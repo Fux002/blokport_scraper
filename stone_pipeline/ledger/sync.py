@@ -400,18 +400,15 @@ def _fail_inventory(ledger: Ledger, sku: str, attempts_before: int, error: str) 
     return cur.rowcount
 
 
-class InvalidAck(ValueError):
-    """An ack the ledger does not apply: an unknown lane, a status outside its lane's set, or a success without the
-    Medusa id on a lane whose ack records one. ack_batch counts it as skipped."""
-
-
 # The closed set of ack statuses per lane (MEDUSA_INTEGRATION_GUIDE.md section 7), as (success, failure). Blokport sends
 # created/updated/skipped/failed on variations and products, updated/skipped/failed on inventory and done/blocked/failed
-# on removed. 'synced' is the ack's own default (an ack that names no status) on the three lanes that apply one.
+# on removed. An inventory 'skipped' is a stock Blokport did NOT apply (SKU not found, or its stock write refused it),
+# so it is a failure there. 'synced' is ack_batch's internal default for an ack that names no status (Blokport always
+# names one).
 _ACK_STATUSES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "variations": (frozenset({"created", "updated", "skipped", "synced"}), frozenset({"failed"})),
     "products": (frozenset({"created", "updated", "skipped", "synced"}), frozenset({"failed"})),
-    "inventory": (frozenset({"updated", "skipped", "synced"}), frozenset({"failed"})),
+    "inventory": (frozenset({"updated", "synced"}), frozenset({"skipped", "failed"})),
     "removed": (frozenset({"done"}), frozenset({"blocked", "failed"})),
 }
 
@@ -422,9 +419,11 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         made_to_order: bool | None = None) -> int:
     """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
     external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
-    Raises InvalidAck for a status outside the lane's set (_ACK_STATUSES) or, on variations/products, a
-    success without a medusa_id: such an ack is not applied, so it can never clear a stored Medusa id
-    (a row without one is dropped locally on retire, with no tombstone to delete it in Medusa).
+    An ack the ledger cannot apply fails loud: a status outside the lane's set (_ACK_STATUSES), or on
+    variations/products a success without a medusa_id, is recorded as a FAILED attempt with that error
+    (it backs off, dead-letters at the cap and is listed in GET /failures). It never writes the id, so a
+    stored Medusa id is never cleared (a row without one is dropped locally on retire, with no tombstone).
+    Raises ValueError for an unknown lane (nothing to record it on).
       success -> record the minted/matched id, mark synced, clear the failure counter+reason.
       failure -> record the reason and re-serve (dirty) once its retry_after has passed (_RETRY_BASE_SECONDS,
                  doubling per consecutive failure); after _MAX_SYNC_ATTEMPTS consecutive failures the entity
@@ -436,11 +435,16 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     never load a product ahead of its variation (which the serve gate already prevents, but the ack
     path must not trust the caller)."""
     if type_ not in _ACK_STATUSES:
-        raise InvalidAck(f"unsupported sync type {type_!r}")
+        raise ValueError(f"unsupported sync type {type_!r}")
     success, failure = _ACK_STATUSES[type_]
     if status_ not in success | failure:
-        raise InvalidAck(f"status {status_!r} is not one of {type_}'s: {sorted(success | failure)}")
-    failed = status_ in failure
+        failed, reason = True, f"unknown ack status {status_!r}"
+    elif status_ in success and type_ in _ENTITY and not (isinstance(medusa_id, str) and medusa_id.strip()):
+        failed, reason = True, "success ack without medusa_id"
+    else:
+        failed = status_ in failure
+        if type_ == "inventory" and status_ == "skipped":   # it carries no reason: say what it means
+            reason = "not applied by the consumer (skipped)"
     if type_ == "removed":
         return _ack_removed(ledger, external_id, failed, reason)
     if type_ == "inventory":
@@ -464,8 +468,6 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
         return cur.rowcount
-    if not (isinstance(medusa_id, str) and medusa_id.strip()):
-        raise InvalidAck(f"a {status_!r} ack on {type_} carries no medusa_id; the stored id is kept")
     # success: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
     guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
         if type_ == "products" else ""
@@ -540,8 +542,8 @@ def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
     """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id, medusa_id, status,
     error?}. Per-ack ISOLATED: a malformed/unsupported ack is skipped and logged, the rest still
     apply -- one bad ack never drops the batch. Returns {applied, missed, skipped}: applied changed a
-    row; missed = external_id not found or ack refused (out-of-order, stale echo); skipped = malformed,
-    or not applied (InvalidAck: a status outside its lane, a success without the id)."""
+    row (a failed attempt included: an unknown status or a success without its id is one); missed =
+    external_id not found or ack refused (out-of-order, stale echo); skipped = malformed (an unknown lane)."""
     applied = missed = skipped = 0
     for a in acks:
         try:
@@ -688,6 +690,9 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
     matcher reference, and the emitted catalog all agree on exactly one Key per variety."""
     import collections
     from stone_pipeline.reference.loaders import survivor_of, variety_identity
+    # the write lock first, as purge does: an ack committing between the product SELECT below and the deletes could
+    # otherwise give a product a medusa_id after it was read as unsent, and it would be deleted without a tombstone
+    _lock_and_check_in_flight(ledger)
     protected = protected or set()
     groups: dict[tuple, list[str]] = collections.defaultdict(list)
     for v in ledger.execute("SELECT key, name FROM variation").fetchall():

@@ -349,16 +349,22 @@ POST /sync/v1/ack
 ]
 ```
 
-Response: `{ "acked": 3, "missed": 0, "skipped": 0 }` (`missed`: unknown id, or refused as out of
-order or stale; `skipped`: not applied, see below).
+Response: `{ "acked": 3, "missed": 0, "skipped": 0 }` (`acked`: recorded, a failed attempt included;
+`missed`: unknown id, or refused as out of order or stale; `skipped`: an unknown `type`).
 
-- `medusa_id` is required for `variations` and `products`; omit for `inventory`. A success ack on
-  `variations`/`products` without it is skipped: it never clears the id the pipeline holds.
-- `status` is a closed set per lane: `variations`/`products` take `created`/`updated`/`skipped`
-  (success) or `failed` (returns the entity to the queue for the next pull); `inventory` takes
-  `updated`/`skipped` or `failed`; `removed` takes `done`, or `blocked`/`failed` (below). A status
-  outside its lane's set is skipped, not applied. An ack that names no status counts as a success.
-- An inventory ack that is `failed`, or that the quantity echo refuses (the echoed stock is not the
+- `medusa_id` is required for `variations` and `products`; omit for `inventory` and `removed`.
+- `status` is a closed set per lane; always send one:
+
+  | lane | success | failure (backs off, dead-letters after five) |
+  |---|---|---|
+  | `variations`, `products` | `created`, `updated`, `skipped` | `failed` |
+  | `inventory` | `updated` | `failed`, `skipped` (the stock was not applied) |
+  | `removed` | `done` | `blocked`, `failed` |
+
+- Any other status, or a success on `variations`/`products` without `medusa_id`, is recorded as a
+  failed attempt with the error `unknown ack status '<x>'` / `success ack without medusa_id`: it backs
+  off, dead-letters and is listed in `GET /sync/v1/failures`. It never changes the id the pipeline holds.
+- An inventory ack that is `failed` or `skipped`, or that the quantity echo refuses (the echoed stock is not the
   current one), waits like a failed product (5, 10, 20, 40 min) and dead-letters after five; it is then
   listed in `GET /sync/v1/failures` with type `inventory`, and `POST /sync/v1/requeue` (no type, or
   `{"type": "inventory"}`) offers it again, or `POST /sync/v1/abandon` drops it like any failure row.

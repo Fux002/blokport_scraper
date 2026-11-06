@@ -47,7 +47,7 @@ def _batch(ledger, *acks):
     return sync.ack_batch(ledger, list(acks))
 
 
-# --- defect 3: a closed set of statuses per lane, and a success never clears a stored id --------------------------
+# --- defect 3: a closed set of statuses per lane; anything else fails loud, never clears an id ------------------------
 
 @pytest.mark.parametrize("status", ["created", "updated", "skipped"])
 def test_every_success_status_of_the_entity_lanes_applies(tmp_path, status):
@@ -59,37 +59,67 @@ def test_every_success_status_of_the_entity_lanes_applies(tmp_path, status):
         assert ledger.get("product", "sku", "S-1")["state"] == "synced"
 
 
+_TABLE = {"products": ("product", "sku"), "variations": ("variation", "key"), "inventory": ("inventory", "sku"),
+          "removed": ("removed", "external_id")}
+
+
 @pytest.mark.parametrize("type_, status", [
     ("products", "done"), ("products", "blocked"), ("products", "applied"), ("variations", "deleted"),
     ("inventory", "created"), ("inventory", "done"), ("removed", "created"), ("removed", "updated"),
 ])
-def test_a_status_outside_its_lane_is_skipped_not_applied(tmp_path, type_, status):
+def test_a_status_outside_its_lane_is_a_failed_attempt_never_an_apply(tmp_path, type_, status):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1", state="syncing", medusa_id=None)
+        _variation(ledger, "slab_marble_x_1", state="syncing", medusa_id="V-1")
         _product(ledger, "S-1", medusa_id="P-1")
         _stock(ledger, "S-1")
+        ledger.execute("UPDATE inventory SET last_synced_qty = 5, last_synced_made_to_order = 0")   # a count move
         sync.record_tombstones(ledger, [("T-1", "s")])
         xid = {"products": "S-1", "variations": "slab_marble_x_1", "inventory": "S-1", "removed": "T-1"}[type_]
-        before = {t: [tuple(r) for r in ledger.execute(f"SELECT * FROM {t}")]
-                  for t in ("variation", "product", "inventory", "removed")}
-        assert _batch(ledger, {"type": type_, "external_id": xid, "medusa_id": "M-9", "status": status}) \
-            == {"applied": 0, "missed": 0, "skipped": 1}
-        assert before == {t: [tuple(r) for r in ledger.execute(f"SELECT * FROM {t}")]
-                          for t in ("variation", "product", "inventory", "removed")}
+        table, pk = _TABLE[type_]
+        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+            _batch(ledger, {"type": type_, "external_id": xid, "medusa_id": "M-9", "status": status})
+            row = ledger.get(table, pk, xid)
+            assert row["sync_attempts"] == attempt and row["sync_error"] == f"unknown ack status {status!r}"
+            assert row["retry_after"] > now_iso()                             # it backs off
+            if table in ("variation", "product"):
+                assert row["medusa_id"] in ("V-1", "P-1")                     # never overwritten
+        assert xid in [f["external_id"] for f in sync.failures(ledger) if f["type"] == type_]   # dead-lettered
 
 
 @pytest.mark.parametrize("medusa_id", [None, ""])
-def test_a_success_without_an_id_never_clears_a_stored_one(tmp_path, medusa_id):
+def test_a_success_without_an_id_is_a_failed_attempt_and_keeps_the_stored_id(tmp_path, medusa_id):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1", state="dirty", medusa_id="V-1")
+        _variation(ledger, "slab_marble_x_1", state="syncing", medusa_id="V-1")
         ack = {"type": "variations", "external_id": "slab_marble_x_1", "status": "updated"}
         if medusa_id is not None:
             ack["medusa_id"] = medusa_id
-        assert _batch(ledger, ack) == {"applied": 0, "missed": 0, "skipped": 1}
+        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+            _batch(ledger, ack)
         row = ledger.get("variation", "key", "slab_marble_x_1")
-        assert (row["medusa_id"], row["state"]) == ("V-1", "dirty")
-        # so a later retire still tells Medusa to delete it, instead of dropping it locally with no tombstone
+        assert (row["medusa_id"], row["state"], row["sync_error"]) == ("V-1", "gap_held", "success ack without medusa_id")
+        assert [f["external_id"] for f in sync.failures(ledger)] == ["slab_marble_x_1"]
+        # the stored id survives, so a later retire still tells Medusa to delete it (no local-only drop)
         assert sync.retire_variation(ledger, "slab_marble_x_1")["tombstoned_variation"] is True
+
+
+def test_an_inventory_skipped_is_a_stock_the_consumer_did_not_apply(tmp_path):
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _variation(ledger, "slab_marble_x_1")
+        _product(ledger, "S-1", state="synced", medusa_id="P-1")
+        _stock(ledger, "S-1", 3)
+        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+            _batch(ledger, {"type": "inventory", "external_id": "S-1", "status": "skipped", "quantity": 3})
+            row = ledger.get("inventory", "sku", "S-1")
+            assert row["last_synced_qty"] is None                              # not synced
+            assert (row["sync_attempts"], row["sync_error"]) == (attempt, "not applied by the consumer (skipped)")
+            assert row["retry_after"] > now_iso()
+        assert [(f["type"], f["state"]) for f in sync.failures(ledger)] == [("inventory", "dead")]
+
+
+def test_an_unknown_lane_is_skipped(tmp_path):
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        assert _batch(ledger, {"type": "combinations", "external_id": "c", "status": "created"}) \
+            == {"applied": 0, "missed": 0, "skipped": 1}
 
 
 def test_an_inventory_and_a_removed_ack_carry_no_id_and_still_apply(tmp_path):
@@ -127,6 +157,25 @@ def test_reconcile_tombstones_the_synced_products_of_a_dropped_variety(tmp_path)
         assert ledger.execute("SELECT COUNT(*) FROM product").fetchone()[0] == 0
         assert [(i["payload"]["kind"], i["external_id"]) for i in sync.ready(ledger, "removed")] == [
             ("product", "S-1"), ("variation", "slab_marble_ghost_1")]
+
+
+def test_reconcile_tombstones_a_products_export_row_a_run_made_dirty(tmp_path):
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _variation(ledger, "slab_marble_ghost_1")
+        _product(ledger, "B-1", "slab_marble_ghost_1", state="dirty")           # no id acked, but ...
+        ledger.execute("UPDATE product SET last_synced = ? WHERE sku = 'B-1'", (now_iso(),))   # ... the export showed it
+        sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
+        assert [(i["payload"]["kind"], i["external_id"]) for i in sync.ready(ledger, "removed")] == [
+            ("product", "B-1"), ("variation", "slab_marble_ghost_1")]
+
+
+def test_reconcile_refuses_while_a_pull_holds_a_lease(tmp_path):
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _variation(ledger, "slab_marble_ghost_1")
+        _product(ledger, "S-1", "slab_marble_ghost_1", state="syncing")           # leased to a live pull
+        with pytest.raises(sync.ServeInFlight):
+            sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
+        assert ledger.get("product", "sku", "S-1") is not None
 
 
 # --- never a hard-deleted product without its tombstone ------------------------------------------------------------
