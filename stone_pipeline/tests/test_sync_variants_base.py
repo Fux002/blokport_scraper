@@ -94,7 +94,6 @@ def test_factory_reset_reseeds_the_base_file_from_the_pristine_seed(tmp_path, mo
     published = []
     monkeypatch.setattr("stone_pipeline.reference.sync_variants_base.publish_base_to_s3",
                         lambda p: published.append(str(p)) or True)
-    monkeypatch.setattr(lifecycle, "_publish_base_deliverable", lambda p: True)   # covered in test_base_deliverable
     result = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
     assert result["reseeded"] is True
     assert base.read_text() == seed.read_text()     # base FILE reset to pristine, drift gone

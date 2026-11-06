@@ -17,10 +17,13 @@ second, diverging list. Re-runnable standalone:
 from __future__ import annotations
 
 import csv
+import os
+import shutil
+import uuid
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS, THIN_COPY_MIN_FRACTION
-from stone_pipeline.core import csvio, logfmt
+from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("sync_variants_base")
 
@@ -96,18 +99,25 @@ def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, pub
 def write_deliverable(base_path: Path | None = None, deliverable_path: Path | None = None) -> None:
     """Copy the base this produce settled into to_upload/ byte for byte, so the manifest lists it (sha256, rows)
     like every deliverable and an importer verifying it against the manifest reads exactly the base the produce
-    used. Called once the base is settled (after sync, whose guard may keep the fetched base). Text round trip
-    with newline="" and plain utf-8 keeps BOM, line endings and every byte; a non-UTF-8 base fails loud. An absent
-    base fails loud and first drops the previous produce's copy, so no publish can list a base that is not this
-    produce's."""
+    used. Called once the base is settled (after sync, whose guard may keep the fetched base). A raw file copy to a
+    temp beside the target, made durable, then os.replace: the deliverable is never partial and never re-encoded.
+    An absent base fails loud and first drops the previous produce's copy, so no publish can list a base that is
+    not this produce's."""
     base = Path(base_path or BASE)
     deliverable = Path(deliverable_path or DELIVERABLE)
     if not base.exists():
         deliverable.unlink(missing_ok=True)
         raise FileNotFoundError(f"no settled {base.name} at {base}: the catalog cannot publish the variety base")
-    with base.open(encoding="utf-8", newline="") as h:
-        text = h.read()
-    csvio.atomic_write(deliverable, lambda out: out.write(text))
+    deliverable.parent.mkdir(parents=True, exist_ok=True)
+    # unique per writer (pid + random), as csvio.atomic_write: overlapping processes never share a temp
+    tmp = deliverable.with_name(f"{deliverable.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        shutil.copyfile(base, tmp)
+        with tmp.open("rb") as h:
+            os.fsync(h.fileno())                    # durable before the rename
+        os.replace(tmp, deliverable)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

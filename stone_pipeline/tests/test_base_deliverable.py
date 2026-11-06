@@ -69,6 +69,14 @@ def test_the_deliverable_is_the_settled_base_byte_for_byte(tmp_path):
     assert deliverable.read_bytes() == _BASE
 
 
+def test_the_copy_is_raw_bytes_never_decoded(tmp_path):
+    base, deliverable = tmp_path / "base.csv", tmp_path / "out" / VARIANTS_BASE_FILE
+    raw = b"Key,Name\r\nslab_marble_a_1,\xff\xfe not utf-8\r\n"
+    base.write_bytes(raw)
+    svb.write_deliverable(base, deliverable)
+    assert deliverable.read_bytes() == raw and list(deliverable.parent.iterdir()) == [deliverable]   # no temp left
+
+
 def test_a_stale_deliverable_from_an_earlier_produce_is_replaced(tmp_path):
     base, deliverable = tmp_path / "base.csv", tmp_path / "out" / VARIANTS_BASE_FILE
     deliverable.parent.mkdir()
@@ -220,8 +228,9 @@ def test_a_factory_reset_publishes_a_manifest_listing_only_the_seed_base(tmp_pat
     svb.write_deliverable(base)
     ua.publish_to_upload(s3, "before-reset")                                   # the pre-reset full set on S3
 
-    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
-    assert r == {"reseeded": True, "s3_published": True, "import_published": True}
+    assert lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base) == {"reseeded": True,
+                                                                                    "s3_published": True}
+    assert lifecycle._publish_base_deliverable(base) is True                    # the factory reset's own step
     manifest = json.loads(s3.objects[f"{prefix}/{ua.MANIFEST_NAME}"])
     assert list(manifest["files"]) == [VARIANTS_BASE_FILE] and manifest["side_files"] == {}
     entry = manifest["files"][VARIANTS_BASE_FILE]
@@ -257,8 +266,8 @@ def test_a_failed_deliverable_publish_is_reported_not_hidden(tmp_path, monkeypat
     def _down(client, run_id):
         raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
     monkeypatch.setattr(ua, "publish_to_upload", _down)
-    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
-    assert r == {"reseeded": True, "s3_published": True, "import_published": False}
+    assert lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)["reseeded"]
+    assert lifecycle._publish_base_deliverable(base) is False
     assert base.read_bytes() == _BASE                                           # the reseed itself still happened
 
 
@@ -280,3 +289,30 @@ def test_the_produce_publish_entry_point_lists_the_base_beside_the_side_files(tm
     m = json.loads(s3.objects[f"{ENV_SEGMENT}/scraper/to_upload/{ua.MANIFEST_NAME}"])
     assert set(m["files"]) == {VARIANTS_BASE_FILE, "1_variants_full.csv"} and set(m["side_files"]) == {"SYNC_STEPS.md"}
     assert m["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[f"{ENV_SEGMENT}/scraper/to_upload/{VARIANTS_BASE_FILE}"]
+
+
+def test_a_curation_rebuild_reseeds_the_base_but_leaves_the_published_manifest_unchanged(tmp_path, monkeypatch):
+    """Medusa is not wiped by a curation repair: the published full set stays valid. It reseeds the local base and
+    publishes no deliverable; the catalog run it starts publishes the full set, base included."""
+    import functools
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config import runner
+    from stone_pipeline.config.settings import ENV_SEGMENT
+    s3 = _S3()
+    seed, base, to_upload = _reset_world(tmp_path, monkeypatch, s3)
+    prefix = f"{ENV_SEGMENT}/scraper/to_upload"
+    (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_minted_7\n", encoding="utf-8")
+    svb.write_deliverable(base)
+    ua.publish_to_upload(s3, "before-repair")
+    published = dict(s3.objects)
+
+    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine",
+                        functools.partial(lifecycle._reseed_base_from_pristine, seed_path=seed, base_path=base))
+    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: (work(None, types.SimpleNamespace(
+        _lock_and_check_in_flight=lambda lg: None)), 200))
+    monkeypatch.setattr(runner, "start_run", lambda sources, stage: ({"run_id": "r9"}, 202))
+    out, code = lifecycle.rebuild_curation()
+    assert code == 200 and out["rebuilt"] and "import_published" not in out["base_reseed"]
+    assert base.read_bytes() == _BASE                                           # the local base is the seed
+    assert {k: v for k, v in s3.objects.items() if k.startswith(prefix)} == \
+        {k: v for k, v in published.items() if k.startswith(prefix)}           # manifest + deliverables untouched

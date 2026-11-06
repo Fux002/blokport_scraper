@@ -218,6 +218,30 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
     assert wiped == []                                # neither touched the scrape cache
 
 
+def test_only_the_factory_reset_publishes_the_base_deliverable_after_a_successful_reseed(tmp_path, monkeypatch):
+    from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import snapshot
+    from deploy import cleanup_images
+
+    _seed_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})
+    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
+    calls: list[str] = []
+    monkeypatch.setattr(lifecycle, "_publish_base_deliverable", lambda: calls.append("publish") or True)
+    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine", lambda: {"reseeded": True, "s3_published": True})
+    out, code = lifecycle.reset(sources=None, pristine=True)
+    assert code == 200 and calls == ["publish"] and out["base_reseed"]["import_published"] is True
+
+    calls.clear()                                     # no seed reseeded -> nothing to publish
+    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine", lambda: {"reseeded": False, "reason": "no seed"})
+    out, code = lifecycle.reset(sources=None, pristine=True)
+    assert code == 200 and calls == [] and "import_published" not in out["base_reseed"]
+
+    lifecycle.reset(sources=None, hard=True)          # a hard reset never reseeds or publishes
+    assert calls == []
+
+
 def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
     _seed_config(tmp_path, monkeypatch)
