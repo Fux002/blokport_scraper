@@ -38,10 +38,12 @@ _CATALOG_STAGES = ("catalog", "all", "republish")
 
 def _fetch_inputs() -> None:
     """Pull the current Medusa export (variants_export + attributes) from S3 so the matcher resolves
-    existing ids. An EMPTY prefix (a fresh env, nothing published yet) is not an error: fetch_inputs.main
-    returns 0 and the cold start proceeds. An exception is a real S3 / credential failure: in production it
-    aborts the produce (matching against a stale or absent export would hold every variety and exit 0);
-    in development (a laptop without S3) it logs and continues."""
+    existing ids. An EMPTY prefix (a fresh env, nothing published yet), or an export with no rows, is not an
+    error: fetch_inputs.main returns 0 and the cold start proceeds. An export refused as thin that still has rows
+    stops the produce in EVERY environment (fetch_inputs raises SystemExit, which this does not catch): left out,
+    it would run as a cold start and publish empty valid combinations. An exception is a real S3 / credential
+    failure: in production it aborts the produce (matching against a stale or absent export would hold every
+    variety and exit 0); in development (a laptop without S3) it logs and continues."""
     try:
         from deploy import fetch_inputs
         fetch_inputs.main()

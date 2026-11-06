@@ -82,9 +82,10 @@ def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, va
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
-            "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "value_display, action, decided_at, decided_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'operator') "
             "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
-            "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at",
+            "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at, "
+            "decided_by = 'operator'",
             (_norm(variety), _norm(stone_type), attribute, _norm(value), value.strip(), action, _now()))
         conn.commit()
 
@@ -96,8 +97,10 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
     overwritten every produce (a variety no longer minted this run drops out of it), but the overlay this
     feeds carries the membership forever, and apply_leaf_overlay CREATES the record for a variety absent from
     every backbone file. `rows` are (variety, stone_type, attribute, value); a bad attribute, or a variety or value
-    with no usable name (empty folded key), is skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns the count of valid
-    rows written (each inserted OR updated in place -- a re-run rewrites the same rows, changing nothing)."""
+    with no usable name (empty folded key), is skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). A
+    key the OPERATOR has a verdict on stays the operator's: the produce only rewrites its own rows (decided_by
+    'produce'), never takes over an approve or a reject from the review API. Returns the count of rows written (each
+    inserted OR its own row updated in place -- a re-run rewrites the same rows, changing nothing)."""
     written = 0
     with closing(store.open_store()) as conn:
         for variety, stone_type, attribute, value in rows:
@@ -105,13 +108,13 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
             variety, value = (variety or "").strip(), (value or "").strip()
             if attribute not in _LEAF_ATTRIBUTES or not _norm(variety) or not _norm(value):
                 continue
-            conn.execute(
+            written += conn.execute(
                 "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
-                "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, 'approve', ?) "
+                "value_display, action, decided_at, decided_by) VALUES (?, ?, ?, ?, ?, 'approve', ?, 'produce') "
                 "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
-                "value_display = excluded.value_display, action = 'approve', decided_at = excluded.decided_at",
-                (_norm(variety), _norm(stone_type), attribute, _norm(value), value, _now()))
-            written += 1
+                "value_display = excluded.value_display, action = 'approve', decided_at = excluded.decided_at "
+                "WHERE backbone_leaf_decision.decided_by = 'produce'",
+                (_norm(variety), _norm(stone_type), attribute, _norm(value), value, _now())).rowcount
         conn.commit()
     return written
 
@@ -152,7 +155,7 @@ def revise_leaf_decision(ref: str, action: str) -> bool:
         if action == "clear":
             cur = conn.execute(f"DELETE FROM backbone_leaf_decision {where}", tuple(parts))
         else:
-            cur = conn.execute(f"UPDATE backbone_leaf_decision SET action = ?, decided_at = ? {where}",
-                               (action, _now(), *parts))
+            cur = conn.execute(f"UPDATE backbone_leaf_decision SET action = ?, decided_at = ?, "
+                               f"decided_by = 'operator' {where}", (action, _now(), *parts))
         conn.commit()
     return cur.rowcount > 0

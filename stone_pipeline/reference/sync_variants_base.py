@@ -18,7 +18,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, THIN_COPY_MIN_FRACTION
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("sync_variants_base")
@@ -31,9 +31,9 @@ FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 # base carries exactly the upload columns and NO Medusa Id (Medusa mints ids on import)
 COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 # Corruption guard: the base is the source of truth and a cold start seeds FROM it, so 1_variants_full can
-# only grow or churn slightly (a retire drops a few). A large collapse means the produce ran on a thin
-# input (e.g. an empty live export), not a real catalog shrink -- refuse to overwrite the base with it.
-_MIN_KEEP_FRACTION = 0.5
+# only grow or churn slightly (a retire drops a few). A large collapse (below settings.THIN_COPY_MIN_FRACTION) means
+# the produce ran on a thin input (e.g. an empty live export), not a real catalog shrink -- refuse to overwrite the
+# base with it.
 
 
 def _row_count(path: Path) -> int:
@@ -86,7 +86,7 @@ def publish_base_to_import(base_path: Path) -> bool:
 
 def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, publish: bool = True) -> dict:
     """base := 1_variants_full (the one complete list). No-op if full hasn't been built yet; a corruption
-    guard refuses a produce that would collapse the base below _MIN_KEEP_FRACTION of its current size. When
+    guard refuses a produce that would collapse the base below THIN_COPY_MIN_FRACTION of its current size. When
     `publish`, the written base is uploaded to S3 as the single source of truth (see publish_base_to_s3),
     so the container's local base can never silently drift from S3 -- the S0 determinism fix."""
     full_path, base_path = Path(full_path), Path(base_path)
@@ -96,10 +96,10 @@ def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, pub
     with full_path.open(encoding="utf-8-sig") as h:
         rows = [{c: (r.get(c) or "") for c in COLS} for r in csv.DictReader(h)]
     existing = _row_count(base_path)
-    if existing and len(rows) < existing * _MIN_KEEP_FRACTION:
+    if existing and len(rows) < existing * THIN_COPY_MIN_FRACTION:
         log.error("base seed NOT updated: produce looks thin; refusing to clobber the source of truth",
                   extra={"extra_fields": {"new_rows": len(rows), "base_rows": existing,
-                                          "min_fraction": _MIN_KEEP_FRACTION}})
+                                          "min_fraction": THIN_COPY_MIN_FRACTION}})
         return {"base_rows": existing, "new_rows": len(rows), "skipped": True, "guarded": True}
     if write:
         with base_path.open("w", newline="", encoding="utf-8") as h:

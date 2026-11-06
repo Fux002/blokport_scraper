@@ -231,8 +231,12 @@ class ScraperBase:
         headers = {"User-Agent": self._ua, **kwargs.pop("headers", {})}
         if self.use_curl_cffi and "content" in kwargs:  # httpx 'content' -> curl_cffi 'data'
             kwargs["data"] = kwargs.pop("content")
-        last_exc = None
+        # Every attempt that does not return records WHY in `cause` and waits before the next one: the server's
+        # Retry-After for a 429, else exponential backoff. A path that skipped either retried at once and ended as
+        # "failed after N tries" with no cause.
+        cause: Exception | None = None
         for attempt in range(self.max_retries):
+            wait = self.backoff_base ** attempt
             try:
                 current = url
                 for _ in range(_MAX_REDIRECTS + 1):
@@ -249,6 +253,7 @@ class ScraperBase:
                     if r.status_code in (301, 302, 303, 307, 308):
                         loc = r.headers.get("location")
                         if not loc:
+                            cause = RuntimeError(f"HTTP {r.status_code} redirect without a Location: {current}")
                             break
                         current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
                         continue
@@ -257,22 +262,24 @@ class ScraperBase:
                     if allow_missing and r.status_code in missing_statuses:
                         return None   # definitive absence -> caller's end-of-list, not a transient error
                     if r.status_code == 429:
-                        # record WHY (else the final raise reports last_exc=None for a pure-429 run) and
-                        # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff.
-                        last_exc = RuntimeError(f"rate limited (HTTP 429): {url}")
-                        time.sleep(self._retry_after_seconds(r.headers.get("Retry-After"), attempt))
-                        break  # retry from the top
+                        # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff
+                        cause = RuntimeError(f"rate limited (HTTP 429): {url}")
+                        wait = self._retry_after_seconds(r.headers.get("Retry-After"), attempt)
+                        break
                     r.raise_for_status()
+                    # not an error status, yet not the 200 the content needs (e.g. a 204 with no body)
+                    cause = RuntimeError(f"HTTP {r.status_code} where 200 was expected: {current}")
                     break
                 else:
-                    last_exc = RuntimeError(f"too many redirects: {url}")
+                    cause = RuntimeError(f"too many redirects: {url}")
             except _SSRFBlocked:
                 raise  # permanent -- never retry a blocked target
             except Exception as exc:  # transient: back off and retry
-                last_exc = exc
-                time.sleep(self.backoff_base ** attempt)
-        self.record_failure("http", method=method, url=url, error=str(last_exc))
-        raise RuntimeError(f"{method} failed after {self.max_retries} tries: {url}")
+                cause = exc
+            if attempt + 1 < self.max_retries:                    # nothing follows the last attempt
+                time.sleep(wait)
+        self.record_failure("http", method=method, url=url, error=str(cause))
+        raise RuntimeError(f"{method} failed after {self.max_retries} tries: {url}: {cause}") from cause
 
     def get(self, url: str, **kwargs) -> Optional[httpx.Response]:
         # Returns an httpx.Response, or None only when allow_missing=True and the server gave a definitive status.
