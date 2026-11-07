@@ -3,7 +3,9 @@
 Three scenarios over both fixture sources, each with ledger write-through on a seeded tmp ledger:
   full_cold    FULL mode, no Medusa product export (everything is new)
   full_known   FULL mode against an export (half the emitted SKUs existing, two live SKUs the scrape dropped, one
-               sold): the new/existing split, the stock delta, the delist and the lot replacements
+               sold): the new/existing split, the stock delta and the delist of the dropped SKUs. NOT pinned here:
+               the two delist guards (neither fires on these fixtures) and the lot replacements (neither fixture
+               source has lots, so they are always empty)
   stock        the stock-only refresh against the same export
 Every output is digested: each file under the outputs and state folders (a parquet by its decoded rows and schema, so a
 polars upgrade cannot fail it), every ledger table (rows sorted, wall-clock timestamps masked), the magnitude baselines

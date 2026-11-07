@@ -701,15 +701,14 @@ def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validat
                                     replaced=delist.replaced_codes)
         emit.write_lot_replacements_csv(delist.discontinued, delist.replaced, layout.review / "lot_replacements.csv")
     emit.write_lot_cards(pre.lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
-    gap_count = 0
     # rejects are an audit invariant: write them in BOTH modes so a rejected row never vanishes
-    # without a per-row record (STOCK mode still runs validate above).
+    # without a per-row record.
     emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
     if not ctx.mode.writes_products:
         ctx.run_log.info("inventory-only: wrote stock delta + rejects, skipped products/images/canonical",
                          extra={"extra_fields": {"existing": len(delist.existing_rows), "changed": len(delist.changed),
                                                  "rejected": len(validation.rejects)}})
-        return gap_count
+        return 0
     columns = emit.read_template_columns()
     emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
     emit.write_photos_json(validation.emit, layout.products_import / STANDARDISE.PHOTOS_FILE)
