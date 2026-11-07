@@ -350,6 +350,9 @@ def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": [], "review": {}})
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf,
+                             say=lambda m: None, clicks_only=True)
+    assert problems == ["2 listings not fully judged (listed in r/clicks-summary.json)"]   # the file it writes
 
 
 def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypatch):
