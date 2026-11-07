@@ -143,8 +143,10 @@ def test_the_lifecycle_s_clients(built, monkeypatch, tmp_path):
     assert built == [_s3(DEFAULTS)] * 3
 
 
-def test_the_variety_base_publisher_s_client(built, tmp_path):
+def test_the_variety_base_publisher_s_client(built, monkeypatch, tmp_path):
     from stone_pipeline.reference import sync_variants_base
+    live = dataclasses.replace(settings.SETTINGS, s3=dataclasses.replace(settings.SETTINGS.s3, dry_run=False))
+    monkeypatch.setattr(settings, "SETTINGS", live)                          # a dry run publishes nothing (#568)
     _drive(lambda: sync_variants_base.publish_base_to_s3(tmp_path / "variants_export_base.csv"))
     assert built == [_s3(DEFAULTS)]
 
