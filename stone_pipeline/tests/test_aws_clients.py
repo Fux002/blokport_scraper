@@ -85,7 +85,7 @@ def _s3(options, profile=None):
 
 # --- the default credential chain (no profile) ------------------------------------------------------------------------
 def test_the_texture_trigger_s_batch_client(built, monkeypatch):
-    from deploy import texture_trigger
+    from stone_pipeline.io import texture_job as texture_trigger
     monkeypatch.setattr(texture_trigger, "SETTINGS", dataclasses.replace(texture_trigger.SETTINGS, auto_texture=dataclasses.replace(
         texture_trigger.SETTINGS.auto_texture, enabled=True, queue="q", job_definition="j")))
     _drive(lambda: texture_trigger.submit_texture_job(1, "k"))
@@ -93,14 +93,14 @@ def test_the_texture_trigger_s_batch_client(built, monkeypatch):
 
 
 def test_fetch_inputs_clients(built, tmp_path):
-    from deploy import fetch_inputs
+    from stone_pipeline.io import medusa_inputs as fetch_inputs
     _drive(lambda: fetch_inputs.fetch_attributes(target=tmp_path / "attributes.csv"))
-    _drive(fetch_inputs.main)
+    _drive(fetch_inputs.fetch_all)
     assert built == [_s3(DEFAULTS), _s3(DEFAULTS)]
 
 
 def test_cleanup_images_client(built):
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
     _drive(cleanup_images.wipe_all_product_images)
     assert built == [_s3(DEFAULTS)]
 
@@ -129,8 +129,8 @@ def test_the_edit_test_job_s_client(built, monkeypatch):
 
 
 def test_upload_artifacts_client(built):
-    from deploy import upload_artifacts
-    _drive(lambda: upload_artifacts.main("R1"))
+    from stone_pipeline.io import deliverables as upload_artifacts
+    _drive(lambda: upload_artifacts.upload_all("R1"))
     assert built == [_s3(DEFAULTS)]
 
 

@@ -10,7 +10,7 @@ import json
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import upload_artifacts as ua
+from stone_pipeline.io import deliverables as ua
 from stone_pipeline.config.settings import UPLOAD_SIDE_FILES
 
 

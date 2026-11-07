@@ -1,7 +1,9 @@
-"""The photo process is application code in stone_pipeline/photos/ (review wave C10); deploy/ keeps only the glue that
-fetches, uploads, cleans and triggers. Pinned here: what deploy/ holds, the only stone_pipeline -> deploy imports left
-(an explicit list wave C10b empties), that the photo code names no source and no product (the owner's rule: a
-per-source switch, product-agnostic in shared code), and that every entry point names a module that exists."""
+"""The photo process is application code in stone_pipeline/photos/ (review wave C10) and the glue's library code is
+stone_pipeline/io (wave C10b); deploy/ keeps only thin entry points: the input fetch and deliverables upload CLIs (an
+operator's manual entry, DEPLOY.md) and the overnight photos trigger. Pinned here: what deploy/ holds, that no
+stone_pipeline module imports deploy, that each CLI only calls its io function, that the photo code names no source and
+no product (the owner's rule: a per-source switch, product-agnostic in shared code), and that every entry point names
+a module that exists."""
 from __future__ import annotations
 
 import ast
@@ -15,16 +17,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PHOTOS = ROOT / "stone_pipeline" / "photos"
-GLUE = {"__init__", "fetch_inputs", "upload_artifacts", "cleanup_images", "texture_trigger", "start_photos_run"}
-# The stone_pipeline -> deploy imports wave C10 leaves (the glue's library code moves whole into stone_pipeline/io in
-# wave C10b, which empties this): (importing module, imported deploy module).
-ALLOWED = {
-    ("stone_pipeline.produce", "deploy.fetch_inputs"), ("stone_pipeline.produce", "deploy.upload_artifacts"),
-    ("stone_pipeline.lifecycle", "deploy.upload_artifacts"), ("stone_pipeline.lifecycle", "deploy.cleanup_images"),
-    ("stone_pipeline.prepare_variant_images", "deploy.texture_trigger"),
-    ("stone_pipeline.config.server", "deploy.fetch_inputs"),
-    ("stone_pipeline.photos.source", "deploy.fetch_inputs"), ("stone_pipeline.photos.review", "deploy.fetch_inputs"),
-}
+GLUE = {"__init__", "fetch_inputs", "upload_artifacts", "start_photos_run"}
+# The thin CLIs and the io function each calls (wave C10b): the library code is stone_pipeline/io.
+CLIS = {"fetch_inputs": ("medusa_inputs", "fetch_all"), "upload_artifacts": ("deliverables", "upload_all")}
 
 
 def _modules(folder):
@@ -56,9 +51,22 @@ def test_the_photo_process_is_the_photos_package():
         "diag", "edit_test", "mark_logo_step"}
 
 
-def test_stone_pipeline_imports_from_deploy_only_the_listed_glue():
+def test_no_stone_pipeline_module_imports_deploy():
     edges = {(_module_name(p), target) for p in _modules(ROOT / "stone_pipeline") for target in _deploy_imports(p)}
-    assert edges == ALLOWED
+    assert edges == set()
+
+
+@pytest.mark.parametrize("cli", sorted(CLIS))
+def test_a_deploy_cli_only_calls_its_io_function(cli):
+    # wave C10b: an operator's entry point holds no logic and builds no AWS client of its own
+    module, function = CLIS[cli]
+    tree = ast.parse((ROOT / "deploy" / f"{cli}.py").read_text())
+    defs = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    assert [d.name for d in defs] == ["main"]
+    calls = {ast.unparse(n.func) for n in ast.walk(defs[0]) if isinstance(n, ast.Call)}
+    assert calls == {f"{module}.{function}"}
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    assert not imported & {"boto3", "aws_client"} and module in imported
 
 
 def test_the_glue_never_imports_the_photo_process():

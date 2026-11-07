@@ -160,7 +160,7 @@ SSRF guard (`io/ssrf.py`), setuptools≥78.1.1, all GitHub Actions SHA-pinned, E
 ## 10. Commands & gotchas
 ```bash
 python -m stone_pipeline.build                 # scrape→catalog→tree→gate
-# image reclamation is via the reset/wipe flows only (deploy.cleanup_images.wipe_*), never a catalog diff
+# image reclamation is via the reset/wipe flows only (stone_pipeline.io.image_wipe.wipe_*), never a catalog diff
 aws ecs run-task ... --no-cli-pager            # run-task can HANG without --no-cli-pager
 ```
 - `scraped/` originals are the photo process's input (no re-download). · The two image lanes (variations/ vs products/) are distinct.

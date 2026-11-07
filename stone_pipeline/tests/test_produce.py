@@ -25,10 +25,10 @@ def _stub(monkeypatch):
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append(("build", sources, stage)) or 0)
     # persist + publish belong to produce now (wave 4g); off for these step-order tests
     from stone_pipeline.ledger import snapshot
-    from deploy import upload_artifacts
+    from stone_pipeline.io import deliverables as upload_artifacts
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
-    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: 0)
+    monkeypatch.setattr(upload_artifacts, "upload_all", lambda run_id=None: 0)
     return calls
 
 
@@ -128,7 +128,7 @@ def test_fetch_inputs_failure_is_best_effort(monkeypatch):
     def boom():
         raise RuntimeError("no S3 here")
     import stone_pipeline.produce as p
-    monkeypatch.setattr("deploy.fetch_inputs.main", boom, raising=False)
+    monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_all", boom, raising=False)
     # call the real _fetch_inputs (not the stub) to prove it swallows the error
     p._fetch_inputs()   # must not raise
 
@@ -212,15 +212,15 @@ def test_gate_stays_fatal_on_empty_export_when_nothing_new_explains_it(monkeypat
 
 
 def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_development(monkeypatch):
-    # An empty S3 prefix is NOT an error (fetch_inputs.main returns 0 with "no input files"), so failing loud
+    # An empty S3 prefix is NOT an error (medusa_inputs.fetch_all returns 0 with "no input files"), so failing loud
     # on an exception cannot block a cold start. A real S3/credential failure in production must abort the
     # produce: matching against a stale or absent export would hold every variety and exit 0.
-    from deploy import fetch_inputs
+    from stone_pipeline.io import medusa_inputs as fetch_inputs
     from stone_pipeline.config import settings
 
     def _boom():
         raise RuntimeError("s3 unreachable")
-    monkeypatch.setattr(fetch_inputs, "main", _boom)
+    monkeypatch.setattr(fetch_inputs, "fetch_all", _boom)
     monkeypatch.setattr(settings, "refresh_category_pcats", lambda: None)
     monkeypatch.setattr(produce, "IS_PRODUCTION", True, raising=False)
     with pytest.raises(SystemExit):

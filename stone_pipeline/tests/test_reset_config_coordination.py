@@ -120,7 +120,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     re-applies). Registered sources are left alone."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
@@ -156,7 +156,7 @@ def test_pristine_keep_images_skips_the_product_image_wipe(tmp_path, monkeypatch
     (test above) DOES wipe -- so this proves only that the flag skips the wipe."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
@@ -182,7 +182,7 @@ def test_pristine_keep_scrape_skips_the_scrape_cache_wipe(tmp_path, monkeypatch)
     runs (overlay wipe), so the republish reclassifies fresh and cannot re-mint."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
@@ -204,7 +204,7 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
     republish still works -- wiping it there would break the "release without re-scrape" flow."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     _seed_config(tmp_path, monkeypatch)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
@@ -221,7 +221,7 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
 def test_only_the_factory_reset_publishes_the_base_deliverable_after_a_successful_reseed(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     _seed_config(tmp_path, monkeypatch)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
@@ -269,7 +269,7 @@ def test_only_the_factory_reset_wipes_images(tmp_path, monkeypatch):
     a hard reset wiped 32k images and the next republish re-spent GPU on all of them)."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
+    from stone_pipeline.io import image_wipe as cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("varsha:\n  source_code: var\n  vendor: V\n"

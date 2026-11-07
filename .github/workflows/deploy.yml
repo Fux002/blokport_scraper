@@ -123,7 +123,7 @@ jobs:
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target core -t "$REPO:core" -t "$REPO:$SHA" .
-          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, stone_pipeline.photos.process, deploy.start_photos_run"
+          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, stone_pipeline.io.medusa_inputs, stone_pipeline.io.deliverables, stone_pipeline.io.image_wipe, stone_pipeline.io.texture_job, stone_pipeline.photos.process, deploy.start_photos_run"
           echo "Entrypoint imports OK in $REPO:core"
 
       # :<sha> is immutable and always pushed; :core (dev's image) only from main's head (Resolve).

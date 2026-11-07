@@ -15,7 +15,7 @@ import types
 import pytest
 
 import stone_pipeline.prepare_variant_images as pvi
-from deploy import texture_trigger
+from stone_pipeline.io import texture_job as texture_trigger
 from stone_pipeline import refresh_images
 from stone_pipeline.config import settings
 from stone_pipeline.stages import image_prompts

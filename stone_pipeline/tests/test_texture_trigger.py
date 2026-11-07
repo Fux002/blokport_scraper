@@ -8,7 +8,7 @@ import sys
 import types
 
 
-from deploy import texture_trigger as tt
+from stone_pipeline.io import texture_job as tt
 
 
 def _cfg(enabled=True, queue="q", job_definition="jd"):
