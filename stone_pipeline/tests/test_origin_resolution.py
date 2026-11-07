@@ -1,7 +1,7 @@
 """Origin-resolution audit tests.
 
 Locks in the behaviour of the origin component after the bug review:
-- _to_iso validates 2-letter tokens against the real ISO set and resolves aliases (UK->GB);
+- reference.to_iso validates 2-letter tokens against the real ISO set and resolves aliases (UK->GB);
 - OriginMap.exact is a STRICT (name, type) match -- no fallback, no name-pattern suggestions;
 - load_origin_map requires (variety + country_iso + stone_type) and skips a row missing any, loud when the
   file is missing;
@@ -50,26 +50,26 @@ def _map(*rows):
     return OriginMap(rules=[OriginRule(*r) for r in rows])
 
 
-# --- _to_iso -----------------------------------------------------------------
+# --- reference.to_iso (the one country resolver; derive and the matcher both call it) ----------------
 def test_to_iso_valid_code_passes(ref):
-    assert derive._to_iso("IN", ref) == "IN"
+    assert ref.to_iso("IN") == "IN"
 
 def test_to_iso_country_name(ref):
-    assert derive._to_iso("India", ref) == "IN"
-    assert derive._to_iso("  italy ", ref) == "IT"   # casing + whitespace
+    assert ref.to_iso("India") == "IN"
+    assert ref.to_iso("  italy ") == "IT"   # casing + whitespace
 
 def test_to_iso_uk_alias_resolves_to_gb_not_literal(ref):
     # the bug: 'UK' short-circuited to the literal (invalid) 'UK'; it must resolve to GB.
-    assert derive._to_iso("UK", ref) == "GB"
+    assert ref.to_iso("UK") == "GB"
 
 def test_to_iso_bogus_two_letter_rejected(ref):
     # the bug: any 2-letter alpha passed through at high confidence. 'XX'/'EN' are not ISO codes.
-    assert derive._to_iso("XX", ref) is None
-    assert derive._to_iso("EN", ref) is None
+    assert ref.to_iso("XX") is None
+    assert ref.to_iso("EN") is None
 
 def test_to_iso_empty(ref):
-    assert derive._to_iso("", ref) is None
-    assert derive._to_iso(None, ref) is None
+    assert ref.to_iso("") is None
+    assert ref.to_iso(None) is None
 
 
 # --- load_origin_map ---------------------------------------------------------
