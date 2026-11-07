@@ -643,3 +643,11 @@ def test_a_use_of_a_conflict_photo_already_the_owner_s_choice_elsewhere_is_refus
     ctx = dec.context(s3, LISTINGS, exclude=set())
     assert dec.refusals(ctx, _use("leathered", E, at=LATER)) == []
     assert any("already the owner's choice for leathered" in why for why in dec.refusals(ctx, _use("polished", E, at=LATER)))
+
+
+def test_the_conflict_rule_never_looks_at_a_decision_already_refused():
+    # review of #556: _one_listing_per_conflict ran over decisions _own had refused
+    s3 = _bucket()
+    with pytest.raises(dec.InvalidDecisions) as refused:
+        dec.plan(s3, [_use("leathered", E, tag="v0"), _use("polished", E)], LISTINGS, exclude=set())
+    assert "conflict photo also chosen for" not in str(refused.value)        # the refused use holds nothing

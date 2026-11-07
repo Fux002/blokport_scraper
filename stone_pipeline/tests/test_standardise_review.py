@@ -541,3 +541,14 @@ def test_the_decisions_route_takes_the_export_and_an_explicit_dry_run(monkeypatc
     for body in (None, {}, [1], "x"):
         assert server.dispatch("POST", ["photos", "decisions"], body, "dry_run=true")[0] == 400
     assert len(seen) == 2
+
+
+@pytest.mark.parametrize("bad", [{"id": ["x"]}, {"action": ["use"]}, {"sha": ["x"]}, {"at": 5}, {"source": None}])
+def test_a_decision_whose_field_is_not_a_string_is_400_never_a_crash(monkeypatch, bad):
+    # review of #556: a list in id, action or sha reached the conflict rule unhashed -> 500
+    monkeypatch.setattr(rv, "client", lambda: _bucket())
+    doc = {**{"id": "one", "action": "use", "source": "sentas", "sha": A, "tag": C.RUN_TAG, "at": AT}, **bad}
+    code, body = server.dispatch("POST", ["photos", "decisions"], [doc], "dry_run=true")
+    assert code == 400 and "string" in body["error"]
+    with pytest.raises(dec.InvalidDecisions, match="string"):
+        dec.read_decisions(json.dumps([doc]))

@@ -102,10 +102,13 @@ def read_decisions(text):
 
 
 def check_docs(docs):
-    """The export's documents when they are a JSON array of objects (the config API's POST /photos/decisions body);
-    InvalidDecisions otherwise."""
+    """The export's documents when they are a JSON array of objects whose every field is a string (the page writes
+    nothing else; the config API's POST /photos/decisions body is checked here); InvalidDecisions otherwise, naming
+    each field that is not."""
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         raise InvalidDecisions("the export must be a JSON array of decision objects")
+    if bad := [f"#{i}: field {k!r} is {v!r}" for i, d in enumerate(docs) for k, v in d.items() if not isinstance(v, str)]:
+        raise InvalidDecisions("every field of a decision is a string:\n" + "\n".join(bad))
     return docs
 
 
@@ -306,7 +309,7 @@ def refusals(ctx, doc):
 
 def _check(ctx, docs):
     """Every decision checked; InvalidDecisions names each bad one."""
-    errors, seen = [], set()
+    errors, seen, fine = [], set(), []
     for i, doc in enumerate(docs):
         key = doc.get("id")
         found = _own(ctx, doc)
@@ -314,8 +317,9 @@ def _check(ctx, docs):
             found = ["decided more than once in this file"]
         if not found:
             seen.add(key)
+            fine.append(doc)
         errors += [f"#{i} {key}: {why}" for why in found]
-    errors += _one_listing_per_conflict(docs, ctx.listings, ctx.shared, ctx.stores)
+    errors += _one_listing_per_conflict(fine, ctx.listings, ctx.shared, ctx.stores)   # over the decisions that stand
     if errors:
         raise InvalidDecisions("\n".join(errors))
 
