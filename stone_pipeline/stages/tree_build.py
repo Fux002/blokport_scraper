@@ -511,7 +511,7 @@ def write_combinations(combinations: set, path: Path) -> int:
 def _backbone_paths() -> list[Path]:
     """Every category backbone + the per-run backbone_additions (new varieties)."""
     paths = [c.backbone_path for c in CATEGORIES]
-    additions = SETTINGS.paths.catalog_source_dir / "backbone_additions"
+    additions = SETTINGS.paths.backbone_additions_dir
     if additions.exists():
         paths += sorted(additions.glob("*.json"))
     return paths

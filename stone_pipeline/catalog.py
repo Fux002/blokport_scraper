@@ -130,7 +130,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color
     from stone_pipeline.config.settings import CATEGORIES
-    _additions = sorted((SETTINGS.paths.catalog_source_dir / "backbone_additions").glob("*.json"))
+    _additions = sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json"))
     _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
     product_images: dict[str, str] = {}                # variation_key -> its product photo (first wins)
     for r in rows:

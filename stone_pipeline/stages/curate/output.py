@@ -34,7 +34,7 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     The full upload file (to_upload/1_variants_full.csv) is produced by emit_catalog."""
     p = SETTINGS.paths
     to_upload = p.to_upload_dir
-    additions = p.catalog_source_dir / "backbone_additions"
+    additions = p.backbone_additions_dir
     upload_rows: list[dict] = []
     needs_review: list[dict] = []
     triage: list[dict] = []

@@ -220,17 +220,21 @@ SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID,
 COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id", required_in_prod=False)
 
 
-# Hand-maintained catalog_source/ files (backbones, origin_map, supplier-overrides) are MATERIAL-specific.
-# The stone pack (historical) keeps them flat at catalog_source/<file>; any OTHER pack MUST ship its own
-# catalog_source/<pack>/<file> and NEVER falls back to stone's -- so a wood/lime run reads its own data or
-# gaps/fails loudly, never silently loads stone varieties/origins (audit A2 / #213 M1).
+# Per-material data (the catalog_source/ backbones, origin map, supplier overrides and new-variety deltas; the
+# reference synonyms) is MATERIAL-specific. The stone pack (historical) keeps it flat at <base>; any OTHER pack MUST
+# ship its own <base>/<pack>/ and NEVER falls back to stone's -- so a wood/lime run reads its own data or
+# gaps/fails loudly, never silently loads stone varieties/origins/synonyms (audit A2 / #213 M1).
 _STONE_PACK = "stone"
 
 
-def _catalog_source_file(filename: str) -> Path:
-    base = WORKSPACE_ROOT / "catalog_source"
+def _pack_namespaced(base: Path) -> Path:
+    """The active pack's folder of per-material data under `base`: `base` itself for stone, `base/<pack>` otherwise."""
     pack = active_pack().name
-    return base / filename if pack == _STONE_PACK else base / pack / filename
+    return base if pack == _STONE_PACK else base / pack
+
+
+def _catalog_source_file(filename: str) -> Path:
+    return _pack_namespaced(WORKSPACE_ROOT / "catalog_source") / filename
 
 # Last-resort attribute defaults are DOMAIN VALUES, so they live in the active pack, not here:
 # config/domains/<pack>.yaml -> last_resort_finishes / last_resort_quality / block_finish (read via
@@ -252,7 +256,6 @@ class Confidence(IntEnum):
 @dataclass(frozen=True)
 class Paths:
     workspace_root: Path = WORKSPACE_ROOT
-    synonyms_dir: Path = REPO_ROOT / "reference" / "synonyms"
     state_dir: Path = REPO_ROOT / "state"
     fixtures_dir: Path = REPO_ROOT / "adapters" / "fixtures"
     # Live scrape outputs (scrapers write here): data/<source>/<timestamp>/products.csv
@@ -313,6 +316,17 @@ class Paths:
         # PACK-NAMESPACED like type_density; absent for a pack with no standard-area concept (the bundle-area
         # ladder then simply falls through), so it never reads stone's slab-area table under another pack.
         return REPO_ROOT / "reference" / f"standard_slab_area.{active_pack().name}.csv"
+
+    @property
+    def synonyms_dir(self) -> Path:
+        # spelling -> canonical value per vocab, PACK-NAMESPACED (stone stays flat): wood never reads stone's synonyms
+        return _pack_namespaced(REPO_ROOT / "reference" / "synonyms")
+
+    @property
+    def backbone_additions_dir(self) -> Path:
+        # the per-run new-variety backbone deltas, PACK-NAMESPACED (stone stays flat). Under this instance's
+        # catalog_source_dir, so a Paths pointed at another catalog_source writes its deltas there too
+        return _pack_namespaced(self.catalog_source_dir) / "backbone_additions"
 
     @property
     def origin_map_csv(self) -> Path:

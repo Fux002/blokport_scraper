@@ -34,21 +34,16 @@ STONE_WORDS = re.compile(r"\b(slabs?|blocks?|tiles?|stones?|marble|granite|quart
                          r"dolomite|polished|honed|leathered|flamed|sandblasted)\b", re.IGNORECASE)
 
 
-def build_workspace(root: Path, *, wood_synonyms: bool = True) -> Path:
+def build_workspace(root: Path) -> Path:
     """A wood deployment's workspace under `root`: the pipeline package (a real copy, so its paths, which derive from
     the package's own location, are the copy's; tests and caches excluded), the shared port list the ports fallback
     reads, the wood data (fixtures/wood/workspace overlaid), the load_frame adapter in the copy's adapters/ (where
-    discovery finds it) and its source entry in the copy's sources.yaml. The repo itself is never written.
-
-    `wood_synonyms`: wood's synonyms (DOMAIN_PACK.md data plane) go where the code reads synonyms today, the package's
-    one shared reference/synonyms (settings.py:256); test_the_shipped_synonyms_do_not_reach_a_wood_run pins that gap."""
+    discovery finds it) and its source entry in the copy's sources.yaml. The repo itself is never written."""
     shutil.copytree(REPO / "stone_pipeline", root / "stone_pipeline",
                     ignore=shutil.ignore_patterns("tests", "__pycache__", "outputs", "*.db"))
     (root / "catalog_source").mkdir()
     shutil.copy(REPO / "catalog_source" / "ports.csv", root / "catalog_source" / "ports.csv")
     shutil.copytree(FIXTURE / "workspace", root, dirs_exist_ok=True)
-    if wood_synonyms:
-        shutil.copytree(FIXTURE / "synonyms", root / "stone_pipeline" / "reference" / "synonyms", dirs_exist_ok=True)
     shutil.copy(FIXTURE / "wood_feed.py", root / "stone_pipeline" / "adapters" / "wood_feed.py")
     sources = root / "stone_pipeline" / "config" / "sources.yaml"
     sources.write_text(sources.read_text(encoding="utf-8") + "\n" + (FIXTURE / "source.yaml").read_text(encoding="utf-8"),
@@ -97,11 +92,12 @@ def products(wood) -> dict[str, dict]:
     return {r["Variant Sku"]: r for r in _csv(wood / "to_upload" / "development" / "3_products_woodfeed.csv")}
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: reconcile validates every category against the DEFAULT form's "
-                   "backbone only (reference/loaders/reference_data.py:162 load_backbone() -> paths.backbone_json, read "
-                   "at stages/reconcile_tree.py:127), so a beam's 'Raw' finish is checked against the plank tree and every "
-                   "bulk-form product is held as missing_leaf_child (stone passes only because its slab backbone lists "
-                   "the block finish 'Raw' on 12,141 of 12,156 varieties)")
+@pytest.mark.xfail(strict=True, reason="fix owner: the Phase 1 data model (blokport_research/2026-11-03-attribute-"
+                   "logistics-audit/PHASE-1-SPEC.md:110 one variety backbone checked against the default form, and :74 D9 "
+                   "`finishes_from`): reconcile validates every category against the DEFAULT form's backbone only "
+                   "(reference/loaders/reference_data.py:162, read at stages/reconcile_tree.py:127), so a beam's 'Raw' "
+                   "finish is checked against the plank tree and every bulk-form product is held as missing_leaf_child. "
+                   "Stone keeps that rule on purpose: per-category backbones would newly hold 42 varsha 'Polished' blocks")
 def test_every_feed_row_is_emitted_nothing_wrongly_held(wood, products):
     rejects = [r for f in (wood / "stone_pipeline" / "outputs" / "development").glob("*/review/products_rejects.csv")
                for r in _csv(f)]
@@ -165,17 +161,22 @@ def test_no_stone_vocabulary_in_any_emitted_value(wood):
     assert len(files) >= 10 and leaks == set()
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: synonyms are not pack-namespaced (config/settings.py:256 "
-                   "synonyms_dir = reference/synonyms), so a wood run on the shipped package reads stone's synonyms, "
-                   "whose targets (Polished, Marble, ...) are not in wood's attributes.csv: load_all refuses to load "
-                   "(reference/loaders/reference_data.py:108)")
-def test_the_shipped_synonyms_do_not_reach_a_wood_run(tmp_path):
-    _completed(run_wood(build_workspace(tmp_path, wood_synonyms=False)))
+def test_the_per_material_data_stays_in_the_packs_own_folders(wood):
+    # the package ships stone's synonyms (flat), untouched, and the wood run (the fixture) never read them: wood reads
+    # only reference/synonyms/wood/, which wood does not have (no synonyms)
+    synonyms = wood / "stone_pipeline" / "reference" / "synonyms"
+    assert (synonyms / "finish.csv").read_bytes() == (REPO / "stone_pipeline" / "reference" / "synonyms" /
+                                                      "finish.csv").read_bytes()
+    assert not (synonyms / "wood").exists()
+    # the catalog's new-variety deltas land in wood's own catalog_source folder, never the stone flat one
+    assert any((wood / "catalog_source" / "wood" / "backbone_additions").glob("*.json"))
+    assert not (wood / "catalog_source" / "backbone_additions").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: the ledger's variation.branch column only admits the stone "
-                   "categories (ledger/schema.sql:61 CHECK (branch IN ('slab', 'block', 'tile'))), so seeding a wood "
-                   "variety fails and write-through cannot record a wood product")
+@pytest.mark.xfail(strict=True, reason="fix owner: the Phase 1 ledger schema bump (blokport_research/2026-11-03-"
+                   "attribute-logistics-audit/PHASE-1-SPEC.md:249 drops `branch` and its CHECK): today the ledger's "
+                   "variation.branch only admits the stone categories (ledger/schema.sql:61), so seeding a wood variety "
+                   "fails and write-through cannot record a wood product")
 def test_the_ledger_records_the_wood_products(tmp_path):
     root = build_workspace(tmp_path)
     _completed(run_wood(root, writethrough=True))
