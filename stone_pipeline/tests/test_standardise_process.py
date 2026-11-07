@@ -710,9 +710,9 @@ def test_a_clicks_only_run_works_only_the_clicked_listings_and_merges_them_into_
                            clicks_only=True)
     assert worked == {"listings": ["new", "chosen"], "clicks_only": True} and summary["listings"] == 2
     body = s3.objects[f"{ROOT}{C.REVIEW_FILE}"]["Body"]
-    assert json.loads(body) == {"SEN-NEW": new_row, "SEN-OTHER": other, "SEN-TILE-1": tile}   # chosen: its row goes
-    for row in (other, tile):                                           # the others' rows byte-identical
-        assert json.dumps(row, sort_keys=True).encode() in body
+    # chosen: its row goes; the tile's row is this publish's (it renders every tile); the other's byte-identical
+    assert json.loads(body) == {"SEN-NEW": new_row, "SEN-OTHER": other, "SEN-TILE-1": {**tile, "why": "no tile fits now"}}
+    assert json.dumps(other, sort_keys=True).encode() in body
     assert s3.objects[f"{ROOT}summary.json"]["Body"] == b"the last full run's"
     assert json.loads(s3.objects[f"{ROOT}clicks-summary.json"]["Body"])["run_id"] == "R1"
 

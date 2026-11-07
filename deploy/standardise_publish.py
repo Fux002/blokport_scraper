@@ -99,20 +99,32 @@ def read_choices(s3, root):
     return read_records(s3, prefix, lambda key: key[len(prefix):-len(".json")])
 
 
-def read_records(s3, prefix, name):
-    """({name: record}, {name: why it could not be read}) of the JSON records under prefix, each named by name(key). A
-    file that is not a JSON object fails only its own listing, named loud with its key; the others are read."""
-    keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
-                  for o in page.get("Contents", []))
+def read_records(s3, prefix, name, keys=None):
+    """({name: record}, {name: why it could not be read}) of the JSON records under prefix (or of exactly `keys`, a few
+    records asked for by key: nothing is listed), each named by name(key), read STORE_WORKERS at once. A file that is
+    not a JSON object fails only its own listing, named loud with its key; the others are read. A record gone by the
+    time it is read (or never there, asked for by key) is absent."""
+    if keys is None:
+        keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+                for o in page.get("Contents", [])]
+    keys = sorted(keys)
 
     def one(key):
         try:
-            record = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
+            body = s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in MISSING:
+                return None, None
+            raise
+        try:
+            record = json.loads(body)
         except ValueError as exc:
             return None, f"not JSON ({exc})"
         return (record, None) if isinstance(record, dict) else (None, "not a JSON object")
     records, errors = {}, {}
     for key, (record, why) in zip(keys, pool_map(C.STORE_WORKERS, one, keys)):
+        if record is None and why is None:
+            continue
         if why is None:
             records[name(key)] = record
         else:

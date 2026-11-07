@@ -48,7 +48,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import boto3
@@ -56,7 +56,7 @@ import boto3
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
 from deploy.standardise_publish import (NoConflictSet, aws_config, chosen_prefix, click_record, clicks_prefix, excluded,
-                                       owner_key, owner_prefix, pool_map, read_choices, read_clicks, read_conflicts,
+                                       owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
                                        read_records, records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
@@ -69,8 +69,8 @@ from stone_pipeline.standardise import index
 FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"},
           "clean": {"id", "action", "source", "sha", "at"}, "withdraw": {"id", "action", "source", "at"}}
 TAGS = (C.RUN_TAG, C.CLEAN_TAG)                        # the process's tags, the only results a choice can name
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")   # what the page writes: toISOString(), UTC
+SHA = re.compile(r"[0-9a-f]{64}")                    # a photo's sha256, matched whole (fullmatch)
+_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")   # toISOString(), UTC, whole
 _FLAG = {"true": True, "false": False}
 ROOT = f"{proc.ROOT}{C.CLEAN_TAG}/"
 
@@ -114,7 +114,7 @@ def check_docs(docs):
 
 def moment(at):
     """A decision's time (an ISO UTC timestamp, ending Z) as a datetime; None when it is not one."""
-    if not isinstance(at, str) or not _AT.match(at):
+    if not isinstance(at, str) or not _AT.fullmatch(at):
         return None
     try:
         return datetime.fromisoformat(at.replace("Z", "+00:00"))
@@ -133,6 +133,9 @@ def _shape(doc, listings):
         return ["every field must be a non-empty string"]
     if moment(doc["at"]) is None:
         return [f"at {doc['at']!r} is not an ISO UTC timestamp (2026-11-02T10:00:00.000Z)"]
+    if moment(doc["at"]) > datetime.now(timezone.utc) + timedelta(seconds=C.DECISION_AHEAD_SECONDS):
+        return [f"at {doc['at']} is ahead of this server's clock by more than {C.DECISION_AHEAD_SECONDS} s: a decision "
+                "from the future would block every later one on its listing"]
     listing = listings.get(key)
     if listing is None:
         return ["not on the product sheet as a photo listing (a tile listing is rendered, never decided here)"]
@@ -140,7 +143,7 @@ def _shape(doc, listings):
         return [f"source {doc['source']!r} is not the listing's ({listing['source']!r})"]
     if action in ("remove", "withdraw"):
         return []
-    if not _SHA.match(doc["sha"]):
+    if not SHA.fullmatch(doc["sha"]):
         return [f"sha {doc['sha']!r} is not a photo's sha256"]
     if action == "use" and doc["tag"] not in TAGS:
         return [f"tag {doc['tag']!r} is not the process's ({' or '.join(TAGS)})"]
@@ -225,13 +228,10 @@ class _Stores:
 
 
 def _choices_of(s3, keys):
-    """({listing key: its choice record}, {listing key: why it cannot be read}) of these listings alone, each read as
-    read_choices reads it (publish.read_records, its key as the prefix)."""
+    """({listing key: its choice record}, {listing key: why it cannot be read}) of these listings alone, read as
+    read_choices reads them (publish.read_records, asked for by key: nothing is listed)."""
     prefix = chosen_prefix(ROOT)
-    found = pool_map(C.STORE_WORKERS, lambda key: read_records(s3, f"{prefix}{key}.json", lambda k: k[len(prefix):-len(".json")]),
-                     sorted(keys))
-    return ({k: v for records, _ in found for k, v in records.items()},
-            {k: v for _, errors in found for k, v in errors.items()})
+    return read_records(s3, prefix, lambda k: k[len(prefix):-len(".json")], keys={f"{prefix}{key}.json" for key in keys})
 
 
 def _touched(keys, listings, shared):

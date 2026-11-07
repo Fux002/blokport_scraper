@@ -7,7 +7,7 @@ from __future__ import annotations
 import csv
 
 from stone_pipeline import catalog
-from stone_pipeline.run import run_source
+from stone_pipeline.run import OutputMode, run_source
 from stone_pipeline.stages import emit
 
 
@@ -66,7 +66,7 @@ def _known_products_export(tmp_path):
 def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape_data_dir):
     # the core guarantee: an inventory refresh writes NO product import and NO canonical (so it
     # neither re-imports products nor feeds the catalog), yet the run completes.
-    manifest = run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
+    manifest = run_source("marenostone", mode=OutputMode.STOCK, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                           known_products_path=_known_products_export(tmp_path))
     run_dir = tmp_path / manifest.run_id
     assert not (run_dir / "4_products_import" / "medusa_import.csv").exists()
@@ -83,7 +83,7 @@ def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scra
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
                         lambda *a, **k: (modes.append(k.get("inventory_only")), True)[1])
-    run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
+    run_source("marenostone", mode=OutputMode.STOCK, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                known_products_path=_known_products_export(tmp_path))
     assert modes == [True]
 
@@ -136,7 +136,7 @@ def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path, scrape_
     import pytest
     missing = tmp_path / "does_not_exist.csv"
     with pytest.raises(SystemExit) as exc:
-        run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
+        run_source("marenostone", mode=OutputMode.STOCK, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                    known_products_path=missing)
     assert exc.value.code == 2
     assert any("inventory-only refresh aborted" in r.getMessage() for r in caplog.records)   # the export guard, not a health failure

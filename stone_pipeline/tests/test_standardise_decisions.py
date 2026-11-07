@@ -651,3 +651,13 @@ def test_the_conflict_rule_never_looks_at_a_decision_already_refused():
     with pytest.raises(dec.InvalidDecisions) as refused:
         dec.plan(s3, [_use("leathered", E, tag="v0"), _use("polished", E)], LISTINGS, exclude=set())
     assert "conflict photo also chosen for" not in str(refused.value)        # the refused use holds nothing
+
+
+def test_a_decision_timed_further_ahead_than_the_allowed_clock_skew_is_refused():
+    # review of #555: a future `at` (a browser clock ahead) would block every later decision on its listing
+    from datetime import datetime, timedelta, timezone
+    ahead = lambda seconds: (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    s3 = _bucket()
+    assert not dec.plan(s3, [_clean("one", B, at=ahead(C.DECISION_AHEAD_SECONDS // 2))], LISTINGS, exclude=set()).empty()
+    with pytest.raises(dec.InvalidDecisions, match="ahead of this server"):
+        dec.plan(s3, [_clean("one", B, at=ahead(C.DECISION_AHEAD_SECONDS * 4))], LISTINGS, exclude=set())

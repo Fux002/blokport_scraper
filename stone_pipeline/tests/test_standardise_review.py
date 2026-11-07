@@ -20,6 +20,7 @@ from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, STANDARDISE as
 from stone_pipeline.io import imagestore
 
 A, B, D = "a" * 64, "b" * 64, "d" * 64
+_REAL_SHEET = rv.sheet                                          # before the autouse fixture stands it in
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 CLN = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
@@ -178,8 +179,7 @@ def test_a_row_shows_the_live_click_the_run_s_state_while_it_is_the_same_and_que
 
 def _offered(row):
     """The decision documents each action the row offers stands for (what the page sends for it)."""
-    at = "2026-11-07T23:00:00.000Z"
-    base = {"id": row["listing"], "source": row["source"], "at": at}
+    base = {"id": row["listing"], "source": row["source"], "at": rv._now()}     # the page sends its own now
     for action in row["actions"]:
         if action == "use":
             yield from ({**base, "action": "use", "sha": p["sha"], "tag": tag} for p in row["photos"] for tag in p["usable"])
@@ -647,7 +647,7 @@ class _Sheets:
 
 def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories_changed(monkeypatch):
     s3, raw = _Sheets(), []
-    monkeypatch.undo()                                                       # the autouse stand-in of rv.sheet
+    monkeypatch.setattr(rv, "sheet", _REAL_SHEET)              # the real one back, every other stand-in kept (conftest's too)
     monkeypatch.setattr(rv, "_SHEET", {})
     monkeypatch.setattr(rv, "fetch_attributes", lambda client: True)
     monkeypatch.setattr(rv, "sheet_and_photos", lambda client: raw.append(1) or ("csv", {}))
@@ -663,3 +663,109 @@ def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories
     s3.etags["sheet"] = '"s2"'
     rv.sheet(s3)
     assert len(raw) == 4
+
+
+# --- the query and body edges (review of #555 and #556) ------------------------------------------------------------------
+@pytest.mark.parametrize("query", ["limit=²", "limit=١", "offset=١", f"offset={'9' * 5000}", "limit= 5",
+                                   "offset=+1"])
+def test_a_page_number_that_is_not_plain_ascii_digits_is_400_never_a_crash(monkeypatch, query):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "hidden", lambda *a: pytest.fail("reached"))
+    code, body = server.dispatch("GET", ["photos", "hidden"], None, query)
+    assert code == 400 and query.split("=")[0] in body["error"]
+
+
+@pytest.mark.parametrize("query", ["month=", "month=2026-11%0A", "month=٢٠٢٦-11",
+                                   "month=2026-10&month=2026-11"])
+def test_a_month_that_is_empty_not_ascii_or_repeated_is_400(monkeypatch, query):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "spend", lambda *a: pytest.fail("reached"))
+    assert server.dispatch("GET", ["photos", "spend"], None, query)[0] == 400
+
+
+def test_a_repeated_dry_run_is_400_never_the_last_value(monkeypatch):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "apply_decisions", lambda *a: pytest.fail("reached"))
+    code, body = server.dispatch("POST", ["photos", "decisions"], [], "dry_run=true&dry_run=false")
+    assert code == 400 and "dry_run" in body["error"]
+
+
+@pytest.mark.parametrize("body", [{"sha": B + "\n", "at": AT}, {"sha": B, "at": AT + "\n"},
+                                  {"sha": B, "at": "٢026-11-07T10:00:00.000Z"}])
+def test_a_sha_or_time_with_a_trailing_newline_or_a_non_ascii_digit_is_400(monkeypatch, body):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "click", lambda *a: pytest.fail("reached"))
+    assert server.dispatch("PUT", ["photos", "clicks", "SEN-ONE"], body)[0] == 400
+
+
+def test_a_candidate_decision_is_checked_at_the_millisecond_the_page_would_write(monkeypatch):
+    # review of #556: _now() floored to the second ('.000Z'), so an action could be withheld for up to a second
+    from datetime import datetime, timezone
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 7, 14, 5, 9, 123456, tzinfo=timezone.utc)
+    monkeypatch.setattr(rv, "datetime", _Clock)
+    assert rv._now() == "2026-11-07T14:05:09.123Z" and dec.moment(rv._now()) is not None
+
+
+def test_a_row_names_its_listing_by_the_sheet_s_handle_not_the_one_stored_with_the_run(monkeypatch):
+    # review of #556: a variety re-bind moves the handle; review.json kept the old one until the next full run
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": {**_row(ONE), "listing": "old-handle"}}).encode()})
+    row = rv.hidden(s3)["rows"][0]
+    assert row["listing"] == "one" and all(d["id"] == "one" for d in _offered(row))
+
+
+def test_a_removed_row_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{imagestore.owner_removed_key("SEN-ONE"): json.dumps(
+        {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "reason": C.REMOVED_REASON, "at": AT}).encode()})
+    del s3.objects[imagestore.conflicts_key("sentas")]
+    with pytest.raises(rv.Unavailable, match="no conflict set"):
+        rv.hidden(s3)
+
+
+def test_a_click_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    del s3.objects[imagestore.conflicts_key("sentas")]
+    with pytest.raises(rv.Unavailable, match="no conflict set"):
+        rv.click(s3, "SEN-ONE", B, AT)
+    assert s3.written == []
+
+
+# --- the open #555 follow-ups ---------------------------------------------------------------------------------------------
+def test_a_click_on_a_tile_is_refused_by_the_applier_before_anything_else(monkeypatch):
+    # review of #555: a hidden tile with a choice record answered 409 chosen_not_linked instead of the promised 422
+    _hidden_in_ledger(monkeypatch, TILE)
+    s3 = _bucket(**{f"{ROOT}chosen/tile-1.json": json.dumps({"key": "tile-1", "sha": A}).encode()})
+    code, body = rv.click(s3, "SEN-TILE-1", B, AT)
+    assert code == 422 and "not on the product sheet as a photo listing" in body["error"] and s3.written == []
+
+
+@pytest.mark.parametrize("change", ["excluded", "pipeline_off"])
+def test_a_stale_run_row_never_offers_what_the_applier_now_refuses(monkeypatch, change):
+    # review of #555: the row says fixable from the last run; the exclude list or the source's switch changed since
+    _hidden_in_ledger(monkeypatch, ONE)
+    if change == "excluded":
+        monkeypatch.setattr(dec, "excluded", lambda: {B})
+    else:
+        monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": _row(ONE, photos=[_photo(A, fixable=False, left=()), _photo(B)])}).encode()})
+    row = rv.hidden(s3)["rows"][0]
+    assert not row["photos"][1]["clickable"] and "clean" not in row["actions"]
+    for doc in _offered(row):
+        dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=dec.excluded())               # what is offered still applies
+
+
+def test_a_spend_file_of_the_wrong_shape_is_listed_unreadable_never_a_crash():
+    month = f"{ROOT[:-len(C.CLEAN_TAG) - 1]}{C.CLEAN_SPEND_DIR}/2026-11/"
+    good = {"at": AT, "source": "sentas", "sha": A, "model": "nano2", "call": "edit", "usd": 0.12}
+    s3 = _S3({f"{month}R1.json": json.dumps({"usd": 0.12, "uses": [good]}).encode(),
+              f"{month}R2.json": json.dumps({"usd": 1.0, "uses": "all of them"}).encode(),
+              f"{month}R3.json": json.dumps({"usd": 1.0, "uses": [{"sha": A}]}).encode()})
+    out = rv.spend(s3, "2026-11")["cleaning"]
+    assert out["uses"] == [{"run_id": "R1", **good}] and out["spent_usd"] == 0.12
+    assert [u["run_id"] for u in out["unreadable"]] == ["R2", "R3"]
