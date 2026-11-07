@@ -258,7 +258,7 @@ def _steps(monkeypatch, cap_at=None):
     monkeypatch.setattr(runner.select, "settle", step("settle"))
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (done.append(f"gpu {tag}"), ([], False))[1])
     return done
 
@@ -284,7 +284,7 @@ def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_th
     monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: given.setdefault("clean", spend) and ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
     assert given["judge"] is process and given["clean"] is cleaning
 
@@ -295,7 +295,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
@@ -347,7 +347,7 @@ def test_the_process_budget_still_ends_the_run_in_any_step(monkeypatch):
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     _steps(monkeypatch)
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": [], "review": {}})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": [], "review": {}})
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
 
@@ -462,6 +462,9 @@ class _Store:
 
     def get_object(self, Bucket, Key):
         import io
+        from botocore.exceptions import ClientError
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def put_object(self, Bucket, Key, Body, ContentType):
@@ -509,7 +512,7 @@ def _clicked_selection(clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "S
 
 
 def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "SEN-2", B),),
-                 cleaned=(), before=0.0, outline_pending=()):
+                 cleaned=(), before=0.0, outline_pending=(), clicks_only=False):
     """A run over _clicked_selection. The GPU round reserves its worst case like the real one, and settles the outline
     of the whole slabs it runs again; a backlog round (listings to standardise) takes all the budget left. (problems,
     report, store, what was paid for edits, the GPU rounds in order, the process spend)."""
@@ -542,8 +545,18 @@ def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog
     monkeypatch.setattr(runner, "gpu_round", gpu_round)
     process = sel_mod.Spend(budget, others=lambda: before)
     problems, report = runner.run(_Batch(), s, process, sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached), "R1",
-                                  math.inf, say=lambda m: None)
+                                  math.inf, say=lambda m: None, clicks_only=clicks_only)
     return problems, report, store, edits, rounds, process
+
+
+def test_a_clicks_only_run_finishes_the_clicks_starts_no_other_step_and_merges_its_report(monkeypatch):
+    merged = []
+    real = runner.select.report
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks, merge: merged.append(merge) or
+                        real(sel, waits, marks, merge=merge))
+    problems, report, store, edits, rounds, process = _clicked_run(monkeypatch, 100.0, backlog=(), clicks_only=True)
+    assert edits == ["nano2"] and [tag for tag, _ in rounds] == ["v9-clean"] and merged == [True]
+    assert [(r["key"], r["tag"]) for r in report["chosen"]] == [("slab-1", "v9-clean")]
 
 
 def _finish_price(slices, listings):

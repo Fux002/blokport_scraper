@@ -647,15 +647,27 @@ It carries no URL. The config API serves it under `/config/v1/photos` (`deploy.s
   next relink shows it), the run's row, else `not_worked_yet`. A run's row says `pending`, `excluded`,
   `photo_conflict`, `clean_failed`, `not_fixable`, `awaiting_auto` (with `why`, its marks' wait) or `awaiting_click`;
   a tile's `tile_no_stone`. The row's click is the clicks store's: the run's state while it is the same click, `queued`
-  once clicked since. Each photo carries `clickable` and `urls` (`original`, `result`, `cleaned`): presigned GET URLs made
-  afresh on every request, valid `REVIEW_URL_TTL_SECONDS` (900). Each row's `actions`: `clean` while a photo is
-  clickable, `withdraw` while a click is stored; none is a read-only row.
+  once clicked since. Each photo carries `clickable`, `usable` (the run tags whose result a "use" would take) and `urls`
+  (`original`, `result`, `cleaned`): presigned GET URLs made afresh on every request, valid `REVIEW_URL_TTL_SECONDS`
+  (900). Each row's `actions`, in this order: `use` while a photo is usable, `clean` while a photo is clickable,
+  `withdraw` while a click is stored, `remove` on a photo listing not removed already; none is a read-only row. Each is
+  offered only when the decisions applier accepts that one decision now (`standardise_decisions.refusals`, over one read
+  of the stores, `context`), so an offered action is never refused on its own; a file that decides one listing twice, or
+  gives one conflict photo to two listings, is still refused as a whole.
 - `GET /photos/spend?month=YYYY-MM` (this UTC month when omitted): the process budget and the cleaning cap, each run's
   spend, the files that cannot be read, and the cleaning cap's paid uses.
 - `PUT /photos/clicks/{sku}` `{sha, at}` (the SKU percent-encoded): 200 `queued`, `already_cleaned` or
   `nothing_left_to_try` (the last two write nothing); 409 `not_hidden`, `chosen_not_linked` or `run_active` (with the
   lock holder's `run_id`); 422 the applier's refusal; 404 an unknown SKU.
 - `DELETE /photos/clicks/{sku}` `{at}`: 200 `withdrawn` or `no_click`; 409 `run_active`; 422; 404.
+- `POST /photos/decisions?dry_run=true|false`, the page's export (a JSON array of decision objects) as the body: 200
+  `{dry_run, applied, owner_choices, removals, cleans, replaced, lines}` (the plan as the CLI prints it); 422 the
+  applier's reasons, nothing written; 409 `run_active`; 400 a body that is no array of objects, or another dry_run.
+- `POST /run {"stage": "photos", "clicks_only": true}`: a clicks-only run ("run now"), steps 1 to 7 over the listings
+  with the owner's click alone (the clicks' steps: clean, their GPU round, their judge), then publish and relink. It
+  rewrites no list: its listings' rows replace theirs in `tracked.csv` and `review.json` and every other row stays as
+  stored, byte for byte, inside the run lock (`select.merged_tracked`, `run.merge_review`); its summary is
+  `clicks-summary.json`. `close_only` and `clicks_only` are two kinds of photos run: asking for both is a 400.
 
 A store the answer depends on that cannot be read (the ledger, `review.json`) is a 503 naming it, never an empty list.
 
