@@ -1,5 +1,5 @@
-"""Auto-texture trigger: after a produce QUEUES new-variant textures it cannot generate locally (the lean
-:core has no fal_client/torch), submit ONE on-demand GPU Batch job to generate + upload them.
+"""Auto-texture trigger: after a produce QUEUES new-variant textures (the produce never generates them),
+submit ONE on-demand GPU Batch job to generate + upload them.
 
 Part of the produce (Republish), NOT a cron: it fires only when a produce actually queued new textures, and
 only when BLOKPORT_AUTO_TEXTURE is set. Fire-and-forget -- produce submits and returns; the images land in

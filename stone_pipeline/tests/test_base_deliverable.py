@@ -123,7 +123,7 @@ def test_the_catalog_copies_the_base_after_the_sync_settles_it(tmp_path, monkeyp
     monkeypatch.setattr(catalog, "collect_discontinued", lambda root: 0)
     monkeypatch.setattr(catalog, "collect_lot_cards", lambda root: 0)
     monkeypatch.setattr(catalog, "write_sync_md", lambda **k: tmp_path / "SYNC_STEPS.md")
-    monkeypatch.setattr(catalog, "_auto_queue_images", lambda: 0)
+    monkeypatch.setattr(catalog.prepare_variant_images, "queue_new_textures", lambda: 0)
     monkeypatch.setattr("stone_pipeline.stages.variety_color.fill_colors", lambda **k: {})
     monkeypatch.setattr(catalog, "write_variants_to_delete", lambda: 0)
     monkeypatch.setattr(catalog, "migrate_retyped_variant_images", lambda ref: 0)

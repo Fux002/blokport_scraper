@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -29,14 +28,10 @@ from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
+from stone_pipeline import prepare_variant_images
 from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
 
 log = logfmt.get_logger("catalog")
-
-# Per-image-script wall-clock ceiling. Generation (FLUX over the whole queue, 4 workers) legitimately runs
-# minutes; this is a defense-in-depth backstop far above normal so a genuinely wedged stage (e.g. a hung
-# model load or network call) fails and flags its variants HELD instead of pinning the whole Batch task.
-IMAGE_SCRIPT_TIMEOUT_S = 3600
 
 
 def _is_complete_run(run_dir: Path) -> bool:
@@ -128,7 +123,7 @@ def run(outputs_root: Path | None = None) -> Path:
     collect_lot_cards(outputs_root)                    # -> the "which slabs are sold?" review queue
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
                          products=products, inventory=inventory, discontinued=discontinued)
-    images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
+    images_queued = prepare_variant_images.queue_new_textures()   # new variants -> the texture job (auto)
     # Give each colour-less variety a real colour read from its REAL PRODUCT IMAGE (the hosted
     # product photo, keyed by variation_key), then propagate to mirrors, so a no-colour source like
     # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
@@ -177,149 +172,6 @@ def run(outputs_root: Path | None = None) -> Path:
     _consistency_gate()
 
     return sync
-
-
-def _auto_queue_images() -> int:
-    """Auto-build the generator's prompt queue (image_pipeline/prompts_to_generate.json) for the
-    new variants this run, then -- if FAL_KEY is set -- kick off generation so the image is ready on
-    S3 before import. Without FAL_KEY it just leaves the queue ready for the image_pipeline run.
-    The variant Image URL already points at dev/variations/{Key}.png, so generation overwrites that
-    exact object (one image per variant)."""
-    import json
-
-    from stone_pipeline.stages import image_prompts
-    from stone_pipeline import refresh_images
-    # Demand-driven QUALITY upgrade: alongside the new mints, drip up to images.upgrade_batch
-    # product-backed variants whose texture predates the current best model. Once-only via the durable
-    # refreshed marker; capped so a produce's FAL spend stays predictable. Upgrade-then-list: a legacy
-    # texture is never held back, it is just replaced within a few produces. cap 0 == mints only.
-    cap = SETTINGS.images.upgrade_batch
-    refreshed = refresh_images.load_refreshed() if cap > 0 else set()
-    try:
-        prompts_path = (image_prompts.build_with_upgrades(refreshed, cap) if cap > 0
-                        else image_prompts.build())
-    except Exception:
-        log.exception("image prompt queue build failed")
-        return 0
-    items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
-    items = items if isinstance(items, list) else items.get("items", [])
-    # The generators need the FLUX/BEN2 stack (fal_client + torch), which the lean deployed images
-    # deliberately omit -- texture generation is an external/GPU step, and the produce's job here is to
-    # QUEUE the prompts (prompts_to_generate.json). Only run inline when BOTH FAL_KEY and the deps are
-    # present (a dev box / a dedicated generation image); otherwise queue and say so, rather than run
-    # scripts that would just ImportError.
-    import importlib.util
-
-    from stone_pipeline.prepare_variant_images import GEN_DEPS   # single source of the generator dep list
-    missing_deps = [m for m in GEN_DEPS if importlib.util.find_spec(m) is None]
-    generated_inline = False
-    if items and os.environ.get("FAL_KEY") and not missing_deps:
-        log.info("auto image generation: FAL_KEY + deps present, generating", extra={"extra_fields": {"queued": len(items)}})
-        failed = _generate_queued_images()
-        generated_inline = True
-        # Publish EVERY texture this run made (mints and upgrades alike) and record them as best-model:
-        # the inline branch previously left the PNGs local. Mints must be marked too -- they are generated
-        # by the current best model, so an unmarked mint would be picked up by the upgrade drip later and
-        # regenerated for nothing. Mark ONLY on a clean upload, mirroring refresh_images: a partial run
-        # leaves the Keys eligible so the next produce retries them. Under s3.dry_run (the dev default)
-        # uploads are suppressed by design, so skip the whole block rather than report a false failure.
-        produced = [i["output_name"] for i in items if i.get("output_name")]
-        if produced and SETTINGS.s3.dry_run:
-            log.info("s3 dry run: %d generated texture(s) NOT uploaded or marked", len(produced),
-                     extra={"extra_fields": {"produced": len(produced)}})
-        elif produced:
-            from stone_pipeline.prepare_variant_images import upload_variant_images
-            uploaded, missing = upload_variant_images(produced)
-            if failed or missing:
-                log.error("texture run incomplete; marker NOT advanced", extra={"extra_fields": {
-                    "produced": len(produced), "uploaded": uploaded, "missing": missing[:8],
-                    "failed_scripts": failed}})
-            else:
-                refresh_images.mark_best_model(produced)
-                log.info("textures published + marked best-model", extra={"extra_fields": {
-                    "uploaded": uploaded,
-                    "upgrades": sum(1 for i in items if i.get("mode") == image_prompts.UPGRADE_MODE)}})
-        if failed:
-            # distinct error-level signal: generation failed, so some {Key}.png will be absent. The
-            # image gate downstream HOLDS imageless variants, but only when S3 is reachable -- surface
-            # this loudly so a wholesale failure isn't mistaken for a clean run.
-            log.error("image generation failed -- expected images may be missing from this build",
-                      extra={"extra_fields": {"failed_scripts": failed, "queued": len(items)}})
-    elif items and os.environ.get("FAL_KEY") and missing_deps:
-        # FAL_KEY is set but this image can't generate (no fal_client/torch): queue only, delegate the
-        # actual generation to the on-demand GPU texture job (auto-texture, below). Their products stay
-        # HELD until {Key}.png exists. Warn (not error) -- this is the expected lean-image path.
-        log.warning("%d new variant texture(s) QUEUED (image_pipeline/prompts_to_generate.json) but NOT "
-                    "generated here: this image lacks %s. Dispatching the GPU texture job (auto-texture); "
-                    "until it lands, their products stay HELD.",
-                    len(items), ", ".join(missing_deps), extra={"extra_fields": {"queued": len(items)}})
-    elif items:
-        # loud signal (risk 2): textures were queued but FAL_KEY is not set for the produce, so they are
-        # NOT generated here -- every one of these new variants' products stays HELD out of the catalogue
-        # until its {Key}.png exists. At cold-start scale that is thousands of products silently unserved,
-        # so warn (not info) rather than let an empty product lane look like a clean run.
-        log.warning("no FAL_KEY for the produce: %d new variant texture(s) queued but NOT generated -- "
-                    "their products stay HELD until the images exist (wire FAL_KEY, or run image_pipeline)",
-                    len(items), extra={"extra_fields": {"queued": len(items)}})
-    # Part of the produce (Republish), NOT a cron: when textures were queued but this lean image did not
-    # generate them, fire-and-forget ONE on-demand GPU job to do it. No-op unless BLOKPORT_AUTO_TEXTURE is
-    # set; best-effort (never fails the produce). The next produce stamps the images (one-cycle hold).
-    if items and not generated_inline and SETTINGS.auto_texture.enabled:
-        import uuid
-
-        from stone_pipeline.prepare_variant_images import (PROMPTS_LOCAL, TEXTURE_QUEUE_PREFIX,
-                                                           publish_prompts)
-        from deploy.texture_trigger import submit_texture_job
-        dispatched = False
-        try:
-            # Publish THIS produce's queue to a UNIQUE key so a concurrent produce cannot clobber the queue a
-            # still-starting GPU job is about to pull; then dispatch a job bound to exactly that key. Gate the
-            # dispatch on a successful publish: if publish no-op'd (S3 dry-run/unreachable) we must NOT submit
-            # a job that would pull a stale/absent queue.
-            queue_key = f"{TEXTURE_QUEUE_PREFIX}{uuid.uuid4().hex}.json"
-            if publish_prompts(PROMPTS_LOCAL, key=queue_key):
-                dispatched = bool(submit_texture_job(len(items), queue_key=queue_key))
-            else:
-                log.error("texture queue publish no-op'd (S3 dry-run/unreachable); NOT dispatching a GPU job "
-                          "against a stale queue", extra={"extra_fields": {"queued": len(items)}})
-        except Exception:
-            log.exception("auto-texture trigger failed (non-fatal; textures stay queued for the next run)")
-        if not dispatched:
-            # loud + actionable, never swallowed: these variants' products stay HELD until a produce
-            # successfully publishes the queue AND submits the GPU job.
-            log.error("%d new variant texture(s) queued but NO GPU job was dispatched; their products stay "
-                      "HELD until a successful produce publishes + dispatches (check FAL_KEY / S3 write / "
-                      "GPU queue+jobdef config)", len(items), extra={"extra_fields": {"queued": len(items)}})
-    return len(items)
-
-
-def _generate_queued_images() -> list[str]:
-    """Run the existing image_pipeline chain (FLUX.2 max -> BEN2 -> S3) on the queued prompts.
-    Reuses the committed scripts so the S3 step you set up elsewhere stays the single source.
-    Returns the list of scripts that exited non-zero (empty == all succeeded)."""
-    import subprocess
-    import sys
-    ip = SETTINGS.paths.workspace_root / "image_pipeline"
-    failed: list[str] = []
-    for script in ("genetate_images.py", "rb_images.py"):
-        if (ip / script).exists():
-            # sys.executable (not bare "python") so the venv interpreter is used. -u (unbuffered) so the
-            # scripts' per-image progress streams to CloudWatch live: without it Python block-buffers a
-            # subprocess' stdout and the whole BEN2 stage looks like a silent hang until it exits. timeout so
-            # a wedged stage can never pin the Batch task forever -- a timeout is recorded as a failed script.
-            try:
-                rc = subprocess.run([sys.executable, "-u", script], cwd=ip, check=False,
-                                    timeout=IMAGE_SCRIPT_TIMEOUT_S).returncode
-            except subprocess.TimeoutExpired:
-                log.error("image-pipeline script timed out",
-                          extra={"extra_fields": {"script": script, "timeout_s": IMAGE_SCRIPT_TIMEOUT_S}})
-                failed.append(script)
-                continue
-            if rc != 0:
-                log.error("image-pipeline script failed",
-                          extra={"extra_fields": {"script": script, "returncode": rc}})
-                failed.append(script)
-    return failed
 
 
 def _s3_image_checker():

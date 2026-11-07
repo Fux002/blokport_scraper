@@ -1,20 +1,16 @@
-"""Prepare NEW variant images: generate -> de-background -> upload to <env>/variations/.
+"""The variant textures, one path (image_pipeline/IMAGE_FLOW.md).
 
-The single command for steps 2-4 of the variant-image flow (image_pipeline/IMAGE_FLOW.md). Steps 1 (the
-produce writes the queue, prompts_to_generate.json) and 5 (a later produce stamps the S3 image onto the
-variant and un-holds its products) are already wired into produce; this closes the manual middle in ONE
-reliable, idempotent step -- and uploads to the CORRECT prefix (dev/variations/), which was the gap: the
-generic upload_artifacts targets dev/scraper/to_upload/, not the variations/ home a variant's Image URL
-resolves to.
+The produce (catalog.run -> queue_new_textures) builds the queue (the imageless, product-backed variants, plus the
+capped upgrade drip), publishes it to a unique S3 key and dispatches ONE on-demand GPU job bound to it
+(deploy.texture_trigger, RUN_MODE=generate-textures). The produce never generates. The job, or a dev box, runs:
 
-    python -m stone_pipeline.prepare_variant_images     # generate + upload the new-variant images
+    python -m stone_pipeline.prepare_variant_images     # generate + de-background + upload to <env>/variations/
 
-Queue = the imageless, product-backed variants (image_prompts.build). A variant with no product, or one
-whose {Key}.png is already on S3, is never listed -- so a re-run never regenerates (or re-charges) an image
-that exists: the S3 object is its own marker. Needs the generator stack (fal_client + torch + FAL_KEY); on
-the lean image (which omits them on purpose) the queue is still written and the run reports where to run it,
-spending nothing. The sync's product gate never ships an imageless PRODUCT (a product lists only once its
-{Key}.png is on S3), so a partial run just leaves those products held; the variant RECORDS stay in Medusa.
+A variant with no product, or one whose {Key}.png is already on S3, is never generated, so a re-run never
+regenerates (or re-charges) an image that exists: the S3 object is its own marker. Generating needs the stack
+(fal_client + torch + FAL_KEY); without it the run reports what is missing and spends nothing. The sync's product
+gate never ships an imageless PRODUCT (a product lists only once its {Key}.png is on S3), so a partial run just
+leaves those products held; the variant RECORDS stay in Medusa.
 """
 
 from __future__ import annotations
@@ -22,8 +18,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
+import sys
+import uuid
 from pathlib import Path
 
+from stone_pipeline import refresh_images
 from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.stages import image_prompts
@@ -51,6 +51,11 @@ TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its e
 # queue a running or just-published job still needs.
 TEXTURE_QUEUE_TTL_SECONDS = 86400   # 1 day
 GEN_DEPS = ("fal_client", "torch")                 # the generator stack the actual run needs to import
+# Per-image-script wall-clock ceiling. Generation (FLUX over the whole queue) legitimately runs minutes; this is a
+# backstop far above normal so a wedged stage (a hung model load or network call) fails and flags its variants
+# HELD instead of pinning the whole Batch task.
+IMAGE_SCRIPT_TIMEOUT_S = 3600
+GENERATOR_SCRIPTS = ("genetate_images.py", "rb_images.py")   # FLUX.2 -> BEN2, run in this order
 
 
 def _s3_client():
@@ -214,6 +219,85 @@ def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]
     return uploaded, missing
 
 
+def queue_new_textures() -> int:
+    """The produce's texture step: build the queue (the new product-backed variants, plus up to images.upgrade_batch
+    older textures re-made, read against the best-model marker), then, with AUTO_TEXTURE on, publish it to a UNIQUE
+    key and dispatch ONE GPU texture job bound to exactly that key (a concurrent produce can never clobber a queue a
+    starting job is about to pull). The produce never generates: the job does (run). Their products stay HELD until
+    {Key}.png exists, so every way the job cannot be dispatched is loud. Returns the number of queued textures."""
+    # The upgrade drip: once-only via the durable best-model marker, capped so a produce's FAL spend stays
+    # predictable. A legacy texture is never held back, just replaced within a few produces. cap 0 == mints only.
+    cap = SETTINGS.images.upgrade_batch
+    refreshed = refresh_images.load_refreshed() if cap > 0 else set()
+    try:
+        prompts_path = image_prompts.build_with_upgrades(refreshed, cap) if cap > 0 else image_prompts.build()
+    except Exception:
+        log.exception("image prompt queue build failed")
+        return 0
+    items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
+    items = items if isinstance(items, list) else items.get("items", [])
+    if not items:
+        return 0
+    # The produce's own FAL_KEY and torch do not matter here: the GPU job carries its own (_generator_blockers).
+    # Loud when nothing will generate them: at cold-start scale an unserved product lane must not read as clean.
+    if SETTINGS.auto_texture.enabled:
+        _dispatch(len(items))
+    else:
+        log.warning("%d new variant texture(s) queued but AUTO_TEXTURE is off, so no GPU job generates them; "
+                    "their products stay HELD until `python -m stone_pipeline.prepare_variant_images` runs",
+                    len(items), extra={"extra_fields": {"queued": len(items)}})
+    return len(items)
+
+
+def _dispatch(queued: int) -> None:
+    """Publish this produce's queue to a unique key and submit the GPU texture job against it; only after a
+    successful publish (a no-op publish, S3 dry-run or unreachable, would leave the job a stale or absent queue).
+    Never fails the produce: the textures stay queued for the next run, and the failure is loud."""
+    from deploy.texture_trigger import submit_texture_job
+    dispatched = False
+    try:
+        queue_key = f"{TEXTURE_QUEUE_PREFIX}{uuid.uuid4().hex}.json"
+        if publish_prompts(PROMPTS_LOCAL, key=queue_key):
+            dispatched = bool(submit_texture_job(queued, queue_key=queue_key))
+            if dispatched:
+                log.info("%d new variant texture(s) queued for the GPU texture job; their products stay HELD "
+                         "until it lands", queued, extra={"extra_fields": {"queued": queued, "queue_key": queue_key}})
+        else:
+            log.error("texture queue publish no-op'd (S3 dry-run/unreachable); NOT dispatching a GPU job "
+                      "against a stale queue", extra={"extra_fields": {"queued": queued}})
+    except Exception:
+        log.exception("auto-texture trigger failed (non-fatal; textures stay queued for the next run)")
+    if not dispatched:
+        log.error("%d new variant texture(s) queued but NO GPU job was dispatched; their products stay "
+                  "HELD until a successful produce publishes + dispatches (check S3 write / "
+                  "GPU queue+jobdef config)", queued, extra={"extra_fields": {"queued": queued}})
+
+
+def _generate_queued_images() -> list[str]:
+    """Run the image_pipeline chain (FLUX.2 -> BEN2) on the queued prompts, in this process's interpreter: the
+    committed scripts stay the one generator. Returns the scripts that exited non-zero or timed out (empty: all
+    succeeded)."""
+    ip = SETTINGS.paths.workspace_root / "image_pipeline"
+    failed: list[str] = []
+    for script in GENERATOR_SCRIPTS:
+        if (ip / script).exists():
+            # sys.executable so the venv interpreter is used; -u so each image's progress streams to CloudWatch
+            # live (a block-buffered BEN2 stage looks like a silent hang); the timeout so a wedged stage can never
+            # pin the Batch task forever (a timeout is a failed script)
+            try:
+                rc = subprocess.run([sys.executable, "-u", script], cwd=ip, check=False,
+                                    timeout=IMAGE_SCRIPT_TIMEOUT_S).returncode
+            except subprocess.TimeoutExpired:
+                log.error("image-pipeline script timed out",
+                          extra={"extra_fields": {"script": script, "timeout_s": IMAGE_SCRIPT_TIMEOUT_S}})
+                failed.append(script)
+                continue
+            if rc != 0:
+                log.error("image-pipeline script failed", extra={"extra_fields": {"script": script, "returncode": rc}})
+                failed.append(script)
+    return failed
+
+
 def run() -> int:
     """Resolve the queue (produce's published one on S3, else build locally), generate + de-background,
     upload each {Key}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued or
@@ -243,15 +327,13 @@ def run() -> int:
               f"(missing {blockers}). Run where the stack is present; nothing was spent.")
         return 0
 
-    from stone_pipeline.catalog import _generate_queued_images
     failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}.png
     uploaded, missing = upload_variant_images(targets)
     if not failed and not missing:
         # A mint is generated by the CURRENT best model, so record it as such. Without this the upgrade
         # drip would later treat every freshly minted texture as legacy and regenerate it once, paying
         # twice for an image that was already best. Only on a clean run: a partial one stays eligible.
-        from stone_pipeline.refresh_images import mark_best_model
-        mark_best_model(targets)
+        refresh_images.mark_best_model(targets)
     if failed or missing:
         # loud: some images did not generate/upload, so their products stay HELD until a clean re-run.
         # Safe (the sync product gate never lists an imageless product) but surfaced, never silent. Include where we

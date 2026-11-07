@@ -161,8 +161,8 @@ def upgrade_candidates(refreshed: set[str], cap: int) -> list[str]:
 def build_with_upgrades(refreshed: set[str], cap: int, out_path: Path | None = None) -> Path:
     """The produce's queue: new-mint prompts (build()) PLUS up to `cap` legacy-texture upgrades. Upgrade
     items carry mode=UPGRADE_MODE so the already-on-S3 prune keeps them (their {Key}.png exists by
-    definition, which is exactly what the mint-idempotency prune drops). One queue, so every downstream
-    branch (inline generate, GPU dispatch, queue-only) handles both kinds unchanged."""
+    definition, which is exactly what the mint-idempotency prune drops). One queue, so the texture job
+    handles both kinds unchanged."""
     build(out_path=out_path)
     path = Path(out_path or SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json")
     items = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
