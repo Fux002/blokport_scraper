@@ -13,7 +13,6 @@ Hard rejects never reach the import CSV regardless of the switch.
 
 from __future__ import annotations
 
-import csv
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -206,14 +205,10 @@ def _archived_variation_keys() -> set[str]:
     export = SETTINGS.paths.export_file
     if not export.exists():
         return set()
-    # cheap header-only gate: in the expand phase the export has no `status` column, so skip the full read
-    # entirely (zero cost per produce until Blokport publishes the column).
-    with export.open(encoding="utf-8-sig", newline="") as handle:
-        header = [c.strip() for c in next(csv.reader(handle), [])]
-    if "status" not in header:
-        return set()
     from stone_pipeline.reference.loaders import variants_status_required
     from stone_pipeline.reference.medusa_files import read_variants_export
+    # the one reader already reads an absent status column as active and respects the step-C flag, so no
+    # column means an empty set (dormant) without a separate gate.
     return {v.key for v in read_variants_export(export, require_status=variants_status_required(export))
             if v.archived and v.key}
 

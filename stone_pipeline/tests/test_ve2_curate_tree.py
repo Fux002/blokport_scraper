@@ -118,7 +118,47 @@ def test_a_frozen_variety_is_counted_frozen_not_uncovered(tmp_path):
     assert not any(u["Key"] == "slab_marble_carrara_1" for u in uncovered)
 
 
+def test_a_variety_left_with_no_combination_after_the_filter_is_uncovered(tmp_path):
+    # 6b: covered is counted AFTER the restricted filter -- a variety whose only colour is restricted, with no
+    # emitted/acked product keeping a tuple, ends uncovered (not covered).
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    attrs = _attrs_status(tmp_path, archived=[("color", "White")])
+    combos, stats, unc = tree_build.build_combinations(exp, attrs, [bb], None)   # no product to keep a tuple
+    assert not _for(combos, "v1")                            # every combo dropped as restricted
+    assert any(u["Id"] == "v1" for u in unc) and stats["covered"] == 0
+
+
+def test_an_acked_product_absent_from_this_runs_emit_keeps_its_restricted_tuple(tmp_path, monkeypatch):
+    # fix 3: the keep-set is emitted UNION ledger-acked tuples. A product live in Medusa on a restricted value
+    # whose source emitted NOTHING this run still keeps its combination (Blokport replaces the whole set).
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    key = "slab_marble_carrara_1"
+    lpath = tmp_path / "dev.ledger"
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
+    with Ledger.open(lpath, env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        now = now_iso()
+        lg.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "Carrara",
+                                "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
+                                "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+                                "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
+                                "created_at": now, "updated_at": now}, pk=("key",))
+        lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1", "color": "White",
+                              "finish": "Polished", "quality": "A", "type": "Marble", "category": "Slabs",
+                              "variation_key": key, "medusa_id": "M1", "state": "synced",
+                              "created_at": now, "updated_at": now}, pk=("sku",))
+    bb = _backbone(tmp_path, [_post(key, "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", key, "Carrara")])
+    attrs = _attrs_status(tmp_path, archived=[("color", "White")])
+    combos, _, _ = tree_build.build_combinations(exp, attrs, [bb], None)   # NO products emitted this run
+    assert ("cat_slab", "t_marble", "v1", "f_pol", "c_white", "q_a") in combos   # kept via the acked tuple
+
+
 # --- curate items 2, 3, 4 ---------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -135,60 +175,19 @@ def ref():
     return loaders.load_all()
 
 
-def test_curate_index_carries_the_archived_flag(tmp_path, monkeypatch):
-    # item 2: an archived variety STAYS in the curate index (so a scrape still recognizes it, no re-mint); the
-    # index entry carries the export's archived flag. Dormant: False when the export has no status column.
-    from stone_pipeline.stages.curate import existing as cur_existing
-    p = tmp_path / "export.csv"
-    with p.open("w", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)", "status"])
-        w.writerow(["v1", "slab_marble_frozen_1", "Frozen", "", "", "", "archived"])
-        w.writerow(["v2", "slab_marble_live_1", "Live", "", "", "", "active"])
-    monkeypatch.setattr(cur_existing, "existing_varieties_file", lambda: p)
-    imports = cur_existing.load_all_existing()
-    by_name = imports["slab"].by_name
-    assert by_name[proj.norm("Frozen")]["archived"] is True    # stays indexed, flagged
-    assert by_name[proj.norm("Live")]["archived"] is False
+def _mk_row(name, color, sk="s1"):
+    r = _scrape(name, raw_type="Granite", sk=sk)
+    r.color_name = color
+    return r
 
 
-def test_aliasing_skips_an_archived_variety():
-    # item 4: no alias row is written onto an archived variety; an active one still gets its alias.
-    from types import SimpleNamespace
-
-    from stone_pipeline.stages.curate.aliasing import emit_alias_rows
-    from stone_pipeline.stages.curate.context import CurationResult
-    from stone_pipeline.stages.curate.keys import active_branches
-    branches = active_branches()
-    b = branches[0]
-    arch = {"Key": f"{b}_marble_frozen_1", "Name": "Frozen", "Image": "", "Aliases": "", "Volume": "",
-            "type": proj.norm("marble"), "archived": True}
-    live = {"Key": f"{b}_marble_live_1", "Name": "Live", "Image": "", "Aliases": "", "Volume": "",
-            "type": proj.norm("marble"), "archived": False}
-
-    def _imp(branch):
-        bynt, byn = {}, {}
-        if branch == b:
-            for v in (arch, live):
-                bynt[(proj.norm(v["Name"]), proj.norm("marble"))] = v
-                byn[proj.norm(v["Name"])] = v
-        return SimpleNamespace(by_name_type=bynt, by_name=byn)
-
-    c = SimpleNamespace(
-        imports={br: _imp(br) for br in branches},
-        alias_new={(proj.norm("Frozen"), proj.norm("marble")): {"Froze"},
-                   (proj.norm("Live"), proj.norm("marble")): {"Liv"}},
-        review_candidates={})
-    result = CurationResult()
-    result.alias_additions = {br: [] for br in branches}
-    emit_alias_rows(c, result)
-    keys = {row["Key"] for rows in result.alias_additions.values() for row in rows}
-    assert live["Key"] in keys           # the active variety gets its alias
-    assert arch["Key"] not in keys       # the archived variety is skipped
+def _posts(res, slug):
+    return [p for b in ("slab", "block", "tile") for p in res.backbone_new[b] if slug in p["key"]]
 
 
 def test_mint_with_a_restricted_type_holds(ref, monkeypatch):
-    # item 3: a mint whose stone type is restricted HOLDS via the existing pending_confirm path, not minted.
+    # item 3 / fix 1: a genuinely NEW variety whose stone type is restricted HOLDS via the existing
+    # pending_confirm path, not minted.
     views.mint("Novum Frozen Stone", stone_type="Granite")   # operator confirms the mint
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"type": {proj.norm("Granite")}})
     res = curate.build_curation([_scrape("Novum Frozen Stone", raw_type="Granite")], ref)
@@ -196,20 +195,53 @@ def test_mint_with_a_restricted_type_holds(ref, monkeypatch):
     assert not _minted_keys(res, "novum_frozen_stone")       # NOT minted under the archived type
 
 
-def test_mint_drops_a_restricted_colour(ref, monkeypatch):
-    views.mint("Novum Pink Stone", stone_type="Granite")
+def test_an_existing_variety_of_a_restricted_type_gives_no_card_or_mint(ref, monkeypatch):
+    # fix 1 (protected): the restricted-type hold must NOT fire for a variety that already exists (it re-enters
+    # emit_new_variants every produce); a card there would flood the queue and following it would mint a
+    # duplicate under a wrong type. Use a real existing variety + its own type, so would_mint is False.
+    from stone_pipeline.stages.curate import existing as cur_existing
+    v = next(iter(cur_existing.load_all_existing()["slab"].varieties))
+    name, ntype = v["Name"], v["type"]                       # ntype is the normalized type slug
+    monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"type": {ntype}})
+    views.mint(name, stone_type=ntype.title())               # a stored mint decision for an EXISTING variety
+    res = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
+    assert not any(p.get("kind") == "archived_type" and p.get("variant") == name
+                   for p in res.pending_confirm)             # no card for the existing variety
+    assert not _minted_keys(res, proj.norm(name).replace(" ", "_"))   # no duplicate mint
 
-    def _mk(color):
-        r = _scrape("Novum Pink Stone", raw_type="Granite")
-        r.color_name = color
-        return r
 
-    def _posts(res):
-        return [p for b in ("slab", "block", "tile")
-                for p in res.backbone_new[b] if "novum_pink_stone" in p["key"]]
-
-    base = _posts(curate.build_curation([_mk("Pink")], ref))
-    assert base and any("Pink" in p["color"] for p in base)   # confirms the observed colour flows into the mint
+def test_mint_with_only_a_restricted_colour_holds(ref, monkeypatch):
+    # fix 2: dropping the ONLY colour (restricted) must HOLD, never fall back to a default (no guessing).
+    views.mint("Novum Only Pink", stone_type="Granite")
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"color": {proj.norm("Pink")}})
-    dropped = _posts(curate.build_curation([_mk("Pink")], ref))
-    assert dropped and all("Pink" not in p["color"] for p in dropped)   # restricted colour dropped from the mint
+    res = curate.build_curation([_mk_row("Novum Only Pink", "Pink")], ref)
+    assert _is_held(res, "Novum Only Pink")
+    assert not _minted_keys(res, "novum_only_pink")
+
+
+def test_mint_drops_a_restricted_colour_but_keeps_the_rest(ref, monkeypatch):
+    # fix 2: a non-empty remainder after the drop mints with what remains (no default, no hold).
+    views.mint("Novum Two Colour", stone_type="Granite")
+    rows = [_mk_row("Novum Two Colour", "Pink", sk="a"), _mk_row("Novum Two Colour", "Grey", sk="b")]
+    base = _posts(curate.build_curation(rows, ref), "novum_two_colour")
+    assert base and any("Pink" in p["color"] and "Grey" in p["color"] for p in base)   # both colours flow
+    monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"color": {proj.norm("Pink")}})
+    posts = _posts(curate.build_curation(rows, ref), "novum_two_colour")
+    assert posts and all("Pink" not in p["color"] and "Grey" in p["color"] for p in posts)
+
+
+def test_decision_audit_skips_the_mint_gap_when_a_hold_card_exists():
+    # fix 6c: a mint held this produce (its spelling carried by a pending card) must NOT also raise a
+    # "Mint not applied" decision_gap -- one hold, one review entry. A held-with-no-card mint still gaps.
+    from stone_pipeline.stages import decision_audit
+    decisions = SimpleNamespace(
+        statements={("", "novum frozen stone"): SimpleNamespace(
+            is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone", stone_type="Granite",
+            source="varsha", origin_iso="")},
+        bindings={}, vendor_origins={})
+    carded = decision_audit.audit([], existing=set(), created=set(), decisions=decisions,
+                                  pending_spellings={"novum frozen stone"})
+    assert not any(g["decision"] == "mint" for g in carded)      # a card exists -> no duplicate gap
+    uncarded = decision_audit.audit([], existing=set(), created=set(), decisions=decisions,
+                                    pending_spellings=set())
+    assert any(g["decision"] == "mint" for g in uncarded)        # no card -> the gap still fires

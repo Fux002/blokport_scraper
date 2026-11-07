@@ -44,10 +44,6 @@ def load_all_existing() -> dict[str, ImportFile]:
                 "Aliases": "|".join(r.aliases),
                 "Volume": r.volume,
                 "type": proj.norm(type_slug_from_key(r.key)),   # the variety's stone type, from its Key
-                # VE2 PR5: carry the export's archived flag. An archived variety STAYS in the index (so a scrape
-                # still RECOGNIZES it, no re-mint), but no new learned alias is emitted onto it (aliasing). False
-                # in the expand phase (no status column), so the index is byte-identical until then.
-                "archived": r.archived,
             }
             imp.varieties.append(v)
             imp.by_name_type[(proj.norm(r.name), v["type"])] = v

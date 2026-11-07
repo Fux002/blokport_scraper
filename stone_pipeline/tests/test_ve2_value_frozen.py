@@ -325,3 +325,11 @@ def test_an_existing_product_moving_onto_an_archived_variety_is_held():
                           acked={"ZUCCHI-1": {("variation_key", norm("slab_marble_other_2"))}},
                           source_code="zucchi")
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
+
+
+def test_a_variation_key_hold_is_visible_in_held_breakdown():
+    # fix 4: a scrape bound to an archived variety (its alias is emitted as normal, no dead-end gap) ends HELD
+    # by the value_frozen variation_key freeze, and that hold is visible in held_breakdown for the operator.
+    row = _vrow()
+    validate.validate_row(row, frozen={"variation_key": {norm(_ARCH_KEY)}}, acked={}, source_code="zucchi")
+    assert any(e["rule"] == "value_frozen" for e in validate.held_breakdown([row]))

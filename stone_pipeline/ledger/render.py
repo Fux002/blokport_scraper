@@ -134,12 +134,26 @@ def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
 # unchanged. Identical id maps in -> identical sorted combination set out.
 
 def _dump_attributes(ledger: Ledger, path: Path) -> None:
-    """Ledger attribute table -> attributes.csv shape (category, value, sourceid)."""
+    """Ledger attribute table -> attributes.csv shape, WITH status/internal (VE2). The ledger does not store
+    those (the files are the single authority, PR3/PR4 ruling), so they are sourced from the real
+    attributes.csv per (category, value); a value absent there defaults to active/not-internal. Carrying them
+    is what makes build_combinations filter the RENDER'S combinations exactly as the real build does, so
+    ledger.verify still matches once a value is archived. Dormant: with no status columns every value reads
+    active/false, so the combination set is byte-identical to today."""
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.reference.loaders.common import norm
+    from stone_pipeline.reference.medusa_files import read_attributes
+    src = SETTINGS.paths.attributes_csv
+    status_of: dict[tuple[str, str], tuple[str, str]] = {}
+    if src.exists():
+        for a in read_attributes(src, require_status=False):
+            status_of[(a.category, norm(a.value))] = (a.status, "true" if a.internal else "false")
     with Path(path).open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
+        w.writerow(["category", "value", "sourceid", "status", "internal"])
         for r in ledger.execute("SELECT category, value, medusa_id FROM attribute"):
-            w.writerow([r["category"], r["value"], r["medusa_id"] or ""])
+            status, internal = status_of.get((r["category"], norm(r["value"])), ("active", "false"))
+            w.writerow([r["category"], r["value"], r["medusa_id"] or "", status, internal])
 
 
 def _dump_variations_export(ledger: Ledger, path: Path) -> None:

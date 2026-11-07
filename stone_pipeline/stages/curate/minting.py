@@ -105,10 +105,14 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
                 evidence, color=title_case(obs_color or ""),
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
-        # VE2 PR5: a restricted stone type holds through the SAME one review path (pending_confirm). The Key is
-        # the variety's frozen identity, so it must not be minted under an archived/internal type; the operator
-        # assigns an active type or reactivates it. Dormant while nothing is restricted.
-        if proj.norm(stone_type) in restricted.get("type", set()):
+        # VE2 PR5: the restriction holds below apply ONLY to a variety that would ACTUALLY mint (at least one
+        # branch is new). An EXISTING variety re-enters emit_new_variants every produce (alias_and_backfill, a
+        # stored mint decision); holding or re-typing it would flood the queue and, by following the card, mint
+        # a DUPLICATE under a wrong type. So decide first whether any branch would mint.
+        would_mint = any(core(gen_key(b, stone_type, title), b) not in union_cores for b in active_branches())
+        # a restricted stone type holds through the SAME one review path (pending_confirm). The Key is the
+        # variety's frozen identity, so a NEW variety must not be minted under an archived/internal type.
+        if would_mint and proj.norm(stone_type) in restricted.get("type", set()):
             c.pending_confirm.append(review_card("archived_type", title,
                 "This variety's stone type is archived or internal in Medusa, so it cannot be minted under it. "
                 "Assign an active type in Review, or reactivate the type in Blokport.",
@@ -136,14 +140,24 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         finishes = list(dict.fromkeys([*sorted(u["finishes"]),
                                        *([obs_finish] if obs_finish else []), *pack.default_finishes]))
         # VE2 PR5: drop restricted colours/qualities from the mint (the classify palette's restricted colours
-        # land here too, via the observed set). Keep falsy entries untouched so the dormant output is identical;
-        # if a drop empties the list, fall back to the pack default (PR4 guarantees it is assignable).
-        colors = [x for x in colors if not x or proj.norm(x) not in restricted.get("color", set())]
-        if not colors:
-            colors = [pack.fallback_color]
-        qualities = [x for x in qualities if not x or proj.norm(x) not in restricted.get("quality", set())]
-        if not qualities:
-            qualities = [pack.last_resort_quality]
+        # land here too, via the observed set). Dropping must NEVER fall back to a pack default -- that would
+        # GUESS a value into output and override an operator statement (binding invariant). If a drop empties a
+        # required dimension, HOLD on the same review path, naming the restricted value, for the operator to
+        # pick an active one; a non-empty remainder mints as-is. Dormant: nothing restricted -> nothing dropped.
+        rc, rq = restricted.get("color", set()), restricted.get("quality", set())
+        dropped_colors = [x for x in colors if x and proj.norm(x) in rc]
+        dropped_quals = [x for x in qualities if x and proj.norm(x) in rq]
+        colors = [x for x in colors if not (x and proj.norm(x) in rc)]
+        qualities = [x for x in qualities if not (x and proj.norm(x) in rq)]
+        if would_mint and ((dropped_colors and not colors) or (dropped_quals and not qualities)):
+            named = ", ".join([*(f"colour {v}" for v in dropped_colors if not colors),
+                               *(f"quality {v}" for v in dropped_quals if not qualities)])
+            c.pending_confirm.append(review_card("archived_value", title,
+                f"The only {named} this variety would mint with is archived or internal in Medusa. Pick an "
+                "active value in Review, or reactivate it in Blokport.",
+                evidence, stone_type=stone_type, color=title_case(obs_color or ""),
+                nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
+            continue
         # A cross-branch sibling's variety already exists in another branch carrying the scraped spelling as
         # an alias (alias_new): carry that SAME alias onto the new sibling so its product resolves in ONE
         # upload. Match the FULL (name, type) owner: a same-name variety of another type must not inherit it.

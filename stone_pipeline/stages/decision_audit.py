@@ -51,7 +51,11 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
         if st.is_mint:
             name = st.name or st.display or spelling
             target = (_norm(name), _norm(st.stone_type))
-            if target not in existing and target not in created:
+            # A mint held THIS produce (VE2: a restricted type or an empty-after-drop colour/quality) already
+            # surfaces its own card, so its spelling is in pending_spellings -- do NOT also raise a "not
+            # applied" gap, or one hold shows as two review entries. The gap still fires for a mint that is
+            # silently ignored with NO card (the failure this audit guards).
+            if target not in existing and target not in created and spelling not in pending_spellings:
                 gaps.append(_gap("mint", st.source, spelling, name, st.stone_type or "", st.origin_iso or "",
                                  f"Mint not applied: no variety '{name}' ({st.stone_type}) exists after this produce."))
         elif spelling in pending_spellings:
