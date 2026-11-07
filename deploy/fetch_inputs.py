@@ -11,7 +11,9 @@ variant as new. Auth is the task's IAM role.
 from __future__ import annotations
 
 import csv
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import boto3
@@ -114,6 +116,15 @@ def _baseline(dest: Path, name: str) -> tuple[int, str]:
     return 0, name
 
 
+def _incoming(target: Path) -> Path:
+    """A new, empty temp file beside `target` (the same folder, so replacing it is atomic) for one download: its own
+    name per call, so two fetches at once (every hidden-listings page GET fetches attributes.csv, and a produce may run
+    beside it) never take each other's file away."""
+    handle, name = tempfile.mkstemp(dir=target.parent, prefix=f"{target.name}.", suffix=".incoming")
+    os.close(handle)
+    return Path(name)
+
+
 def fetch_attributes(client=None, target=None) -> bool:
     """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, honoring the same
     thin-copy floor as the full fetch. The config server calls this on BOOT so the review-decision endpoint
@@ -127,10 +138,10 @@ def fetch_attributes(client=None, target=None) -> bool:
     to the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
-    tmp = target.with_suffix(target.suffix + ".incoming")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _incoming(target)
     try:
         client = client or boto3.client("s3", region_name=S3_REGION)
-        target.parent.mkdir(parents=True, exist_ok=True)
         client.download_file(S3_BUCKET, key, str(tmp))
         # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
         if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
@@ -140,14 +151,13 @@ def fetch_attributes(client=None, target=None) -> bool:
         except ValueError as exc:
             log.error(f"kept the local attributes.csv: the S3 copy is malformed ({exc})")
             return False
-        tmp.replace(target)
+        os.replace(tmp, target)
         return True
     except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
         log.error(f"could not fetch s3://{S3_BUCKET}/{key}; keeping the committed attributes.csv: {exc}")
         return False
     finally:
-        if tmp.exists():
-            tmp.unlink()
+        tmp.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -171,7 +181,7 @@ def main() -> int:
             target.parent.mkdir(parents=True, exist_ok=True)
             # one flow for every file: download beside the target, then the thin-copy guard, then the reader check, and
             # only then replace, so a refused or malformed copy never touches the local file
-            tmp = target.with_suffix(target.suffix + ".incoming")
+            tmp = _incoming(target)
             try:
                 client.download_file(S3_BUCKET, key, str(tmp))
                 # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
@@ -182,7 +192,7 @@ def main() -> int:
                         _refuse_thin(name, incoming, current, basis)
                         continue
                 check_readable(name, tmp)       # malformed: raise, the produce stops loud with the local file kept
-                tmp.replace(target)
+                os.replace(tmp, target)
             finally:
                 tmp.unlink(missing_ok=True)
             if dropped:

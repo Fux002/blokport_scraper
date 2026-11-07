@@ -55,12 +55,45 @@ def _committed(tmp_path, lines: int):
     return target
 
 
+def _leftovers(folder):
+    return sorted(p.name for p in folder.iterdir() if p.name.endswith(".incoming"))
+
+
+def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(tmp_path):
+    # review of #556: every page GET fetches attributes.csv; two at once shared one .incoming path, so the second
+    # replace found the first one's file gone (FileNotFoundError, a 500)
+    import threading
+    target = _committed(tmp_path, 26)
+    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    both = threading.Barrier(2)
+
+    class _Together(_FakeS3):
+        def download_file(self, bucket, key, filename):
+            super().download_file(bucket, key, filename)
+            both.wait(timeout=5)                                  # both downloaded before either replaces
+
+    out, errors = [], []
+
+    def fetch():
+        try:
+            out.append(fetch_inputs.fetch_attributes(client=_Together(live), target=target))
+        except Exception as exc:                                 # what the request saw
+            errors.append(exc)
+    threads = [threading.Thread(target=fetch) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and out == [True, True] and target.read_text().count("color,") == 38
+    assert _leftovers(tmp_path) == []
+
+
 def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
     target = _committed(tmp_path, 26)
     live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
     assert fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target) is True
     assert target.read_text().count("color,") == 38          # replaced with the live vocab
-    assert not target.with_suffix(".csv.incoming").exists()   # temp cleaned up
+    assert _leftovers(tmp_path) == []                         # temp cleaned up
 
 
 def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
@@ -68,7 +101,7 @@ def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
     thin = "category,value,sourceid\ncolor,c0,id0\n"          # 2 lines << 50% of 101 -> floor keeps committed
     assert fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target) is False
     assert target.read_text().count("color,") == 100          # committed seed preserved
-    assert not target.with_suffix(".csv.incoming").exists()
+    assert _leftovers(tmp_path) == []
 
 
 @pytest.mark.parametrize("error", [_NO_SUCH_KEY, NoCredentialsError(), EndpointConnectionError(endpoint_url="x"),
@@ -80,7 +113,7 @@ def test_fetch_attributes_keeps_the_committed_vocab_on_an_s3_error_and_says_so(t
     before = target.read_text()
     assert fetch_inputs.fetch_attributes(client=_FakeS3(error=error), target=target) is False   # kept
     assert target.read_text() == before
-    assert not target.with_suffix(".csv.incoming").exists()
+    assert _leftovers(tmp_path) == []
     assert len(errors) == 1 and "attributes.csv" in errors[0]                  # loud, not silent
 
 
@@ -89,7 +122,7 @@ def test_fetch_attributes_raises_an_unexpected_error(tmp_path):
     target = _committed(tmp_path, 26)
     with pytest.raises(RuntimeError, match="boom"):
         fetch_inputs.fetch_attributes(client=_FakeS3(error=RuntimeError("boom")), target=target)
-    assert not target.with_suffix(".csv.incoming").exists()
+    assert _leftovers(tmp_path) == []
 
 
 def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
@@ -197,7 +230,7 @@ def test_fetch_attributes_keeps_the_local_file_when_s3_is_malformed(tmp_path, ca
         caplog.clear()
         assert fetch_inputs.fetch_attributes(client=_FakeS3(body), target=target) is False, problem
         assert target.read_text() == before, problem
-        assert not target.with_suffix(".csv.incoming").exists()
+        assert _leftovers(tmp_path) == []
         errors = [r for r in caplog.records if r.levelname == "ERROR"]
         assert errors and "attributes.csv" in errors[0].getMessage(), problem
 
