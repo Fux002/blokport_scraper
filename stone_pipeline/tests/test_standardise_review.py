@@ -1,8 +1,8 @@
-"""The hidden-listings page's side of the photo process (deploy.standardise_review, served by the config API under
+"""The hidden-listings page's side of the photo process (stone_pipeline.photos.review, served by the config API under
 /config/v1/photos): the ledger's hidden listings joined with the review list, the owner's removals, the choice records
 and the live clicks, each row with its actions and its photos' images as presigned URLs made afresh on every request
 (never stored); the month's spend and paid uses; the owner's click and its withdrawal, through the one decisions writer
-(deploy.standardise_decisions.decide), refused while a photos run holds the lock. S3 and the ledger are stand-ins."""
+(stone_pipeline.photos.decisions.decide), refused while a photos run holds the lock. S3 and the ledger are stand-ins."""
 from __future__ import annotations
 
 import io
@@ -12,9 +12,9 @@ from contextlib import contextmanager
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import standardise_decisions as dec
-from deploy import standardise_publish as pub
-from deploy import standardise_review as rv
+from stone_pipeline.photos import decisions as dec
+from stone_pipeline.photos import publish as pub
+from stone_pipeline.photos import review as rv
 from stone_pipeline.config import server
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, STANDARDISE as C
 from stone_pipeline.io import imagestore

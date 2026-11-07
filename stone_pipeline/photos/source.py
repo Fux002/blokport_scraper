@@ -58,9 +58,9 @@ LOGO_STEP = "logo-step/"
 
 
 def logo_step_key(out, sha):
-    """The marker of a result the retired logo step made (deploy.mark_logo_step_results, once at that release's deploy):
+    """The marker of a result the retired logo step made (stone_pipeline.photos.mark_logo_step, once at that release's deploy):
     a re-run would start from the photo with its logo and add views no judge saw, so such a result is never completed
-    (outdated) and its close-up never made again (deploy.standardise_close), whatever the close-up rule. Per photo:
+    (outdated) and its close-up never made again (stone_pipeline.photos.close), whatever the close-up rule. Per photo:
     data, never a source setting."""
     return f"{out}{LOGO_STEP}{sha}.json"
 
@@ -104,7 +104,7 @@ def candidate_key(out, sha):
 
 
 def pending(client, out, sha):
-    """A complete candidate of this photo waits for the judge (deploy.standardise_select.settle)."""
+    """A complete candidate of this photo waits for the judge (stone_pipeline.photos.select.settle)."""
     return _exists(client, candidate_key(out, sha))
 
 
@@ -272,7 +272,7 @@ def rework(client, out, sha, res, how):
       - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): tried;
       - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): a candidate
         (draw_candidate), never over the result: the judge scores it as it scores a new result, and it is promoted or
-        discarded (deploy.standardise_select.settle);
+        discarded (stone_pipeline.photos.select.settle);
       - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
         and its slab (the result complete), then the note {"changed": false}. Cut short, the close view comes off again
         while the slab is missing, so half of one is never published."""
@@ -312,7 +312,7 @@ def tried(client, out, sha, how, reason):
 
 
 def photo_source(client, out, key, sha):
-    """The photo a run works from: its cleaned copy when a hosted edit made one (deploy.standardise_select: reflections,
+    """The photo a run works from: its cleaned copy when a hosted edit made one (stone_pipeline.photos.select: reflections,
     marks and logos off), else the scraped photo. A cleaned copy goes through every step a scraped photo does (the hosted
     edit leaves the straps, which the retouch takes off)."""
     cleaned = f"{out}cleaned/{sha}.jpg"

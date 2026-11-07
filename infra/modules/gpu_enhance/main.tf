@@ -296,7 +296,7 @@ resource "aws_batch_job_definition" "this" {
 }
 
 # --- Batch: the photo standardiser's job definition ---------------------------
-# The standardised-photo process (deploy.standardise_run, on the sync service) submits each GPU slice as a retouch job
+# The standardised-photo process (stone_pipeline.photos.process, on the sync service) submits each GPU slice as a retouch job
 # then a standardise job on THIS queue, overriding RUN_MODE, SRC, RUN_TAG, ONLY_KEY and the timeout per submission. Its
 # own image (the Dockerfile's standardise targets), pinned per env by its protected tag standardise-pin-<sha>.
 # No retries: a slice that fails is retried by the next run, which skips every photo already done. No secrets: every

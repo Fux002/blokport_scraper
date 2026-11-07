@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import standardise_publish as pub
-from deploy import standardise_run as proc
+from stone_pipeline.photos import publish as pub
+from stone_pipeline.photos import process as proc
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
 from stone_pipeline.core.schema import CanonicalRow
@@ -644,7 +644,7 @@ def test_only_one_slab_s_stone_is_decoded_at_a_time(categories, monkeypatch):
 
 def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
     import time
-    from deploy import standardise_select as select
+    from stone_pipeline.photos import select as select
     s3 = _S3()
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: ("", {}))
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [])

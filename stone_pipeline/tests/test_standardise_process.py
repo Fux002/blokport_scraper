@@ -15,10 +15,10 @@ import boto3
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import standardise_close as close
-from deploy import standardise_publish as pub
-from deploy import standardise_run as proc
-from deploy import standardise_select as select
+from stone_pipeline.photos import close as close
+from stone_pipeline.photos import publish as pub
+from stone_pipeline.photos import process as proc
+from stone_pipeline.photos import select as select
 from stone_pipeline.config import runner
 from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -882,7 +882,7 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     """One photos run over listing "one" (photos_round's selection, proc.run's steps, then publish), its GPU job stood in:
     each photo it sends is worked on with `redraw` (a photo.Result) through standardise_source.rework, as the job does; the
     judge answers `verdict` ("pass" or "fail"). Unexpected work fails the test. Returns (photos sent, judge calls)."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     sent, asked = [], []
 
     def run_round(batch, client, tag, todo, run_id, deadline, spend, work=None):
@@ -920,7 +920,7 @@ def _published(s3):
 
 @pytest.mark.parametrize("owner", [False, True])
 def test_a_redraw_the_judge_passes_is_promoted_then_published_and_a_second_run_is_a_no_op(monkeypatch, owner):
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(owner)
     before = _published(s3)
     sent, asked = _photos_run(monkeypatch, s3, owned, _redrawn(), "pass")
@@ -940,7 +940,7 @@ def test_a_redraw_the_judge_passes_is_promoted_then_published_and_a_second_run_i
 def test_a_redraw_the_judge_fails_is_discarded_and_everything_live_stays_and_a_second_run_is_a_no_op(monkeypatch, owner):
     """The result, its verdict, the choice and what is published stay exactly as they were; it is never redrawn or
     judged again under this rule."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(owner)
     before = _state(s3)
     sent, asked = _photos_run(monkeypatch, s3, owned, _redrawn(), "fail")
@@ -956,7 +956,7 @@ def test_a_redraw_the_judge_fails_is_discarded_and_everything_live_stays_and_a_s
 def test_a_pending_redraw_of_a_listing_left_as_published_waits_then_settles_once_its_record_is_readable(monkeypatch):
     # review of #525: settle promoted a redraw an earlier run left, changing the published outline of a listing whose
     # choice record cannot be read; it must wait (kept, never discarded) and settle normally once the record reads
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, _ = _older_whole_slab_chosen(owner=False)
     out = src.round_prefix(C.RUN_TAG, "sentas")
     src.rework(s3, out, A, _redrawn(), src.again(s3, out, A))                        # left complete by an earlier run
@@ -1002,7 +1002,7 @@ def test_a_run_cut_short_at_any_write_is_finished_cleanly_by_the_next(monkeypatc
     """Killed at each write in turn (the candidate, its marker, the judge's verdict, the promotion or the discard, the
     note, the removal): what is published never changes before the next run, which ends exactly where an uninterrupted
     run ends, and never pays the judge again for a verdict already stored."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(False)
     seen = _cut_at(s3, 0)                              # counts every write, fails none
     _photos_run(monkeypatch, s3, owned, _redrawn(), verdict)
@@ -1040,7 +1040,7 @@ def _process(monkeypatch, s3, mode, redraw=None, verdict=None):
     """proc.process over listing "one", its GPU job stood in as in _photos_run: mode "photos", "halted" (a photos run
     stopped in its first round: the run lock taken over, so nothing is settled after a GPU round) or "close-only" (every
     close-up made already). Returns the photos sent to the GPU."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     import time
     sent = []
 
@@ -1075,7 +1075,7 @@ def _process(monkeypatch, s3, mode, redraw=None, verdict=None):
 def _promotion_cut_short(monkeypatch):
     """A chosen slab whose redraw passed and whose promotion was killed half way: its slab and its white and studio views
     copied over the result, its main view not, the old close view still there, no note."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(False)
     s3._store(imagestore.conflicts_key("sentas"), b"{}")
     before = _published(s3)
@@ -1100,7 +1100,7 @@ def test_a_promotion_cut_short_is_finished_before_either_kind_of_run_publishes(m
     """Killed half way through its copies: the next run, a photos run stopped in its first round or a close-only run
     (neither settles after a GPU round), finishes the promotion first, with no paid call, so a half-new set is never
     published."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _promotion_cut_short(monkeypatch)
     assert _process(monkeypatch, s3, mode) == []
     assert not src.pending(s3, RUN, A) and _published_whole(s3)
@@ -1110,7 +1110,7 @@ def test_a_promotion_cut_short_is_finished_before_either_kind_of_run_publishes(m
 def test_a_promotion_cut_short_then_a_later_rule_is_finished_under_its_own_rule_then_checked_whole(monkeypatch):
     """The candidate is settled under the rule its marker names: promoted (its stored pass) and noted under that rule,
     then the photo is due under the later rule and checked whole; never old and new views published side by side."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     s3 = _promotion_cut_short(monkeypatch)
     monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
@@ -1124,7 +1124,7 @@ def test_a_promotion_cut_short_then_a_later_rule_is_finished_under_its_own_rule_
 def test_a_candidate_drawn_under_an_older_rule_is_settled_under_it_unjudged_and_its_slab_checked_again(monkeypatch, verdict):
     """A candidate pending when a later rule is deployed: never judged (no verdict of it), so it is discarded and noted
     under the rule it was drawn under; the photo is due under the new rule and is checked whole."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(False)
     assert src.rework(s3, RUN, A, _redrawn(), "recheck") == "redrawn for the judge"     # under outline-v2
     monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
@@ -1143,7 +1143,7 @@ def test_a_candidate_drawn_under_an_older_rule_is_settled_under_it_unjudged_and_
 def test_a_removal_cut_short_after_a_pass_then_a_later_rule_never_stalls_the_runs(monkeypatch):
     """Its note (outline-v2) written, its candidate half removed: under a later rule it is removed, never promoted
     again from files already gone, and the photo is checked under the new rule."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3, owned = _older_whole_slab_chosen(False)
     restore = _killed_at(s3, "delete_object", f"{src.candidate_prefix(RUN)}{A}.white.jpg")
     with pytest.raises(_Killed):
@@ -1159,7 +1159,7 @@ def test_a_removal_cut_short_after_a_pass_then_a_later_rule_never_stalls_the_run
 @pytest.mark.parametrize("bump", [False, True])
 def test_a_recheck_with_no_whole_slab_notes_it_kept_and_never_loops(monkeypatch, bump):
     """Also after a candidate cut short (its leftovers removed), and under a later rule (a new note folder)."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     s3, owned = _older_whole_slab_chosen(False)
     s3._store(f"{src.candidate_prefix(RUN)}{A}.slab.png", b"half")                    # a candidate cut short
@@ -1194,7 +1194,7 @@ def test_a_close_only_run_makes_the_close_ups_again_in_the_same_process_then_pub
 
 def test_a_close_only_run_slices_only_the_photos_whose_close_up_is_not_made_yet(monkeypatch):
     import time
-    from deploy import standardise_close as close
+    from stone_pipeline.photos import close as close
     other = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
     s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": _record("two", B),
               f"{ROOT}chosen/three.json": _record("three", D), f"{ROOT}chosen/four.json": _record("four", D, other),
@@ -1432,7 +1432,7 @@ def test_the_photos_stage_is_one_run_over_the_whole_environment(monkeypatch):
     launched = []
     rec, code = runner.start_run(None, "photos", launch=lambda r: launched.append(r) or r.update(status="succeeded"))
     assert code == 202 and rec["stage"] == "photos" and rec["sources"] == [] and launched
-    assert runner._build_command(launched[0]) == [sys.executable, "-u", "-m", "deploy.standardise_run"]
+    assert runner._build_command(launched[0]) == [sys.executable, "-u", "-m", "stone_pipeline.photos.process"]
     rec, code = runner.start_run(["sentas"], "photos", launch=lambda r: pytest.fail("launched"))
     assert code == 400
 
@@ -1638,9 +1638,9 @@ def test_a_killed_produce_leaves_nothing_of_the_photo_process_to_clear(monkeypat
 def test_clearing_a_killed_photos_run_never_outlasts_the_deadline(monkeypatch):
     import threading
     import time
-    from deploy import standardise_run
+    from stone_pipeline.photos import process
     release, seen = threading.Event(), []
-    monkeypatch.setattr(standardise_run, "reap", lambda run_id: seen.append(run_id) or release.wait(5))
+    monkeypatch.setattr(process, "reap", lambda run_id: seen.append(run_id) or release.wait(5))
     started = time.monotonic()
     runner._reap_photos("R7", started + 0.1, time.monotonic)
     assert time.monotonic() - started < 1 and seen == ["R7"]                # it goes on alone; the launch is not held

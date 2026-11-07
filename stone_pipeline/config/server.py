@@ -878,11 +878,11 @@ def _delete_source(params, body, query):
     return code, result
 
 
-# -- photos: the hidden-listings page (deploy.standardise_review) ------------------------------------------------------
+# -- photos: the hidden-listings page (stone_pipeline.photos.review) ------------------------------------------------------
 # The photo process's stores live in S3 and its decisions are written there inside its run lock, so none of these
 # touches config.db. A store that cannot be read (the ledger, the review list) is a 503 naming it.
 def _photos(call):
-    from deploy import standardise_review as rv
+    from stone_pipeline.photos import review as rv
     try:
         return call(rv)
     except rv.Unavailable as exc:

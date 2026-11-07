@@ -1,4 +1,4 @@
-"""The outline diagnostic (deploy.standardise_diag) on synthetic photos, models stubbed: it records what the real
+"""The outline diagnostic (stone_pipeline.photos.diag) on synthetic photos, models stubbed: it records what the real
 find_slabs saw, puts the real steps back after, and writes only under the diag prefix."""
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import numpy as np
 import boto3
 import pytest
 
-from deploy import standardise_diag as diag
-from deploy import standardise_source as source
+from stone_pipeline.photos import diag as diag
+from stone_pipeline.photos import source as source
 from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, models, outline, photo
 

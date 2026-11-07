@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import standardise_close as close
+from stone_pipeline.photos import close as close
 from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import photo
 
@@ -264,7 +264,7 @@ def test_the_run_makes_each_photos_close_up_from_the_photo_its_run_started_from(
 
 
 def test_a_saved_slab_reads_back_as_it_was_written():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     rgb = np.random.default_rng(1).integers(0, 256, (20, 30, 3), dtype=np.uint8)
     alpha = np.linspace(0, 1, 600, dtype=np.float32).reshape(20, 30)
     got_rgb, got_alpha = src.read_slab(src._slab_png((rgb, alpha)))
@@ -305,7 +305,7 @@ def _jpg(rgb):
 
 
 def test_a_photos_missing_or_broken_input_is_its_own_outcome_and_a_denied_one_is_not():
-    from deploy import standardise_source as runner
+    from stone_pipeline.photos import source as runner
     key = f"dev/products/scraped/sentas/{A}.jpg"
     with pytest.raises(photo.NoCloseUp, match="missing"):
         runner.own_input(_S3(), key)
@@ -322,7 +322,7 @@ def test_a_photos_missing_or_broken_input_is_its_own_outcome_and_a_denied_one_is
 
 
 def test_what_of_the_start_photo_is_not_as_shot():
-    from deploy import standardise_source as runner
+    from stone_pipeline.photos import source as runner
     scraped = np.random.default_rng(3).integers(60, 200, (400, 600, 3), dtype=np.uint8)
     key = f"dev/products/scraped/sentas/{A}.jpg"
     s3 = _S3({key: _jpg(scraped)})
@@ -337,10 +337,10 @@ def test_what_of_the_start_photo_is_not_as_shot():
         runner.start_edits(_S3(), RUN, key, f"{RUN}retouched/{A}.jpg", False, retouched)
 
 
-# --- a result the retired logo step made (deploy.mark_logo_step_results) -----------------------------------------------
+# --- a result the retired logo step made (stone_pipeline.photos.mark_logo_step) -----------------------------------------------
 def test_a_photo_the_retired_logo_step_made_is_never_remade_whatever_the_close_up_rule(monkeypatch):
     # its close-up would be made from the photo with the logo, unjudged: it is never remade and its close.jpg stays
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     marked, plain = _record(A), _record(B)
     s3 = _S3({src.logo_step_key(RUN, A): b"{}", f"{RUN}{A}.close.jpg": b"old close-up"})
     assert close.undone(s3, [marked, plain]) == [plain]

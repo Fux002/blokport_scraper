@@ -189,7 +189,7 @@ def _square_with_corner_mark(monkeypatch, read_as_text):
 
 def test_a_clip_on_a_square_corner_is_drawn_differently_so_its_recheck_redraws_it_for_the_judge(monkeypatch):
     """The stone's hull cuts the corner under the clip diagonally: this version draws it otherwise than the older rule, so
-    a recheck redraws it, and the redraw is published only once the judge passes it (deploy.standardise_source.rework,
+    a recheck redraws it, and the redraw is published only once the judge passes it (stone_pipeline.photos.source.rework,
     test_standardise_process)."""
     found = _square_with_corner_mark(monkeypatch, read_as_text=False)
     assert layout.wall_in_corners(found.cards, found.objects, found.inside, found.stone).sum() > 1000

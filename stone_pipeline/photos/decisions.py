@@ -52,12 +52,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
-from deploy import standardise_run as proc
-from deploy import standardise_select as select
-from deploy.standardise_publish import (NoConflictSet, chosen_prefix, click_record, clicks_prefix, excluded,
+from stone_pipeline.photos import process as proc
+from stone_pipeline.photos import select as select
+from stone_pipeline.photos.publish import (NoConflictSet, chosen_prefix, click_record, clicks_prefix, excluded,
                                        owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
                                        read_records, records_by_sku, write_click)
-from deploy.standardise_source import sheet_and_photos
+from stone_pipeline.photos.source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.io import imagestore
@@ -303,7 +303,7 @@ def _own(ctx, doc):
 
 def refusals(ctx, doc):
     """Why the applier refuses this one decision on its own, [] when it applies it: the hidden-listings page offers an
-    action only when this is empty (deploy.standardise_review), so an offered action is never refused. The rules a
+    action only when this is empty (stone_pipeline.photos.review), so an offered action is never refused. The rules a
     whole file adds (a listing decided twice in it, a conflict photo given to two of its listings) are _check's."""
     return _own(ctx, doc) or list(_one_listing_per_conflict([doc], ctx.listings, ctx.shared, ctx.stores))
 

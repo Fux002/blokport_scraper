@@ -10,9 +10,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from deploy import standardise_batch as gpu
-from deploy import standardise_run as runner
-from deploy import standardise_select as sel_mod
+from stone_pipeline.photos import batch as gpu
+from stone_pipeline.photos import process as runner
+from stone_pipeline.photos import select as sel_mod
 from stone_pipeline.config.settings import STANDARDISE as C
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
@@ -194,7 +194,7 @@ def test_only_the_named_run_s_active_jobs_are_stopped(monkeypatch):
 
 def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_passing_storage_error_stops_the_slice_for_a_retry():
     from botocore.exceptions import ClientError
-    from deploy import standardise_source as source
+    from stone_pipeline.photos import source as source
     slow = ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
     missing = ClientError({"Error": {"Code": "NoSuchKey"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "GetObject")
     assert source.after_failure(ValueError("undecodable image"), 0, False) == "hold"

@@ -1013,7 +1013,7 @@ class STANDARDISE:
                         "on their racks, the walls, windows, ceiling and lights exactly as they are. Do not add anything."),
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
-    # The photo process (deploy.standardise_run, STANDARDISE_PROCESS.md) continues in the run tags the published results
+    # The photo process (stone_pipeline.photos.process, STANDARDISE_PROCESS.md) continues in the run tags the published results
     # came from, so no stored verdict, cleaned copy or choice record is orphaned: the standardiser's run over the scraped
     # photos, and the run over the hosted edit's cleaned copies, which also keeps the choice records and the review list.
     # Fixed here, not per deployment: a mistyped tag would re-pay every photo and unpublish the folder. Moving to new tags
@@ -1043,13 +1043,13 @@ class STANDARDISE:
     LOCK_HEARTBEAT_SECONDS = 300       # the run lock is rewritten this often while the process runs (its sign of life)
     SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>/<run id>.json: each run's spend of the month
     CLEAN_SPEND_DIR = "clean-spend"    # the same per run for the cleaning cap, with every paid call listed ("uses")
-    # The listings the owner removed on the hidden-listings page (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<this>/
+    # The listings the owner removed on the hidden-listings page (stone_pipeline.photos.decisions): <env>/<TEST_PREFIX>/<this>/
     # <SKU>.json each (percent-encoded), per environment and outside the run tags (a removal is about the listing, not a
     # run's results). The process never works on them and the image stage gives them no standardised photo, so they stay
     # hidden with the existing reason 'no_photo' (a new inventory reason needs Blokport's agreement); the record keeps why.
     REMOVED_DIR = "removed"
     REMOVED_REASON = "owner_removed"
-    # The owner's photo choice per listing (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this>/<SKU>.json
+    # The owner's photo choice per listing (stone_pipeline.photos.decisions): <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this>/<SKU>.json
     # (percent-encoded) = {tag, sha, at, listing, decided_on}; it names a result of the process's tags, so it moves with
     # them (a tag migration copies these records with the choice records).
     OWNER_DIR = "owner"
@@ -1057,7 +1057,7 @@ class STANDARDISE:
     # (percent-encoded) = {sku, listing, source, sha, at}. Only the intent: the next photos run cleans it within the cap.
     CLICKS_DIR = "clicks"
     # The review list of the hidden-listings page: <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this> = {SKU: row} of the listings a
-    # full photos run left without a good photo and the tiles publish could not render (deploy.standardise_select.
+    # full photos run left without a good photo and the tiles publish could not render (stone_pipeline.photos.select.
     # review_row); it carries no URL. The config API serves it joined with the ledger (GET /config/v1/photos/hidden),
     # each photo's images as presigned GET URLs made afresh on every request, valid this long (Blokport's page fetches
     # the list again when an image no longer loads).
@@ -1089,7 +1089,7 @@ class STANDARDISE:
     STORE_WORKERS = 32                 # S3 reads, copies and deletes made at once (records, published files, job stops)
     JPEG_QUALITY = 92                  # every JPEG the process writes, and the photo it sends to an edit model
     AWS_MAX_ATTEMPTS = 10              # a throttled AWS call is retried this many times (botocore standard mode), never fatal
-    DIAG_DIR = "diag"                  # the outline diagnostic (deploy.standardise_diag) writes under <env>/<TEST_PREFIX>/<this>/ only
+    DIAG_DIR = "diag"                  # the outline diagnostic (stone_pipeline.photos.diag) writes under <env>/<TEST_PREFIX>/<this>/ only
     DIAG_JOINTS = 6                    # it lists this many of the strongest joints in each half of a profile ...
     DIAG_JOINT_MIN = 2.0               # ... scoring at least this (the trim's own bar is SEAM_MIN_END)
     DIAG_LONG_EDGE = 1600              # px: its overlay's long side
@@ -1110,7 +1110,7 @@ class STANDARDISE:
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
-    # from its photo, a tile product one rendered from its slab stone (deploy.standardise_publish.publish_tiles); a block
+    # from its photo, a tile product one rendered from its slab stone (stone_pipeline.photos.publish.publish_tiles); a block
     # or a close-up gets none.
     # The 3D tile (Blokport's viewer, 2026-11-02): the cut-out's horizontal axis is the listing's stored Length, its aspect
     # Length:Width, at least CUTOUT_LONG_SIDE px on its long side (the viewer zooms 4x): the real face resampled
@@ -1252,7 +1252,7 @@ Your whole answer is one JSON object and nothing else:
     # Off: no photo is cleaned without asking (the automatic marks, CLEAN_AUTO_*); the owner's click still is, within the
     # cleaning cap (owner 2026-11-05). An edit already paid for is always collected and checked.
     CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
-    # The process (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
+    # The process (stone_pipeline.photos.process) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
     # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than
@@ -1263,7 +1263,7 @@ Your whole answer is one JSON object and nothing else:
     RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 30)
     RUN_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128)
     # The idle ceiling is Terraform's gpu_idle_vcpus, the value it also creates the pool with: no default here, so the two
-    # can never disagree. None off AWS; setting the pool's ceiling without it fails loud (deploy.standardise_batch).
+    # can never disagree. None off AWS; setting the pool's ceiling without it fails loud (stone_pipeline.photos.batch).
     IDLE_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_IDLE_GPU_VCPUS", None)
     RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...
     RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
@@ -1457,7 +1457,7 @@ Your whole answer is one JSON object and nothing else:
     CABLE_MAX_SHARE = 0.04             # ... and no larger than this share of the photo (not the block itself)
     CROP_NOTE_MIN = 0.01               # the log says so when the canvas crop cuts more than this share of a block
     # --- scene ---
-    # --- tiles (deploy.standardise_publish.publish_tiles: a tile listing's views and 3D tile, from its slab stone) ---
+    # --- tiles (stone_pipeline.photos.publish.publish_tiles: a tile listing's views and 3D tile, from its slab stone) ---
     # The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone (its 3D
     # cut-out), never from the vendor's tile photos (warehouse racks), never generated; CPU only, no judge per tile.
     TILE_FORMAT = "tile"               # the format whose listings are rendered here, never sent through the photo process

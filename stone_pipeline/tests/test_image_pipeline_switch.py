@@ -15,8 +15,8 @@ import cv2
 import numpy as np
 import pytest
 
-from deploy import standardise_batch as gpu
-from deploy import standardise_run as proc
+from stone_pipeline.photos import batch as gpu
+from stone_pipeline.photos import process as proc
 from stone_pipeline.config import server, store
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS, STANDARDISE as C, ImageProcessingConfig, ImagesConfig
 from stone_pipeline.config.sources import SourceConfig, load_source
@@ -215,7 +215,7 @@ def test_the_photo_process_never_picks_a_listing_of_an_off_source(config_db):
 
 def test_the_close_only_run_never_works_an_off_source(config_db, monkeypatch):
     import time
-    from deploy import standardise_select as select
+    from stone_pipeline.photos import select as select
     records = [{"source": "sentas", "sha": A, "prefix": "p/", "tag": "v2", "key": "s1"},
                {"source": "varsha", "sha": B, "prefix": "p/", "tag": "v2", "key": "v1"}]
     monkeypatch.setattr(proc.close, "chosen", lambda s3, root: records)

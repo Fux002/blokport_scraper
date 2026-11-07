@@ -13,7 +13,7 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
   produce: scrape, build, publish the product sheet
   succeeded and SCRAPER_STANDARDISE_AUTO=true
     -> the runner starts the next run: stage "photos"   (its own run record, same run slot)
-       python -m deploy.standardise_run:
+       python -m stone_pipeline.photos.process:
        1. lock        <env>/standardise-test/run.lock, rewritten every 5 min while the process runs
        2. clear       GPU jobs a killed earlier run left (photos-<run id>-...) are stopped, the GPU pool's ceiling
                       set back to idle
@@ -92,8 +92,8 @@ no open book this time, or that fails for the photo itself, adds nothing and is 
 never run again; a judged result is never held. A GPU error stops the slice as for any photo, and the same photo
 breaking it again is noted the same way. A completion cut short takes its close view off again while its slab is
 missing, and a passing storage error leaves it for the next run. Nothing is removed by hand. The completion and the
-recheck below are one path (`deploy.standardise_source.rework`), and a re-run starts from the input its result was made
-from (`deploy.standardise_source.start`): the retouch never searches a photo again once its retouch ended (retouched or
+recheck below are one path (`stone_pipeline.photos.source.rework`), and a re-run starts from the input its result was made
+from (`stone_pipeline.photos.source.start`): the retouch never searches a photo again once its retouch ended (retouched or
 refused) or its run made a result of it, so a photo it found nothing on, or one made before the retouch existed, is
 never retouched afresh for a re-run.
 
@@ -117,14 +117,14 @@ recheck gave no whole slab). A whole slab without the note was made under the ol
 finished, so it is never judged, until its recheck is settled. What every listing on the sheet shows now (its owner
 choice that applies, else its valid choice record; never a listing the owner removed or of a source whose image pipeline
 is off) is among them: such a photo goes to the GPU without its listing being picked again
-(`deploy.standardise_run.live_choices`). A recheck never writes over a result's files. The GPU works on it:
+(`stone_pipeline.photos.process.live_choices`). A recheck never writes over a result's files. The GPU works on it:
 
 - drawn the same by this version (no wall in a corner, the sawn edge unchanged): only the note; its views stay as they
   are. A recheck stops before the costly steps (eraser, upscale, inpainting);
 - drawn differently: a complete candidate beside the result, `<run folder>redraw/<sha>.<file>` (which slab it is, the
   slab, the views, main last), its completion marker `redraw/<sha>.done.json` written last. The result, its verdict
   and what is published of it stay exactly as they are. After the GPU round the process settles each complete candidate
-  (`deploy.standardise_select.settle`): the judge scores it through the same path as a new result
+  (`stone_pipeline.photos.select.settle`): the judge scores it through the same path as a new result
   (`redraw/judged/<sha>.json`). A pass promotes it: its files copied over the result's, the views it does not make
   removed, its verdict copied over the result's, the note `{"changed": true}`, then the candidate removed (its marker
   last); publish then copies the new files by their ETag and makes the 3D slab again (the tiles cut from it render
@@ -296,7 +296,7 @@ close-only photos run, an operator's action (no UI button): `POST /config/v1/run
 It is a photos run like any other (the run slot, giving way to the owner's Publish, a run record with `close_only: true`);
 the runner alone tells the process it is close-only (`SCRAPER_STANDARDISE_CLOSE_ONLY` in that run's environment only). It
 holds the same lock, budget, work window and run id, makes one close-only GPU job per slice of the chosen photos whose
-close-up is not made yet (`deploy.standardise_close`) instead of steps 1-7, then publishes and relinks as any run (the
+close-up is not made yet (`stone_pipeline.photos.close`) instead of steps 1-7, then publishes and relinks as any run (the
 owner's decisions and the stored conflict set read the same way, so only the conflict photos the owner assigned are
 published); its summary is `close-summary.json`, so the photos run's `summary.json` stays.
 
@@ -512,7 +512,7 @@ view and 3D slab, unjudged), the close-only run (its close-up, under every close
 recheck (a whole slab drawn differently is redrawn as a candidate the judge scores before it replaces the result). A
 result the retired logo step made (RUN_TAG, a watermarked source) would be re-run without that step, from the photo with
 its logo, not the logo-free copy it was judged as. Before the first photos run of that release on an environment, run
-`python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual `SCRAPER_`
+`python -m stone_pipeline.photos.mark_logo_step` (`DRY_RUN=true` first, then `false`; the environment's usual `SCRAPER_`
 settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed, never rechecked
 and its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
 `close.jpg` as they are. It reads the watermarked sources from a config.db snapshot taken before the migration; for dev
@@ -537,7 +537,7 @@ The logo of a watermarked supplier (varsha) is no longer taken off by a step of 
 2. Run the GPU round on them under a throwaway tag (`RUN_TAG=logo-check`, `ONLY_KEY=<that list>`): one retouch and
    one standardise job, about 0.30 to 0.50 USD of GPU time (one slice, its 12-minute allowance plus about 40 s a photo
    on 4 vCPU at 0.147 USD per vCPU-hour). Nothing is published: the tag is not RUN_TAG or CLEAN_TAG.
-3. Judge each finished result (`deploy.standardise_select.verdict` on the `logo-check` round): 20 judge calls,
+3. Judge each finished result (`stone_pipeline.photos.select.verdict` on the `logo-check` round): 20 judge calls,
    about 0.016 USD each as billed (0.14 reserved). Then judge the close view of each result that passed and has one
    (`<sha>.close.jpg`; the judge sees the published views, and the close view is cut from the photo's middle, where
    varsha's logo sits): at most 20 more calls, about 0.30 USD.
@@ -584,7 +584,7 @@ The owner reviews the hidden listings (no chosen photo, not removed) on a decisi
 shared photo says which listings of the same stone it also applies to, and the conflicts page names, per conflict photo,
 every listing that shows it, live ones included (one live now is hidden by the next run unless the owner assigns the
 photo to it). The page keeps one document per listing; its export (a JSON array of `{id: <listing handle>, action,
-source, sha, tag, at}`, the fields per action below) is applied with `python -m deploy.standardise_decisions`
+source, sha, tag, at}`, the fields per action below) is applied with `python -m stone_pipeline.photos.decisions`
 (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`). It prints the environment and bucket
 first. It checks every decision before writing anything: the listing is on the sheet; the action is known with exactly
 the page's fields; `at` is an ISO UTC timestamp, no further ahead of the server's clock than `DECISION_AHEAD_SECONDS`
@@ -641,7 +641,7 @@ time, so a click from the page and one from an export are checked and written th
 
 A full photos run writes `<CLEAN_TAG>/review.json` after publish: `{SKU: row}` of each listing it left without a good
 photo and each tile publish could not render (`select.review_row`, `run.write_review`). A close-only run leaves it.
-It carries no URL. The config API serves it under `/config/v1/photos` (`deploy.standardise_review`):
+It carries no URL. The config API serves it under `/config/v1/photos` (`stone_pipeline.photos.review`):
 
 - `GET /photos/hidden?reason=&offset=&limit=`: a page of the listings the ledger hides (inventory reason `no_photo`),
   `{"total", "counts", "offset", "limit", "rows"}`: `limit` defaults to `REVIEW_PAGE_DEFAULT` (50), at most

@@ -106,14 +106,14 @@ def test_cleanup_images_client(built):
 
 
 @pytest.mark.parametrize("module, env", [
-    ("standardise_source", {"SRC": "sentas"}), ("standardise_diag", {"SRC": "sentas", "ONLY_KEY": "k"}),
-    ("standardise_close", {"CLEAN_TAG": "t", "SRC": "sentas"}), ("standardise_retouch", {"SRC": "sentas"}),
-    ("mark_logo_step_results", {"DRY_RUN": "true"})])
+    ("source", {"SRC": "sentas"}), ("diag", {"SRC": "sentas", "ONLY_KEY": "k"}),
+    ("close", {"CLEAN_TAG": "t", "SRC": "sentas"}), ("retouch_job", {"SRC": "sentas"}),
+    ("mark_logo_step", {"DRY_RUN": "true"})])
 def test_the_photo_job_entry_points_clients(built, monkeypatch, module, env):
     import importlib
     for name, value in env.items():
         monkeypatch.setenv(name, value)
-    _drive(importlib.import_module(f"deploy.{module}").main)
+    _drive(importlib.import_module(f"stone_pipeline.photos.{module}").main)
     assert built == [_s3(DEFAULTS)]
 
 
@@ -122,9 +122,9 @@ def test_the_edit_test_job_s_client(built, monkeypatch):
     # in CI; skipping it would drop it silently), and the module is imported afresh under them
     monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
     monkeypatch.setitem(sys.modules, "diffusers", types.SimpleNamespace(Flux2KleinPipeline=object))
-    monkeypatch.delitem(sys.modules, "deploy.standardise_edit_test", raising=False)
-    from deploy import standardise_edit_test
-    _drive(standardise_edit_test.main)
+    monkeypatch.delitem(sys.modules, "stone_pipeline.photos.edit_test", raising=False)
+    from stone_pipeline.photos import edit_test
+    _drive(edit_test.main)
     assert built == [_s3(DEFAULTS)]
 
 
@@ -156,27 +156,27 @@ def test_the_variety_base_publisher_s_client(built, monkeypatch, tmp_path):
 
 
 def test_the_photo_process_s_clients(built, monkeypatch, tmp_path):
-    from deploy import standardise_decisions, standardise_run
+    from stone_pipeline.photos import decisions, process
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")                    # what the GPU target reads before its first call
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "j")
-    _drive(lambda: standardise_run.reap("R1"))
-    monkeypatch.setattr(standardise_run, "unconfigured", lambda close_only=False: [])
-    monkeypatch.setattr(standardise_run, "stop_on_signal", lambda *spends: None)
+    _drive(lambda: process.reap("R1"))
+    monkeypatch.setattr(process, "unconfigured", lambda close_only=False: [])
+    monkeypatch.setattr(process, "stop_on_signal", lambda *spends: None)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLOSE_ONLY", raising=False)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLICKS_ONLY", raising=False)
-    _drive(standardise_run.main)
+    _drive(process.main)
     export = tmp_path / "decisions.json"
     export.write_text(json.dumps([]))
     for name, value in (("SCRAPER_ENV", "development"), ("DRY_RUN", "true"), ("DECISIONS_FILE", str(export))):
         monkeypatch.setenv(name, value)
-    monkeypatch.setattr(standardise_decisions, "photo_listings", lambda s3: (_ for _ in ()).throw(_Called("sheet")))
-    _drive(standardise_decisions.main)
+    monkeypatch.setattr(decisions, "photo_listings", lambda s3: (_ for _ in ()).throw(_Called("sheet")))
+    _drive(decisions.main)
     assert built == [_s3(PROCESS), ("batch", S3_REGION, None, PROCESS)] * 2 + [_s3(PROCESS)]
 
 
 def test_the_photo_routes_client(built):
-    from deploy import standardise_review
-    standardise_review.client()
+    from stone_pipeline.photos import review
+    review.client()
     assert built == [_s3(POOLED)]
 
 
@@ -274,11 +274,11 @@ def test_a_bootstrap_the_seed_failed_still_opens_its_ledger_bound(opened, monkey
 
 
 def test_the_readers_open_it_unbound(opened):
-    from deploy import standardise_review
+    from stone_pipeline.photos import review
     from stone_pipeline.config import diagnostics, runner, scrape_status, server, varieties
     from stone_pipeline.ledger import simulate
     path, seen = opened
-    for call in (standardise_review.hidden_products, diagnostics.ledger_image_counts, lambda: simulate.main([]),
+    for call in (review.hidden_products, diagnostics.ledger_image_counts, lambda: simulate.main([]),
                  runner._capture_counts, varieties._build_index, lambda: server._ledger_products("sen"),
                  scrape_status.ledger_product_counts):
         _drive(call)

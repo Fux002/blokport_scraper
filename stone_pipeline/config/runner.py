@@ -73,7 +73,7 @@ def _now() -> str:
 # Kept in sync with build.STAGES (a test locks the two together). Duplicated here on purpose: the config
 # server validates the :4200 trigger WITHOUT importing the heavy pipeline (build pulls catalog/run/inventory).
 # `republish` = re-run pipeline + catalog from the last scrape, no supplier re-fetch (release approved products).
-# `photos` is this runner's own stage, not a produce: the standardised-photo process (deploy.standardise_run,
+# `photos` is this runner's own stage, not a produce: the standardised-photo process (stone_pipeline.photos.process,
 # STANDARDISE_PROCESS.md) over the whole environment, which links what it published with a republish of its own.
 STAGES = ("scrape", "catalog", "republish", "inventory", "all", "photos")
 # With STANDARDISE.AUTO on, the photos run follows a full produce (the owner's button) and nothing else. A republish
@@ -265,7 +265,7 @@ def _build_command(rec: dict) -> list[str]:
     produce guarantees the inputs first. `--stage` scopes HOW FAR (scrape / catalog / all) and
     `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
     if rec.get("stage") == "photos":
-        return [sys.executable, "-u", "-m", "deploy.standardise_run"]
+        return [sys.executable, "-u", "-m", "stone_pipeline.photos.process"]
     cmd = [sys.executable, "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
     if rec.get("scope"):
         cmd += ["--sources", ",".join(rec["scope"])]
@@ -354,8 +354,8 @@ def _reap_photos(run_id: str, deadline: float, clock=time.monotonic) -> None:
     lock taken over)."""
     def clear():
         try:
-            from deploy import standardise_run
-            standardise_run.reap(run_id)
+            from stone_pipeline.photos import process
+            process.reap(run_id)
         except Exception:
             log.exception("could not clear what the killed photos run left; the next photos run clears it")
     clearing = threading.Thread(target=clear, daemon=True)

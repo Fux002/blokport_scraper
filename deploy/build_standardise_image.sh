@@ -35,7 +35,7 @@ for f in "${REQUIREMENTS[@]}"; do REQ_ARGS+=(-r "/app/$f"); done
 docker run --rm --platform linux/amd64 --entrypoint pip "$REPO:$TAG" install --dry-run --no-index --quiet "${REQ_ARGS[@]}" \
   || { echo "ERROR: the base does not meet this commit's package requirements; build a new base first" >&2; exit 1; }
 # Every standardise run mode the entrypoint dispatches (deploy/run_pipeline.sh) must import in the image.
-IMPORTS=$(grep -o 'python -m deploy\.standardise[a-z_]*' "$CONTEXT/deploy/run_pipeline.sh" | sed 's/python -m //' | sort -u | paste -sd, -) \
+IMPORTS=$(grep -o 'python -m stone_pipeline\.photos\.[a-z_]*' "$CONTEXT/deploy/run_pipeline.sh" | sed 's/python -m //' | sort -u | paste -sd, -) \
   || { echo "ERROR: no standardise run modes found in deploy/run_pipeline.sh" >&2; exit 1; }
 docker run --rm --platform linux/amd64 --entrypoint python "$REPO:$TAG" -c "import $IMPORTS"
 
