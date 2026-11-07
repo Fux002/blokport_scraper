@@ -18,6 +18,8 @@ Every record is keyed by the listing's SKU, which a variety re-bind never moves 
           cleaned copy is judged, chosen on a pass, and on a fail the listing stays on the review list (its stored
           attempts are read back, never paid again). Only for the listing decided on: a cleaned copy is the photo's, so
           a listing of the same stone showing it finds it itself.
+  withdraw the owner's click withdrawn (the hidden-listings page's DELETE /photos/clicks): its click file goes, nothing
+          else; a listing without a click is left as it is.
 The judge's verdicts are never touched. The owner's latest decision on a listing wins, and each replaces the other two:
 a "use" lifts its removal and its click; a "remove" drops its choice and its click; a "clean" lifts its removal and its
 owner choice with the choice record made from it (else that photo stays the listing's valid choice and the run never
@@ -25,7 +27,7 @@ reaches the click). A decision older than the one already stored for its listing
 again never undoes a later decision.
 Every decision is checked first (the listing is on the product sheet, the action is known, exactly the page's fields,
 `at` an ISO UTC timestamp, the source is the listing's, the photo one of the listing's and not excluded, the tag's result
-exists, for a clean the photo is no conflict photo and the run could ever use the click (select.click_problem: its record
+exists, for a clean the source's image pipeline is on, the photo is no conflict photo and the run could ever use the click (select.click_problem: its record
 is the listing's, and no current verdict or hold says a cleaned copy cannot fix the photo; one not judged yet is
 accepted, the run reports it blocked until it is), not older than what is stored, no stored decision of the listing that
 cannot be read); one bad decision refuses the whole file and nothing is written. The stores are read through the photo
@@ -54,17 +56,18 @@ import boto3
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
 from deploy.standardise_publish import (NoConflictSet, aws_config, chosen_prefix, click_record, clicks_prefix, excluded,
-                                       owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
-                                       records_by_sku, write_click)
+                                       owner_key, owner_prefix, pool_map, read_choices, read_clicks, read_conflicts,
+                                       read_records, records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index
 
 # The page's document shape per action (its contract, not a setting): exactly these fields. A clean names no tag: the
 # clean step always edits the scraped photo whose standardised result failed (select.clean_plan).
 FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"},
-          "clean": {"id", "action", "source", "sha", "at"}}
+          "clean": {"id", "action", "source", "sha", "at"}, "withdraw": {"id", "action", "source", "at"}}
 TAGS = (C.RUN_TAG, C.CLEAN_TAG)                        # the process's tags, the only results a choice can name
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")   # what the page writes: toISOString(), UTC
@@ -126,7 +129,7 @@ def _shape(doc, listings):
         return ["not on the product sheet as a photo listing (a tile listing is rendered, never decided here)"]
     if doc["source"] != listing["source"]:
         return [f"source {doc['source']!r} is not the listing's ({listing['source']!r})"]
-    if action == "remove":
+    if action in ("remove", "withdraw"):
         return []
     if not _SHA.match(doc["sha"]):
         return [f"sha {doc['sha']!r} is not a photo's sha256"]
@@ -149,11 +152,15 @@ class _Stores:
     listing is never decided over (its decision is unknown); and the click files' keys by SKU, so a later decision
     removes the file there."""
 
-    def __init__(self, s3, listings):
+    def __init__(self, s3, listings, touched=None):
+        """touched: read only these listings' choice records (narrow), not every one."""
         self.s3 = s3
         self.owner_keys, self.removal_keys = _keys(s3, owner_prefix(ROOT)), _keys(s3, imagestore.owner_removed_prefix())
-        self.record_keys = _keys(s3, chosen_prefix(ROOT))
-        self.records, record_bad = read_choices(s3, ROOT)                 # by listing key
+        if touched is None:
+            self.record_keys, (self.records, record_bad) = _keys(s3, chosen_prefix(ROOT)), read_choices(s3, ROOT)
+        else:                                          # the touched listings' records: those read, and those unreadable
+            self.records, record_bad = _choices_of(s3, touched)
+            self.record_keys = {f"{chosen_prefix(ROOT)}{key}.json" for key in {*self.records, *record_bad}}
         self.click_keys = {imagestore.sku_of(k, clicks_prefix(ROOT)): k for k in _keys(s3, clicks_prefix(ROOT))}
         self.stored = self.owner_keys | self.removal_keys | self.record_keys
         (self.owners, owner_bad), clicks = proc.owner_records(s3, ROOT), read_clicks(s3, ROOT)
@@ -208,15 +215,42 @@ class _Stores:
                 or (choice is not None and choice["decided_on"] == choice["listing"]))
 
 
-def _check(docs, listings, rounds, stores, exclude, shared):
-    """Every decision checked; InvalidDecisions names each bad one."""
+def _choices_of(s3, keys):
+    """({listing key: its choice record}, {listing key: why it cannot be read}) of these listings alone, each read as
+    read_choices reads it (publish.read_records, its key as the prefix)."""
+    prefix = chosen_prefix(ROOT)
+    found = pool_map(C.STORE_WORKERS, lambda key: read_records(s3, f"{prefix}{key}.json", lambda k: k[len(prefix):-len(".json")]),
+                     sorted(keys))
+    return ({k: v for records, _ in found for k, v in records.items()},
+            {k: v for _, errors in found for k, v in errors.items()})
+
+
+def _touched(docs, listings, shared):
+    """The listings a few decisions can reach (narrow): each decided listing, and every listing a photo of it is shared
+    with (its siblings, which a "use" reaches; its conflict partners, whose stored choice can hold the photo)."""
+    out = set()
+    for doc in docs:
+        listing = listings.get(doc.get("id"))
+        if listing is None:
+            continue
+        out.add(listing["key"])
+        for sha in listing["photos"]:
+            if (group := shared.get((listing["source"], sha))) is not None:
+                out.update(k for k in group.listings if k in listings)
+    return out
+
+
+def _check(docs, listings, rounds, stores, exclude, shared, off):
+    """Every decision checked; InvalidDecisions names each bad one. off: the sources whose image pipeline is off."""
     errors, seen = [], set()
     for i, doc in enumerate(docs):
         key = doc.get("id")
         found = _shape(doc, listings)
         if not found and key in seen:
             found = ["decided more than once in this file"]
-        elif not found and doc["action"] != "remove" and doc["sha"] in exclude:
+        elif not found and doc["action"] == "clean" and doc["source"] in off:
+            found = [f"source {doc['source']!r}: its image pipeline is off, the photos run never works on it"]
+        elif not found and "sha" in doc and doc["sha"] in exclude:
             found = [f"photo {doc['sha'][:12]} is on the exclude list"]
         elif not found and doc["action"] == "use" and doc["sha"] not in rounds(doc["tag"], doc["source"]).finished:
             found = [f"photo {doc['sha'][:12]} has no result under {doc['tag']}"]
@@ -257,7 +291,7 @@ def _one_listing_per_conflict(docs, listings, shared, stores):
     """The errors of a "use" giving a conflict photo (listings of several stones show it) to a second listing: it is
     one listing's, by the owner's own decision, until that decision is withdrawn (a removal, or another photo chosen for
     it in this file). Decisions are taken by listing key, so the same file names the same holder."""
-    decided = {d.get("id") for d in docs}
+    decided = {d.get("id") for d in docs if d.get("action") != "withdraw"}   # a withdraw releases no photo it holds
     holders = {}
     for doc in sorted((d for d in docs if d.get("action") == "use" and d.get("id") in listings), key=lambda d: d["id"]):
         photo = (listings[doc["id"]]["source"], doc["sha"])
@@ -283,13 +317,13 @@ def _one_listing_per_conflict(docs, listings, shared, stores):
         holders[photo] = doc["id"]
 
 
-def _rounds(s3):
-    """Round(tag, src), each listed once."""
+def _rounds(s3, shas=None):
+    """Round(tag, src), each read once: its whole folder, or only what it holds of `shas` (narrow)."""
     seen = {}
 
     def get(tag, src):
         if (tag, src) not in seen:
-            seen[(tag, src)] = select.Round(s3, tag, src)
+            seen[(tag, src)] = select.Round(s3, tag, src, shas)
         return seen[(tag, src)]
     return get
 
@@ -298,7 +332,7 @@ def _choices(docs, listings, shared, stores, exclude, notes):
     """{SKU: the owner choice record it should have} from the "use" decisions: each decided listing's own, then the
     listings of the same stone each photo reaches. A listing reached by several takes the latest decision (then the
     first deciding listing by key); one with its own decision, in this file or stored, keeps it."""
-    decided = {listings[d["id"]]["sku"] for d in docs}
+    decided = {listings[d["id"]]["sku"] for d in docs if d["action"] != "withdraw"}   # a withdraw decides no photo
     conflicts = {photo: group.listings for photo, group in shared.items() if group.kind == "conflict"}
     out = {}
     for doc in sorted((d for d in docs if d["action"] == "use"), key=lambda d: d["id"]):
@@ -332,16 +366,19 @@ def _choices(docs, listings, shared, stores, exclude, notes):
     return out
 
 
-def plan(s3, docs, sheet, exclude):
+def plan(s3, docs, sheet, exclude, narrow=False):
     """The changes the decisions make (Plan), every decision checked first: InvalidDecisions names each bad one. Reads
-    only; the same decisions against the same stores give the same plan, whatever their order in the file."""
+    only; the same decisions against the same stores give the same plan, whatever their order in the file. narrow (a
+    decision or two from the config API): the same plan, reading only the choice records of the listings they can
+    reach (_touched) and the run tags' results of the photos they name, never a whole folder."""
     listings = {l["key"]: l for l in sheet}
-    stores = _Stores(s3, listings)
     try:                                              # the produce's conflict set, the sheet's sibling groups
         shared = index.groups(sheet, read_conflicts(s3, {l["source"] for l in sheet}))
     except NoConflictSet as exc:
         raise InvalidDecisions(str(exc)) from exc
-    _check(docs, listings, _rounds(s3), stores, exclude, shared)
+    stores = _Stores(s3, listings, _touched(docs, listings, shared) if narrow else None)
+    rounds = _rounds(s3, {d["sha"] for d in docs if isinstance(d.get("sha"), str)} if narrow else None)
+    _check(docs, listings, rounds, stores, exclude, shared, image_pipeline_off())
     out = Plan()
     for sku, record in sorted(_choices(docs, listings, shared, stores, exclude, out.notes).items()):
         if stores.owner(sku) != record:
@@ -371,6 +408,9 @@ def plan(s3, docs, sheet, exclude):
         if owner_key(ROOT, listing["sku"]) in stores.owner_keys:     # the owner's choice, with the record made from it
             lifted += [owner_key(ROOT, listing["sku"]), f"{chosen_prefix(ROOT)}{listing['key']}.json"]
         out.deletions += [k for k in lifted if k in stores.stored]
+    for doc in sorted((d for d in docs if d["action"] == "withdraw"), key=lambda d: d["id"]):
+        if (sku := listings[doc["id"]]["sku"]) in stores.click_keys:
+            out.deletions.append(stores.click_keys[sku])
     return out
 
 
@@ -409,6 +449,25 @@ def apply(s3, p):
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
 
 
+def decide(s3, docs, dry_run, say=print, sheet=None, narrow=False):
+    """The Plan of the decisions (described through `say`), and unless dry_run applied inside the photo process's run
+    lock (planned again there, so it is written against the stores as they are under the lock). The one way decisions
+    reach the stores: this CLI and the config API's photo routes both come here. InvalidDecisions names each bad
+    decision, RunActive says a photos run holds the lock; either way nothing is written. sheet: the photo listings
+    when the caller has read them already (else read here); narrow: plan's narrow read, for a decision or two."""
+    listings = photo_listings(s3) if sheet is None else sheet
+    if dry_run:
+        p = plan(s3, docs, listings, excluded(), narrow)
+        describe(p, say)
+        return p
+    run_id = "decisions-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    with proc.exclusive(s3, {"run_id": run_id, "tags": list(TAGS)}):
+        p = plan(s3, docs, listings, excluded(), narrow)
+        describe(p, say)
+        apply(s3, p)
+    return p
+
+
 def main() -> int:
     if not os.environ.get("SCRAPER_ENV", "").strip():
         print("ERROR: SCRAPER_ENV must be set explicitly (development or production): it picks the bucket written to")
@@ -428,18 +487,12 @@ def main() -> int:
         print(f"ERROR: {exc}; nothing applied")
         return 2
     s3 = boto3.client("s3", region_name=S3_REGION, config=aws_config())
-    exclude = excluded()
     print(f"==> {len(docs)} owner decisions from {path}")
     try:
+        decide(s3, docs, dry)
         if dry:
-            describe(plan(s3, docs, photo_listings(s3), exclude))
             print("==> DRY_RUN: nothing written")
             return 0
-        run_id = "decisions-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        with proc.exclusive(s3, {"run_id": run_id, "tags": list(TAGS)}):
-            p = plan(s3, docs, photo_listings(s3), exclude)
-            describe(p)
-            apply(s3, p)
     except InvalidDecisions as exc:
         print(f"ERROR: invalid decisions, nothing applied:\n{exc}")
         return 2

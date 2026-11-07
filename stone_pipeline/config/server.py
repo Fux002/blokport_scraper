@@ -876,6 +876,56 @@ def _delete_source(params, body, query):
     return code, result
 
 
+# -- photos: the hidden-listings page (deploy.standardise_review) ------------------------------------------------------
+# The photo process's stores live in S3 and its decisions are written there inside its run lock, so none of these
+# touches config.db. A store that cannot be read (the ledger, the review list) is a 503 naming it.
+def _photos(call):
+    from deploy import standardise_review as rv
+    try:
+        return call(rv)
+    except rv.Unavailable as exc:
+        return 503, {"error": str(exc)}
+
+
+def _photo_body(rv, body, fields):
+    try:
+        return rv.check_body(body, fields)
+    except ValueError as exc:
+        raise _BadRequest(str(exc)) from exc
+
+
+def _get_photos_hidden(params, body, query):
+    return _photos(lambda rv: (200, rv.hidden(rv.client())))
+
+
+def _get_photos_spend(params, body, query):
+    # ?month=YYYY-MM, this month (UTC) when omitted
+    from datetime import datetime, timezone
+
+    def answer(rv):
+        month = parse_qs(query).get("month", [datetime.now(timezone.utc).strftime("%Y-%m")])[-1]
+        if not rv.valid_month(month):
+            raise _BadRequest(f"month must be YYYY-MM, got {month!r}")
+        return 200, rv.spend(rv.client(), month)
+    return _photos(answer)
+
+
+def _put_photo_click(params, body, query):
+    # Body {"sha", "at"}; the SKU percent-encoded in the path (prod SKUs carry slashes)
+    def answer(rv):
+        b = _photo_body(rv, body, ("sha", "at"))
+        return rv.click(rv.client(), unquote(params["sku"]), b["sha"], b["at"])
+    return _photos(answer)
+
+
+def _delete_photo_click(params, body, query):
+    # Body {"at"}: when the owner withdrew it (an older withdrawal never undoes a later decision)
+    def answer(rv):
+        b = _photo_body(rv, body, ("at",))
+        return rv.withdraw(rv.client(), unquote(params["sku"]), b["at"])
+    return _photos(answer)
+
+
 # _durable: the route records an operator decision in config.db, snapshotted as soon as it succeeds. The lifecycle verbs
 # (reset, delist, pause, resume, remove a source) snapshot it themselves.
 _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
@@ -919,6 +969,10 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("GET", ("sources", "{name}"), _get_source),
     ("PUT", ("sources", "{name}"), _durable(_put_source)),
     ("DELETE", ("sources", "{name}"), _delete_source),
+    ("GET", ("photos", "hidden"), _get_photos_hidden),
+    ("GET", ("photos", "spend"), _get_photos_spend),
+    ("PUT", ("photos", "clicks", "{sku}"), _put_photo_click),
+    ("DELETE", ("photos", "clicks", "{sku}"), _delete_photo_click),
 )
 
 # derived from the table, so the answer to an unknown path can never drift from what is served

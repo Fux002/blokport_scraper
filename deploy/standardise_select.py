@@ -170,15 +170,28 @@ def read_candidates(client, out):
     return Candidates(out, [o["Key"][len(out):] for page in pages for o in page.get("Contents", [])])
 
 
+# Where a run folder keeps what it holds of one photo: <sha>.<view> at its top, then each folder by <sha>. Round reads
+# exactly these, so a Round of a few photos (shas) lists each of them here and nothing else.
+ROUND_FOLDERS = ("", "noslab/", LOGO_STEP, C.OUTLINE_CHECKED, "held/", "judged/", "cleaned/", "attempts/", REDRAW,
+                 f"{REDRAW}judged/")
+
+
 class Round(_Locks):
     """What one run tag holds for one source, its keys listed once: finished photos, the whole slabs among them, held
     ones, verdicts, cleaned copies and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted
     request), and the candidates of an outline recheck (redraw)."""
 
-    def __init__(self, client, tag, src):
+    def __init__(self, client, tag, src, shas=None):
+        """shas: read only what the folder holds of these photos (their keys under each of ROUND_FOLDERS, listed a few
+        at a time), the same sets the whole folder gives restricted to them: a check about one listing never lists the
+        source's whole run folder."""
         self.prefix = round_prefix(tag, src)
-        keys = [o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=self.prefix)
-                for o in page.get("Contents", [])]
+        prefixes = [self.prefix] if shas is None else [f"{self.prefix}{folder}{sha}" for sha in sorted(set(shas))
+                                                       for folder in ROUND_FOLDERS]
+        listed = pool_map(C.STORE_WORKERS, lambda prefix: [
+            o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+            for o in page.get("Contents", [])], prefixes)
+        keys = [k for part in listed for k in part]
         self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
@@ -708,6 +721,89 @@ def photo_notes(client, rounds, listing, exclude, conflicts, click=None, state=N
     return " | ".join(notes)
 
 
+# The hidden-listings page's reasons (review.json, GET /config/v1/photos/hidden): its contract, not a setting. The first
+# seven come from a photos run's report (review_row); the last four only from the config API's join of the ledger's
+# hidden listings with the photo stores (owner_removed, not_worked_yet, chosen_not_linked) and publish's tiles.
+REVIEW_REASONS = ("not_fixable", "awaiting_auto", "awaiting_click", "clean_failed", "photo_conflict", "pending",
+                  "excluded", "owner_removed", "tile_no_stone", "not_worked_yet", "chosen_not_linked")
+
+
+def result_state(client, rnd, sha):
+    """Where one photo's result stands in a round, from its stored answers (choose reads them in the same order): "held"
+    (the standardiser held it), "no_result", "unchecked" (its outline recheck not settled), "not_judged", "unparsed"
+    (the judge's answer could not be read: asked again), "outdated" (a verdict under an older bar: judged again),
+    "pass" or "fail"."""
+    if sha in rnd.held:
+        return "held"
+    if sha not in rnd.finished:
+        return "no_result"
+    if sha in rnd.unchecked:
+        return "unchecked"
+    if sha not in rnd.judged:
+        return "not_judged"
+    found = _get_json(client, f"{rnd.prefix}judged/{sha}.json")
+    if found["verdict"] == "unparsed":
+        return "unparsed"
+    if not judge.current(found):
+        return "outdated"
+    return "pass" if judge.passed(found) else "fail"
+
+
+def review_photo(client, rounds, listing, sha, exclude, blocked):
+    """One photo of a listing on the review list: its scraped photo's result (result_state; "excluded" or "conflict"
+    when it is never chosen by itself), the kinds of its verdict, its hold, whether a cleaned copy could fix it
+    (fixable) and may be paid without a click (authorised "auto"), and its clean: the models tried and left (left only
+    for a fixable photo) and its cleaned copy's result (None without one). exclude: the reviewed exclude list; blocked:
+    Selection.blocked (the exclude list and the listing's conflict photos)."""
+    (tag, gpu), (_, cl) = rounds
+    g, c = gpu[listing["source"]], cl[listing["source"]]
+    state = ("excluded" if sha in exclude else "conflict" if sha in blocked else result_state(client, g, sha))
+    found = _get_json(client, f"{g.prefix}judged/{sha}.json") if sha in g.judged else None
+    cause = fixable(client, g, sha, blocked)
+    return {"sha": sha, "tag": tag, "state": state,
+            "kinds": sorted({p.get("kind", "?") for p in found.get("problems", [])}) if found else [],
+            "held": _get_json(client, f"{g.prefix}held/{sha}.json")["reason"] if sha in g.held else None,
+            "fixable": cause is not None, "auto": cause is not None and authorised(cause, sha, None) == "auto",
+            "clean": {"tried": [m for m in clean.MODELS if f"{sha}.{m}" in c.attempts],
+                      "left": models_left(client, c, sha) if cause is not None else [],
+                      "copy": result_state(client, c, sha) if sha in c.cleaned else None}}
+
+
+def review_reason(listing, outcome, photos, state, blocked):
+    """Why a listing the run did not give a good photo is hidden (REVIEW_REASONS), from its outcome (report), its photos
+    (review_photo) and its click's state (click_state): "pending" while not fully judged; "excluded" or "photo_conflict"
+    when none of its photos may be chosen by itself; "clean_failed" when its cleaned copy failed the judge or every
+    fixable photo has no model left; "not_fixable" when no cleaned copy could fix any; "awaiting_auto" when a mark may
+    still be cleaned without a click (authorised); else "awaiting_click"."""
+    if outcome == "pending":
+        return "pending"
+    if listing["photos"] and not candidates(listing, blocked):
+        return "photo_conflict" if any(p["state"] == "conflict" for p in photos) else "excluded"
+    if (state is not None and state[0] == "cleaned") or any(p["clean"]["copy"] is not None for p in photos):
+        return "clean_failed"
+    fixes = [p for p in photos if p["fixable"]]
+    if not fixes:
+        return "not_fixable"
+    if not any(p["clean"]["left"] for p in fixes):
+        return "clean_failed"
+    if any(p["auto"] and p["clean"]["left"] for p in fixes):
+        return "awaiting_auto"
+    return "awaiting_click"
+
+
+def review_row(client, rounds, listing, outcome, exclude, blocked, click, state, mark_wait):
+    """The listing's row on the review list (review.json): its reason (review_reason), why its marks wait (admission,
+    only for "awaiting_auto"), the owner's click in its one state (click_state, "waiting" from admission) and its
+    photos (review_photo). No URL: the config API makes those when it serves the list."""
+    photos = [review_photo(client, rounds, listing, sha, exclude, blocked) for sha in listing["photos"]]
+    reason = review_reason(listing, outcome, photos, state, blocked)
+    return {"listing": listing["key"], "source": listing["source"], "format": listing["format"], "reason": reason,
+            "why": mark_wait if reason == "awaiting_auto" else None,
+            "click": None if click is None else {"sha": click.get("sha"), "at": click.get("at"), "state": state[0],
+                                                 "why": state[1]},
+            "photos": photos}
+
+
 def read_rounds(client, tags, sources):
     """[(tag, {source: Round})] of the tags for the sources, each listed once."""
     return [(tag, {src: Round(client, tag, src) for src in sources}) for tag in tags]
@@ -903,17 +999,20 @@ def clean_all(sel, plans, spend, deadline):
     return _each([plan.listing for plan in plans], lambda l: pay(sel.client, sel.rounds, by_key[l["key"]], spend), deadline)
 
 
-def report(sel, waits):
-    """{"chosen", "tracked", "pending", "click_problems"} of this run's listings; `waits` = {listing key: why its new edit
-    waits} from the run's admission (deploy.standardise_run.admit), so a click that waits says so on the review list,
-    and each blocked click is a problem line (click_state). Each listing with a good photo gets its choice record (a
+def report(sel, waits, marks):
+    """{"chosen", "tracked", "pending", "click_problems", "review"} of this run's listings; `waits` = {listing key: why
+    its click's new edit waits} and `marks` = {listing key: why its other new edits wait} from the run's admission
+    (deploy.standardise_run.admit), so a click or a mark that waits says so on the review list, and each blocked click
+    is a problem line (click_state). review = {SKU: review_row} of each listing without a good photo (tracked or
+    pending), for review.json. Each listing with a good photo gets its choice record (a
     kept close-up's stays as it is unless a whole slab passed), a listing now without one loses its record (and is in
     tracked.csv, this run's list of listings with no good photo); a listing not fully judged is neither and its record
     is left as it is. Listings outside this run are untouched."""
     prefix = chosen_prefix(sel.root)
 
     def one(l):
-        """(outcome, what goes in its list, its click's state) of one listing, from its stored answers only."""
+        """(outcome, what goes in its list, its click's state, its review row or None) of one listing, from its stored
+        answers only."""
         click, state = sel.click_state(l)
         if l["key"] in waits and state == ("ready", None):
             state = ("waiting", waits[l["key"]])
@@ -924,23 +1023,26 @@ def report(sel, waits):
                       "prefix": round_prefix(tag, l["source"])}
             if picked != l.get("kept"):                # a kept choice is its record already: never written again
                 _put_json(sel.client, f"{prefix}{l['key']}.json", record)
-            return "chosen", record, state
+            return "chosen", record, state, None
+        row = review_row(sel.client, sel.rounds, l, "tracked" if complete else "pending", sel.exclude, sel.blocked(l),
+                         click, state, marks.get(l["key"]))
         if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
             return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
                                "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude, sel.conflicts,
-                                                            click, state)}, state
-        return "pending", l["key"], state
+                                                            click, state)}, state, row
+        return "pending", l["key"], state, row
     outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
-    chosen, tracked, pending = ([item for kind, item, _ in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
-    clicks = [f"{l['key']}: {click_line(sel.clicks[l['sku']], state)}" for l, (_, _, state) in zip(sel.listings, outcomes)
+    chosen, tracked, pending = ([item for kind, item, _, _ in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
+    clicks = [f"{l['key']}: {click_line(sel.clicks[l['sku']], state)}" for l, (_, _, state, _) in zip(sel.listings, outcomes)
               if state is not None and state[0] == "blocked"]
+    review = {l["sku"]: row for l, (_, _, _, row) in zip(sel.listings, outcomes) if row is not None}
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
     writer.writeheader()
     writer.writerows(tracked)
     _put(sel.client, f"{sel.root}tracked.csv", out.getvalue().encode(), "text/csv")
-    return {"chosen": chosen, "tracked": tracked, "pending": pending, "click_problems": clicks}
+    return {"chosen": chosen, "tracked": tracked, "pending": pending, "click_problems": clicks, "review": review}
 
 
 def _each(listings, work, deadline, clock=time.monotonic):

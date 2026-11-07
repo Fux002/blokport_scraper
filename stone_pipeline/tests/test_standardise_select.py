@@ -399,7 +399,7 @@ def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]   # A not judged
     s = _selection(_S3(), [_listing(A)], rounds)
     s.root, s.clicks = "r/", {"SEN-1": _click(D)}
-    out = sel.report(s, {})
+    out = sel.report(s, {}, {})
     assert out["pending"] == ["slab-1"] and out["click_problems"] == [
         f"slab-1: owner's click on {D[:12]}: blocked: it names a photo that is not the listing's"]
 
@@ -454,6 +454,27 @@ class _Bucket:
             def paginate(self, Bucket, Prefix):
                 return [{"Contents": [{"Key": k} for k in sorted(objects) if k.startswith(Prefix)]}]
         return _Pages()
+
+
+def test_a_round_read_for_a_few_photos_holds_exactly_what_the_whole_folder_says_of_them():
+    # review of #555: a click listed the source's whole run folder (dev v2/zucchi: 56,840 keys) for one listing's photos
+    from deploy.standardise_source import LOGO_STEP, REDRAW
+    keys = []
+    for sha in (A, B, D):
+        keys += [f"{GPU}{sha}.main.jpg", f"{GPU}{sha}.slab.png", f"{GPU}{sha}.studio.jpg", f"{GPU}noslab/{sha}.json",
+                 f"{GPU}{LOGO_STEP}{sha}.json", f"{GPU}{C.OUTLINE_CHECKED}{sha}.json", f"{GPU}held/{sha}.json",
+                 f"{GPU}judged/{sha}.json", f"{GPU}cleaned/{sha}.jpg", f"{GPU}attempts/{sha}.nano2.json",
+                 f"{GPU}attempts/{sha}.kontext.request.json", f"{GPU}attempts/{sha}.flux3.jpg",
+                 f"{GPU}{REDRAW}{sha}.done.json", f"{GPU}{REDRAW}judged/{sha}.json"]
+    bucket = _Bucket({k: b"{}" for k in keys})
+    whole, few = sel.Round(bucket, "v9", "sentas"), sel.Round(bucket, "v9", "sentas", shas=[A, B])
+    names = ("finished", "slabs", "studio", "noslab", "logo_step", "checked", "held", "judged", "cleaned")
+    for name in names:
+        assert getattr(few, name) == getattr(whole, name) - {D} == {A, B}, name
+    for name in ("requested", "edited", "attempts"):
+        assert getattr(few, name) == {a for a in getattr(whole, name) if not a.startswith(D)}, name
+    assert few.redraw.complete == whole.redraw.complete - {D} and few.redraw.judged == whole.redraw.judged - {D}
+    assert few.redrawn == {A, B} and few.prefix == whole.prefix
 
 
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
@@ -575,7 +596,7 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
     s.client, s.exclude, s.root, s.owner, s.conflicts, s.clicks = s3, set(), "r/", {}, {}, {}
     s.listings = [_listing(A, key="one"), _listing(B, key="two")]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
-    result = sel.report(s, {})
+    result = sel.report(s, {}, {})
     assert [c["key"] for c in result["chosen"]] == ["one"] and [t["listing"] for t in result["tracked"]] == ["two"]
     assert json.loads(s3.objects["r/chosen/one.json"])["sha"] == A                      # chosen: recorded
     assert "r/chosen/two.json" not in s3.objects                                        # now without a good photo
@@ -804,7 +825,7 @@ def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch
             now[0] -= 1
         return choose(*a, **k)
     monkeypatch.setattr(sel, "choose", slow)
-    result = sel.report(s, {})
+    result = sel.report(s, {}, {})
     assert [c["key"] for c in result["chosen"]] == ["one", "two", "three", "four"] and at_once[0] > 1
 
 
@@ -1006,7 +1027,7 @@ def test_the_review_list_says_a_click_waits_and_why(monkeypatch):
     s3, _, rounds = _reflection_on_a(monkeypatch)
     s = _selection(s3, [_listing(A, B)], rounds)
     s.root, s.clicks = "r/", {"SEN-1": _click(A)}
-    out = sel.report(s, {"slab-1": "month photo budget reached"})
+    out = sel.report(s, {"slab-1": "month photo budget reached"}, {})
     assert f"owner's click on {A[:12]}: waiting: month photo budget reached" in out["tracked"][0]["what_happened"]
     assert out["click_problems"] == []                                                # the run names the wait itself
 
@@ -1016,7 +1037,93 @@ def test_a_blocked_click_is_a_problem_of_the_run(monkeypatch):
     _all_models_failed(s3, rounds, A)
     s = _selection(s3, [_listing(A, B)], rounds)
     s.root, s.clicks = "r/", {"SEN-1": _click(A)}
-    assert sel.report(s, {})["click_problems"] == [f"slab-1: owner's click on {A[:12]}: blocked: {sel.NO_MODEL_LEFT}"]
+    assert sel.report(s, {}, {})["click_problems"] == [f"slab-1: owner's click on {A[:12]}: blocked: {sel.NO_MODEL_LEFT}"]
+
+
+# --- the hidden-listings page's rows (review.json): one reason per listing, read from the one click state -------------
+def _reviewed(s3, rounds, listings=None, clicks=None, waits=None, marks=None, exclude=(), conflicts=None):
+    s = _selection(s3, listings or [_listing(A, B)], rounds, conflicts=conflicts, exclude=exclude)
+    s.root, s.clicks = "r/", clicks or {}
+    return sel.report(s, waits or {}, marks or {})["review"]
+
+
+def _photo(sha, state, kinds=(), fixable=False, auto=False, tried=(), left=(), copy=None, held=None):
+    return {"sha": sha, "tag": "v9", "state": state, "kinds": list(kinds), "held": held, "fixable": fixable,
+            "auto": auto, "clean": {"tried": list(tried), "left": list(left), "copy": copy}}
+
+
+def test_a_listing_with_a_fixable_photo_outside_the_automatic_class_awaits_the_owner_s_click(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
+    assert _reviewed(s3, rounds) == {"SEN-1": {
+        "listing": "slab-1", "source": "sentas", "format": "slab", "reason": "awaiting_click", "why": None, "click": None,
+        "photos": [_photo(A, "fail", ["not_one_slab"]),
+                   _photo(B, "fail", ["light_reflection"], fixable=True, left=sel.clean.MODELS)]}}
+
+
+def test_a_mark_awaits_the_automatic_clean_and_says_why_it_waits(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")                         # B: a leftover mark
+    row = _reviewed(s3, rounds, marks={"slab-1": "cleaning cap reached"})["SEN-1"]
+    assert (row["reason"], row["why"]) == ("awaiting_auto", "cleaning cap reached")
+    assert row["photos"][1]["auto"] and _reviewed(s3, rounds)["SEN-1"]["why"] is None   # nothing waits: the next run
+    monkeypatch.setattr(C, "CLEAN_ENABLED", False)                                       # the switch off: a click's
+    assert _reviewed(s3, rounds)["SEN-1"]["reason"] == "awaiting_click"
+
+
+def test_a_listing_no_cleaned_copy_could_fix_is_not_fixable(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "not_one_slab")
+    assert _reviewed(s3, rounds)["SEN-1"]["reason"] == "not_fixable"
+
+
+def test_a_listing_whose_edits_all_failed_or_whose_cleaned_copy_failed_the_judge_is_clean_failed(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    _all_models_failed(s3, rounds, B)
+    row = _reviewed(s3, rounds)["SEN-1"]
+    assert row["reason"] == "clean_failed" and row["photos"][1]["clean"] == {"tried": list(sel.clean.MODELS), "left": [],
+                                                                               "copy": None}
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    cl = rounds[1][1]["sentas"]
+    cl.cleaned, cl.finished, cl.judged, cl.attempts = {B}, {B}, {B}, {f"{B}.nano2"}
+    s3.objects[f"{CL}attempts/{B}.nano2.json"] = json.dumps({"passes": True, "clean_version": C.CLEAN_VERSION}).encode()
+    s3.objects[f"{CL}judged/{B}.json"] = _verdict("fail", "bad_fill")
+    row = _reviewed(s3, rounds)["SEN-1"]
+    assert row["reason"] == "clean_failed" and row["photos"][1]["clean"]["copy"] == "fail"
+
+
+def test_a_listing_not_fully_judged_is_pending_with_its_photos_as_they_stand(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    rounds[0][1]["sentas"].judged.discard(B)
+    row = _reviewed(s3, rounds)["SEN-1"]
+    assert row["reason"] == "pending" and row["photos"][1]["state"] == "not_judged"
+    rounds[0][1]["sentas"].finished.discard(B)
+    assert _reviewed(s3, rounds)["SEN-1"]["photos"][1]["state"] == "no_result"
+
+
+def test_a_listing_whose_every_photo_is_excluded_or_shown_by_another_stone_says_so(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    row = _reviewed(s3, rounds, exclude={A, B})["SEN-1"]
+    assert row["reason"] == "excluded" and [p["state"] for p in row["photos"]] == ["excluded", "excluded"]
+    row = _reviewed(s3, rounds, exclude={A}, conflicts={("sentas", B): ("slab-1", "other")})["SEN-1"]
+    assert row["reason"] == "photo_conflict" and [p["state"] for p in row["photos"]] == ["excluded", "conflict"]
+
+
+def test_a_listing_with_a_good_photo_has_no_review_row(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("pass")
+    assert _reviewed(s3, rounds) == {}
+
+
+def test_a_review_row_carries_the_owner_s_click_in_its_one_state(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    clicks = {"SEN-1": _click(A)}
+    assert _reviewed(s3, rounds, clicks=clicks)["SEN-1"]["click"] == {"sha": A, "at": "2026-11-05T18:00:00Z",
+                                                                      "state": "ready", "why": None}
+    row = _reviewed(s3, rounds, clicks=clicks, waits={"slab-1": "month photo budget reached"})["SEN-1"]
+    assert row["click"]["state"] == "waiting" and row["click"]["why"] == "month photo budget reached"
+    assert _reviewed(s3, rounds, clicks={"SEN-1": {"error": "not json"}})["SEN-1"]["click"] == {
+        "sha": None, "at": None, "state": "blocked", "why": "its file cannot be read: not json"}
 
 
 # --- an unparsed verdict is asked again (review 2026-11-06, A2.6) -----------------------------------------------------
@@ -1211,7 +1318,7 @@ def _reported(objects, listing, rnd):
     s = object.__new__(sel.Selection)
     s.client, s.exclude, s.root, s.listings, s.owner, s.conflicts, s.clicks = s3, set(), "r/", [listing], {}, {}, {}
     s.rounds = [("v9", {"sentas": rnd}), ("v9-clean", {"sentas": _round(CL)})]
-    return s3, sel.report(s, {})
+    return s3, sel.report(s, {}, {})
 
 
 def test_the_report_switches_a_kept_close_up_to_the_whole_slab_that_passed():
@@ -1569,7 +1676,7 @@ def test_the_review_list_says_which_photo_is_held_for_a_conflict_and_with_whom()
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
     s = _selection(s3, [_listing(A, B)], rounds, conflicts={("sentas", A): ("other-stone", "slab-1")})
     s.root = "r/"
-    tracked = sel.report(s, {})["tracked"]
+    tracked = sel.report(s, {}, {})["tracked"]
     assert [t["listing"] for t in tracked] == ["slab-1"]
     assert f"{A[:12]}: photo_conflict: also shown by other-stone" in tracked[0]["what_happened"]
 

@@ -208,6 +208,85 @@ def test_a_later_clean_replaces_the_earlier_one():
     assert _click(s3, "SEN-ONE") == {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "sha": B, "at": LATER}
 
 
+# --- withdrawing a click (the hidden-listings page's DELETE /photos/clicks, through the one writer) ------------------
+def _withdraw(key, at=AT, **extra):
+    return {"id": key, "action": "withdraw", "source": "sentas", "at": at, **extra}
+
+
+def test_a_withdraw_removes_the_listing_s_click_and_nothing_else():
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B), _use("two", D)])
+    before = {k: v for k, v in s3.objects.items() if "/clicks/" not in k}
+    p = dec.plan(s3, [_withdraw("one", at=LATER)], LISTINGS, exclude=set())
+    assert p.deletions == [next(k for k in s3.objects if "/clicks/" in k)] and not (p.owner or p.removals or p.clicks)
+    dec.apply(s3, p)
+    assert _click(s3, "SEN-ONE") is None and s3.objects == before
+
+
+def test_a_withdraw_of_a_listing_without_a_click_changes_nothing():
+    s3 = _bucket()
+    assert dec.plan(s3, [_withdraw("one")], LISTINGS, exclude=set()).empty()
+
+
+def test_a_withdraw_older_than_the_stored_click_is_refused():
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B, at=LATER)])
+    with pytest.raises(dec.InvalidDecisions, match="older than the decision already stored"):
+        dec.plan(s3, [_withdraw("one")], LISTINGS, exclude=set())
+
+
+def test_a_withdraw_has_exactly_its_fields():
+    with pytest.raises(dec.InvalidDecisions, match="a withdraw has exactly the fields"):
+        dec.plan(_bucket(), [_withdraw("one", sha=B)], LISTINGS, exclude=set())
+
+
+def test_a_withdraw_beside_a_use_never_frees_a_conflict_photo_its_listing_holds():
+    # review of #555: a withdraw counted as the listing's new decision, so the stored holder of conflict photo E looked
+    # released and a use gave E to its partner too: E chosen by both
+    s3 = _bucket()
+    _apply(s3, [_use("leathered", E)])
+    with pytest.raises(dec.InvalidDecisions, match="already the owner's choice for leathered"):
+        dec.plan(s3, [_withdraw("leathered", at=LATER), _use("polished", E, at=LATER)], LISTINGS, exclude=set())
+
+
+def test_a_clean_of_a_source_whose_image_pipeline_is_off_is_refused(monkeypatch):
+    # its products show the scraped photos and the process never works on it: a click would wait for ever
+    monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
+    with pytest.raises(dec.InvalidDecisions, match="image pipeline is off"):
+        dec.plan(_bucket(), [_clean("one", B)], LISTINGS, exclude=set())
+
+
+# --- deciding in process (the config API's routes call this, the CLI too) ---------------------------------------------
+def _decide(monkeypatch, docs, dry_run, lock=None):
+    s3, held = _bucket(), []
+    monkeypatch.setattr(dec, "photo_listings", lambda client: LISTINGS)
+
+    @contextmanager
+    def exclusive(client, owner, on_lost=None):
+        if lock:
+            raise lock
+        held.append(owner["run_id"].startswith("decisions-"))
+        yield
+        held.append(False)
+    monkeypatch.setattr(dec.proc, "exclusive", exclusive)
+    return dec.decide(s3, docs, dry_run=dry_run, say=lambda line: None), s3, held
+
+
+def test_decide_applies_the_plan_inside_the_run_lock_and_returns_it(monkeypatch):
+    p, s3, held = _decide(monkeypatch, [_clean("one", B)], dry_run=False)
+    assert held == [True, False] and set(p.clicks) == {"SEN-ONE"} and _click(s3, "SEN-ONE")["sha"] == B
+
+
+def test_decide_dry_run_returns_the_plan_writes_nothing_and_takes_no_lock(monkeypatch):
+    p, s3, held = _decide(monkeypatch, [_clean("one", B)], dry_run=True)
+    assert held == [] and s3.written == [] and set(p.clicks) == {"SEN-ONE"}
+
+
+def test_decide_raises_run_active_and_writes_nothing_while_a_photos_run_holds_the_lock(monkeypatch):
+    with pytest.raises(dec.proc.RunActive):
+        _decide(monkeypatch, [_clean("one", B)], dry_run=False, lock=dec.proc.RunActive("held"))
+
+
 @pytest.mark.parametrize("stored, older", [(_clean("one", B, at=LATER), _use("one", A)),
                                           (_use("one", A, at=LATER), _clean("one", B)),
                                           (_clean("one", B, at=LATER), _remove("one")),
@@ -510,3 +589,34 @@ def test_no_decision_is_planned_before_the_produce_stored_the_conflict_set(monke
 def test_nothing_runs_without_an_explicit_environment(monkeypatch, tmp_path, capsys):
     rc, s3, held = _main(monkeypatch, tmp_path, [_use("one", B)], env=None)
     assert rc == 2 and s3.written == [] and held == [] and "SCRAPER_ENV" in capsys.readouterr().out
+
+
+# --- one decision from the page reads only what it touches (review of #555: a click must answer inside 15 s) ----------
+@pytest.mark.parametrize("docs", [[_clean("one", B)], [_use("block-1", F)], [_use("leathered", E)], [_withdraw("one")],
+                                  [_remove("two")]])
+def test_a_narrow_plan_is_the_full_plan_and_reads_only_the_choice_records_it_touches(docs):
+    s3 = _bucket()
+    for key in ("one", "two", "three", "block-1", "block-2", "leathered", "polished"):
+        s3.objects[f"{CHOSEN}{key}.json"] = json.dumps({"key": key, "sha": "c" * 64, "tag": C.RUN_TAG}).encode()
+    read = []
+    get = s3.get_object
+    s3.get_object = lambda Bucket, Key: read.append(Key) or get(Bucket, Key)
+    full = dec.plan(s3, docs, LISTINGS, exclude=set())
+    read.clear()
+    narrow = dec.plan(s3, docs, LISTINGS, exclude=set(), narrow=True)
+    assert vars(narrow) == vars(full)
+    touched = {k[len(CHOSEN):-len(".json")] for k in read if k.startswith(CHOSEN)}
+    group = {"block-1": {"block-1", "block-2"}, "leathered": {"leathered", "polished"}}
+    assert touched == group.get(docs[0]["id"], {docs[0]["id"]})
+
+
+def test_decide_takes_the_sheet_it_is_given_and_reads_none(monkeypatch):
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: pytest.fail("the sheet was read again"))
+
+    @contextmanager
+    def exclusive(client, owner, on_lost=None):
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", exclusive)
+    s3 = _bucket()
+    p = dec.decide(s3, [_clean("one", B)], dry_run=False, say=lambda line: None, sheet=LISTINGS, narrow=True)
+    assert set(p.clicks) == {"SEN-ONE"} and _click(s3, "SEN-ONE")["sha"] == B

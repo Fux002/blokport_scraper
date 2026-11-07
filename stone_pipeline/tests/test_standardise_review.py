@@ -1,0 +1,452 @@
+"""The hidden-listings page's side of the photo process (deploy.standardise_review, served by the config API under
+/config/v1/photos): the ledger's hidden listings joined with the review list, the owner's removals, the choice records
+and the live clicks, each row with its actions and its photos' images as presigned URLs made afresh on every request
+(never stored); the month's spend and paid uses; the owner's click and its withdrawal, through the one decisions writer
+(deploy.standardise_decisions.decide), refused while a photos run holds the lock. S3 and the ledger are stand-ins."""
+from __future__ import annotations
+
+import io
+import json
+from contextlib import contextmanager
+
+import pytest
+from botocore.exceptions import ClientError
+
+from deploy import standardise_decisions as dec
+from deploy import standardise_publish as pub
+from deploy import standardise_review as rv
+from stone_pipeline.config import server
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, STANDARDISE as C
+from stone_pipeline.io import imagestore
+
+A, B, D = "a" * 64, "b" * 64, "d" * 64
+RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
+CLN = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
+ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
+REVIEW = f"{ROOT}{C.REVIEW_FILE}"
+AT, LATER = "2026-11-07T10:00:00.000Z", "2026-11-07T11:00:00.000Z"
+
+
+class _S3:
+    """A bucket in a dict, every write recorded; a presigned URL names its key and how many were signed so far."""
+
+    def __init__(self, objects):
+        self.objects, self.written, self.signed = dict(objects), [], []
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return {"Body": io.BytesIO(self.objects[Key])}
+
+    def put_object(self, Bucket, Key, Body, ContentType=None):
+        self.written.append(Key)
+        self.objects[Key] = Body
+
+    def delete_object(self, Bucket, Key):
+        self.written.append(Key)
+        self.objects.pop(Key, None)
+
+    def get_paginator(self, name):
+        objects = self.objects
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                return [{"Contents": [{"Key": k, "ETag": "e"} for k in sorted(objects) if k.startswith(Prefix)]}]
+        return _Pages()
+
+    def generate_presigned_url(self, ClientMethod, Params, ExpiresIn):
+        assert ClientMethod == "get_object" and ExpiresIn == C.REVIEW_URL_TTL_SECONDS
+        self.signed.append(Params["Key"])
+        return f"https://signed/{Params['Key']}?n={len(self.signed)}"
+
+
+def _verdict(v, *kinds):
+    return json.dumps({"verdict": v, "problems": [{"kind": k} for k in kinds], "version": C.JUDGE_VERSION}).encode()
+
+
+def _listing(key, *photos, fmt="slab"):
+    return {"key": key, "sku": f"SEN-{key.upper()}", "source": "sentas", "stone": ("v1", key), "format": fmt,
+            "photos": list(photos)}
+
+
+ONE, TWO, TILE = _listing("one", A, B), _listing("two", D), _listing("tile-1", fmt="tile")
+
+
+def _bucket(**extra):
+    """A and B of listing one failed the judge for a reflection (a click's work), D of listing two too."""
+    return _S3({**{f"{RUN}{s}.main.jpg": b"m" for s in (A, B, D)},
+                **{f"{RUN}judged/{s}.json": _verdict("fail", "light_reflection") for s in (A, B, D)},
+                imagestore.conflicts_key("sentas"): b"{}", **extra})
+
+
+@pytest.fixture(autouse=True)
+def _sheet(monkeypatch):
+    """The product sheet's listings (tiles too) and the decisions applier's own reading of them; no lock held."""
+    monkeypatch.setattr(rv, "sheet", lambda s3: ([ONE, TWO], [TILE]))
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: [ONE, TWO])
+    monkeypatch.setattr(dec, "image_pipeline_off", lambda: set())
+
+    @contextmanager
+    def exclusive(client, owner, on_lost=None):
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", exclusive)
+
+
+def _hidden_in_ledger(monkeypatch, *listings):
+    monkeypatch.setattr(rv, "hidden_products", lambda: {l["sku"]: {"listing": l["key"], "source": l["source"]}
+                                                       for l in listings})
+
+
+def _photo(sha, state="fail", fixable=True, left=("nano2", "kontext", "flux3"), copy=None):
+    return {"sha": sha, "tag": C.RUN_TAG, "state": state, "kinds": ["light_reflection"], "held": None,
+            "fixable": fixable, "auto": False, "clean": {"tried": [], "left": list(left), "copy": copy}}
+
+
+def _row(listing, reason="awaiting_click", photos=None, click=None):
+    return {"listing": listing["key"], "source": "sentas", "format": listing["format"], "reason": reason, "why": None,
+            "click": click, "photos": photos if photos is not None else [_photo(s) for s in listing["photos"]]}
+
+
+# --- GET /photos/hidden -----------------------------------------------------------------------------------------------
+def test_each_listing_the_ledger_hides_has_one_row_with_its_reason_from_the_join(monkeypatch):
+    gone, chosen, unseen = _listing("gone"), _listing("chosen"), _listing("unseen")
+    _hidden_in_ledger(monkeypatch, ONE, gone, chosen, unseen, TILE)
+    tile_row = {**_row(TILE, "tile_no_stone", photos=[]), "why": "no tile of this size fits"}
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": _row(ONE), "SEN-TWO": _row(TWO), "SEN-TILE-1": tile_row}).encode(),
+                    imagestore.owner_removed_key("SEN-GONE"): json.dumps({"sku": "SEN-GONE", "listing": "gone",
+                                                                          "source": "sentas"}).encode(),
+                    f"{ROOT}chosen/chosen.json": json.dumps({"key": "chosen", "sha": A}).encode()})
+    rows = {r["sku"]: r for r in rv.hidden(s3)["rows"]}
+    assert {sku: r["reason"] for sku, r in rows.items()} == {
+        "SEN-ONE": "awaiting_click", "SEN-GONE": "owner_removed", "SEN-CHOSEN": "chosen_not_linked",
+        "SEN-UNSEEN": "not_worked_yet", "SEN-TILE-1": "tile_no_stone"}             # two: not hidden, not listed
+    assert rows["SEN-UNSEEN"] == {"sku": "SEN-UNSEEN", "listing": "unseen", "source": "sentas", "format": None,
+                                  "reason": "not_worked_yet", "why": None, "click": None, "photos": [], "actions": []}
+    assert rows["SEN-TILE-1"]["why"] == "no tile of this size fits" and rows["SEN-TILE-1"]["actions"] == []
+    assert [r["sku"] for r in rv.hidden(s3)["rows"]] == sorted(rows, key=lambda sku: (rows[sku]["source"],
+                                                                                     rows[sku]["listing"]))
+
+
+def test_image_urls_are_signed_afresh_on_every_request_and_never_stored(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    photos = [_photo(A), _photo(B, state="no_result", copy="fail")]
+    stored = json.dumps({"SEN-ONE": _row(ONE, photos=photos)}).encode()
+    s3 = _bucket(**{REVIEW: stored})
+    first, second = rv.hidden(s3)["rows"][0]["photos"], rv.hidden(s3)["rows"][0]["photos"]
+    scraped = imagestore.scraped_prefix("sentas")
+    assert first[0]["urls"] == {"original": f"https://signed/{scraped}{A}.jpg?n=1",
+                                "result": f"https://signed/{RUN}{A}.main.jpg?n=2", "cleaned": None}
+    assert first[1]["urls"] == {"original": f"https://signed/{scraped}{B}.jpg?n=3", "result": None,
+                                "cleaned": f"https://signed/{CLN}cleaned/{B}.jpg?n=4"}
+    assert second[0]["urls"]["original"].endswith("?n=5")                       # minted again, not cached
+    assert s3.objects[REVIEW] == stored and b"http" not in stored and REVIEW not in s3.written
+
+
+def test_a_row_offers_clean_for_a_photo_a_click_can_still_fix_and_withdraw_for_a_live_click(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE, TWO)
+    one = _row(ONE, photos=[_photo(A, fixable=False, left=()), _photo(B)])
+    two = _row(TWO, "clean_failed", photos=[_photo(D, left=())])
+    click = pub.click_record("SEN-TWO", "two", "sentas", D, AT)
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": one, "SEN-TWO": two}).encode(),
+                    f"{pub.clicks_prefix(ROOT)}{imagestore.sku_file('SEN-TWO')}": json.dumps(click).encode()})
+    rows = {r["sku"]: r for r in rv.hidden(s3)["rows"]}
+    assert rows["SEN-ONE"]["actions"] == ["clean"] and [p["clickable"] for p in rows["SEN-ONE"]["photos"]] == [False, True]
+    assert rows["SEN-TWO"]["actions"] == ["withdraw"] and rows["SEN-TWO"]["photos"][0]["clickable"] is False
+
+
+def test_a_row_shows_the_live_click_the_run_s_state_while_it_is_the_same_and_queued_once_changed(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    seen = {"sha": B, "at": AT, "state": "waiting", "why": "cleaning cap reached"}
+    clicks = pub.clicks_prefix(ROOT) + imagestore.sku_file("SEN-ONE")
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": _row(ONE, click=seen)}).encode(),
+                    clicks: json.dumps(pub.click_record("SEN-ONE", "one", "sentas", B, AT)).encode()})
+    assert rv.hidden(s3)["rows"][0]["click"] == seen
+    s3.objects[clicks] = json.dumps(pub.click_record("SEN-ONE", "one", "sentas", A, LATER)).encode()
+    assert rv.hidden(s3)["rows"][0]["click"] == {"sha": A, "at": LATER, "state": "queued", "why": None}
+    s3.objects[clicks] = b"not json"
+    click = rv.hidden(s3)["rows"][0]["click"]
+    assert click["state"] == "blocked" and click["why"].startswith("its file cannot be read")
+    del s3.objects[clicks]
+    assert rv.hidden(s3)["rows"][0]["click"] is None                            # withdrawn since the run
+
+
+def test_a_review_list_that_cannot_be_read_is_said_never_served_empty(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    with pytest.raises(rv.Unavailable, match="review.json"):
+        rv.hidden(_bucket(**{REVIEW: b"not json"}))
+
+
+def test_before_any_full_run_every_hidden_listing_is_not_worked_yet(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    assert [r["reason"] for r in rv.hidden(_bucket())["rows"]] == ["not_worked_yet"]
+
+
+def test_the_hidden_products_are_read_from_the_ledger_by_reason_no_photo_with_their_source_names(tmp_path, monkeypatch):
+    from stone_pipeline.config import store
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas Marble", "ports": ["Izmir"]})
+    path = tmp_path / "dev.ledger"
+    monkeypatch.setattr(writethrough, "ledger_path", lambda: path)
+    with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        for sku, handle, reason in (("SEN-1", "one", "no_photo"), ("SEN-2", "two", None), ("SEN-3", "three", "delisted")):
+            lg.upsert("product", {"sku": sku, "source": "sen", "handle": handle, "created_at": AT, "updated_at": AT},
+                      pk=("sku",))
+            lg.upsert("inventory", {"sku": sku, "qty": 0, "reason": reason, "updated_at": AT}, pk=("sku",))
+    assert rv.hidden_products() == {"SEN-1": {"listing": "one", "source": "sentas"}}
+    path.unlink()
+    with pytest.raises(rv.Unavailable, match="ledger"):
+        rv.hidden_products()
+
+
+# --- GET /photos/spend ------------------------------------------------------------------------------------------------
+def test_the_month_s_spend_lists_each_run_the_cleaning_uses_and_both_budgets(monkeypatch):
+    monkeypatch.setattr(C, "BUDGET_USD", 100.0)
+    monkeypatch.setattr(C, "CLEAN_BUDGET_USD", 10.0)
+    # the shape select.clean_photo records (Spend.record stamps at); the run is the file it is kept in
+    use = {"at": "2026-11-07T10:00:00+00:00", "source": "sentas", "sha": A, "sku": "SEN-ONE", "listing": "one",
+           "reason": "click", "kinds": ["light_reflection"], "click_at": AT, "model": "nano2", "call": "edit", "usd": 0.12}
+    early = {**use, "at": "2026-11-02T09:00:00+00:00", "call": "check", "usd": 0.02}
+    spend, clean = f"{ROOT[:-len(C.CLEAN_TAG) - 1]}{C.SPEND_DIR}/2026-11/", f"{ROOT[:-len(C.CLEAN_TAG) - 1]}{C.CLEAN_SPEND_DIR}/2026-11/"
+    s3 = _S3({f"{spend}R1.json": json.dumps({"usd": 3.5, "uses": []}).encode(),
+              f"{spend}R2.json": json.dumps({"usd": 1.25, "uses": []}).encode(),
+              f"{spend}R3.json": b"not json", f"{spend}R4.json": json.dumps({"uses": []}).encode(),
+              f"{clean}R2.json": json.dumps({"usd": 0.12, "uses": [use]}).encode(),
+              f"{clean}R1.json": json.dumps({"usd": 0.02, "uses": [early]}).encode(),
+              f"{spend[:-8]}2026-10/R0.json": json.dumps({"usd": 50.0, "uses": []}).encode()})
+    out = rv.spend(s3, "2026-11")
+    assert out["month"] == "2026-11"
+    assert out["process"] == {"budget_usd": 100.0, "spent_usd": 4.75,
+                              "runs": [{"run_id": "R1", "usd": 3.5}, {"run_id": "R2", "usd": 1.25}],
+                              "unreadable": [{"run_id": "R3", "error": out["process"]["unreadable"][0]["error"]},
+                                             {"run_id": "R4", "error": "usd is None, not a number"}]}
+    assert out["cleaning"]["budget_usd"] == 10.0 and out["cleaning"]["spent_usd"] == 0.14
+    assert out["cleaning"]["uses"] == [{"run_id": "R1", **early}, {"run_id": "R2", **use}]
+    assert out["cleaning"]["unreadable"] == []
+
+
+# --- PUT /photos/clicks/{sku} -------------------------------------------------------------------------------------------
+def _clicks(s3):
+    return pub.read_clicks(s3, ROOT)
+
+
+def test_a_click_on_a_hidden_listing_s_fixable_photo_is_queued_through_the_one_writer(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    written = []
+    monkeypatch.setattr(rv.decisions, "decide", lambda s3, docs, dry_run, say, sheet, narrow: written.append(
+        (docs, dry_run, sheet, narrow)) or dec.plan(s3, docs, sheet, set(), narrow=narrow))
+    s3 = _bucket()
+    assert rv.click(s3, "SEN-ONE", B, AT) == (200, {"sku": "SEN-ONE", "status": "queued"})
+    doc = {"id": "one", "action": "clean", "source": "sentas", "sha": B, "at": AT}
+    assert written == [([doc], False, [ONE, TWO], True)]    # applied once, under the lock, on the sheet read once
+
+
+def test_a_queued_click_is_the_record_the_photos_run_reads(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    assert rv.click(s3, "SEN-ONE", B, AT)[1]["status"] == "queued"
+    assert _clicks(s3) == {"SEN-ONE": pub.click_record("SEN-ONE", "one", "sentas", B, AT)}
+
+
+def test_a_click_on_a_listing_not_hidden_is_409_and_writes_nothing(monkeypatch):
+    _hidden_in_ledger(monkeypatch, TWO)
+    s3 = _bucket()
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert (code, body["reason"]) == (409, "not_hidden") and s3.written == []
+    monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})          # never hidden: the applier's 422 first
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert code == 422 and "image pipeline is off" in body["error"] and s3.written == []
+
+
+def test_a_click_on_a_listing_whose_photo_now_passes_is_409_chosen_not_linked(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{f"{RUN}judged/{A}.json": _verdict("pass")})
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert (code, body["reason"]) == (409, "chosen_not_linked") and s3.written == []
+    s3 = _bucket(**{f"{ROOT}chosen/one.json": json.dumps({"key": "one", "sha": A}).encode()})
+    assert rv.click(s3, "SEN-ONE", B, AT)[1]["reason"] == "chosen_not_linked"
+
+
+def test_a_click_on_a_photo_already_cleaned_is_200_already_cleaned_and_writes_nothing(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{f"{CLN}cleaned/{B}.jpg": b"c"})
+    assert rv.click(s3, "SEN-ONE", B, AT) == (200, {"sku": "SEN-ONE", "status": "already_cleaned"})
+    assert s3.written == []
+
+
+def test_a_click_on_a_photo_with_no_model_left_is_200_nothing_left_to_try_and_writes_nothing(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    failed = json.dumps({"passes": False, "clean_version": C.CLEAN_VERSION}).encode()
+    s3 = _bucket(**{f"{CLN}attempts/{B}.{m}.json": failed for m in ("nano2", "kontext", "flux3")})
+    assert rv.click(s3, "SEN-ONE", B, AT) == (200, {"sku": "SEN-ONE", "status": "nothing_left_to_try"})
+    assert s3.written == []
+
+
+@pytest.mark.parametrize("case, match", [
+    ("unfixable", "a cleaned copy cannot fix"), ("conflict", "conflict photo"), ("excluded", "exclude list"),
+    ("off", "image pipeline is off"), ("tile", "not on the product sheet as a photo listing")])
+def test_a_click_the_photos_run_could_never_use_is_422_with_the_applier_s_reason(monkeypatch, case, match):
+    listing = TILE if case == "tile" else ONE
+    _hidden_in_ledger(monkeypatch, listing)
+    s3 = _bucket()
+    sha = B
+    if case == "unfixable":
+        s3.objects[f"{RUN}judged/{B}.json"] = _verdict("fail", "not_one_slab")
+    elif case == "conflict":
+        s3.objects[imagestore.conflicts_key("sentas")] = json.dumps({B: ["one", "other"]}).encode()
+        monkeypatch.setattr(dec, "photo_listings", lambda client: [ONE, TWO, _listing("other", B)])
+    elif case == "excluded":
+        monkeypatch.setattr(dec, "excluded", lambda: {B})
+    elif case == "off":
+        monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
+    code, body = rv.click(s3, listing["sku"], sha, AT)
+    assert code == 422 and match in body["error"] and s3.written == []
+
+
+def test_a_click_while_a_photos_run_holds_the_lock_is_409_naming_the_run(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "20261107T090000Z"}).encode()})
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert (code, body["reason"], body["run_id"]) == (409, "run_active", "20261107T090000Z") and s3.written == []
+
+
+def test_a_click_never_lists_a_whole_run_folder(monkeypatch):
+    # review of #555: dev v2/zucchi holds 56,840 keys; a click reads only its listing's photos
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    listed = []
+    pages = s3.get_paginator
+
+    def paginator(name):
+        inner = pages(name)
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                listed.append(Prefix)
+                return inner.paginate(Bucket=Bucket, Prefix=Prefix)
+        return _Pages()
+    s3.get_paginator = paginator
+    assert rv.click(s3, "SEN-ONE", B, AT)[1]["status"] == "queued"
+    assert RUN not in listed and CLN not in listed and f"{ROOT}chosen/" not in listed
+
+
+def test_a_click_reads_only_its_listing_s_candidates_and_the_clicked_photo(monkeypatch):
+    # dev SEN-6978 has 114 photos: what the run judges (its first JUDGE_MAX_PER_LISTING) and the click are all a click asks
+    many = [f"{i:x}" * 64 for i in range(1, 7)]
+    listing = _listing("long", *many)
+    monkeypatch.setattr(rv, "sheet", lambda s3: ([ONE, TWO, listing], [TILE]))
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: [ONE, TWO, listing])
+    _hidden_in_ledger(monkeypatch, listing)
+    s3 = _bucket(**{f"{RUN}{s}.main.jpg": b"m" for s in many},
+                 **{f"{RUN}judged/{s}.json": _verdict("fail", "light_reflection") for s in many})
+    listed = []
+    pages = s3.get_paginator
+
+    def paginator(name):
+        inner = pages(name)
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                listed.append(Prefix)
+                return inner.paginate(Bucket=Bucket, Prefix=Prefix)
+        return _Pages()
+    s3.get_paginator = paginator
+    assert rv.click(s3, "SEN-LONG", many[5], AT)[1]["status"] == "queued"
+    read = {sha for sha in many if any(sha in prefix for prefix in listed)}
+    assert read == set(many[:C.JUDGE_MAX_PER_LISTING]) | {many[5]}
+
+
+def test_a_click_while_a_decisions_apply_holds_the_lock_says_so(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "decisions-20261107T120000Z"}).encode()})
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert code == 409 and "a decisions apply holds the lock" in body["error"] and "photos run" not in body["error"]
+
+
+def test_a_click_on_an_unknown_sku_is_404(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    assert rv.click(_bucket(), "SEN-NOWHERE", B, AT)[0] == 404
+
+
+# --- DELETE /photos/clicks/{sku} ----------------------------------------------------------------------------------------
+def test_a_withdraw_removes_the_click_through_the_one_writer_and_a_second_finds_none(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    rv.click(s3, "SEN-ONE", B, AT)
+    assert rv.withdraw(s3, "SEN-ONE", LATER) == (200, {"sku": "SEN-ONE", "status": "withdrawn"})
+    assert _clicks(s3) == {} and rv.withdraw(s3, "SEN-ONE", LATER) == (200, {"sku": "SEN-ONE", "status": "no_click"})
+
+
+def test_a_withdraw_older_than_the_click_is_422_and_one_while_a_run_holds_the_lock_is_409(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    rv.click(s3, "SEN-ONE", B, LATER)
+    assert rv.withdraw(s3, "SEN-ONE", AT)[0] == 422
+
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    assert rv.withdraw(s3, "SEN-ONE", "2026-11-07T12:00:00.000Z")[1]["reason"] == "run_active"
+    assert rv.withdraw(s3, "SEN-NOWHERE", LATER)[0] == 404
+
+
+# --- the routes (config API) ----------------------------------------------------------------------------------------------
+@pytest.fixture
+def _served(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "hidden", lambda s3: calls.append(("hidden", s3)) or {"rows": []})
+    monkeypatch.setattr(rv, "spend", lambda s3, month: calls.append(("spend", month)) or {"month": month})
+    monkeypatch.setattr(rv, "click", lambda s3, sku, sha, at: calls.append(("click", sku, sha, at)) or (200, {}))
+    monkeypatch.setattr(rv, "withdraw", lambda s3, sku, at: calls.append(("withdraw", sku, at)) or (200, {}))
+    return calls
+
+
+def test_the_photo_routes_reach_the_review_module_with_the_sku_decoded(_served):
+    assert server.dispatch("GET", ["photos", "hidden"], None) == (200, {"rows": []})
+    assert server.dispatch("PUT", ["photos", "clicks", "MAR-P%2F02%2F16"], {"sha": B, "at": AT})[0] == 200
+    assert server.dispatch("DELETE", ["photos", "clicks", "MAR-P%2F02%2F16"], {"at": AT})[0] == 200
+    assert server.dispatch("GET", ["photos", "spend"], None, "month=2026-10")[0] == 200
+    assert _served == [("hidden", "s3"), ("click", "MAR-P/02/16", B, AT), ("withdraw", "MAR-P/02/16", AT),
+                       ("spend", "2026-10")]
+
+
+def test_the_spend_route_defaults_to_this_month_and_refuses_another_shape(_served):
+    from datetime import datetime, timezone
+    server.dispatch("GET", ["photos", "spend"], None)
+    assert _served == [("spend", datetime.now(timezone.utc).strftime("%Y-%m"))]
+    for bad in ("month=2026-13", "month=26-11", "month=2026-1", "month=x"):
+        assert server.dispatch("GET", ["photos", "spend"], None, bad)[0] == 400
+
+
+@pytest.mark.parametrize("body", [None, [], {"sha": B}, {"at": AT}, {"sha": "x", "at": AT}, {"sha": B, "at": "today"},
+                                  {"sha": B, "at": AT, "more": 1}])
+def test_a_click_with_a_bad_body_is_400_and_reaches_nothing(_served, body):
+    assert server.dispatch("PUT", ["photos", "clicks", "SEN-ONE"], body)[0] == 400 and _served == []
+
+
+def test_a_withdraw_with_a_bad_body_is_400(_served):
+    for body in (None, {}, {"at": "today"}, {"at": AT, "sha": B}):
+        assert server.dispatch("DELETE", ["photos", "clicks", "SEN-ONE"], body)[0] == 400
+    assert _served == []
+
+
+def test_a_store_that_cannot_be_read_is_503_naming_it(monkeypatch):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "hidden", lambda s3: (_ for _ in ()).throw(rv.Unavailable("the ledger cannot be read")))
+    assert server.dispatch("GET", ["photos", "hidden"], None) == (503, {"error": "the ledger cannot be read"})

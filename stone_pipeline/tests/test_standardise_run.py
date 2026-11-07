@@ -258,7 +258,7 @@ def _steps(monkeypatch, cap_at=None):
     monkeypatch.setattr(runner.select, "settle", step("settle"))
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (done.append(f"gpu {tag}"), ([], False))[1])
     return done
 
@@ -284,7 +284,7 @@ def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_th
     monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: given.setdefault("clean", spend) and ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
     assert given["judge"] is process and given["clean"] is cleaning
 
@@ -295,7 +295,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}})
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
@@ -347,7 +347,7 @@ def test_the_process_budget_still_ends_the_run_in_any_step(monkeypatch):
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     _steps(monkeypatch)
-    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits, marks: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": [], "review": {}})
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
 
@@ -742,10 +742,11 @@ def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch
         monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": True}, 0.02))
         cap = sel_mod.Spend(3 * _send_price(), cap_error=sel_mod.CleanCapReached)
         plans, _ = s.plans()
-        problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+        problems, _, _, waits, marks = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
         paid.append(sorted(k for k in store.objects if "/cleaned/" in k))
         assert cap.spent <= cap.budget and not cap.capped
         assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"] and waits == {}   # no click waits
+        assert marks == {k: runner.WAIT_CAP for k in keys[3:]}       # each mark's wait by listing, for the review list
     assert paid[0] == paid[1] == paid[2] == sorted(f"{CL_P}cleaned/{sha}.jpg" for sha in shas[:3])
 
 
@@ -781,9 +782,9 @@ def test_a_mark_that_waits_beside_a_collected_click_is_never_called_the_click_s_
     monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": False}, 0.02))
     plans, _ = s.plans()
     cap = sel_mod.Spend(3 * C.JUDGE_PRICE_USD, cap_error=sel_mod.CleanCapReached)          # A's checks, not E's edit
-    problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+    problems, _, _, waits, marks = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
     assert waits == {} and not any("owner's click waits" in p for p in problems)
-    assert any(p.startswith("the marks of 1 listings wait") for p in problems)
+    assert any(p.startswith("the marks of 1 listings wait") for p in problems) and marks == {"slab-1": runner.WAIT_CAP}
 
 
 def test_without_a_cleaning_cap_a_ready_click_says_it_waits_for_one(monkeypatch):
@@ -1052,6 +1053,24 @@ def test_a_lock_released_while_we_looked_at_it_is_taken_on_the_next_try():
     s3.head_object = released
     with runner.exclusive(s3, {"run_id": "R2"}, now=NOW):
         assert s3.locks[runner.LOCK]["owner"] == "R2"
+
+
+def test_the_lock_holder_is_the_run_id_its_body_names_and_none_without_a_lock():
+    # the config API's photo routes answer 409 with it, so the page can say which run to wait for
+    import io
+    from botocore.exceptions import ClientError
+
+    class _Body:
+        def __init__(self, body):
+            self.body = body
+
+        def get_object(self, Bucket, Key):
+            if self.body is None:
+                raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+            assert Key == runner.LOCK
+            return {"Body": io.BytesIO(self.body)}
+    assert runner.lock_holder(_Body(json.dumps({"run_id": "20261107T100000Z", "tags": []}).encode())) == "20261107T100000Z"
+    assert runner.lock_holder(_Body(None)) is None
 
 
 def test_the_lock_is_released_even_when_the_run_fails():
