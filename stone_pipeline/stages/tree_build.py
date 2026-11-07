@@ -166,22 +166,29 @@ def _load_product_tuples(path: Path | None) -> set[tuple]:
     return out
 
 
-def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str]) -> set[tuple]:
-    """The combination tuples of ledger-ACKED products (medusa_id set), in COMBINATION_COLUMNS order, so a
+def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str], ledger=None) -> tuple[set[tuple], int]:
+    """(tuples, unrebuilt) for the ledger-ACKED products (medusa_id set), in COMBINATION_COLUMNS order, so a
     product live in Medusa keeps its combination even when this run emitted nothing for it (held for a
     transient reason, or its source produced nothing). Reconstructed from ledger/existing.acked_products (the
     ONE ledger reader) with names mapped to ids through the attributes vocabulary (`attr`, the single
-    authority) and the variation id from the export (keyed by normalized Key). Empty when there is no ledger."""
-    from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
+    authority) and the variation id from the export (keyed by normalized Key). `ledger`, when given, is read
+    directly (ledger.verify passes the ledger it was given); else the per-env ledger is opened if it exists.
+    `unrebuilt` counts acked products whose tuple could not be fully rebuilt (a missing id/vid), surfaced as a
+    finding rather than dropped silently. Empty when there is no ledger."""
     from stone_pipeline.ledger.existing import acked_products
-    path = writethrough.ledger_path()
-    if not path.exists():
-        return set()
-    with Ledger.open(path, env=writethrough.ENV_NAME,
-                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
-        acked = acked_products(lg)
+    if ledger is not None:
+        acked = acked_products(ledger)
+    else:
+        from stone_pipeline.ledger import writethrough
+        from stone_pipeline.ledger.db import Ledger
+        path = writethrough.ledger_path()
+        if not path.exists():
+            return set(), 0
+        with Ledger.open(path, env=writethrough.ENV_NAME,
+                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+            acked = acked_products(lg)
     out: set[tuple] = set()
+    unrebuilt = 0
     for carried in acked.values():
         d = dict(carried)   # {dimension: norm(value)}, one value per dimension
         t = (attr["category"].get(d.get("category", "")), attr["type"].get(d.get("type", "")),
@@ -189,7 +196,9 @@ def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str]) -> set[tu
              attr["color"].get(d.get("color", "")), attr["quality"].get(d.get("quality", "")))
         if all(t):
             out.add(t)
-    return out
+        else:
+            unrebuilt += 1
+    return out, unrebuilt
 
 
 def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
@@ -265,6 +274,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                        exclude_ids: set[str] | None = None,
                        retired_keys: set[str] | None = None,
                        leaf_overlay: "dict[tuple[str, str], dict[str, list[str]]] | None" = None,
+                       acked_ledger=None,
                        ) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
     uncovered). exclude_ids = variation IDs slated for deletion in Medusa (variants_to_delete);
@@ -450,9 +460,11 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     # restricted set leaves `combinations` untouched (byte-identical); the ledger is opened only when restricted.
     vidx = COMBINATION_COLUMNS.index("variation_id")
     missing_product_tuples = len(emitted_tuples - combinations)
+    unrebuilt_acked = 0
     if restricted_ids:
-        keep_set = set(emitted_tuples) | _acked_combination_tuples(
-            attr, {match_key(k): v for k, v, _ in export_rows})
+        acked_tuples, unrebuilt_acked = _acked_combination_tuples(
+            attr, {match_key(k): v for k, v, _ in export_rows}, acked_ledger)
+        keep_set = set(emitted_tuples) | acked_tuples
         attr_pos = tuple(i for i, col in enumerate(COMBINATION_COLUMNS) if col != "variation_id")
         assignable = {c for c in combinations if not restricted_ids.intersection(c[p] for p in attr_pos)}
         combinations = assignable | (combinations & keep_set)
@@ -469,17 +481,23 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         elif key in archived_keys:
             frozen_count += 1
         else:
+            # dormant: a vid with a pre-filter diagnostic keeps it (even the empty '' main writes when only the
+            # category pcat was missing); "restricted" is only for a vid dropped BY the filter (not pre-filter).
             uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix,
-                              "missing": premissing.get(vid) or "restricted"})
+                              "missing": premissing[vid] if vid in premissing else "restricted"})
     stats = {"covered": covered, "uncovered": len(uncovered), "frozen": frozen_count,
              "combination_rows": len(combinations),
              "variations": len({c[vidx] for c in combinations}),
              "categories": len({c[0] for c in combinations}),
              "product_tuples_absent_from_fanout": missing_product_tuples,
+             "acked_tuples_unrebuilt": unrebuilt_acked,
              "category_finish_counts": {k: len(v) for k, v in cat_finishes.items()}}
     if missing_product_tuples:
         log.warning("emitted product tuples absent from the fan-out (kept none of these; a separate finding)",
                     extra={"extra_fields": {"count": missing_product_tuples}})
+    if unrebuilt_acked:
+        log.warning("acked products whose combination tuple could not be rebuilt (a missing id/vid); not kept",
+                    extra={"extra_fields": {"count": unrebuilt_acked}})
     return combinations, stats, uncovered
 
 

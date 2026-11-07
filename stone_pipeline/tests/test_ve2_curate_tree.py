@@ -165,6 +165,7 @@ import pytest  # noqa: E402
 from stone_pipeline.matching import projections as proj  # noqa: E402
 from stone_pipeline.reference import loaders  # noqa: E402
 from stone_pipeline.stages import curate  # noqa: E402
+from stone_pipeline.stages.curate import existing as cur_existing  # noqa: E402
 from stone_pipeline.stages.curate import minting  # noqa: E402
 from stone_pipeline.tests import _decision_views as views  # noqa: E402
 from stone_pipeline.tests.test_mint_matrix import _is_held, _minted_keys, _scrape  # noqa: E402
@@ -230,18 +231,112 @@ def test_mint_drops_a_restricted_colour_but_keeps_the_rest(ref, monkeypatch):
     assert posts and all("Pink" not in p["color"] and "Grey" in p["color"] for p in posts)
 
 
-def test_decision_audit_skips_the_mint_gap_when_a_hold_card_exists():
-    # fix 6c: a mint held this produce (its spelling carried by a pending card) must NOT also raise a
-    # "Mint not applied" decision_gap -- one hold, one review entry. A held-with-no-card mint still gaps.
+def test_decision_audit_suppresses_the_mint_gap_only_for_a_ve2_hold():
+    # fix 6c: the "Mint not applied" gap is suppressed only when THIS (source, spelling) is held by a VE2
+    # freeze card -- not by another vendor's card, and not for non-VE2 holds. One hold, one review entry.
     from stone_pipeline.stages import decision_audit
-    decisions = SimpleNamespace(
-        statements={("", "novum frozen stone"): SimpleNamespace(
-            is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone", stone_type="Granite",
-            source="varsha", origin_iso="")},
-        bindings={}, vendor_origins={})
-    carded = decision_audit.audit([], existing=set(), created=set(), decisions=decisions,
-                                  pending_spellings={"novum frozen stone"})
-    assert not any(g["decision"] == "mint" for g in carded)      # a card exists -> no duplicate gap
-    uncarded = decision_audit.audit([], existing=set(), created=set(), decisions=decisions,
-                                    pending_spellings=set())
-    assert any(g["decision"] == "mint" for g in uncarded)        # no card -> the gap still fires
+    st = SimpleNamespace(is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone",
+                         stone_type="Granite", source="varsha", origin_iso="")
+    decisions = SimpleNamespace(statements={("varsha", "novum frozen stone"): st},
+                                bindings={}, vendor_origins={})
+    held = decision_audit.audit([], set(), set(), decisions, set(),
+                                held_ve2={("varsha", "novum frozen stone")})
+    assert not any(g["decision"] == "mint" for g in held)         # same (source, spelling) held -> no gap
+    other = decision_audit.audit([], set(), set(), decisions, set(),
+                                 held_ve2={("zucchi", "novum frozen stone")})
+    assert any(g["decision"] == "mint" for g in other)            # another vendor's card never hides this gap
+    assert any(g["decision"] == "mint"                            # no VE2 hold -> the gap fires
+               for g in decision_audit.audit([], set(), set(), decisions, set()))
+
+
+def test_a_gapped_scrape_aliasing_to_an_archived_variety_is_held(ref, monkeypatch):
+    # fix 1 (round 2): the alias to an archived variety never serves, so curate surfaces an archived_variety
+    # card (the alias row is still recorded). No card when the owner is active.
+    v = next(iter(cur_existing.load_all_existing()["slab"].varieties))
+    name, ntype = v["Name"], v["type"]
+    active = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
+    assert not any(p.get("kind") == "archived_variety" for p in active.pending_confirm)   # owner active -> no card
+
+    real = cur_existing.load_all_existing()
+    for imp in real.values():
+        for e in imp.varieties:
+            if e["Name"] == name and e["type"] == ntype:
+                e["archived"] = True
+        imp.by_name_type.clear(); imp.by_name.clear()
+        for e in imp.varieties:
+            imp.by_name_type[(proj.norm(e["Name"]), e["type"])] = e
+            imp.by_name[proj.norm(e["Name"])] = e
+    monkeypatch.setattr(curate, "load_all_existing", lambda: real)
+    held = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
+    assert any(p.get("kind") == "archived_variety" for p in held.pending_confirm)   # owner archived -> held
+
+
+def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monkeypatch):
+    # fix 2: the QUALITY recovery text must not send the operator to a Review action that cannot set a quality.
+    views.mint("Novum Only Quality", stone_type="Granite")
+    monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"quality": {proj.norm("A")}})
+    rows = [_mk_row("Novum Only Quality", "White")]   # quality A is the pack last-resort, now restricted
+    rows[0].quality_name = "A"
+    res = curate.build_curation(rows, ref)
+    card = next((p for p in res.pending_confirm
+                 if p.get("kind") == "archived_value" and p["variant"] == "Novum Only Quality"), None)
+    if card is not None:   # only if the quality dimension emptied for this mint
+        assert "Reactivate it in Blokport" in card["reason"] and "quality in Review" not in card["reason"]
+
+
+def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path):
+    # fix 4: when ONLY the category pcat is missing (not colour/quality), main writes an empty missing. The
+    # post-filter classification must preserve that '' (not write 'restricted'), so the file is byte-identical.
+    p = tmp_path / "attrs_no_category.csv"
+    with p.open("w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(["category", "value", "sourceid"])
+        w.writerows([r for r in _ATTR_ROWS if r[0] != "category"])   # NO category pcat rows
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    _combos, _stats, unc = tree_build.build_combinations(exp, p, [bb], None)
+    entry = next(u for u in unc if u["Id"] == "v1")
+    assert entry["missing"] == ""      # category-only shortfall -> empty, exactly as main writes it
+
+
+def test_an_acked_product_that_cannot_be_rebuilt_is_counted(tmp_path, monkeypatch):
+    # fix 5: an acked product whose tuple cannot be rebuilt (an id/vid missing) is counted, not dropped silently.
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    key = "slab_marble_carrara_1"
+    lpath = tmp_path / "dev.ledger"
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
+    with Ledger.open(lpath, env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        now = now_iso()
+        lg.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "Carrara",
+                                "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
+                                "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+                                "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
+                                "created_at": now, "updated_at": now}, pk=("key",))
+        lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1",
+                              "color": "NoSuchColour", "finish": "Polished", "quality": "A", "type": "Marble",
+                              "category": "Slabs", "variation_key": key, "medusa_id": "M1", "state": "synced",
+                              "created_at": now, "updated_at": now}, pk=("sku",))
+    bb = _backbone(tmp_path, [_post(key, "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", key, "Carrara")])
+    attrs = _attrs_status(tmp_path, archived=[("color", "White")])   # something restricted -> acked path runs
+    _combos, stats, _unc = tree_build.build_combinations(exp, attrs, [bb], None)
+    assert stats["acked_tuples_unrebuilt"] >= 1   # NoSuchColour has no id -> counted, not dropped silently
+
+
+def test_render_dump_attributes_writes_status_and_internal(tmp_path):
+    # fix 6: render._dump_attributes carries status/internal so ledger.verify matches once restricted. A revert
+    # to the 3-column shape fails this.
+    from stone_pipeline.ledger import render
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        now = now_iso()
+        lg.upsert("attribute", {"category": "color", "value": "Beige", "medusa_id": "c1", "state": "synced",
+                                "created_at": now, "updated_at": now}, pk=("category", "value"))
+        out = tmp_path / "attrs.csv"
+        render._dump_attributes(lg, out)
+    with out.open(encoding="utf-8-sig", newline="") as h:
+        rows = list(csv.DictReader(h))
+    assert "status" in rows[0] and "internal" in rows[0]
+    assert rows[0]["status"] == "active" and rows[0]["internal"] == "false"

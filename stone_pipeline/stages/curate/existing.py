@@ -44,6 +44,11 @@ def load_all_existing() -> dict[str, ImportFile]:
                 "Aliases": "|".join(r.aliases),
                 "Volume": r.volume,
                 "type": proj.norm(type_slug_from_key(r.key)),   # the variety's stone type, from its Key
+                # VE2 PR5: the export's archived flag. An archived variety STAYS in the index (a scrape still
+                # recognizes it, no re-mint); classify uses the flag to surface a card when a gapped scrape
+                # would need a NEW alias onto a frozen variety (which the lane never serves, so it would
+                # otherwise stay a tree gap forever). False in the expand phase, so the index is unchanged.
+                "archived": r.archived,
             }
             imp.varieties.append(v)
             imp.by_name_type[(proj.norm(r.name), v["type"])] = v

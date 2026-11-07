@@ -13,8 +13,8 @@ from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import restricted_values
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
-from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
-                                                 review_evidence)
+from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, human_join, named_with_types,
+                                                 review_card, review_evidence)
 from stone_pipeline.state.writeback import is_learned
 
 log = logfmt.get_logger("curate")
@@ -150,12 +150,22 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         colors = [x for x in colors if not (x and proj.norm(x) in rc)]
         qualities = [x for x in qualities if not (x and proj.norm(x) in rq)]
         if would_mint and ((dropped_colors and not colors) or (dropped_quals and not qualities)):
-            named = ", ".join([*(f"colour {v}" for v in dropped_colors if not colors),
-                               *(f"quality {v}" for v in dropped_quals if not qualities)])
-            c.pending_confirm.append(review_card("archived_value", title,
-                f"The only {named} this variety would mint with is archived or internal in Medusa. Pick an "
-                "active value in Review, or reactivate it in Blokport.",
-                evidence, stone_type=stone_type, color=title_case(obs_color or ""),
+            parts: list[str] = []
+            if dropped_colors and not colors:
+                verb = "are" if len(dropped_colors) > 1 else "is"
+                label = "colours" if len(dropped_colors) > 1 else "colour"
+                parts.append(f"The only {label} this variety would mint with "
+                             f"({human_join([title_case(v) for v in dropped_colors])}) {verb} archived or "
+                             "internal in Medusa. Pick an active colour in Review, or reactivate it in Blokport.")
+            if dropped_quals and not qualities:
+                verb = "are" if len(dropped_quals) > 1 else "is"
+                label = "qualities" if len(dropped_quals) > 1 else "quality"
+                parts.append(f"The only {label} this variety would mint with "
+                             f"({human_join([str(v) for v in dropped_quals])}) {verb} archived or internal in "
+                             "Medusa. Reactivate it in Blokport, or the supplier's listing changes.")
+            # the colour field is left EMPTY on the card: prefilling the restricted colour would just hold again.
+            c.pending_confirm.append(review_card("archived_value", title, " ".join(parts), evidence,
+                stone_type=stone_type,
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
         # A cross-branch sibling's variety already exists in another branch carrying the scraped spelling as

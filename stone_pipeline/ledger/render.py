@@ -189,6 +189,7 @@ def render_combinations(ledger: Ledger, path: str | Path, *,
             export_p, attrs_p,
             backbone_paths if backbone_paths is not None else tree_build._backbone_paths(),
             products_csv, assigned_types, exclude_ids,
+            acked_ledger=ledger,   # VE2: rebuild acked tuples from the ledger verify was given, not the default
         )
     current = {tuple(str(x) for x in c) for c in combinations}
     return tree_build.write_combinations(current, Path(path))

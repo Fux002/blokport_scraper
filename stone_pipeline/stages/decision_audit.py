@@ -37,11 +37,15 @@ def _gap(kind: str, source: str, scraped: str, name: str, stone_type: str, origi
 
 
 def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set[tuple[str, str]],
-          decisions: Decisions, pending_spellings: set[str]) -> list[dict]:
+          decisions: Decisions, pending_spellings: set[str],
+          held_ve2: set[tuple[str, str]] = frozenset()) -> list[dict]:
     """The decisions this produce did NOT honour. `existing` and `created` are (norm name, norm type) sets of
     the varieties in the reference and the ones minted this run; `decisions` is the one operator-decisions
     object the produce ran with; `pending_spellings` are the norm scraped spellings still carried by a pending
-    variety card."""
+    variety card. `held_ve2` is the (norm source, norm spelling) pairs held by a VE2 freeze card this run
+    (archived_type / archived_value / archived_variety): a mint held for one of those is already surfaced, so
+    its gap is suppressed -- keyed by (source, spelling) and only for those kinds, so no other vendor's gap
+    and no non-VE2 hold is affected."""
     gaps: list[dict] = []
     by_listing: dict[tuple[str, str], list[CanonicalRow]] = {}
     for r in rows:
@@ -51,11 +55,12 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
         if st.is_mint:
             name = st.name or st.display or spelling
             target = (_norm(name), _norm(st.stone_type))
-            # A mint held THIS produce (VE2: a restricted type or an empty-after-drop colour/quality) already
-            # surfaces its own card, so its spelling is in pending_spellings -- do NOT also raise a "not
-            # applied" gap, or one hold shows as two review entries. The gap still fires for a mint that is
-            # silently ignored with NO card (the failure this audit guards).
-            if target not in existing and target not in created and spelling not in pending_spellings:
+            # A mint held THIS produce by a VE2 freeze (restricted type, empty-after-drop value, archived
+            # variety) already surfaces its own card, so do NOT also raise a "not applied" gap (one hold, one
+            # entry). Keyed by (source, spelling) and only the VE2 kinds, so another vendor's gap and the
+            # retired/no_type holds are untouched. The gap still fires for a mint silently ignored with NO card.
+            if (target not in existing and target not in created
+                    and (_norm(st.source), spelling) not in held_ve2):
                 gaps.append(_gap("mint", st.source, spelling, name, st.stone_type or "", st.origin_iso or "",
                                  f"Mint not applied: no variety '{name}' ({st.stone_type}) exists after this produce."))
         elif spelling in pending_spellings:
