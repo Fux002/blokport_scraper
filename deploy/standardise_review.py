@@ -17,8 +17,9 @@ A store that cannot be read (the ledger, review.json) is Unavailable: said, neve
 from __future__ import annotations
 
 import re
-from collections import Counter
 import sqlite3
+import threading
+from collections import Counter
 from datetime import datetime, timezone
 
 import boto3
@@ -28,7 +29,9 @@ from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
 from deploy.standardise_publish import aws_config, chosen_prefix, pool_map, read_conflicts, read_records
+from deploy.fetch_inputs import fetch_attributes
 from deploy.standardise_source import round_prefix, sheet_and_photos
+from stone_pipeline.config import settings
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
@@ -55,11 +58,37 @@ def client():
                         config=aws_config().merge(Config(max_pool_connections=C.STORE_WORKERS)))
 
 
+_SHEET = {}                                            # {"key", "value"}: the sheet as last parsed (sheet)
+_SHEET_LOCK = threading.Lock()
+
+
+def _categories():
+    """The live category registry the sheet's formats are read by (index.listings), as a comparable value."""
+    return tuple(sorted((c.pcat_id, c.name) for c in settings.active_categories()))
+
+
+def _etag(s3, key):
+    return s3.head_object(Bucket=S3_BUCKET, Key=key)["ETag"]
+
+
 def sheet(s3):
     """(photo listings, tile listings) of the product sheet, by the photo process's own split (standardise_run): the
-    photo listings are the ones decisions are about, a tile listing is rendered from its variety's slab stone."""
+    photo listings are the ones decisions are about, a tile listing is rendered from its variety's slab stone. Parsed
+    again only when the sheet, its photo list (their ETags) or the live categories changed; else the last parse is
+    served (dev's sheet is 8.7 MB and changes once a produce; its readers never change it). A write between the look
+    and the read only costs one more read on the next request."""
+    fetch_attributes(s3)
+    settings.refresh_category_pcats()
+    key = (_etag(s3, f"{settings.ENV_SEGMENT}/{C.SHEET_KEY}"), _etag(s3, f"{settings.ENV_SEGMENT}/{C.PHOTOS_KEY}"),
+           _categories())
+    with _SHEET_LOCK:
+        if _SHEET.get("key") == key:
+            return _SHEET["value"]
     raw = sheet_and_photos(s3)
-    return proc.photo_listings(*raw), proc.tile_listings(*raw)
+    value = (proc.photo_listings(*raw), proc.tile_listings(*raw))
+    with _SHEET_LOCK:
+        _SHEET.update(key=key, value=value)
+    return value
 
 
 # --- what the ledger hides --------------------------------------------------------------------------------------------
@@ -206,17 +235,21 @@ def _removed_photos(s3, page, exclude):
 
 
 def _results(s3, rows):
-    """{(tag, source): select.Results} of the photos the page asks the applier about: a result to use (the stored
-    state has one) or a verdict to clean (fixable with a model left), read in parallel; nothing else is read."""
+    """{(tag, source): select.Results} of what the page asks the applier about: a result to use (the stored state has
+    one) and, of a photo a click may clean (fixable with a model left), its verdict and hold, read in parallel; nothing
+    else is read (served_photo asks exactly these)."""
     wanted = {}
     for row in rows:
         for p in row["photos"]:
-            if p["state"] in RESULT_STATES or (p["fixable"] and p["clean"]["left"]):
-                wanted.setdefault((C.RUN_TAG, row["source"]), set()).add(p["sha"])
+            run = wanted.setdefault((C.RUN_TAG, row["source"]), (set(), set()))
+            if p["state"] in RESULT_STATES:
+                run[0].add(p["sha"])
+            if p["fixable"] and p["clean"]["left"]:
+                run[1].add(p["sha"])
             if p["clean"]["copy"] in RESULT_STATES:
-                wanted.setdefault((C.CLEAN_TAG, row["source"]), set()).add(p["sha"])
+                wanted.setdefault((C.CLEAN_TAG, row["source"]), (set(), set()))[0].add(p["sha"])
     # one (tag, source) at a time, each listing its photos' prefixes STORE_WORKERS at once (never pools in pools)
-    return {pair: select.Results(s3, *pair, shas) for pair, shas in sorted(wanted.items())}
+    return {pair: select.Results(s3, *pair, shas, verdicts) for pair, (shas, verdicts) in sorted(wanted.items())}
 
 
 def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
@@ -239,7 +272,7 @@ def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
     results = _results(s3, [row for _, row in rows])
     try:
         ctx = decisions.context(s3, photo_listings, exclude, keys=[row["listing"] for _, row in rows],
-                                results=lambda tag, src: results.get((tag, src)) or select.Results(s3, tag, src, ()))
+                                results=lambda tag, src: results.get((tag, src)) or select.Results(s3, tag, src, (), ()))
     except decisions.InvalidDecisions as exc:
         raise Unavailable(str(exc)) from exc
     stores, at = ctx.stores, _now()

@@ -50,9 +50,10 @@ _SNAPSHOTS_ITSELF = {
 # reconciles) or work on the ledger and files.
 _NO_OPERATOR_DECISION = {
     ("POST", ("run",)), ("POST", ("curation", "rebuild")), ("POST", ("purge",)), ("POST", ("clean",)),
-    # the owner's click and its withdrawal: a photo decision the decisions applier writes to S3 (clicks/), durable once
-    # written, inside the photo process's run lock; config.db is only read (the sources' image pipeline switch)
-    ("PUT", ("photos", "clicks", "{sku}")), ("DELETE", ("photos", "clicks", "{sku}")),
+    # the owner's click and its withdrawal, and the decision page's export: photo decisions the decisions applier
+    # writes to S3 (clicks/, owner/, removed/), durable once written, inside the photo process's run lock; config.db is
+    # only read (the sources' image pipeline switch)
+    ("PUT", ("photos", "clicks", "{sku}")), ("DELETE", ("photos", "clicks", "{sku}")), ("POST", ("photos", "decisions")),
 }
 # Every write route that changes the ledger, with a body that reaches its ledger op.
 _LEDGER_WRITES = {

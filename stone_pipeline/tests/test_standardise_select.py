@@ -485,10 +485,13 @@ def test_the_results_of_a_few_photos_are_the_round_s_results_and_nothing_more():
     keys = [f"{GPU}{s}.main.jpg" for s in (A, B, D)] + [f"{GPU}judged/{A}.json", f"{GPU}held/{B}.json",
                                                         f"{GPU}judged/{D}.json", f"{GPU}cleaned/{A}.jpg"]
     bucket = _Bucket({k: b"{}" for k in keys})
-    whole, few = sel.Round(bucket, "v9", "sentas"), sel.Results(bucket, "v9", "sentas", [A, B])
-    for name in ("finished", "judged", "held"):
-        assert getattr(few, name) == getattr(whole, name) - {D}, name
-    assert few.prefix == whole.prefix
+    whole, few = sel.Round(bucket, "v9", "sentas"), sel.Results(bucket, "v9", "sentas", [A, B], verdicts=[B])
+    assert set(few.finished) == whole.finished - {D} and few.prefix == whole.prefix
+    assert (B in few.judged, B in few.held) == (B in whole.judged, B in whole.held)
+    with pytest.raises(LookupError):
+        A in few.judged                                                  # its verdict was not read: never a silent no
+    with pytest.raises(LookupError):
+        D in few.finished
     with pytest.raises(AttributeError):
         few.cleaned                                                     # never read: never answered
 

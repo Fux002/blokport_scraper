@@ -232,22 +232,40 @@ class Round(_Locks):
                 - self.redrawn) | self.older_outline
 
 
-class Results:
-    """What a run folder holds of a few photos for the decisions applier's checks (a "use" needs a result, a "clean"
-    reads its verdict or hold: decisions.refusals): prefix, finished, judged and held, read from RESULT_FOLDERS by sha,
-    the same sets a Round gives restricted to them. Nothing else is read, so nothing else is answered (AttributeError)."""
+class _Read(frozenset):
+    """The members of a set read for some photos only (its scope): asked about another photo it raises LookupError, so
+    a question nobody read the answer to is never a silent no."""
 
-    def __init__(self, client, tag, src, shas):
+    def __new__(cls, members, scope):
+        out = super().__new__(cls, members)
+        out.scope = frozenset(scope)
+        return out
+
+    def __contains__(self, sha):
+        if sha not in self.scope:
+            raise LookupError(f"photo {sha[:12]} was not read")
+        return frozenset.__contains__(self, sha)
+
+
+class Results:
+    """What a run folder holds of a few photos for the decisions applier's checks (decisions.refusals): prefix;
+    finished (a "use" needs a result) of `shas`; judged and held (a "clean" reads its verdict or hold) of `verdicts`
+    alone. The same answers a Round gives, for those photos only: asked about another it raises (_Read), and nothing
+    else is answered (AttributeError)."""
+
+    def __init__(self, client, tag, src, shas, verdicts):
         self.prefix = round_prefix(tag, src)
-        prefixes = [f"{self.prefix}{folder}{sha}" for sha in sorted(set(shas)) for folder in RESULT_FOLDERS]
+        shas, verdicts = set(shas) | set(verdicts), set(verdicts)
+        prefixes = ([f"{self.prefix}{sha}" for sha in sorted(shas)]
+                    + [f"{self.prefix}{folder}{sha}" for sha in sorted(verdicts) for folder in ("judged/", "held/")])
         listed = pool_map(C.STORE_WORKERS, lambda prefix: [
             o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
             for o in page.get("Contents", [])], prefixes)
         keys = [k for part in listed for k in part]
-        self.finished, self.judged, self.held = _finished(keys), _shas(keys, "judged/"), _shas(keys, "held/")
+        self.finished = _Read(_finished(keys), shas)
+        self.judged, self.held = _Read(_shas(keys, "judged/"), verdicts), _Read(_shas(keys, "held/"), verdicts)
 
 
-RESULT_FOLDERS = ("", "judged/", "held/")
 
 
 def _finished(keys):

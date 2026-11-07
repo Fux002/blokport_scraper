@@ -632,3 +632,34 @@ def test_the_export_is_planned_in_full_never_narrow(monkeypatch):
                         or dec.plan(s3, docs, PHOTO_LISTINGS, set()))
     rv.apply_decisions(_bucket(), [{"id": "two", "action": "remove", "source": "sentas", "at": AT}], dry_run=True)
     assert seen == [(None, False)]
+
+
+# --- the sheet is read again only when it changed (dev: 8.7 MB, read on every request) ------------------------------
+class _Sheets:
+    """The sheet and its photo list as ETagged objects; every read and look counted."""
+
+    def __init__(self):
+        self.etags, self.reads = {"sheet": '"s1"', "photos": '"p1"'}, []
+
+    def head_object(self, Bucket, Key):
+        return {"ETag": self.etags["sheet" if Key.endswith(C.SHEET_KEY) else "photos"]}
+
+
+def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories_changed(monkeypatch):
+    s3, raw = _Sheets(), []
+    monkeypatch.undo()                                                       # the autouse stand-in of rv.sheet
+    monkeypatch.setattr(rv, "_SHEET", {})
+    monkeypatch.setattr(rv, "fetch_attributes", lambda client: True)
+    monkeypatch.setattr(rv, "sheet_and_photos", lambda client: raw.append(1) or ("csv", {}))
+    monkeypatch.setattr(rv.proc, "photo_listings", lambda sheet, photos: [ONE])
+    monkeypatch.setattr(rv.proc, "tile_listings", lambda sheet, photos: [TILE])
+    categories = [("pcat_slab", "Slab")]
+    monkeypatch.setattr(rv, "_categories", lambda: tuple(categories))
+    assert rv.sheet(s3) == rv.sheet(s3) == ([ONE], [TILE]) and len(raw) == 1
+    s3.etags["photos"] = '"p2"'
+    rv.sheet(s3)
+    categories.append(("pcat_tile", "Tile"))
+    rv.sheet(s3)
+    s3.etags["sheet"] = '"s2"'
+    rv.sheet(s3)
+    assert len(raw) == 4
