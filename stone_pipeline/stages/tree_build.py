@@ -180,12 +180,10 @@ def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str], ledger=No
         acked = acked_products(ledger)
     else:
         from stone_pipeline.ledger import writethrough
-        from stone_pipeline.ledger.db import Ledger
         path = writethrough.ledger_path()
         if not path.exists():
             return set(), 0
-        with Ledger.open(path, env=writethrough.ENV_NAME,
-                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        with writethrough.connect(path, bind=True) as lg:
             acked = acked_products(lg)
     out: set[tuple] = set()
     unrebuilt = 0

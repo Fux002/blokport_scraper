@@ -240,10 +240,9 @@ def _ledger_op(name: str, work):
     pull (ServeInFlight) -> 409, anything else -> 500. Every lifecycle verb that changes the ledger runs here, so
     this is the one place its change is snapshotted: once the ledger is committed and closed, before the answer."""
     from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
     try:
         with _exclusive(name):
-            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
+            with writethrough.connect(bind=True) as ledger:
                 result = work(ledger, sync)
         _snapshot_ledger()
         return result, 200
@@ -737,12 +736,10 @@ def list_minted_variations() -> tuple[dict, int]:
         return {"error": "base file not present on this task (a produce re-fetches it); "
                          "run a Republish All first, then retry"}, 503
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.matching import projections as proj
     import collections
     try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
-                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        with writethrough.connect(bind=True) as lg:
             rows = lg.execute("SELECT key, name, type FROM variation").fetchall()
     except Exception as exc:                                # noqa: BLE001 -- best-effort read, surfaced as 500
         log.exception("list_minted_variations failed")

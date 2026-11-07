@@ -88,7 +88,6 @@ def _index_from_rows(rows: list[dict], alias: dict, archived: set | None = None)
 
 def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], set[tuple[str, str]]]:
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.stages import decisions
     if not writethrough.ledger_path().exists():
         return _index_from_rows([], {})               # no produce yet -> empty, every alias refused
@@ -97,7 +96,7 @@ def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], se
     rows: list[dict] = []
     alias_hits: dict[tuple[str, str], set[str]] = {}
     arch_flags: dict[tuple[str, str], list[int]] = {}
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+    with writethrough.connect(bind=False) as lg:
         for r in lg.execute("SELECT key, name, type, aliases, archived FROM variation "
                             "WHERE name IS NOT NULL AND name != '' ORDER BY name COLLATE NOCASE"):
             if r["key"] in retired:                   # retired varieties are not valid targets

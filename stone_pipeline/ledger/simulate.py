@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     if not path.exists():
         print(f"no ledger at {path} (run a build with SCRAPER_LEDGER_WRITETHROUGH=1 first)")
         return 1
-    with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+    with writethrough.connect(path, bind=False) as ledger:
         before = sync.status(ledger)
         report = simulate_sync(ledger)
         after = sync.status(ledger)

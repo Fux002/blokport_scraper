@@ -318,3 +318,41 @@ def test_the_config_is_a_choice_every_caller_states():
     from stone_pipeline.io import storage
     with pytest.raises(TypeError):
         storage.aws_client("s3")                                                # config is required, by keyword
+
+
+# --- writethrough.connect: the one way the ledger is opened --------------------------------------------------------------
+def _stamp(path):
+    import sqlite3
+    with sqlite3.connect(path) as conn:
+        return conn.execute("SELECT backend_id_fingerprint FROM ledger_meta WHERE id = 1").fetchone()[0]
+
+
+def test_a_bound_open_stamps_this_deployment_and_refuses_another_s_ledger(tmp_path, monkeypatch):
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import LedgerError
+    path = tmp_path / "dev.db"
+    writethrough.connect(path, bind=True).close()
+    assert _stamp(path) == writethrough.backend_fingerprint()
+    monkeypatch.setattr(writethrough, "backend_fingerprint", lambda: "another-brand")
+    with pytest.raises(LedgerError):
+        writethrough.connect(path, bind=True)
+
+
+def test_an_unbound_open_stamps_nothing_and_refuses_nothing(tmp_path, monkeypatch):
+    from stone_pipeline.ledger import writethrough
+    path = tmp_path / "dev.db"
+    writethrough.connect(path, bind=False).close()
+    assert _stamp(path) is None                                                 # a reader writes no stamp
+    writethrough.connect(path, bind=True).close()
+    monkeypatch.setattr(writethrough, "backend_fingerprint", lambda: "another-brand")
+    writethrough.connect(path, bind=False).close()                              # nor checks one
+
+
+def test_connect_opens_this_environment_s_ledger_by_default_and_binding_is_a_choice(tmp_path, monkeypatch):
+    from stone_pipeline.ledger import writethrough
+    monkeypatch.setenv("SCRAPER_LEDGER_PATH", str(tmp_path / "env.db"))
+    with writethrough.connect(bind=False) as ledger:
+        assert ledger.env == writethrough.ENV_NAME
+    assert (tmp_path / "env.db").exists()
+    with pytest.raises(TypeError):
+        writethrough.connect(tmp_path / "x.db")                                 # bind is required, by keyword

@@ -123,14 +123,13 @@ def ledger_image_counts() -> dict[str, dict[str, int]] | None:
     counted. standard: listed with a published standardised photo as its thumbnail; hosted: listed with any thumbnail;
     hidden: reason no_photo. None when there is no ledger (never created here) or it cannot be read: the caller then
     serves no images block, and the failure is logged."""
-    from stone_pipeline.config.settings import ENV_NAME
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger, LedgerError, on_sale_sql
+    from stone_pipeline.ledger.db import LedgerError, on_sale_sql
     path = writethrough.ledger_path()
     if not path.exists():
         return None
     try:
-        with Ledger.open(path, env=ENV_NAME) as ledger:
+        with writethrough.connect(path, bind=False) as ledger:
             rows = ledger.execute(
                 "SELECT p.source AS source, COUNT(*) AS total,"
                 " SUM(CASE WHEN i.reason IS NOT 'no_photo' AND p.thumbnail_key LIKE ? THEN 1 ELSE 0 END) AS standard,"

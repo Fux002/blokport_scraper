@@ -117,9 +117,7 @@ def _mirror_archived() -> None:
 def _frozen_waiting() -> int:
     """New products waiting on a frozen (archived) variety -- counted from the ledger for a visible log line."""
     from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
-                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+    with writethrough.connect(bind=True) as lg:
         return sync.frozen_waiting_products(lg)
 
 
@@ -142,8 +140,7 @@ def _ledger_gate_state() -> tuple[int, int]:
     which is why pass-2 needs no refreshed Medusa export. The schema queries live in the ledger layer
     (sync.gate_state); produce owns only the held-vs-fatal DECISION made from them."""
     from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+    with writethrough.connect(bind=True) as lg:
         return sync.gate_state(lg)
 
 
@@ -153,8 +150,7 @@ def _cold_start_stall() -> str | None:
     produced set means the WHOLE catalogue is held untyped forever -- a broken cold start, not the
     expected pass-1 hold. produced == 0 (a no-op re-run) is not a stall."""
     from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+    with writethrough.connect(bind=True) as lg:
         vocab, produced, typed = sync.typing_health(lg)
     if produced == 0:
         return None

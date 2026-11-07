@@ -54,13 +54,22 @@ def backend_fingerprint() -> str:
     return hashlib.sha256(f"{BRAND}|{ENV_NAME}".encode()).hexdigest()[:16]
 
 
+def connect(path: str | Path | None = None, *, bind: bool) -> Ledger:
+    """The one way the ledger is opened: at `path` (this environment's, ledger_path(), when None), for this environment.
+    bind=True (a writer, the sync side): bound to this deployment's backend, its fingerprint checked (a wrong-brand
+    ledger refused) and stamped on a first bind. bind=False (a reader): neither, so an unbound open stamps nothing and
+    refuses nothing. Ledger.open creates the file when it is absent: a reader that must not create one looks first."""
+    return Ledger.open(path or ledger_path(), env=ENV_NAME,
+                       backend_id_fingerprint=backend_fingerprint() if bind else None)
+
+
 def open_ledger(path: str | Path | None = None) -> Ledger:
     """Open the per-env ledger, seeding the id foundation (attributes + variations
     from the from_medusa exports) on first use so product FKs resolve. Idempotent:
     the seed runs only when the variation table is empty."""
     p = Path(path or ledger_path())
     p.parent.mkdir(parents=True, exist_ok=True)
-    ledger = Ledger.open(p, env=ENV_NAME, backend_id_fingerprint=backend_fingerprint())
+    ledger = connect(p, bind=True)
     if ledger.execute("SELECT COUNT(*) AS n FROM variation").fetchone()["n"] == 0:
         bootstrap.seed_attributes(ledger)
         bootstrap.seed_variations(ledger)

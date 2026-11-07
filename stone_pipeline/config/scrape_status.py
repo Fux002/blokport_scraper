@@ -35,9 +35,8 @@ def scrape_info(source: str) -> dict:
 def ledger_product_counts() -> dict[str, int]:
     """{source_code: produced-product count} from the ledger. Empty on any error (best-effort)."""
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        with writethrough.connect(bind=False) as lg:
             return {r["source"]: r["n"] for r in
                     lg.execute("SELECT source, COUNT(*) AS n FROM product GROUP BY source")}
     except Exception:
