@@ -5,12 +5,14 @@ queue, and the no-spend guard when the generator stack is absent."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import types
 
 import pytest
 
 import stone_pipeline.prepare_variant_images as pvi
+from stone_pipeline.config.settings import SETTINGS
 
 @pytest.fixture(autouse=True)
 def _no_dispatched_queue(monkeypatch):
@@ -32,13 +34,14 @@ class _FakeS3:
         self.downloads.append((bucket, key, local))
 
 
-def _fake_settings(dry_run: bool, bucket: str = "test-bucket"):
+def _fake_settings(dry_run: bool, bucket: str = "test-bucket", auto_texture=SETTINGS.auto_texture):
     # rebind the module's SETTINGS (frozen dataclass -> replace the name, don't mutate the field). paths is
     # used by the _find_png rglob fallback; point workspace_root at a dir with no image_pipeline/ so a
-    # missing key stays missing.
+    # missing key stays missing. auto_texture is the real one (the queue TTL, the script timeout) unless a test
+    # sets its own.
     import pathlib
     return types.SimpleNamespace(
-        s3=types.SimpleNamespace(dry_run=dry_run, bucket=bucket),
+        s3=types.SimpleNamespace(dry_run=dry_run, bucket=bucket), auto_texture=auto_texture,
         paths=types.SimpleNamespace(workspace_root=pathlib.Path("/nonexistent-workspace-root")))
 
 
@@ -237,8 +240,8 @@ class _FakeS3Lister:
 
 def test_prune_stale_queue_keys_deletes_only_old_objects(monkeypatch):
     from datetime import datetime, timedelta, timezone
-    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
-    monkeypatch.setattr(pvi, "TEXTURE_QUEUE_TTL_SECONDS", 3600)   # 1h for the test
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(   # 1h TTL for the test
+        dry_run=False, auto_texture=dataclasses.replace(SETTINGS.auto_texture, queue_ttl_seconds=3600)))
     now = datetime.now(timezone.utc)
     client = _FakeS3Lister([
         {"Key": "dev/scraper/texture_queues/old.json", "LastModified": now - timedelta(hours=5)},

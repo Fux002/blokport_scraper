@@ -154,6 +154,13 @@ if not _S3_BUCKET_ENV and not _is_blokport_dev():
         f"even in dev) -- refusing to default to the blokport dev bucket ({_DEV_S3_BUCKET}). Set "
         "SCRAPER_S3_BUCKET to this brand's own bucket.")
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
+# ... and a PROD run never on the dev bucket, even set explicitly: that passes the guard above (it is set) and the
+# brand-prefix guard below (it is blokport's), and would write prod data into dev. Checked here, at import, so no entry
+# point (produce, image stage, image wipe, sync or config server) can reach S3 with it.
+if IS_PRODUCTION and S3_BUCKET == _DEV_S3_BUCKET:
+    raise RuntimeError(
+        f"production run targeting the DEV S3 bucket {_DEV_S3_BUCKET} -- refusing to run. Set SCRAPER_S3_BUCKET to "
+        "the production bucket.")
 S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
 # The AWS clients' configurations (io/storage.aws_client presets). BOUNDED: the image and catalog tools, timed and
 # retried so a network stall cannot hang a build. FAIL_FAST: the ledger snapshot, whose stop-path save must not burn
@@ -503,10 +510,9 @@ class BackendConstants:
 @dataclass(frozen=True)
 class S3Config:
     # All env-driven so dev/prod differ by configuration only. The path segment
-    # (dev/ vs prod/) follows BLOKPORT_ENV; bucket/region/profile/dry-run each
+    # (dev/ vs prod/) follows BLOKPORT_ENV; bucket/profile/dry-run each
     # have their own override.
     bucket: str = S3_BUCKET
-    region: str = S3_REGION
     # The S3 key prefix the image stage re-hosts product photos under. This is the
     # real staging location (blokport-dev-staging-3e58a6/dev/products/), and it MUST
     # match the path in ImagesConfig.public_base so the emitted URL resolves to the
@@ -653,6 +659,15 @@ class AutoTextureConfig:
     enabled: bool = _env_bool("BLOKPORT_AUTO_TEXTURE", False)
     queue: str = env.getenv("BLOKPORT_GPU_QUEUE", "")
     job_definition: str = env.getenv("BLOKPORT_GPU_JOBDEF", "")
+    # Per-dispatch queue objects are ephemeral coordination, consumed by their GPU job within minutes. The publish
+    # deletes any older than this so the prefix self-heals instead of accumulating forever. Far above a job's runtime
+    # (jobs finish in minutes; the Batch attempt ceiling is hours), so it can never delete a queue a running or
+    # just-published job still needs.
+    queue_ttl_seconds: int = 86400                     # 1 day
+    # Per-image-script wall-clock ceiling. Generation (FLUX over the whole queue) legitimately runs minutes; this is a
+    # backstop far above normal so a wedged stage (a hung model load or network call) fails and flags its variants
+    # HELD instead of pinning the whole Batch task.
+    script_timeout_s: int = 3600
 
 
 @dataclass(frozen=True)

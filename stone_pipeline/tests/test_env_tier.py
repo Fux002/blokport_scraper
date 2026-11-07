@@ -78,6 +78,20 @@ def test_tier_is_not_a_brand_slot(monkeypatch):
         _reload_settings(monkeypatch, "wudport-production")
 
 
+def test_a_production_run_on_the_dev_bucket_fails_at_import(monkeypatch):
+    # the bucket set EXPLICITLY to blokport's dev bucket passes both other bucket guards (it is set, and it carries the
+    # blokport prefix), so a prod deployment pointed at it would write prod data into dev. It fails at import, in every
+    # entry point, before anything reads or writes S3.
+    import stone_pipeline.config.settings as settings
+    dev_bucket = settings._DEV_S3_BUCKET
+    monkeypatch.setenv("BLOKPORT_ENV", "production")
+    monkeypatch.setenv("BLOKPORT_BRAND", "blokport")
+    monkeypatch.setenv("BLOKPORT_S3_BUCKET", dev_bucket)
+    monkeypatch.setenv("BLOKPORT_SALES_CHANNEL_ID", "sc_test")
+    with pytest.raises(RuntimeError, match=dev_bucket):
+        importlib.reload(settings)
+
+
 @pytest.fixture(autouse=True)
 def _restore_settings(monkeypatch):
     """Leave config.settings reloaded at its default so later tests see the normal module."""

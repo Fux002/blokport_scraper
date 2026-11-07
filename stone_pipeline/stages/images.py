@@ -62,14 +62,7 @@ def _build_backend(cfg) -> Optional[storage.StorageBackend]:
     if cfg.mode == "local":
         return storage.LocalStorageBackend(cfg.local_staging_dir, cfg.public_base)
     if cfg.mode == "s3":
-        s3 = SETTINGS.s3
-        # Guard against a production run still pointing at the dev bucket (the
-        # default until BLOKPORT_S3_BUCKET is set on the prod deployment).
-        from stone_pipeline.config.settings import IS_PRODUCTION, _DEV_S3_BUCKET
-        if IS_PRODUCTION and s3.bucket == _DEV_S3_BUCKET:
-            raise RuntimeError(
-                "production run targeting the DEV S3 bucket -- refusing to write/stamp prod images "
-                f"into {_DEV_S3_BUCKET}. Set BLOKPORT_S3_BUCKET to the prod bucket.")
+        s3 = SETTINGS.s3            # never prod on the dev bucket: settings refuses that at import
         return storage.S3StorageBackend(
             bucket=s3.bucket, key_prefix=s3.staging_prefix,
             public_base=cfg.public_base, profile=s3.credentials_profile, dry_run=s3.dry_run,

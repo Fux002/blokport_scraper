@@ -33,13 +33,8 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
     'clean raw scraped data' keeps these so the manifest reuses them. It NEVER touches
     <env>/variations/ (variant textures) or any other prefix/bucket: it lists+deletes ONLY the hardcoded
     <env>/products/<folder>/ prefixes and refuses if any key is somehow outside products/ or under
-    variations/. Env-scoped bucket, with the production dev-bucket guard. Idempotent. Returns per-folder
-    delete counts."""
-    from stone_pipeline.config.settings import IS_PRODUCTION, _DEV_S3_BUCKET
-
-    if IS_PRODUCTION and S3_BUCKET == _DEV_S3_BUCKET:
-        raise RuntimeError(
-            f"production image wipe targeting the DEV bucket {_DEV_S3_BUCKET} -- refusing (set BLOKPORT_S3_BUCKET)")
+    variations/. Env-scoped bucket (settings refuses a production run on the dev bucket at import). Idempotent.
+    Returns per-folder delete counts."""
     client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
     products_root = f"{ENV_SEGMENT}/products/"
     variations_root = f"{ENV_SEGMENT}/variations/"        # the protected sibling -- must never appear in a key
