@@ -642,9 +642,17 @@ A full photos run writes `<CLEAN_TAG>/review.json` after publish: `{SKU: row}` o
 photo and each tile publish could not render (`select.review_row`, `run.write_review`). A close-only run leaves it.
 It carries no URL. The config API serves it under `/config/v1/photos` (`deploy.standardise_review`):
 
-- `GET /photos/hidden`: `{"rows": [...]}`, one row per listing the ledger hides (inventory reason `no_photo`), by source
-  then listing. Its reason is, in order: `owner_removed` (a removal record), `chosen_not_linked` (a choice record: the
-  next relink shows it), the run's row, else `not_worked_yet`. A run's row says `pending`, `excluded`,
+- `GET /photos/hidden?reason=&offset=&limit=`: a page of the listings the ledger hides (inventory reason `no_photo`),
+  `{"total", "counts", "offset", "limit", "rows"}`: `limit` defaults to `REVIEW_PAGE_DEFAULT` (50), at most
+  `REVIEW_PAGE_MAX` (100); `reason` keeps only that reason's rows; `total` counts the rows asked for, `counts` every
+  hidden row by reason. An unknown reason, a bad offset or limit, or a repeated parameter is a 400 naming it. Every row
+  is placed and counted from `review.json`, the ledger and the keys of the removals and choice records alone, in one
+  stable order (source, listing, SKU) applied before the page is cut; only the page's rows are then worked (their
+  listings' stored decisions, what the applier is asked about their photos, their images). The sheet is parsed again
+  only when it, its photo list or the live categories changed. A row's reason is, in order: `owner_removed` (a removal
+  record: its candidates are shown, with "use" and "clean" where accepted, either lifting the removal),
+  `chosen_not_linked` (a choice record: the next relink shows it), the run's row, else `not_worked_yet`. A run's row
+  says `pending`, `excluded`,
   `photo_conflict`, `clean_failed`, `not_fixable`, `awaiting_auto` (with `why`, its marks' wait) or `awaiting_click`;
   a tile's `tile_no_stone`. The row's click is the clicks store's: the run's state while it is the same click, `queued`
   once clicked since. Each photo carries `clickable`, `usable` (the run tags whose result a "use" would take) and `urls`
