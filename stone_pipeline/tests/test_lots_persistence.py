@@ -9,7 +9,8 @@ from contextlib import closing
 
 import pytest
 
-from stone_pipeline.config import server, store
+from stone_pipeline.config import store
+from stone_pipeline.config.control import server
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso

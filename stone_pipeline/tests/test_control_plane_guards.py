@@ -8,7 +8,8 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline import lifecycle
-from stone_pipeline.config import decisions_store, runner, server, store, varieties
+from stone_pipeline.config import decisions_store, store, varieties
+from stone_pipeline.config.control import runner, server
 from stone_pipeline.reference.loaders import _norm
 
 

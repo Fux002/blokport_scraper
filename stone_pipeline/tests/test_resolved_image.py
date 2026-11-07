@@ -2,7 +2,7 @@
 resolved cards depended entirely on a Medusa SKU fallback; when it stopped matching, images vanished. The
 parquet stores the image lists as JSON strings, so the extraction must parse them."""
 
-from stone_pipeline.config import resolved
+from stone_pipeline.config.control import resolved
 from stone_pipeline.config.decisions_model import Decisions
 
 

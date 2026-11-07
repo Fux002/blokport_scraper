@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline import lifecycle
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 from stone_pipeline.stages import decisions
 
 

@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import server, varieties
+from stone_pipeline.config import varieties
+from stone_pipeline.config.control import server
 from stone_pipeline.stages import decisions
 from stone_pipeline.tests import _decision_views as views
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 
 
 def test_every_route_is_unique_and_literal_routes_precede_capturing_ones():

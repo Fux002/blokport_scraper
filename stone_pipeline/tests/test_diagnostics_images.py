@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import diagnostics, runner, server, store
+from stone_pipeline.config import store
+from stone_pipeline.config.control import diagnostics, runner, server
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT
 from stone_pipeline.ledger.db import Ledger, now_iso
 

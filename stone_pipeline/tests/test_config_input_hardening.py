@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline.config import settings as settings_mod
-from stone_pipeline.config.server import ConfigHandler, _MAX_BODY_BYTES
+from stone_pipeline.config.control.server import ConfigHandler, _MAX_BODY_BYTES
 
 
 # ---- _env_int ---------------------------------------------------------------------------------------

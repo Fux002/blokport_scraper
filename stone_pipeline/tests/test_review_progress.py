@@ -6,7 +6,8 @@ from an untouched one, nor a finished review from an untouched one."""
 
 import json
 
-from stone_pipeline.config import decisions_store as ds, server
+from stone_pipeline.config import decisions_store as ds
+from stone_pipeline.config.control import server
 from stone_pipeline.config.decisions_model import Decisions
 
 

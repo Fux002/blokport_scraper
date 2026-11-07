@@ -131,7 +131,8 @@ def evaluate_from_outputs(outputs_dir=None, path=None) -> int:
     event is skipped -- it did not run this produce, so re-recording (and re-certifying) it is wasted work.
     Best-effort per source. Returns the number newly processed."""
     from stone_pipeline import adapters as adapter_registry
-    from stone_pipeline.config import diagnostics, store
+    from stone_pipeline.config import store
+    from stone_pipeline.config.control import diagnostics
     processed = 0
     for source in adapter_registry.REGISTRY:
         try:

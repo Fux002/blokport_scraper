@@ -127,7 +127,7 @@ rebuilt is counted, not dropped silently.
 ## 8. Operator API: the review gate (config server)
 
 The review API never offers, assigns, or binds a restricted value
-(`stone_pipeline/config/server.py`):
+(`stone_pipeline/config/control/server.py`):
 
 - **Pickers.** `GET /config/v1/colors` and `/types` list **assignable** values only. The decide validator
   still sees the full vocab (a restricted value is a known attribute, just not offered) and applies its own

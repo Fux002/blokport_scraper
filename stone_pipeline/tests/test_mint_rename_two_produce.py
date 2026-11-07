@@ -103,7 +103,8 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
 def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monkeypatch):
     # No monkeypatched decision loaders: the operator's PUT lands in a real config.db, the pending card is
     # real, and curate reads the store exactly as a produce does.
-    from stone_pipeline.config import server, varieties
+    from stone_pipeline.config import varieties
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
@@ -156,7 +157,8 @@ def test_one_session_mints_named_apart_only_by_case_create_one_variety(tmp_path,
     # The admin review reads bind vs mint from the ledger, which holds a mint only after the next produce, so
     # two cards stated in one session as 'Agata Blue' and 'agata blue' both read as mints and both are sent.
     # The fold is curate's: the mint is keyed on the title-cased name's norm, so they are ONE variety.
-    from stone_pipeline.config import server, varieties
+    from stone_pipeline.config import varieties
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
@@ -203,7 +205,8 @@ def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monke
       produce 2 -- after the re-export, marenostone's product binds to Chocolate Classic via the vendor-
                    scoped alias, while another vendor's identical spelling keeps the Brown Granite match.
     This is exactly the prod decision_gap (brown granite -> Chocolate Classic) the audit kept reporting."""
-    from stone_pipeline.config import server, varieties
+    from stone_pipeline.config import varieties
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))

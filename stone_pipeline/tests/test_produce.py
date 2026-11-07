@@ -49,7 +49,7 @@ def test_default_scope_scrapes_all(monkeypatch):
 def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
     # an inventory run is a stock refresh, not a validated produce -- it must NOT persist a diagnostic or
     # record an admission event (which would advance the N-clean-runs-to-auto streak without validating).
-    from stone_pipeline.config import admission, diagnostics
+    from stone_pipeline.config.control import admission, diagnostics
     calls = []
     monkeypatch.setattr(diagnostics, "persist_from_outputs", lambda *a, **k: calls.append("persist"))
     monkeypatch.setattr(admission, "evaluate_from_outputs", lambda *a, **k: calls.append("evaluate"))

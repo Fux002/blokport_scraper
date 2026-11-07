@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import types
 
-from stone_pipeline.config import scrape_status
+from stone_pipeline.config.control import scrape_status
 
 
 def _write_scrape(data_dir, source, stamp, n_rows):

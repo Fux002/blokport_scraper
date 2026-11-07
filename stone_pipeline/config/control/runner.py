@@ -115,7 +115,7 @@ def _persist_diagnostics() -> None:
     so GET /config/v1/diagnostics serves the :4200 UI durably. This process shares the run disk in dev.
     Best-effort: a diagnostics failure must never affect the run."""
     try:
-        from stone_pipeline.config import diagnostics
+        from stone_pipeline.config.control import diagnostics
         diagnostics.persist_from_outputs()
     except Exception:
         log.exception("failed to persist per-source diagnostics (non-fatal)")
@@ -125,7 +125,7 @@ def _evaluate_admission() -> None:
     """Record each source's run outcome into its consistency history and REACT: a drift on an `auto` source
     auto-demotes it to review. Best-effort: an admission failure must never affect the run."""
     try:
-        from stone_pipeline.config import admission
+        from stone_pipeline.config.control import admission
         admission.evaluate_from_outputs()
     except Exception:
         log.exception("failed to evaluate source admission (non-fatal)")

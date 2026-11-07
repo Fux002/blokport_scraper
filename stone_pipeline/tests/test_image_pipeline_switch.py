@@ -17,7 +17,8 @@ import pytest
 
 from stone_pipeline.photos import batch as gpu
 from stone_pipeline.photos import process as proc
-from stone_pipeline.config import server, store
+from stone_pipeline.config import store
+from stone_pipeline.config.control import server
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS, ImageProcessingConfig, ImagesConfig
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import SourceConfig, load_source

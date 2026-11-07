@@ -70,7 +70,7 @@ def test_empty_when_no_ledger_yet(tmp_path, monkeypatch):
 
 
 def test_dispatch_plumbs_query_params_to_varieties(ledger_with_varieties):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     code, body = server.dispatch("GET", ["varieties"], None, "q=nero&limit=5")
     assert code == 200 and [v["name"] for v in body["varieties"]] == ["Nero Assoluto"]
     # no query -> the full (deduped, non-retired) set

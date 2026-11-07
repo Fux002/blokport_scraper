@@ -107,7 +107,7 @@ def test_multi_home_absent_is_held_for_confirmation(base_ref):
 def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base_ref):
     # the supplier's HOME is not a declared own country and is by definition not a documented origin, so the
     # card says where the supplier is based and leaves the origin for the operator to choose
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN,TR")))
     row = _row(src_site="turco", variation_name="Patagonia")
     derive.derive_origin(row, ref, _cfg("IT"))
@@ -119,7 +119,7 @@ def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base
 
 
 def test_the_vendor_mismatch_card_keeps_the_declared_country_prefill(base_ref):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN")))
     row = _row(src_site="turco", variation_name="Patagonia")
     derive.derive_origin(row, ref, dataclasses.replace(_cfg("IT"), primary_origin="TR"))

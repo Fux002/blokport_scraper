@@ -208,7 +208,7 @@ def _finalize_control_plane(stage: str) -> None:
     if stage == "inventory":
         return
     try:
-        from stone_pipeline.config import admission, diagnostics
+        from stone_pipeline.config.control import admission, diagnostics
         diagnostics.persist_from_outputs()
         admission.evaluate_from_outputs()
     except Exception:

@@ -7,7 +7,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from stone_pipeline.config import runner
+from stone_pipeline.config.control import runner
 
 
 def test_the_runner_has_one_launcher_and_no_mode_knob(monkeypatch):

@@ -1,11 +1,11 @@
 """The one entity-lifecycle module: every add/remove operation for BOTH sources and variations, over a
 single guarded operations layer. This replaces the per-verb duplication that used to live in
-config/runner.py (the same lock + run-guard + resolve + translate block copied across delist/purge/reset/
+config/control/runner.py (the same lock + run-guard + resolve + translate block copied across delist/purge/reset/
 remove). One `_exclusive` guard and one `_resolve` are the shared plumbing; each verb is then a few lines.
 
 Two mutual-exclusion layers, kept distinct:
   - process level (`_exclusive`): a destructive lifecycle op, a produce run, and another lifecycle op are
-    mutually exclusive in this control-plane process. A run is tracked by config.runner; this module owns
+    mutually exclusive in this control-plane process. A run is tracked by config.control.runner; this module owns
     the destructive-op flag. Cross-checks are lazy imports (runner <-> lifecycle) to avoid an import cycle.
   - ledger level (`sync._lock_and_check_in_flight`, raised as ServeInFlight): a pull holds a lease -> the
     op refuses atomically inside the DB transaction. Mapped to 409 here.
@@ -27,7 +27,7 @@ log = logfmt.get_logger("lifecycle")
 
 _lock = threading.Lock()
 _active: str | None = None      # the in-flight DESTRUCTIVE lifecycle op (delist/purge/reset/remove/clean),
-                                # or None. Runs are tracked separately by config.runner (status-based); the
+                                # or None. Runs are tracked separately by config.control.runner (status-based); the
                                 # two never nest their locks: start_run checks active() BEFORE taking its
                                 # lock, and an op checks runner.run_in_progress() AFTER claiming here.
 
@@ -59,7 +59,7 @@ def _release(name: str) -> None:
 
 
 def active() -> str | None:
-    """The in-flight destructive lifecycle op, or None. config.runner.start_run checks this to refuse a
+    """The in-flight destructive lifecycle op, or None. config.control.runner.start_run checks this to refuse a
     run while an op is mid-flight (checked before it takes its own lock, so the locks never nest)."""
     with _lock:
         return _active
@@ -203,7 +203,7 @@ def _exclusive(name: str):
     if busy:
         raise _Busy(f"a {busy} is in progress")
     try:
-        from stone_pipeline.config import runner
+        from stone_pipeline.config.control import runner
         if runner.run_in_progress():
             raise _Busy("a run is in progress; refusing to run a lifecycle op mid-run")
         yield
@@ -831,7 +831,7 @@ def rebuild_curation() -> tuple[dict, int]:
         # no pristine seed baked (local dev): nothing to rebuild from -- report, do not silently re-derive
         return {"rebuilt": False, "base_reseed": reseed,
                 "note": "no committed pristine seed to rebuild from"}, 409
-    from stone_pipeline.config import runner
+    from stone_pipeline.config.control import runner
     rec, run_code = runner.start_run(None, "catalog")   # re-derive all sources from the clean base (async)
     return {"rebuilt": True, "base_reseed": reseed, "rederive": rec, "rederive_status": run_code,
             "scope": "global", "pristine_retired": True,

@@ -1,7 +1,7 @@
 # :4200 frontend API reference (the review routes are documented in REVIEW_DECISIONS.md; this file is the older overview)
 
 Every endpoint the Blokport admin (:4200) can call, taken directly from the two dispatchers
-(`stone_pipeline/config/server.py`, `stone_pipeline/ledger/server.py`). **Anything not in this document is
+(`stone_pipeline/config/control/server.py`, `stone_pipeline/ledger/server.py`). **Anything not in this document is
 not served -- remove it from the frontend.** Grouped by the three pages: Scraper, Sync, Diagnostics.
 
 ## Two backends, two tokens

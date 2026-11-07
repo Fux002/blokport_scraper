@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 
-from stone_pipeline.config import runner
+from stone_pipeline.config.control import runner
 
 
 def _alive(pid: int) -> bool:

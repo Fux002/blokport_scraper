@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import decisions_store, server
+from stone_pipeline.config import decisions_store
+from stone_pipeline.config.control import server
 
 CARD = {"ref": "sentas|2351", "sources": ["sentas"], "payload": {
     "source": "sentas", "lot_ref": "2351", "label": "B4804", "variety": "Golden Emparador", "src_url": None,

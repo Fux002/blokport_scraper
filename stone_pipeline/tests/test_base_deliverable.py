@@ -301,7 +301,7 @@ def test_a_curation_rebuild_reseeds_the_base_but_leaves_the_published_manifest_u
     publishes no deliverable; the catalog run it starts publishes the full set, base included."""
     import functools
     from stone_pipeline import lifecycle
-    from stone_pipeline.config import runner
+    from stone_pipeline.config.control import runner
     from stone_pipeline.config.settings import ENV_SEGMENT
     s3 = _S3()
     seed, base, to_upload = _reset_world(tmp_path, monkeypatch, s3)
