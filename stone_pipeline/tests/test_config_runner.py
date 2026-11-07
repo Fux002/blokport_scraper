@@ -46,7 +46,8 @@ def test_default_run_is_all_sources_full_stage():
     assert seen["rec"]["scope"] is None                       # no subset -> produce runs every enabled source
     assert runner._build_command(seen["rec"]) == [
         sys.executable, "-m", "stone_pipeline.produce"]       # full produce (fetch -> scrape -> build); no argv flags
-    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "all"}   # scope on the env
+    assert runner._produce_run_env(seen["rec"]) == {   # scope on the env; all three ALWAYS set
+        "SCRAPER_RUN_STAGE": "all", "SCRAPER_RUN_SOURCES": "", "SCRAPER_RUN_VERIFY": "0"}
 
 
 def test_single_source_scrape_scopes_the_command():
@@ -54,21 +55,23 @@ def test_single_source_scrape_scopes_the_command():
     rec, code = runner.start_run(sources=["zucchi"], stage="scrape", launch=launch)
     assert code == 202 and rec["stage"] == "scrape" and rec["sources"] == ["zucchi"]
     assert "--" not in " ".join(runner._build_command(seen["rec"]))   # no argv flags
-    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "scrape", "SCRAPER_RUN_SOURCES": "zucchi"}
+    assert runner._produce_run_env(seen["rec"]) == {
+        "SCRAPER_RUN_STAGE": "scrape", "SCRAPER_RUN_SOURCES": "zucchi", "SCRAPER_RUN_VERIFY": "0"}
 
 
 def test_catalog_stage_carries_no_sources():
     seen, launch = _capture()
     rec, code = runner.start_run(stage="catalog", launch=launch)
     assert code == 202 and rec["stage"] == "catalog"
-    assert "SCRAPER_RUN_SOURCES" not in runner._produce_run_env(seen["rec"])
+    assert runner._produce_run_env(seen["rec"])["SCRAPER_RUN_SOURCES"] == ""   # set but empty -> all enabled
 
 
 def test_inventory_stage_scopes_to_one_source():
     seen, launch = _capture()
     rec, code = runner.start_run(sources=["zucchi"], stage="inventory", launch=launch)
     assert code == 202 and rec["stage"] == "inventory"
-    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "inventory", "SCRAPER_RUN_SOURCES": "zucchi"}
+    assert runner._produce_run_env(seen["rec"]) == {
+        "SCRAPER_RUN_STAGE": "inventory", "SCRAPER_RUN_SOURCES": "zucchi", "SCRAPER_RUN_VERIFY": "0"}
 
 
 def test_unknown_stage_is_rejected():
@@ -96,7 +99,21 @@ def test_catalog_stage_ignores_a_source_scope():
     seen, launch = _capture()
     rec, code = runner.start_run(sources=["zucchi"], stage="catalog", launch=launch)
     assert code == 202 and seen["rec"]["scope"] is None        # scope ignored for catalog
-    assert "SCRAPER_RUN_SOURCES" not in runner._produce_run_env(seen["rec"])
+    assert runner._produce_run_env(seen["rec"])["SCRAPER_RUN_SOURCES"] == ""
+
+
+def test_produce_child_env_scope_is_fully_the_record_not_inherited(monkeypatch):
+    # the produce subprocess inherits the config container's env; its run scope must come ONLY from the record.
+    # A stray SCRAPER_RUN_SOURCES / legacy BLOKPORT_RUN_* on the task must not turn an "all" run into a scoped one.
+    monkeypatch.setenv("SCRAPER_RUN_SOURCES", "zucchi")
+    monkeypatch.setenv("BLOKPORT_RUN_STAGE", "catalog")
+    monkeypatch.setenv("BLOKPORT_RUN_SOURCES", "polonine")
+    monkeypatch.setenv("BLOKPORT_RUN_VERIFY", "1")
+    env = runner._child_env({"run_id": "r1", "stage": "all", "scope": None}, photos=False)
+    assert env["SCRAPER_RUN_STAGE"] == "all"
+    assert env["SCRAPER_RUN_SOURCES"] == ""          # all enabled, not the inherited zucchi/polonine
+    assert env["SCRAPER_RUN_VERIFY"] == "0"
+    assert not any(k.startswith("BLOKPORT_RUN_") for k in env)   # no legacy scope leaks through
 
 
 
