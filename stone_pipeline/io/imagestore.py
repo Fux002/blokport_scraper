@@ -44,7 +44,6 @@ CONFLICTS_SUBDIR = "conflicts"               # under standard/: the produce's co
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
-MANIFEST_BACKUP_KEY = f"{_PRODUCTS}/_manifest.backup.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a hosted image's S3 url/key contains this substring
 
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any

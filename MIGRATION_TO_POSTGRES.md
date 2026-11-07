@@ -27,7 +27,7 @@ Everything else is portable.
 
 - **All the SQL**: `INSERT ... ON CONFLICT (...) DO UPDATE/NOTHING` (Postgres 9.5+), `CHECK`, foreign keys,
   JSON stored as `TEXT`, and the deterministic `hashlib`/`uuid5` ids (computed in Python, not the DB).
-- **The DAL** (`db.py` `upsert`/`set_state`/`get`/`iter_state`/`execute`) -- raw parameterized SQL.
+- **The DAL** (`db.py` `upsert`/`set_state`/`get`/`execute`) -- raw parameterized SQL.
 - **Indexes** -- already defined for every serve predicate and for `product(source)`
   (`idx_product_serve`, `idx_product_source`, `idx_variation_serve`, `idx_combination_serve`, ...).
 - **Pagination** -- `_sub_limit(limit)` on the serve lanes (`sync.py`).

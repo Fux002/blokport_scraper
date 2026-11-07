@@ -95,20 +95,6 @@ def generate_contract_from_sample(
     )
 
 
-def write_contract(contract: SourceContract, path: Path | None = None) -> Path:
-    path = Path(path or SETTINGS.paths.source_contracts_yaml)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = {}
-    if path.exists():
-        existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    body = asdict(contract)
-    body.pop("source")
-    existing[contract.source] = body
-    # atomic: a crash mid-write must not leave a truncated YAML the next run reads as a contract.
-    csvio.atomic_write(path, lambda h: h.write(yaml.safe_dump(existing, sort_keys=False)))
-    return path
-
-
 # --- fill-rate helpers (shared by contract generation and the health gate) ----
 def column_fill_rates(frame: pl.DataFrame) -> dict[str, float]:
     """Per-column non-empty fraction. Empty means null or blank/whitespace."""

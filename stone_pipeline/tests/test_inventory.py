@@ -164,10 +164,3 @@ def test_drop_deleted_variants_keeps_imageless_new_but_drops_to_delete(tmp_path)
         assert "block_new_blank" in keys                     # imageless fan-out record is KEPT (Medusa-prepared)
         assert "slab_new_imaged" in keys
         assert "slab_junk_del" not in keys                   # to-delete junk still dropped
-
-
-def test_delete_variant_images_dry_run_counts(tmp_path):
-    # dry-run lists the variations/<Key>.png it WOULD delete, removing nothing (no boto3 needed).
-    from stone_pipeline import delete_variant_images as d
-    counts = d.run(["slab_z_aqua_blue_abc", "slab_z_astoria_def"], apply=False)
-    assert counts["would-delete"] == 2 and counts["deleted"] == 0
