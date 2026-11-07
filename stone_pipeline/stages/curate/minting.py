@@ -10,6 +10,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.loaders import restricted_values
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
@@ -89,6 +90,10 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
     union_cores = _union_cores(c)
     obs_union = _observed_attributes(c)
     pack = active_pack()
+    # VE2 PR5: a restricted (archived/internal) stone type cannot be minted (it drives the Key, a frozen
+    # identity), and restricted colours/qualities are dropped from a mint. From the files via restricted_values
+    # (the single authority); empty in the expand phase, so minting is byte-identical until the columns exist.
+    restricted = restricted_values()
     for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed, evidence, spelling, src in c.new_variant_rows:
         if not stone_type:
             # a variety cannot mint without a stone type (it drives the Key, so a wrong/empty type is a wrong
@@ -98,6 +103,16 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
                 "No stone type detected. Assign the correct type to mint it. "
                 "A variety cannot exist without a type.",
                 evidence, color=title_case(obs_color or ""),
+                nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
+            continue
+        # VE2 PR5: a restricted stone type holds through the SAME one review path (pending_confirm). The Key is
+        # the variety's frozen identity, so it must not be minted under an archived/internal type; the operator
+        # assigns an active type or reactivates it. Dormant while nothing is restricted.
+        if proj.norm(stone_type) in restricted.get("type", set()):
+            c.pending_confirm.append(review_card("archived_type", title,
+                "This variety's stone type is archived or internal in Medusa, so it cannot be minted under it. "
+                "Assign an active type in Review, or reactivate the type in Blokport.",
+                evidence, stone_type=stone_type, color=title_case(obs_color or ""),
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
         # keep-retired-and-surface: a mint whose deterministic Key in ANY fan-out branch is RETIRED was
@@ -120,6 +135,15 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         qualities = sorted(u["qualities"]) or [obs_quality]
         finishes = list(dict.fromkeys([*sorted(u["finishes"]),
                                        *([obs_finish] if obs_finish else []), *pack.default_finishes]))
+        # VE2 PR5: drop restricted colours/qualities from the mint (the classify palette's restricted colours
+        # land here too, via the observed set). Keep falsy entries untouched so the dormant output is identical;
+        # if a drop empties the list, fall back to the pack default (PR4 guarantees it is assignable).
+        colors = [x for x in colors if not x or proj.norm(x) not in restricted.get("color", set())]
+        if not colors:
+            colors = [pack.fallback_color]
+        qualities = [x for x in qualities if not x or proj.norm(x) not in restricted.get("quality", set())]
+        if not qualities:
+            qualities = [pack.last_resort_quality]
         # A cross-branch sibling's variety already exists in another branch carrying the scraped spelling as
         # an alias (alias_new): carry that SAME alias onto the new sibling so its product resolves in ONE
         # upload. Match the FULL (name, type) owner: a same-name variety of another type must not inherit it.

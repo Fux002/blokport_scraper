@@ -45,12 +45,13 @@ def test_restricted_values_absent_file(tmp_path):
 
 # --- acked_products: Medusa-held values exempt an existing product -----------
 
-def _ledger_product(lg, sku, *, color=None, finish=None, quality=None, type_=None, category=None, medusa_id=None):
+def _ledger_product(lg, sku, *, color=None, finish=None, quality=None, type_=None, category=None,
+                    variation_key=None, medusa_id=None):
     now = now_iso()
     lg.upsert("product", {"sku": sku, "source": sku.split("-")[0].lower(), "surrogate_key": sku.split("-")[-1],
                           "color": color, "finish": finish, "quality": quality, "type": type_,
-                          "category": category, "medusa_id": medusa_id, "state": "synced",
-                          "created_at": now, "updated_at": now}, pk=("sku",))
+                          "category": category, "variation_key": variation_key, "medusa_id": medusa_id,
+                          "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
 
 
 def test_acked_products_only_includes_medusa_held(tmp_path):
@@ -277,3 +278,50 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
     stage.resolve_row(row)
     assert row.variation_id == "a" and row.variation_method == "fuzzy"   # still RECOGNIZED
     assert stage.writeback.aliases == []                                 # but the guess is NOT learned onto it
+
+
+# --- VE2 PR5: the variety Key as a frozen dimension (item 6) ------------------
+
+_ARCH_KEY = "slab_marble_carrara_1"
+
+
+def _vrow():
+    return CanonicalRow(src_site="zucchi", surrogate_key="1", variation_key=_ARCH_KEY)
+
+
+def _variation_row(lg, key):
+    now = now_iso()
+    lg.upsert("variation", {"key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": "x",
+                            "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
+                            "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced",
+                            "archived": 0, "first_seen": now, "last_synced": now, "created_at": now,
+                            "updated_at": now}, pk=("key",))
+
+
+def test_acked_products_includes_the_variation_key(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation_row(lg, _ARCH_KEY)   # product.variation_key is a FK to variation.key
+        _ledger_product(lg, "ZUCCHI-1", variation_key=_ARCH_KEY, medusa_id="M1")
+        out = acked_products(lg)
+    assert ("variation_key", norm(_ARCH_KEY)) in out["ZUCCHI-1"]
+
+
+def test_a_new_product_on_an_archived_variety_is_held():
+    row = _vrow()
+    validate.validate_row(row, frozen={"variation_key": {norm(_ARCH_KEY)}}, acked={}, source_code="zucchi")
+    assert "value_frozen" in {r.rule for r in row.reject_reasons}
+
+
+def test_an_existing_product_staying_on_its_archived_variety_is_exempt():
+    row = _vrow()
+    validate.validate_row(row, frozen={"variation_key": {norm(_ARCH_KEY)}},
+                          acked={"ZUCCHI-1": {("variation_key", norm(_ARCH_KEY))}}, source_code="zucchi")
+    assert "value_frozen" not in {r.rule for r in row.reject_reasons}
+
+
+def test_an_existing_product_moving_onto_an_archived_variety_is_held():
+    row = _vrow()   # resolved to the archived Key, but acked on a DIFFERENT key -> a move -> held
+    validate.validate_row(row, frozen={"variation_key": {norm(_ARCH_KEY)}},
+                          acked={"ZUCCHI-1": {("variation_key", norm("slab_marble_other_2"))}},
+                          source_code="zucchi")
+    assert "value_frozen" in {r.rule for r in row.reject_reasons}

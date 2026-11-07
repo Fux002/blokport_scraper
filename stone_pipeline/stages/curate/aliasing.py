@@ -103,6 +103,8 @@ def emit_alias_rows(c: Curation, result: CurationResult) -> None:
                         else c.imports[branch].by_name.get(target))
             if not existing:
                 continue  # variety not in this category's import file
+            if existing.get("archived"):
+                continue  # VE2 PR5: never write a new alias row onto a frozen (archived) variety
             current = alias_list(existing["Aliases"])
             have = {proj.norm(a) for a in current}
             additions = [s for s in sorted(spellings) if proj.norm(s) not in have]

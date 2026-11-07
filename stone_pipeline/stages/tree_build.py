@@ -143,6 +143,29 @@ def _load_products(path: Path | None) -> dict[str, dict]:
     return out
 
 
+# The emitted products sheet's id columns, in COMBINATION_COLUMNS order (product_category_id, type_id,
+# variation_id, finish_id, color_id, quality_id), so a product tuple intersects the fan-out tuples directly.
+_PRODUCT_TUPLE_COLS = ("Product Category 1", "STN Type Id", "STN Variation Id",
+                       "STN Finish Id", "STN Color Id", "STN Quality Id")
+
+
+def _load_product_tuples(path: Path | None) -> set[tuple]:
+    """The EXACT (category, type, variation, finish, colour, quality) id tuple of every emitted product, from
+    the same products sheet build_combinations already reads (VE2 PR5). Used to KEEP an emitted product's own
+    combination when a value is restricted: the fan-out is filtered to assignable values, then these exact
+    tuples are re-added ONLY where the fan-out already produced them (an intersection), so the result stays a
+    subset of today's set. A row missing any id is skipped (it is not a priceable combination)."""
+    out: set[tuple] = set()
+    if not path or not Path(path).exists():
+        return out
+    with Path(path).open(encoding="utf-8-sig", newline="") as h:
+        for r in csv.DictReader(h):
+            t = tuple((r.get(col) or "").strip() for col in _PRODUCT_TUPLE_COLS)
+            if all(t):
+                out.add(t)
+    return out
+
+
 def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
     """review/tree_uncovered_variations.csv 'assign_type' -> {variant_name_lower: type_id}: a stone
     type the user gives a variation the scrape never typed, so it gets allocated to combinations on
@@ -238,6 +261,13 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     retired_keys = retired_keys or set()
     by_key, by_cat_name, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
+    # VE2 PR5: the restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
+    # in the expand phase (no status column), so the fan-out below is byte-identical until then.
+    restricted_ids = {a.sourceid for a in read_attributes(
+        Path(attributes_csv), require_status=attributes_status_required(Path(attributes_csv)))
+        if not a.assignable and a.sourceid}
+    emitted_tuples = _load_product_tuples(products_csv)
+    archived_keys: set[str] = set()
     # Operator leaf decisions as attribute IDs, keyed (variety_norm, stone_type_norm) -- precomputed once so
     # the per-row lookup below is a dict hit, not a re-map of every decision each of ~36k rows.
     overlay_ids: dict[tuple[str, str], tuple[set, set]] = {}
@@ -261,6 +291,8 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         # a row missing Id or Key is skipped, not a KeyError (the cold-start guard only checks the export
         # EXISTS; read_variants_export fails loud on a missing Key or Name column, an absent Id reads empty).
         vid, key, name = r.id, r.key, r.name
+        if r.archived and key:
+            archived_keys.add(key)   # VE2 PR5: a frozen variety is counted frozen, not uncovered (below)
         # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
         # combination references a variation that will not exist after the Medusa cleanup.
         if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
@@ -323,6 +355,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         return True
 
     covered = 0
+    frozen_count = 0
     uncovered: list[dict] = []
     for key, vid, name in export_rows:
         prefix = key.split("_", 1)[0]
@@ -379,16 +412,36 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
         if add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
             covered += 1
+        elif key in archived_keys:
+            # VE2 PR5: a FROZEN (archived) variety with no combination is counted frozen, NOT uncovered -- it
+            # is not awaiting an operator decision (it will not be served), so it must not sit in the review file.
+            frozen_count += 1
         else:
             missing = [n for n, v in (("type", typ), ("finish", finishes), ("colour", colors), ("quality", quals))
                        if not v]
             uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix, "missing": "+".join(missing)})
 
-    stats = {"covered": covered, "uncovered": len(uncovered),
+    # VE2 PR5: fan out only to ASSIGNABLE values. Drop a fan-out tuple that carries a restricted attribute id
+    # (category pcat / type / finish / colour / quality -- positions 0,1,3,4,5 of COMBINATION_COLUMNS; position
+    # 2 is the variation id, a different namespace, never matched). Then RE-ADD the exact tuples of emitted
+    # products, but only where the fan-out ALREADY produced them (an intersection), so the result is always a
+    # SUBSET of today's set -- an emitted product carrying a restricted value (validate allows it only when the
+    # product is acked with it) keeps its combination, and nothing new is ever added. Dormant: an empty
+    # restricted set leaves `combinations` untouched (byte-identical).
+    missing_product_tuples = len(emitted_tuples - combinations)
+    if restricted_ids:
+        _attr_pos = (0, 1, 3, 4, 5)
+        assignable = {c for c in combinations if not restricted_ids.intersection(c[p] for p in _attr_pos)}
+        combinations = assignable | (combinations & emitted_tuples)
+    stats = {"covered": covered, "uncovered": len(uncovered), "frozen": frozen_count,
              "combination_rows": len(combinations),
              "variations": len({c[2] for c in combinations}),
              "categories": len({c[0] for c in combinations}),
+             "product_tuples_absent_from_fanout": missing_product_tuples,
              "category_finish_counts": {k: len(v) for k, v in cat_finishes.items()}}
+    if missing_product_tuples:
+        log.warning("emitted product tuples absent from the fan-out (kept none of these; a separate finding)",
+                    extra={"extra_fields": {"count": missing_product_tuples}})
     return combinations, stats, uncovered
 
 
