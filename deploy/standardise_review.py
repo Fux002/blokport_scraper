@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -26,8 +27,7 @@ from botocore.exceptions import ClientError
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (MISSING, aws_config, chosen_prefix, excluded, read_clicks, read_conflicts,
-                                       read_records)
+from deploy.standardise_publish import MISSING, aws_config, chosen_prefix, read_conflicts, read_records
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import logfmt
@@ -36,7 +36,7 @@ from stone_pipeline.io import imagestore
 log = logfmt.get_logger("photos.review")
 
 ROOT = decisions.ROOT
-ACTIONS = ("clean", "withdraw")                      # the page's contract: PUT and DELETE /photos/clicks/{sku}
+ACTIONS = ("use", "clean", "withdraw", "remove")      # the page's contract, in the order the page lists them
 CLICKABLE = ("awaiting_click", "awaiting_auto")      # the reasons a click may still change
 RESULT_STATES = ("unchecked", "not_judged", "unparsed", "outdated", "pass", "fail")   # a result image exists
 QUEUED = "queued"                                    # a click stored since the last full run: no run has read it yet
@@ -124,13 +124,26 @@ def _url(s3, key):
                                      ExpiresIn=C.REVIEW_URL_TTL_SECONDS)
 
 
-def served_photo(s3, source, photo, reason):
-    """A review photo as served: whether a click may clean it (its listing's reason still lets a click help, a cleaned
-    copy could fix it and a model is left) and its images signed now: the scraped photo, its result when one exists,
-    its cleaned copy when one was made."""
-    sha = photo["sha"]
-    return {**photo,
-            "clickable": reason in CLICKABLE and photo["fixable"] and bool(photo["clean"]["left"]),
+def _now():
+    """Now as the page writes a decision's time (toISOString, UTC): the time a candidate decision is checked at."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _accepted(ctx, doc):
+    return not decisions.refusals(ctx, doc)
+
+
+def served_photo(s3, ctx, row, photo, at):
+    """A review photo as served. clickable: its listing's reason still lets a click help, a cleaned copy could fix it,
+    a model is left, and the applier would store the click; usable: the run tags whose result of it the applier would
+    take as the owner's choice ("use"). Its images signed now: the scraped photo, its result when one exists, its
+    cleaned copy when one was made."""
+    sha, source = photo["sha"], row["source"]
+    doc = {"id": row["listing"], "source": source, "sha": sha, "at": at}
+    clickable = (row["reason"] in CLICKABLE and photo["fixable"] and bool(photo["clean"]["left"])
+                 and _accepted(ctx, {**doc, "action": "clean"}))
+    return {**photo, "clickable": clickable,
+            "usable": [tag for tag in decisions.TAGS if _accepted(ctx, {**doc, "action": "use", "tag": tag})],
             "urls": {"original": _url(s3, f"{imagestore.scraped_prefix(source)}{sha}.jpg"),
                      "result": (_url(s3, f"{round_prefix(photo['tag'], source)}{sha}.main.jpg")
                                 if photo["state"] in RESULT_STATES else None),
@@ -138,33 +151,55 @@ def served_photo(s3, source, photo, reason):
                                  if photo["clean"]["copy"] is not None else None)}}
 
 
-def _joined(found, reason):
-    return {"listing": found["listing"], "source": found["source"], "format": None, "reason": reason, "why": None,
-            "click": None, "photos": []}
+def row_actions(ctx, row, photos, click, at):
+    """What the owner can do on the row, each only when the decisions applier would accept it (refusals), so an offered
+    action never meets a 422: "use" while a photo has a usable result, "clean" while a photo is clickable, "withdraw"
+    while a click is stored, "remove" on a photo listing not removed already."""
+    doc = {"id": row["listing"], "source": row["source"], "at": at}
+    offered = {"use": any(p["usable"] for p in photos), "clean": any(p["clickable"] for p in photos),
+               "withdraw": click is not None and _accepted(ctx, {**doc, "action": "withdraw"}),
+               "remove": row["reason"] != "owner_removed" and _accepted(ctx, {**doc, "action": "remove"})}
+    return [action for action in ACTIONS if offered[action]]
+
+
+def _joined(found, listing, reason):
+    """A row only the join can give: the listing as the sheet has it (the ledger's handle when it left the sheet)."""
+    return {"listing": listing["key"] if listing else found["listing"], "source": found["source"],
+            "format": listing["format"] if listing else None, "reason": reason, "why": None, "click": None, "photos": []}
 
 
 def hidden(s3):
     """{"rows": [...]} of every listing the ledger hides, by source then listing: the owner's removal first, then a
     choice record (chosen, the next relink links it), then the last full run's row, else not worked yet; each with the
-    live click (live_click), its photos served (served_photo) and its actions: "clean" while a photo is clickable,
-    "withdraw" while a click is stored."""
+    live click (live_click), its photos served (served_photo) and its actions (row_actions). The stored decisions are
+    read once, by the decisions applier's own readers (decisions.context), so what is offered is what it accepts."""
     products = hidden_products()
-    review, removed = read_review(s3), proc.removed_listings(s3)
-    records, clicks = chosen_listings(s3), read_clicks(s3, ROOT)
+    photo_listings, tiles = sheet(s3)
+    by_sku = {l["sku"]: l for l in photo_listings + tiles}
+    try:
+        ctx = decisions.context(s3, photo_listings, decisions.excluded())
+    except decisions.InvalidDecisions as exc:
+        raise Unavailable(str(exc)) from exc
+    stores, review, at = ctx.stores, read_review(s3), _now()
+    removed = imagestore.owner_removed_skus(stores.removal_keys)
+    chosen = {k[len(chosen_prefix(ROOT)):-len(".json")] for k in stores.record_keys}
+    clicks = {**stores.clicks, **{sku: {"error": why} for sku, items in stores.unreadable.items()
+                                  for what, _, why in items if what == "click"}}
     rows = []
     for sku, found in products.items():
+        listing = by_sku.get(sku)
         if sku in removed:
-            row = _joined(found, "owner_removed")
-        elif found["listing"] in records:
-            row = _joined(found, "chosen_not_linked")
+            row = _joined(found, listing, "owner_removed")
+        elif (listing["key"] if listing else found["listing"]) in chosen:
+            row = _joined(found, listing, "chosen_not_linked")
         elif sku in review:
             row = review[sku]
         else:
-            row = _joined(found, "not_worked_yet")
-        photos = [served_photo(s3, row["source"], p, row["reason"]) for p in row["photos"]]
+            row = _joined(found, listing, "not_worked_yet")
+        photos = [served_photo(s3, ctx, row, p, at) for p in row["photos"]]
         click = live_click(clicks.get(sku), row["click"])
-        actions = [a for a, on in (("clean", any(p["clickable"] for p in photos)), ("withdraw", click is not None)) if on]
-        rows.append({"sku": sku, **row, "click": click, "photos": photos, "actions": actions})
+        rows.append({"sku": sku, **row, "click": click, "photos": photos,
+                     "actions": row_actions(ctx, row, photos, click, at)})
     return {"rows": sorted(rows, key=lambda r: (r["source"] or "", r["listing"] or "", r["sku"]))}
 
 
@@ -275,7 +310,7 @@ def click(s3, sku, sha, at):
     if _has_choice(s3, listing["key"]):
         return 409, {"reason": "chosen_not_linked", "error": f"{sku} has a chosen photo; the next relink shows it"}
     conflicts = read_conflicts(s3, {src})
-    blocked = excluded() | {s for s in listing["photos"] if (src, s) in conflicts}
+    blocked = decisions.excluded() | {s for s in listing["photos"] if (src, s) in conflicts}
     # what the run folders hold of the photos the two states ask about (select.Round shas), never a whole folder: the
     # listing's candidates (listing_state judges only those) and the clicked photo (click_state)
     asked = set(select.candidates(listing, blocked)) | {sha}
