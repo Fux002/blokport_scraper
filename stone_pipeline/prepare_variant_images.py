@@ -44,16 +44,7 @@ PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_g
 TEXTURE_QUEUE_PREFIX = f"{ENV_SEGMENT}/scraper/texture_queues/"
 TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its exact queue key from here
 BATCH_JOB_ENV = "AWS_BATCH_JOB_ID"   # set by Batch in every job it runs: this process is the dispatched GPU task
-# Per-dispatch queue objects are ephemeral coordination, consumed by their GPU job within minutes. Delete
-# any older than this at publish time so the prefix self-heals instead of accumulating forever. Far above a
-# job's runtime (jobs finish in minutes; the Batch attempt ceiling is hours), so this can never delete a
-# queue a running or just-published job still needs.
-TEXTURE_QUEUE_TTL_SECONDS = 86400   # 1 day
 GEN_DEPS = ("fal_client", "torch")                 # the generator stack the actual run needs to import
-# Per-image-script wall-clock ceiling. Generation (FLUX over the whole queue) legitimately runs minutes; this is a
-# backstop far above normal so a wedged stage (a hung model load or network call) fails and flags its variants
-# HELD instead of pinning the whole Batch task.
-IMAGE_SCRIPT_TIMEOUT_S = 3600
 GENERATOR_SCRIPTS = ("genetate_images.py", "rb_images.py")   # FLUX.2 -> BEN2, run in this order
 # The job's own exit codes, apart from a crash (1) and run_pipeline.sh's bad mode (2). Both fail the Batch job (the
 # failed-job alert fires once); the job definition never retries them (evaluateOnExit), so FAL is never paid twice.
@@ -120,13 +111,13 @@ def publish_prompts(prompts_path: Path, key: str, client=None) -> bool:
 
 
 def _prune_stale_queue_keys(client) -> int:
-    """Delete per-dispatch queue objects under TEXTURE_QUEUE_PREFIX older than TEXTURE_QUEUE_TTL_SECONDS --
+    """Delete per-dispatch queue objects under TEXTURE_QUEUE_PREFIX older than SETTINGS.auto_texture.queue_ttl_seconds --
     they are ephemeral (each is consumed by its GPU job within minutes), so without this the prefix grows
     forever (one object per mint-batch, including failed dispatches). Best-effort: a cleanup failure NEVER
     fails the produce (the images are what matter); it only logs. Returns the count deleted. The TTL is far
     above any job's runtime, so a running or just-published queue is never touched."""
     from datetime import datetime, timezone
-    cutoff = datetime.now(timezone.utc).timestamp() - TEXTURE_QUEUE_TTL_SECONDS
+    cutoff = datetime.now(timezone.utc).timestamp() - SETTINGS.auto_texture.queue_ttl_seconds
     deleted = 0
     try:
         for page in client.get_paginator("list_objects_v2").paginate(
@@ -319,10 +310,10 @@ def _generate_queued_images() -> list[str]:
             # pin the Batch task forever (a timeout is a failed script)
             try:
                 rc = subprocess.run([sys.executable, "-u", script], cwd=ip, check=False,
-                                    timeout=IMAGE_SCRIPT_TIMEOUT_S).returncode
+                                    timeout=SETTINGS.auto_texture.script_timeout_s).returncode
             except subprocess.TimeoutExpired:
                 log.error("image-pipeline script timed out",
-                          extra={"extra_fields": {"script": script, "timeout_s": IMAGE_SCRIPT_TIMEOUT_S}})
+                          extra={"extra_fields": {"script": script, "timeout_s": SETTINGS.auto_texture.script_timeout_s}})
                 failed.append(script)
                 continue
             if rc != 0:
