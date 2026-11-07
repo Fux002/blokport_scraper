@@ -8,7 +8,8 @@ from __future__ import annotations
 import re
 import uuid
 
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories
+from stone_pipeline.config.categories import CATEGORIES, active_categories
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.text import ascii_fold
 
 # deterministic namespace for variant key uuids (fixed, so keys are reproducible)

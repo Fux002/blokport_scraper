@@ -18,8 +18,9 @@ from pathlib import Path
 from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
+from stone_pipeline.config.categories import category_for_key
 from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, SETTINGS,
-                                            THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key)
+                                            THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED)
 from stone_pipeline.core import logfmt
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export

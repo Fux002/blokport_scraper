@@ -8,7 +8,7 @@ from functools import cached_property
 from pathlib import Path
 
 from stone_pipeline.config.decisions_model import Decisions
-from stone_pipeline.config.settings import CATEGORIES
+from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.reference.loaders.attributes import VOCAB_CATEGORIES, Attributes, load_attributes
 from stone_pipeline.reference.loaders.backbone import Backbone, load_backbone
@@ -138,7 +138,7 @@ def existing_varieties_file() -> Path:
 
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
-    from stone_pipeline.config import decisions_store, settings, store
+    from stone_pipeline.config import categories, decisions_store, store
 
     # load_all is a READ path. The operator overlays below live in config.db, but merely READING them via
     # open_store() CREATES the file if it is absent -- which then flips load_source (config store vs yaml) for
@@ -156,7 +156,7 @@ def load_all() -> ReferenceData:
     # leaves block/tile inactive on the frozen snapshot -- silently disabling new-variety fan-out into
     # those categories. load_all is the single point every pipeline stage passes through with the export on
     # disk, so refreshing here makes EVERY path (not just produce) reflect the live pcats. Idempotent.
-    settings.refresh_category_pcats()
+    categories.refresh_category_pcats()
     # The effective backbone = the committed seed grown by the operator-approved leaf overlay (config.db).
     # The seed file is never mutated; the overlay is applied in memory, here, in the one place ref is built.
     backbone = load_backbone()
@@ -223,8 +223,8 @@ def load_all() -> ReferenceData:
                 # the default-form variant count (pack primary category); NOT literally slab, so a non-stone
                 # pack whose default form is not named 'slab' does not KeyError building this log line.
                 "variants_default_form": (
-                    len(ref.variants[settings.default_form_name()].by_id)
-                    if settings.default_form_name() in ref.variants else 0),
+                    len(ref.variants[categories.default_form_name()].by_id)
+                    if categories.default_form_name() in ref.variants else 0),
                 "backbone_varieties": len(ref.backbone),
             }
         },

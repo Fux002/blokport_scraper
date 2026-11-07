@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED,
-                                            category)
+from stone_pipeline.config.categories import category
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.payloads import variation_hash

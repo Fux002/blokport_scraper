@@ -12,7 +12,8 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from stone_pipeline.config.settings import SETTINGS, category
+from stone_pipeline.config.categories import category
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key

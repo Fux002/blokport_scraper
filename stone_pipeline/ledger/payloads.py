@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
-from stone_pipeline.config.settings import CATEGORIES
+from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import payload_hash
 

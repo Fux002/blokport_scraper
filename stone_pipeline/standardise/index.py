@@ -8,7 +8,7 @@ import json
 import re
 from typing import NamedTuple
 
-from stone_pipeline.config import settings
+from stone_pipeline.config import categories
 from stone_pipeline.io import imagestore
 
 # A hosted photo (/products/<scraped|improved>/<source>/<sha>.<ext>) or a published standardised view of one
@@ -53,7 +53,7 @@ def rows(sheet_text, photos):
     """(row, format, [(source, sha)] of the product's own photos in its order) per product row, the photos from the
     photo list (parse_photos). Fails loud on an unknown category (a guessed format would put a tile on a slab's stand)
     and on a product the photo list does not have (its photos are never read from the sheet's image columns)."""
-    formats = {c.pcat_id: c.name for c in settings.active_categories()}     # the live registry: refreshed from the export
+    formats = {c.pcat_id: c.name for c in categories.active_categories()}     # the live registry: refreshed from the export
     for row in csv.DictReader(io.StringIO(sheet_text)):
         category = row["Product Category 1"]
         fmt = formats.get(category)

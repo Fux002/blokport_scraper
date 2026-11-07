@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from stone_pipeline.config.settings import Confidence, bulk_form_name
+from stone_pipeline.config.categories import bulk_form_name
+from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core import ids, logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.matching import projections as proj

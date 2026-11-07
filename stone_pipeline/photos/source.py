@@ -426,9 +426,9 @@ def _sheet(client):
     export, and a committed one can lag Medusa. A fetch that fails keeps what is on disk, so a prod run without its export
     fails loud on its first category, never guesses."""
     from stone_pipeline.io import medusa_inputs
-    from stone_pipeline.config import settings
+    from stone_pipeline.config import categories
     medusa_inputs.fetch_attributes(client)
-    settings.refresh_category_pcats()
+    categories.refresh_category_pcats()
     return _get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8")
 
 

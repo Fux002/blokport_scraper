@@ -29,7 +29,7 @@ from stone_pipeline.photos import select as select
 from stone_pipeline.photos.publish import NoConflictSet, chosen_prefix, pool_map, read_conflicts, read_records
 from stone_pipeline.io.medusa_inputs import fetch_attributes
 from stone_pipeline.photos.source import round_prefix, sheet_and_photos
-from stone_pipeline.config import settings
+from stone_pipeline.config import categories, settings
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
@@ -61,7 +61,7 @@ _SHEET_LOCK = threading.Lock()
 
 def _categories():
     """The live category registry the sheet's formats are read by (index.listings), as a comparable value."""
-    return tuple(sorted((c.pcat_id, c.name) for c in settings.active_categories()))
+    return tuple(sorted((c.pcat_id, c.name) for c in categories.active_categories()))
 
 
 def _etag(s3, key):
@@ -75,7 +75,7 @@ def sheet(s3):
     served (dev's sheet is 8.7 MB and changes once a produce; its readers never change it). A write between the look
     and the read only costs one more read on the next request."""
     fetch_attributes(s3)
-    settings.refresh_category_pcats()
+    categories.refresh_category_pcats()
     key = (_etag(s3, f"{settings.ENV_SEGMENT}/{C.SHEET_KEY}"), _etag(s3, f"{settings.ENV_SEGMENT}/{C.PHOTOS_KEY}"),
            _categories())
     with _SHEET_LOCK:

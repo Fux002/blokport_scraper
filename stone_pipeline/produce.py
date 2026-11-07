@@ -56,8 +56,8 @@ def _fetch_inputs() -> None:
     # pcat id or a corrected category label -- would otherwise keep gating emit + new-variety fan-out on
     # the stale import snapshot (symptom: every row category_invalid). Runs even when the fetch was
     # skipped (re-reads the same local file the import used), so it can only ever correct, never regress.
-    from stone_pipeline.config import settings
-    settings.refresh_category_pcats()
+    from stone_pipeline.config import categories
+    categories.refresh_category_pcats()
 
 
 def _acquires_scraper(source: str) -> bool:

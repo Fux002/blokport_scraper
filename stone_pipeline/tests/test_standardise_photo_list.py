@@ -19,9 +19,9 @@ HOSTED = "https://b.s3.amazonaws.com/dev/products/{}/sentas/{}.jpg"
 # --- reading it -------------------------------------------------------------------------------------------------------
 def _slab_category(monkeypatch, pcat="pcat_S"):
     from dataclasses import replace
-    from stone_pipeline.config import settings
-    slab = replace(settings.category("slab"), pcat_id=pcat)
-    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
+    from stone_pipeline.config import categories
+    slab = replace(categories.category("slab"), pcat_id=pcat)
+    monkeypatch.setattr(categories, "_BY_NAME", {**categories._BY_NAME, slab.name: slab})
 
 
 def test_a_listing_missing_from_the_photo_list_fails_loud_never_falls_back_to_the_sheet(monkeypatch):

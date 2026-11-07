@@ -16,7 +16,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from stone_pipeline.config.settings import SETTINGS, active_categories
+from stone_pipeline.config.categories import active_categories
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS

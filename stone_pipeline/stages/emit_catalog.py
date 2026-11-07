@@ -20,7 +20,8 @@ from pathlib import Path
 # Never import the frozen CATEGORIES tuple here: union-fill must read the runtime registry
 # (active_categories), never an import-time snapshot (the slab-only-mint regression; test_categories
 # guards that this module has no such attribute).
-from stone_pipeline.config.settings import SETTINGS, active_categories, category_for_key
+from stone_pipeline.config.categories import active_categories, category_for_key
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
     clean_alias_list,

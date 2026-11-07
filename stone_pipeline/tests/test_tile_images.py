@@ -20,7 +20,7 @@ from botocore.exceptions import ClientError
 
 from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import process as proc
-from stone_pipeline.config import settings
+from stone_pipeline.config import categories as registry
 from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.io import imagestore
@@ -270,8 +270,8 @@ _IMG = "https://b.s3.amazonaws.com/{env}/products/improved/{src}/{sha}.jpg"
 
 @pytest.fixture
 def categories(monkeypatch):
-    by = {n: replace(c, pcat_id=f"pcat_{n}") for n, c in settings._BY_NAME.items()}
-    monkeypatch.setattr(settings, "_BY_NAME", by)
+    by = {n: replace(c, pcat_id=f"pcat_{n}") for n, c in registry._BY_NAME.items()}
+    monkeypatch.setattr(registry, "_BY_NAME", by)
 
 
 def _sheet(*rows):

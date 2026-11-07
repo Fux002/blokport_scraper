@@ -5,7 +5,7 @@ result counts. Every mint edge (type-less, already-exists, retired) is enforced 
 from __future__ import annotations
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import category
+from stone_pipeline.config.categories import category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.core.text import title_case

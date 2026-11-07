@@ -1,9 +1,9 @@
 > Note: categories come from the domain pack (`stone_pipeline/config/domains/<pack>.yaml`, `categories:`);
-> `settings.CATEGORIES` is built from it at import. A category activates once its Medusa pcat is set.
+> `CATEGORIES` (`stone_pipeline/config/categories.py`) is built from it at import. A category activates once its Medusa pcat is set.
 
 # Adding a category
 
-Categories live in ONE place — `CATEGORIES` in `stone_pipeline/config/settings.py`.
+Categories live in ONE place: `CATEGORIES` in `stone_pipeline/config/categories.py`.
 Everything (matching engines, tree build, image generation, inbox folders, fan-out,
 validation) derives from that list, so adding a category is mostly a
 registry entry plus its data. A misspelled/unwired category fails loudly rather

@@ -18,7 +18,7 @@ import re
 from functools import lru_cache
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES
+from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.core.text import looks_codey, match_key
 
 

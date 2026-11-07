@@ -22,7 +22,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
+from stone_pipeline.config.categories import bulk_form_name, category
+from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.adapters.tokens import clean_variety

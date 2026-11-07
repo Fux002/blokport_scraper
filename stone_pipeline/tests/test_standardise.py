@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from stone_pipeline.config import settings
+from stone_pipeline.config import categories
 from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import blend, index, kinds, layout, marks, outline, retouch, studio, views
 
@@ -699,8 +699,8 @@ PHOTOS = {"one": [("zucchi", "a" * 64), ("zucchi", "b" * 64)], "two": [("zucchi"
 @pytest.fixture
 def _active_slab(monkeypatch):
     from dataclasses import replace
-    slab = replace(settings.category("slab"), pcat_id="pcat_01M1GWN1V1E66J1NM1PTQ3ESAK")
-    monkeypatch.setattr(settings, "_BY_NAME", {slab.name: slab})           # the live registry the helpers read
+    slab = replace(categories.category("slab"), pcat_id="pcat_01M1GWN1V1E66J1NM1PTQ3ESAK")
+    monkeypatch.setattr(categories, "_BY_NAME", {slab.name: slab})           # the live registry the helpers read
 
 
 def test_the_index_links_a_photo_to_its_first_product(_active_slab):
