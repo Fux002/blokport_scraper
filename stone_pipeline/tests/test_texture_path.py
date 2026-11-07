@@ -99,7 +99,8 @@ def test_without_auto_texture_the_produce_only_queues_and_says_nothing_generates
     produce["configure"](auto_texture=False)
     assert _queue_textures() == 2
     assert produce["published"] == [] and produce["dispatched"] == [] and produce["generated"] == []
-    assert "AUTO_TEXTURE is off" in caplog.text and "stay HELD" in caplog.text
+    [warning] = [r for r in caplog.records if "AUTO_TEXTURE is off" in r.getMessage()]
+    assert warning.levelname == "WARNING" and "stay HELD" in warning.getMessage()
 
 
 def test_a_queue_that_cannot_be_published_is_never_dispatched(produce, caplog):

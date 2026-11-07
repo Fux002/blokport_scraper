@@ -18,12 +18,13 @@ start fail LOUD instead.
    New values discovered mid-scrape are the known dormant C3 case (held for review, not auto-sent) --
    they are created via the new-variant review "attributes" screen, not by the cold start.
 
-2. **FAL must be wired to the produce (SCRAPER-side only).** Every product is held until its variety's
-   `{Key}.png` is on S3. On a cold start that is thousands of new textures, generated inside the produce
-   only when `FAL_KEY` is set (via `produce_secret_arns`). Without it, variations sync but ZERO products
-   serve. This is entirely the scraper's concern -- the produce generates the texture and uploads it to
-   S3; Blokport/Medusa never generates or supplies a variant image, it only reads the `image_url`.
-   FAL_KEY is wired on dev (the sync_service task); it must be wired per environment (scraper infra).
+2. **The texture job must be wired (SCRAPER-side only).** Every product is held until its variety's
+   `{Key}.png` is on S3. On a cold start that is thousands of new textures. The produce never generates
+   them: it queues them and, with `AUTO_TEXTURE` on, dispatches ONE GPU texture job
+   (`RUN_MODE=generate-textures`), which generates and uploads them. That job needs `FAL_KEY` on the GPU
+   job definition (the gpu_enhance module's `ssm_secret_arns`: `infra/main.tf`, dev and prod blocks).
+   Without the job, variations sync but ZERO products serve. This is entirely the scraper's concern --
+   Blokport/Medusa never generates or supplies a variant image, it only reads the `image_url`.
 
 ## Fail-loud guards (added so a stalled cold start is not mistaken for success)
 

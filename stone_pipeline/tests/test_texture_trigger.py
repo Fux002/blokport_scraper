@@ -1,4 +1,4 @@
-"""The auto-texture trigger: after a produce queues new-variant textures the lean image can't generate, it
+"""The auto-texture trigger: after a produce queues new-variant textures (it never generates them), it
 submits ONE GPU Batch job (RUN_MODE=generate-textures) reusing the auto-enhance queue/jobdef. Off unless
 BLOKPORT_AUTO_TEXTURE; best-effort (a submit failure never raises). Mocks boto3 -- no AWS."""
 
