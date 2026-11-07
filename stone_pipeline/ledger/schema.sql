@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS variation (
     -- render_variants_full renders only in_full rows; the export dump for
     -- combinations uses ALL rows.
     in_full       INTEGER NOT NULL DEFAULT 0,
+    -- VE2: 1 when the Medusa export marks this variety archived (a frozen variety: it is served to no
+    -- variations lane, so never created or updated, and no NEW product binds to it; existing products keep
+    -- flowing). A PURE MIRROR of the export's status column, recomputed every produce (writethrough).
+    archived      INTEGER NOT NULL DEFAULT 0,
     payload_hash  TEXT,
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),

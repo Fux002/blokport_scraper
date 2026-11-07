@@ -97,6 +97,46 @@ def _live_scrape(sources: list[str] | None) -> int:
 _COLD_START_MARKERS = ("NOT in the current export", "NO valid-combination row", "cannot verify")
 
 
+def _mirror_archived() -> None:
+    """VE2: mirror the export's archived flag onto the ledger RIGHT AFTER the fetch, before any record_source
+    write, so a variety Blokport archived in the fresh export is frozen for the whole produce (every stage,
+    `scrape` included), not only from the later catalog step. No-op when write-through is off.
+
+    It RAISES on a ledger failure (no swallow): the ledger is the live sync source, and a failed
+    record_source/record_catalog already aborts the run. A silently-skipped mirror would let record_source
+    (which runs a moment later, per source) serve new products on a freshly archived variety for the whole
+    scrape -- exactly the hole this call closes -- so it must fail loud, not continue."""
+    from stone_pipeline.ledger import writethrough
+    if not writethrough.enabled():
+        return
+    with writethrough.open_ledger() as ledger:
+        n = writethrough.mirror_archived_variations(ledger)
+    log.info("VE2 archived mirror after fetch", extra={"extra_fields": {"archived_changed": n}})
+
+
+def _frozen_waiting() -> int:
+    """New products waiting on a frozen (archived) variety -- counted from the ledger for a visible log line."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        return sync.frozen_waiting_products(lg)
+
+
+def _log_frozen_waiting() -> None:
+    """VE2: surface new products held on a frozen (archived) variety. They wait silently as pending (the sync
+    lane never serves them), so the produce logs the count on EVERY stage that recorded products (scrape
+    included), not only the catalog stages. The VISIBLE upstream hold (curate refusing the new bind) is PR5's.
+    No-op when write-through is off."""
+    from stone_pipeline.ledger import writethrough
+    if not writethrough.enabled():
+        return
+    if (waiting := _frozen_waiting()):
+        log.warning("VE2: new products are held on a frozen (archived) variety and will not sync until "
+                    "the variety is active again or the product is moved off it",
+                    extra={"extra_fields": {"frozen_waiting": waiting}})
+
+
 def _ledger_gate_state() -> tuple[int, int]:
     """(held, untyped) from the ledger -- the pull-model source of truth (NOT the stale CSV export),
     which is why pass-2 needs no refreshed Medusa export. The schema queries live in the ledger layer
@@ -193,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return build.main(argv)   # let build report the unknown stage consistently
 
     _fetch_inputs()
+    _mirror_archived()   # VE2: freeze archived varieties from the FRESH export before any source is recorded
     # Stages that REUSE the last scrape instead of re-fetching suppliers: `catalog` (consolidate only) and
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
@@ -217,6 +258,12 @@ def main(argv: list[str] | None = None) -> int:
             # checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
             if rc != 0:
                 rc = _reconcile_gate(rc)
+    # VE2: log products held on a frozen variety on EVERY stage that recorded products (scrape writes new
+    # products too), so it is not confined to the catalog-only branch above. ONLY on a clean build: it must
+    # never run its own ledger query in place of a failing build's exit code (a gate rc, an abort), so a
+    # build failure returns untouched.
+    if rc == 0:
+        _log_frozen_waiting()
     return _persist_and_publish(stage, rc)
 
 

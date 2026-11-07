@@ -68,6 +68,38 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
     return ledger
 
 
+def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None = None) -> int:
+    """Mirror the Medusa export's archived flag onto variation.archived (VE2 design section 6). A PURE FUNCTION
+    of the variants export: a variety no longer archived flips back to 0. Touches ONLY the rows whose flag
+    actually changes, so an unchanged row keeps its updated_at and is never re-served. Dormant when the export is
+    absent (returns 0). Reads through the one reader with the download-path status decision, so an export without
+    the column reads tolerant until step C flips the flag. Returns the number of variation rows changed.
+    Idempotent: a second call with the same export changes nothing.
+
+    attribute.restricted is deliberately NOT mirrored here: PR4 decides restricted values from the files through
+    medusa_files.read_attributes, the single authority, so no partial copy is kept in the ledger."""
+    from stone_pipeline.ledger.db import now_iso
+    from stone_pipeline.reference.loaders import variants_status_required
+    from stone_pipeline.reference.medusa_files import read_variants_export
+
+    export = Path(export_path) if export_path is not None else SETTINGS.paths.export_file
+    if not export.exists():
+        return 0
+    now = now_iso()
+    changed = 0
+    archived = {v.key for v in read_variants_export(export, require_status=variants_status_required(export))
+                if v.archived}
+    current = {r["key"] for r in ledger.execute("SELECT key FROM variation WHERE archived = 1")}
+    for key in sorted(archived - current):   # raise only the rows flipping up (a key with no row no-ops)
+        changed += ledger.execute(
+            "UPDATE variation SET archived = 1, updated_at = ? WHERE key = ? AND archived = 0",
+            (now, key)).rowcount
+    for key in sorted(current - archived):   # lower the rows no longer archived in the file
+        changed += ledger.execute(
+            "UPDATE variation SET archived = 0, updated_at = ? WHERE key = ?", (now, key)).rowcount
+    return changed
+
+
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, inventory_only: bool,
                   replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
@@ -131,8 +163,13 @@ def record_catalog(path: str | Path | None = None) -> bool:
         with open_ledger(path) as ledger:
             n = populate.populate_variations_full(ledger, full)
             typed = populate.fill_variation_types(ledger)
+            # VE2: re-mirror the archived flag onto the variation ROWS THIS STEP CREATES (populate adds the
+            # produced variants here). The primary mirror runs at fetch time (produce._mirror_archived, before
+            # any record_source write); this second call catches rows that did not exist yet at fetch.
+            archived_changed = mirror_archived_variations(ledger)
         log.info("ledger write-through recorded catalog variations",
-                 extra={"extra_fields": {"variants_full": n, "types_filled": typed}})
+                 extra={"extra_fields": {"variants_full": n, "types_filled": typed,
+                                         "archived_changed": archived_changed}})
         return True
     except Exception:
         log.exception("ledger catalog write-through FAILED: produced variations did NOT reach the ledger; "

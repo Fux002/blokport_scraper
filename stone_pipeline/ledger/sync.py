@@ -118,7 +118,10 @@ def gate_state(ledger: Ledger) -> tuple[int, int]:
     product with no variation is structurally impossible -- it can never exist to be a fatal fault.)"""
     def n(sql: str) -> int:
         return ledger.execute(sql).fetchone()["n"]
-    new_pending = "in_full = 1 AND medusa_id IS NULL AND state IN ('pending', 'dirty')"
+    # VE2: an archived variety is frozen (never re-served), so it can never clear. After a reset nulls its
+    # medusa_id it would otherwise sit in this held count forever and mask the reset's converged (held == 0)
+    # check, so exclude it: a frozen variety is not an awaiting-pull variety.
+    new_pending = "in_full = 1 AND medusa_id IS NULL AND state IN ('pending', 'dirty') AND archived = 0"
     return (
         n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending}"),
         n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending} AND (type IS NULL OR type = '')"),
@@ -142,6 +145,15 @@ def typing_health(ledger: Ledger) -> tuple[int, int, int]:
     )
 
 
+def frozen_waiting_products(ledger: Ledger) -> int:
+    """New products (NOT Medusa-held) bound to an ARCHIVED variety. The VE2 freeze means the products lane
+    never serves them, so they wait silently as pending. The produce logs this count so the hold is visible;
+    the VISIBLE upstream hold (curate refusing a new bind to an archived variety) is PR5's, not PR3's."""
+    return ledger.execute(
+        "SELECT COUNT(*) AS n FROM product p JOIN variation v ON v.key = p.variation_key "
+        f"WHERE v.archived = 1 AND p.state IN ('pending', 'dirty') AND NOT {in_medusa_sql('p')}").fetchone()["n"]
+
+
 # --- GET /sync/<type>?status=ready --------------------------------------------
 
 def _sub_limit(limit: int | None) -> str:
@@ -152,9 +164,14 @@ def _sub_limit(limit: int | None) -> str:
 # peek (count_ready) so the two can never diverge -- a variation is servable once produced + typed;
 # a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias. Neither while
 # it waits out a failed apply (retry_after): each takes the current time as its one parameter.
-_ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND type IS NOT NULL AND type != '' "
+# VE2: an archived variation is FROZEN -- the variations lane never serves it (no create, no update), and the
+# products lane admits it only for an EXISTING product (one Medusa holds, in_medusa_sql): a new product on an
+# archived variety is never served. archived beats dirty. Both are a pure mirror of the export (writethrough).
+_ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archived = 0 "
+                       "AND type IS NOT NULL AND type != '' "
                        "AND (retry_after IS NULL OR retry_after <= ?)")
-_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') "
+                     f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
                      "AND v.type IS NOT NULL AND v.type != '' "
                      "AND v.image_url IS NOT NULL AND v.image_url != '' "
                      "AND (p.retry_after IS NULL OR p.retry_after <= ?)")
@@ -458,8 +475,12 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
         return cur.rowcount
-    # success: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
-    guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
+    # success: a PRODUCT is only marked synced if its variation is synced OR archived. An ack RECORDS what
+    # Medusa did, so it must not re-apply the serve-time freeze rule: if the variety was archived between serve
+    # and ack, refusing the ack would lose the id Medusa assigned and let withdraw_unsent orphan the product.
+    # The VE2 frozen rule (no NEW product on an archived variety) lives once, in the serve predicate
+    # (_ELIGIBLE_PRODUCT); a new product is never served, so it never reaches a success ack to begin with.
+    guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced' OR archived = 1)" \
         if type_ == "products" else ""
     # retire guard: a success ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
     # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves
