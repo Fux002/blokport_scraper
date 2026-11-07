@@ -620,3 +620,34 @@ def test_decide_takes_the_sheet_it_is_given_and_reads_none(monkeypatch):
     s3 = _bucket()
     p = dec.decide(s3, [_clean("one", B)], dry_run=False, say=lambda line: None, sheet=LISTINGS, narrow=True)
     assert set(p.clicks) == {"SEN-ONE"} and _click(s3, "SEN-ONE")["sha"] == B
+# --- one decision checked on its own (the hidden-listings page offers an action only when the applier accepts it) -----
+@pytest.mark.parametrize("doc", [
+    _use("one", B), _use("two", D, tag=C.CLEAN_TAG), _remove("three"), _clean("one", B), _withdraw("one"),
+    _use("one", "c" * 64), _use("three", "c" * 64), _use("nowhere", A), _remove("one", source="other"),
+    _clean("one", B, tag=C.RUN_TAG), _use("leathered", E), _clean("leathered", E), _use("one", A, at="today")])
+def test_one_decision_s_refusals_are_exactly_why_the_applier_refuses_it(doc):
+    s3 = _bucket()
+    refused = dec.refusals(dec.context(s3, LISTINGS, exclude=set()), doc)
+    try:
+        dec.plan(s3, [doc], LISTINGS, exclude=set())
+        applied = True
+    except dec.InvalidDecisions as exc:
+        applied = False
+        assert all(why in str(exc) for why in refused)
+    assert applied == (refused == [])
+
+
+def test_a_use_of_a_conflict_photo_already_the_owner_s_choice_elsewhere_is_refused_on_its_own():
+    s3 = _bucket()
+    _apply(s3, [_use("leathered", E)])
+    ctx = dec.context(s3, LISTINGS, exclude=set())
+    assert dec.refusals(ctx, _use("leathered", E, at=LATER)) == []
+    assert any("already the owner's choice for leathered" in why for why in dec.refusals(ctx, _use("polished", E, at=LATER)))
+
+
+def test_the_conflict_rule_never_looks_at_a_decision_already_refused():
+    # review of #556: _one_listing_per_conflict ran over decisions _own had refused
+    s3 = _bucket()
+    with pytest.raises(dec.InvalidDecisions) as refused:
+        dec.plan(s3, [_use("leathered", E, tag="v0"), _use("polished", E)], LISTINGS, exclude=set())
+    assert "conflict photo also chosen for" not in str(refused.value)        # the refused use holds nothing

@@ -30,8 +30,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
+from botocore.exceptions import ClientError
 
-from deploy.standardise_publish import chosen_prefix, excluded, pool_map
+from deploy.standardise_publish import MISSING, chosen_prefix, excluded, pool_map
 from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
                                        remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
@@ -192,7 +193,7 @@ class Round(_Locks):
             o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
             for o in page.get("Contents", [])], prefixes)
         keys = [k for part in listed for k in part]
-        self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
+        self.finished = _finished(keys)
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
         self.noslab = _shas(keys, "noslab/")
@@ -229,6 +230,47 @@ class Round(_Locks):
         Round: settle reads the rounds again after it changes them."""
         return ((self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step - self.checked
                 - self.redrawn) | self.older_outline
+
+
+class _Read(frozenset):
+    """The members of a set read for some photos only (its scope): asked about another photo it raises LookupError, so
+    a question nobody read the answer to is never a silent no."""
+
+    def __new__(cls, members, scope):
+        out = super().__new__(cls, members)
+        out.scope = frozenset(scope)
+        return out
+
+    def __contains__(self, sha):
+        if sha not in self.scope:
+            raise LookupError(f"photo {sha[:12]} was not read")
+        return frozenset.__contains__(self, sha)
+
+
+class Results:
+    """What a run folder holds of a few photos for the decisions applier's checks (decisions.refusals): prefix;
+    finished (a "use" needs a result) of `shas`; judged and held (a "clean" reads its verdict or hold) of `verdicts`
+    alone. The same answers a Round gives, for those photos only: asked about another it raises (_Read), and nothing
+    else is answered (AttributeError)."""
+
+    def __init__(self, client, tag, src, shas, verdicts):
+        self.prefix = round_prefix(tag, src)
+        shas, verdicts = set(shas) | set(verdicts), set(verdicts)
+        prefixes = ([f"{self.prefix}{sha}" for sha in sorted(shas)]
+                    + [f"{self.prefix}{folder}{sha}" for sha in sorted(verdicts) for folder in ("judged/", "held/")])
+        listed = pool_map(C.STORE_WORKERS, lambda prefix: [
+            o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+            for o in page.get("Contents", [])], prefixes)
+        keys = [k for part in listed for k in part]
+        self.finished = _Read(_finished(keys), shas)
+        self.judged, self.held = _Read(_shas(keys, "judged/"), verdicts), _Read(_shas(keys, "held/"), verdicts)
+
+
+
+
+def _finished(keys):
+    """The photos with a result: <sha>.main.jpg at the folder's top."""
+    return {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
 
 
 def _attempts(keys, suffix):
@@ -999,12 +1041,13 @@ def clean_all(sel, plans, spend, deadline):
     return _each([plan.listing for plan in plans], lambda l: pay(sel.client, sel.rounds, by_key[l["key"]], spend), deadline)
 
 
-def report(sel, waits, marks):
+def report(sel, waits, marks, merge=False):
     """{"chosen", "tracked", "pending", "click_problems", "review"} of this run's listings; `waits` = {listing key: why
     its click's new edit waits} and `marks` = {listing key: why its other new edits wait} from the run's admission
     (deploy.standardise_run.admit), so a click or a mark that waits says so on the review list, and each blocked click
     is a problem line (click_state). review = {SKU: review_row} of each listing without a good photo (tracked or
-    pending), for review.json. Each listing with a good photo gets its choice record (a
+    pending), for review.json. merge (a clicks-only run, over a few listings): tracked.csv keeps every other listing's
+    row exactly as it is and only this run's listings' rows are replaced (merged_tracked); else it is this run's list. Each listing with a good photo gets its choice record (a
     kept close-up's stays as it is unless a whole slab passed), a listing now without one loses its record (and is in
     tracked.csv, this run's list of listings with no good photo); a listing not fully judged is neither and its record
     is left as it is. Listings outside this run are untouched."""
@@ -1038,11 +1081,28 @@ def report(sel, waits, marks):
               if state is not None and state[0] == "blocked"]
     review = {l["sku"]: row for l, (_, _, _, row) in zip(sel.listings, outcomes) if row is not None}
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
+    writer = csv.DictWriter(out, fieldnames=TRACKED_FIELDS)
     writer.writeheader()
-    writer.writerows(tracked)
+    writer.writerows(merged_tracked(sel, tracked) if merge else tracked)
     _put(sel.client, f"{sel.root}tracked.csv", out.getvalue().encode(), "text/csv")
     return {"chosen": chosen, "tracked": tracked, "pending": pending, "click_problems": clicks, "review": review}
+
+
+TRACKED_FIELDS = ["source", "listing", "format", "photos", "what_happened"]
+
+
+def merged_tracked(sel, tracked):
+    """tracked.csv's rows with this selection's listings' rows replaced by `tracked` (manager ruling C1, 2026-11-07: a
+    clicks-only run never rewrites the list from its few listings): every other row read back as stored, so it is
+    written again byte for byte; this run's rows after them. No list yet: this run's rows."""
+    try:
+        body = sel.client.get_object(Bucket=S3_BUCKET, Key=f"{sel.root}tracked.csv")["Body"].read().decode()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") not in MISSING:
+            raise
+        return tracked
+    own = {l["key"] for l in sel.listings}
+    return [row for row in csv.DictReader(io.StringIO(body)) if row["listing"] not in own] + tracked
 
 
 def _each(listings, work, deadline, clock=time.monotonic):

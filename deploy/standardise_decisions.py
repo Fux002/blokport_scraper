@@ -98,8 +98,17 @@ def read_decisions(text):
         docs = json.loads(text)
     except json.JSONDecodeError as exc:
         raise InvalidDecisions(f"the export is not JSON: {exc}") from exc
+    return check_docs(docs)
+
+
+def check_docs(docs):
+    """The export's documents when they are a JSON array of objects whose every field is a string (the page writes
+    nothing else; the config API's POST /photos/decisions body is checked here); InvalidDecisions otherwise, naming
+    each field that is not."""
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         raise InvalidDecisions("the export must be a JSON array of decision objects")
+    if bad := [f"#{i}: field {k!r} is {v!r}" for i, d in enumerate(docs) for k, v in d.items() if not isinstance(v, str)]:
+        raise InvalidDecisions("every field of a decision is a string:\n" + "\n".join(bad))
     return docs
 
 
@@ -225,12 +234,13 @@ def _choices_of(s3, keys):
             {k: v for _, errors in found for k, v in errors.items()})
 
 
-def _touched(docs, listings, shared):
-    """The listings a few decisions can reach (narrow): each decided listing, and every listing a photo of it is shared
-    with (its siblings, which a "use" reaches; its conflict partners, whose stored choice can hold the photo)."""
+def _touched(keys, listings, shared):
+    """The listings decisions on these listing keys can reach (narrow): each of them, and every listing a photo of it
+    is shared with (its siblings, which a "use" reaches; its conflict partners, whose stored choice can hold the
+    photo)."""
     out = set()
-    for doc in docs:
-        listing = listings.get(doc.get("id"))
+    for key in keys:
+        listing = listings.get(key)
         if listing is None:
             continue
         out.add(listing["key"])
@@ -240,32 +250,77 @@ def _touched(docs, listings, shared):
     return out
 
 
-def _check(docs, listings, rounds, stores, exclude, shared, off):
-    """Every decision checked; InvalidDecisions names each bad one. off: the sources whose image pipeline is off."""
-    errors, seen = [], set()
+@dataclass
+class Context:
+    """What decisions are checked against and planned over, read once (context): the sheet's photo listings by key,
+    the stored decisions (_Stores), the sheet's sibling and conflict groups, the run tags' stores (read per source
+    when first asked), the exclude list and the sources whose image pipeline is off."""
+    s3: object
+    listings: dict
+    stores: _Stores
+    shared: dict
+    rounds: object
+    exclude: set
+    off: set
+
+
+def context(s3, sheet, exclude, keys=None, results=None):
+    """The Context of the photo listings `sheet`; InvalidDecisions before a produce has stored the conflict sets.
+    keys: the listings it is read for alone (a click's decision, a page of the hidden list): only the choice records of
+    the listings decisions on them can reach (_touched), never every one. results: what answers a run tag's results
+    for a source, results(tag, src) (default: its whole folder, a Round, read once)."""
+    listings = {l["key"]: l for l in sheet}
+    try:                                              # the produce's conflict set, the sheet's sibling groups
+        shared = index.groups(sheet, read_conflicts(s3, {l["source"] for l in sheet}))
+    except NoConflictSet as exc:
+        raise InvalidDecisions(str(exc)) from exc
+    touched = None if keys is None else _touched(keys, listings, shared)
+    return Context(s3, listings, _Stores(s3, listings, touched), shared, results or _rounds(s3), exclude,
+                   image_pipeline_off())
+
+
+def _own(ctx, doc):
+    """Why one decision is refused by its own fields, its listing and the stores; [] when none."""
+    if found := _shape(doc, ctx.listings):
+        return found
+    listing = ctx.listings[doc["id"]]
+    if doc["action"] == "clean" and doc["source"] in ctx.off:
+        return [f"source {doc['source']!r}: its image pipeline is off, the photos run never works on it"]
+    if "sha" in doc and doc["sha"] in ctx.exclude:
+        return [f"photo {doc['sha'][:12]} is on the exclude list"]
+    if doc["action"] == "use" and doc["sha"] not in ctx.rounds(doc["tag"], doc["source"]).finished:
+        return [f"photo {doc['sha'][:12]} has no result under {doc['tag']}"]
+    if doc["action"] == "clean" and (unfit := _unusable(doc, listing, ctx.shared, ctx.rounds(C.RUN_TAG, doc["source"]),
+                                                        ctx.exclude, ctx.s3)):
+        return unfit
+    if broken := ctx.stores.unreadable.get(listing["sku"]):
+        return [f"its stored {what} cannot be read ({why}): it has no time to order this decision against; look at "
+                f"{path} first" for what, path, why in broken]
+    if (stored := ctx.stores.latest(listing["sku"])) is not None and moment(doc["at"]) < stored:
+        return [f"older than the decision already stored for it ({stored.isoformat()}): an old export"]
+    return []
+
+
+def refusals(ctx, doc):
+    """Why the applier refuses this one decision on its own, [] when it applies it: the hidden-listings page offers an
+    action only when this is empty (deploy.standardise_review), so an offered action is never refused. The rules a
+    whole file adds (a listing decided twice in it, a conflict photo given to two of its listings) are _check's."""
+    return _own(ctx, doc) or list(_one_listing_per_conflict([doc], ctx.listings, ctx.shared, ctx.stores))
+
+
+def _check(ctx, docs):
+    """Every decision checked; InvalidDecisions names each bad one."""
+    errors, seen, fine = [], set(), []
     for i, doc in enumerate(docs):
         key = doc.get("id")
-        found = _shape(doc, listings)
+        found = _own(ctx, doc)
         if not found and key in seen:
             found = ["decided more than once in this file"]
-        elif not found and doc["action"] == "clean" and doc["source"] in off:
-            found = [f"source {doc['source']!r}: its image pipeline is off, the photos run never works on it"]
-        elif not found and "sha" in doc and doc["sha"] in exclude:
-            found = [f"photo {doc['sha'][:12]} is on the exclude list"]
-        elif not found and doc["action"] == "use" and doc["sha"] not in rounds(doc["tag"], doc["source"]).finished:
-            found = [f"photo {doc['sha'][:12]} has no result under {doc['tag']}"]
-        elif not found and doc["action"] == "clean" and (
-                unfit := _unusable(doc, listings[key], shared, rounds(C.RUN_TAG, doc["source"]), exclude, stores.s3)):
-            found = unfit
-        elif not found and (broken := stores.unreadable.get(listings[key]["sku"])):
-            found = [f"its stored {what} cannot be read ({why}): it has no time to order this decision against; look "
-                     f"at {path} first" for what, path, why in broken]
-        elif not found and (stored := stores.latest(listings[key]["sku"])) is not None and moment(doc["at"]) < stored:
-            found = [f"older than the decision already stored for it ({stored.isoformat()}): an old export"]
         if not found:
             seen.add(key)
+            fine.append(doc)
         errors += [f"#{i} {key}: {why}" for why in found]
-    errors += _one_listing_per_conflict(docs, listings, shared, stores)
+    errors += _one_listing_per_conflict(fine, ctx.listings, ctx.shared, ctx.stores)   # over the decisions that stand
     if errors:
         raise InvalidDecisions("\n".join(errors))
 
@@ -369,16 +424,12 @@ def _choices(docs, listings, shared, stores, exclude, notes):
 def plan(s3, docs, sheet, exclude, narrow=False):
     """The changes the decisions make (Plan), every decision checked first: InvalidDecisions names each bad one. Reads
     only; the same decisions against the same stores give the same plan, whatever their order in the file. narrow (a
-    decision or two from the config API): the same plan, reading only the choice records of the listings they can
-    reach (_touched) and the run tags' results of the photos they name, never a whole folder."""
-    listings = {l["key"]: l for l in sheet}
-    try:                                              # the produce's conflict set, the sheet's sibling groups
-        shared = index.groups(sheet, read_conflicts(s3, {l["source"] for l in sheet}))
-    except NoConflictSet as exc:
-        raise InvalidDecisions(str(exc)) from exc
-    stores = _Stores(s3, listings, _touched(docs, listings, shared) if narrow else None)
-    rounds = _rounds(s3, {d["sha"] for d in docs if isinstance(d.get("sha"), str)} if narrow else None)
-    _check(docs, listings, rounds, stores, exclude, shared, image_pipeline_off())
+    decision or two from the config API): the same plan, read narrow (context)."""
+    ctx = (context(s3, sheet, exclude, [d.get("id") for d in docs],
+                   _rounds(s3, {d["sha"] for d in docs if isinstance(d.get("sha"), str)})) if narrow
+           else context(s3, sheet, exclude))
+    listings, stores, shared = ctx.listings, ctx.stores, ctx.shared
+    _check(ctx, docs)
     out = Plan()
     for sku, record in sorted(_choices(docs, listings, shared, stores, exclude, out.notes).items()):
         if stores.owner(sku) != record:

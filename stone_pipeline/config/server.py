@@ -228,13 +228,14 @@ def _durable(handler):
 
 # -- run: the produce trigger ------------------------------------------------------------------------------
 def _post_run(params, body, query):
-    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"|..., "close_only": bool}
-    # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate); close_only
-    # (stage photos only, an operator's action) makes the chosen photos' close-ups again.
+    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"|..., "close_only": bool,
+    # "clicks_only": bool}. sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog ->
+    # gate); close_only (stage photos only, an operator's action) makes the chosen photos' close-ups again;
+    # clicks_only (stage photos only, the hidden-listings page's "run now") works only the listings with a click.
     from stone_pipeline.config import runner
     b = _dict(body)
-    rec, code = runner.start_run(_sources_of(b), _str(b, "stage") or "all",
-                                 close_only=b.get("close_only", False))   # (record, status)
+    rec, code = runner.start_run(_sources_of(b), _str(b, "stage") or "all", close_only=b.get("close_only", False),
+                                 clicks_only=b.get("clicks_only", False))   # (record, status)
     return code, rec
 
 
@@ -894,8 +895,33 @@ def _photo_body(rv, body, fields):
         raise _BadRequest(str(exc)) from exc
 
 
+def _page_param(qs, name, default, low, high=None):
+    """A whole-number query parameter of at least low (and at most high, when given), default when absent; a 400 naming
+    it otherwise."""
+    if name not in qs:
+        return default
+    value = qs[name][0]
+    if not value.isdigit() or int(value) < low or (high is not None and int(value) > high):
+        raise _BadRequest(f"{name} must be a whole number from {low}{f' to {high}' if high is not None else ''}, "
+                          f"got {value!r}")
+    return int(value)
+
+
 def _get_photos_hidden(params, body, query):
-    return _photos(lambda rv: (200, rv.hidden(rv.client())))
+    # ?reason=<one of the review reasons>&offset=<0..>&limit=<1..REVIEW_PAGE_MAX>, each at most once
+    from stone_pipeline.config.settings import STANDARDISE as C
+
+    def answer(rv):
+        qs = parse_qs(query, keep_blank_values=True)
+        if repeated := sorted(name for name in ("reason", "offset", "limit") if len(qs.get(name, ())) > 1):
+            raise _BadRequest(f"{', '.join(repeated)} given more than once")
+        reason = qs["reason"][0] if "reason" in qs else None
+        if reason is not None and reason not in rv.select.REVIEW_REASONS:
+            raise _BadRequest(f"reason must be one of {', '.join(rv.select.REVIEW_REASONS)}, got {reason!r}")
+        offset = _page_param(qs, "offset", 0, 0)
+        limit = _page_param(qs, "limit", C.REVIEW_PAGE_DEFAULT, 1, C.REVIEW_PAGE_MAX)
+        return 200, rv.hidden(rv.client(), reason, offset, limit)
+    return _photos(answer)
 
 
 def _get_photos_spend(params, body, query):
@@ -923,6 +949,20 @@ def _delete_photo_click(params, body, query):
     def answer(rv):
         b = _photo_body(rv, body, ("at",))
         return rv.withdraw(rv.client(), unquote(params["sku"]), b["at"])
+    return _photos(answer)
+
+
+def _post_photo_decisions(params, body, query):
+    # Body: the decision page's export (a JSON array of decision objects); ?dry_run=true plans only, false applies
+    def answer(rv):
+        flag = parse_qs(query).get("dry_run", [""])[-1]
+        if flag not in ("true", "false"):
+            raise _BadRequest(f"dry_run must be true (plan only) or false (apply), got {flag!r}")
+        try:
+            docs = rv.decisions.check_docs(body)
+        except rv.decisions.InvalidDecisions as exc:
+            raise _BadRequest(str(exc)) from exc
+        return rv.apply_decisions(rv.client(), docs, flag == "true")
     return _photos(answer)
 
 
@@ -973,6 +1013,7 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("GET", ("photos", "spend"), _get_photos_spend),
     ("PUT", ("photos", "clicks", "{sku}"), _put_photo_click),
     ("DELETE", ("photos", "clicks", "{sku}"), _delete_photo_click),
+    ("POST", ("photos", "decisions"), _post_photo_decisions),
 )
 
 # derived from the table, so the answer to an unknown path can never drift from what is served
