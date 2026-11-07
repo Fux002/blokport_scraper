@@ -34,21 +34,16 @@ STONE_WORDS = re.compile(r"\b(slabs?|blocks?|tiles?|stones?|marble|granite|quart
                          r"dolomite|polished|honed|leathered|flamed|sandblasted)\b", re.IGNORECASE)
 
 
-def build_workspace(root: Path, *, wood_synonyms: bool = True) -> Path:
+def build_workspace(root: Path) -> Path:
     """A wood deployment's workspace under `root`: the pipeline package (a real copy, so its paths, which derive from
     the package's own location, are the copy's; tests and caches excluded), the shared port list the ports fallback
     reads, the wood data (fixtures/wood/workspace overlaid), the load_frame adapter in the copy's adapters/ (where
-    discovery finds it) and its source entry in the copy's sources.yaml. The repo itself is never written.
-
-    `wood_synonyms`: wood's synonyms (DOMAIN_PACK.md data plane) go where the code reads synonyms today, the package's
-    one shared reference/synonyms (settings.py:256); test_the_shipped_synonyms_do_not_reach_a_wood_run pins that gap."""
+    discovery finds it) and its source entry in the copy's sources.yaml. The repo itself is never written."""
     shutil.copytree(REPO / "stone_pipeline", root / "stone_pipeline",
                     ignore=shutil.ignore_patterns("tests", "__pycache__", "outputs", "*.db"))
     (root / "catalog_source").mkdir()
     shutil.copy(REPO / "catalog_source" / "ports.csv", root / "catalog_source" / "ports.csv")
     shutil.copytree(FIXTURE / "workspace", root, dirs_exist_ok=True)
-    if wood_synonyms:
-        shutil.copytree(FIXTURE / "synonyms", root / "stone_pipeline" / "reference" / "synonyms", dirs_exist_ok=True)
     shutil.copy(FIXTURE / "wood_feed.py", root / "stone_pipeline" / "adapters" / "wood_feed.py")
     sources = root / "stone_pipeline" / "config" / "sources.yaml"
     sources.write_text(sources.read_text(encoding="utf-8") + "\n" + (FIXTURE / "source.yaml").read_text(encoding="utf-8"),
@@ -165,12 +160,16 @@ def test_no_stone_vocabulary_in_any_emitted_value(wood):
     assert len(files) >= 10 and leaks == set()
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: synonyms are not pack-namespaced (config/settings.py:256 "
-                   "synonyms_dir = reference/synonyms), so a wood run on the shipped package reads stone's synonyms, "
-                   "whose targets (Polished, Marble, ...) are not in wood's attributes.csv: load_all refuses to load "
-                   "(reference/loaders/reference_data.py:108)")
-def test_the_shipped_synonyms_do_not_reach_a_wood_run(tmp_path):
-    _completed(run_wood(build_workspace(tmp_path, wood_synonyms=False)))
+def test_the_per_material_data_stays_in_the_packs_own_folders(wood):
+    # the package ships stone's synonyms (flat), untouched, and the wood run (the fixture) never read them: wood reads
+    # only reference/synonyms/wood/, which wood does not have (no synonyms)
+    synonyms = wood / "stone_pipeline" / "reference" / "synonyms"
+    assert (synonyms / "finish.csv").read_bytes() == (REPO / "stone_pipeline" / "reference" / "synonyms" /
+                                                      "finish.csv").read_bytes()
+    assert not (synonyms / "wood").exists()
+    # the catalog's new-variety deltas land in wood's own catalog_source folder, never the stone flat one
+    assert any((wood / "catalog_source" / "wood" / "backbone_additions").glob("*.json"))
+    assert not (wood / "catalog_source" / "backbone_additions").exists()
 
 
 @pytest.mark.xfail(strict=True, reason="follow-up fix: the ledger's variation.branch column only admits the stone "

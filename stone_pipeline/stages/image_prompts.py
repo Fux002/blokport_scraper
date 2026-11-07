@@ -19,7 +19,7 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key
 from stone_pipeline.core import logfmt
 from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -54,13 +54,13 @@ def _write(items: list[dict], out_path: Path | None, mode: str) -> Path:
 def _backbone_types() -> dict[str, str]:
     """Key -> stone_type from every backbone (full + new-variety additions)."""
     ktype: dict[str, str] = {}
-    cs = SETTINGS.paths.catalog_source_dir
-    for f in sorted(cs.glob("backbone_*.json")):
+    # each category's own backbone (pack-namespaced; one file per category, Keys category-prefixed so none repeats)
+    for f in (p for p in dict.fromkeys(c.backbone_path for c in CATEGORIES) if p.exists()):
         data = json.loads(f.read_text(encoding="utf-8-sig"))
         for p in (data.get("posts") if isinstance(data, dict) else data):
             if p.get("key"):
                 ktype[p["key"]] = (p.get("stone_type") or "").strip()
-    for f in sorted((cs / "backbone_additions").glob("*.json")):
+    for f in sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json")):
         for p in json.loads(f.read_text(encoding="utf-8")):
             if p.get("key"):
                 ktype.setdefault(p["key"], (p.get("stone_type") or "").strip())
@@ -106,7 +106,7 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
     placeholdered by Blokport) until its own product appears. No whole-catalog backfill: the old backfill
     pre-textured EVERY category of a stocked variety, which made block/tile images for varieties only ever
     sold as slabs. The rule is now one line -- image a category exactly when it has a product to list."""
-    additions_dir = Path(additions_dir or SETTINGS.paths.catalog_source_dir / "backbone_additions")
+    additions_dir = Path(additions_dir or SETTINGS.paths.backbone_additions_dir)
     items, seen = [], set()
     for f in sorted(additions_dir.glob("*.json")):
         for p in json.loads(f.read_text(encoding="utf-8")):
