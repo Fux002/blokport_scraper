@@ -552,3 +552,12 @@ def test_a_decision_whose_field_is_not_a_string_is_400_never_a_crash(monkeypatch
     assert code == 400 and "string" in body["error"]
     with pytest.raises(dec.InvalidDecisions, match="string"):
         dec.read_decisions(json.dumps([doc]))
+
+
+def test_the_export_is_planned_in_full_never_narrow(monkeypatch):
+    # manager 2026-11-07: narrow reads only for a click's single decision; a file of decisions is read whole
+    seen = []
+    monkeypatch.setattr(rv.decisions, "decide", lambda s3, docs, dry_run, say, sheet, narrow: seen.append((sheet, narrow))
+                        or dec.plan(s3, docs, PHOTO_LISTINGS, set()))
+    rv.apply_decisions(_bucket(), [{"id": "two", "action": "remove", "source": "sentas", "at": AT}], dry_run=True)
+    assert seen == [(None, False)]
