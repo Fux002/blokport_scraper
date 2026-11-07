@@ -273,7 +273,7 @@ def test_the_loader_names_the_base_file_in_an_error(tmp_path):
 
 
 def test_own_variants_keeps_the_status_column_whole(tmp_path):
-    from deploy.fetch_inputs import own_variants
+    from stone_pipeline.io.medusa_inputs import own_variants
     p = _export(tmp_path, "Id,Key,Name,status\nv1,slab_a_1,A,archived\nv9,np-cattle-1,Cow,active\n")
     assert own_variants(p) == 1
     assert p.read_text(encoding="utf-8") == "Id,Key,Name,status\nv1,slab_a_1,A,archived\n"

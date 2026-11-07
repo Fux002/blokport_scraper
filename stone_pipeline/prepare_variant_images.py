@@ -2,7 +2,7 @@
 
 The produce (catalog.run -> queue_new_textures) builds the queue (the imageless, product-backed variants, plus the
 capped upgrade drip), publishes it to a unique S3 key and dispatches ONE on-demand GPU job bound to it
-(deploy.texture_trigger, RUN_MODE=generate-textures). The produce never generates. The job, or a dev box, runs:
+(stone_pipeline.io.texture_job, RUN_MODE=generate-textures). The produce never generates. The job, or a dev box, runs:
 
     python -m stone_pipeline.prepare_variant_images     # generate + de-background + upload to <env>/variations/
 
@@ -274,7 +274,7 @@ def _dispatch(prompts_path: Path, queued: int) -> None:
     """Publish this produce's queue to a unique key and submit the GPU texture job against it; only after a
     successful publish (a no-op publish, S3 dry-run or unreachable, would leave the job a stale or absent queue).
     Never fails the produce: the textures stay queued for the next run, and the failure is loud."""
-    from deploy.texture_trigger import submit_texture_job
+    from stone_pipeline.io.texture_job import submit_texture_job
     dispatched = False
     try:
         queue_key = f"{TEXTURE_QUEUE_PREFIX}{uuid.uuid4().hex}.json"

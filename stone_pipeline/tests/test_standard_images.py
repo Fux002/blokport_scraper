@@ -169,7 +169,7 @@ def test_a_run_can_be_limited_to_a_list_of_photos():
 
 
 def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet_and_photo_list(monkeypatch):
-    from deploy import fetch_inputs
+    from stone_pipeline.io import medusa_inputs as fetch_inputs
     from stone_pipeline.photos import source as src
     from stone_pipeline.config import categories, settings
     calls = []

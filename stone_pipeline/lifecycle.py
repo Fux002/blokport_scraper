@@ -141,11 +141,11 @@ def _publish_base_deliverable(base=None) -> bool:
     next produce publishes a full set. Best-effort + loud like the rest of the reseed: False (logged) when the
     copy or the publish fails."""
     try:
-        from deploy import upload_artifacts
+        from stone_pipeline.io import deliverables
         from stone_pipeline.config.settings import SETTINGS, VARIANTS_BASE_FILE
         from stone_pipeline.reference.sync_variants_base import write_deliverable
         write_deliverable(base or SETTINGS.paths.variants_export_base_csv)
-        upload_artifacts.publish_to_upload(storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS), None,
+        deliverables.publish_to_upload(storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS), None,
                                            only={VARIANTS_BASE_FILE})
         return True
     except Exception:
@@ -525,7 +525,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
             # Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails the reset
             # (catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
             try:
-                from deploy.cleanup_images import wipe_all_product_images
+                from stone_pipeline.io.image_wipe import wipe_all_product_images
                 out["images_wiped"] = wipe_all_product_images()
             except Exception as exc:
                 log.exception("reset: product-image wipe FAILED; images were kept")

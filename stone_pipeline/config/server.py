@@ -1285,8 +1285,8 @@ def boot(config_db, ledger_path) -> None:
     # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
     # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
     # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
-    from deploy import fetch_inputs
-    if fetch_inputs.fetch_attributes():
+    from stone_pipeline.io import medusa_inputs
+    if medusa_inputs.fetch_attributes():
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
 
 

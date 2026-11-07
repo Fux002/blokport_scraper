@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import upload_artifacts as ua
+from stone_pipeline.io import deliverables as ua
 from stone_pipeline import catalog, produce
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_BASE_FILE
@@ -195,7 +195,7 @@ def test_a_produce_without_a_catalog_publishes_nothing(stage, monkeypatch):
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: 0)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
-    monkeypatch.setattr(ua, "main", lambda run_id=None: published.append(run_id) or 0)
+    monkeypatch.setattr(ua, "upload_all", lambda run_id=None: published.append(run_id) or 0)
     assert produce.run(None, stage) == 0
     assert published == []
 
@@ -277,7 +277,7 @@ def test_a_failed_deliverable_publish_is_reported_not_hidden(tmp_path, monkeypat
 
 
 def test_the_produce_publish_entry_point_lists_the_base_beside_the_side_files(tmp_path, monkeypatch):
-    """upload_artifacts.main (the produce's publish) goes through publish_to_upload without `only`: the whole
+    """deliverables.upload_all (the produce's publish) goes through publish_to_upload without `only`: the whole
     folder, the base under `files` with its version, side files under `side_files`."""
     import boto3
     from stone_pipeline.config.settings import ENV_SEGMENT
@@ -290,7 +290,7 @@ def test_the_produce_publish_entry_point_lists_the_base_beside_the_side_files(tm
     monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(ua, "SETTINGS", types.SimpleNamespace(
         paths=types.SimpleNamespace(to_upload_dir=to_upload, review_dir=review)))
-    assert ua.main("r1") == 0
+    assert ua.upload_all("r1") == 0
     m = json.loads(s3.objects[f"{ENV_SEGMENT}/scraper/to_upload/{ua.MANIFEST_NAME}"])
     assert set(m["files"]) == {VARIANTS_BASE_FILE, "1_variants_full.csv"} and set(m["side_files"]) == {"SYNC_STEPS.md"}
     assert m["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[f"{ENV_SEGMENT}/scraper/to_upload/{VARIANTS_BASE_FILE}"]

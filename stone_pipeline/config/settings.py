@@ -178,7 +178,7 @@ RUN_STOP_GRACE_SECONDS = _env_int("SCRAPER_RUN_STOP_GRACE_SECONDS", 80)
 RUN_HISTORY_MAX = 200
 RUN_LOG_TAIL_LINES = 40
 # A thin copy of a protected base file (Medusa mid-reset, or a produce on a thin input) replaces the fuller one only
-# when it keeps at least this fraction of its rows: the S3 input fetch (deploy.fetch_inputs) and the base write-back
+# when it keeps at least this fraction of its rows: the S3 input fetch (stone_pipeline.io.medusa_inputs) and the base write-back
 # (reference.sync_variants_base) both refuse a collapse below it.
 THIN_COPY_MIN_FRACTION = 0.5
 
@@ -640,7 +640,7 @@ class CurationConfig:
 @dataclass(frozen=True)
 class AutoTextureConfig:
     """After a produce queues NEW-variant textures the lean :core cannot generate (no fal_client/torch),
-    auto-submit ONE on-demand GPU Batch job to generate + upload them (deploy/texture_trigger). Part of the
+    auto-submit ONE on-demand GPU Batch job to generate + upload them (stone_pipeline.io.texture_job). Part of the
     produce (Republish), NOT a cron: it fires only when a produce actually queued textures. The job runs on the
     gpu_enhance module's queue and job definition (the :gpu image, RUN_MODE=generate-textures ->
     prepare_variant_images, the FLUX.2 -> BEN2 -> upload pipeline). Fire-and-forget; the next produce stamps the
@@ -1386,7 +1386,7 @@ Your whole answer is one JSON object and nothing else:
     TILE_CLOSE_MIN_TILES = 1.6         # ... and shows at least this many tile lengths (a joint for scale)
 
 
-# The files in to_upload/ that are not deliverables: published beside them (deploy.upload_artifacts) but not listed in
+# The files in to_upload/ that are not deliverables: published beside them (stone_pipeline.io.deliverables) but not listed in
 # the deliverables manifest, which no consumer reads them through. The operator checklist (core.layout), the photo
 # process's list of each listing's photos (read by its fixed key, STANDARDISE.PHOTOS_KEY), and the texture
 # fingerprints the produce writes beside 1_variants_full.csv (stages.emit_catalog, read back by the ledger populate).
