@@ -56,7 +56,7 @@ import boto3
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
 from deploy.standardise_publish import (NoConflictSet, aws_config, chosen_prefix, click_record, clicks_prefix, excluded,
-                                       owner_key, owner_prefix, pool_map, read_choices, read_clicks, read_conflicts,
+                                       owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
                                        read_records, records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
@@ -225,13 +225,10 @@ class _Stores:
 
 
 def _choices_of(s3, keys):
-    """({listing key: its choice record}, {listing key: why it cannot be read}) of these listings alone, each read as
-    read_choices reads it (publish.read_records, its key as the prefix)."""
+    """({listing key: its choice record}, {listing key: why it cannot be read}) of these listings alone, read as
+    read_choices reads them (publish.read_records, asked for by key: nothing is listed)."""
     prefix = chosen_prefix(ROOT)
-    found = pool_map(C.STORE_WORKERS, lambda key: read_records(s3, f"{prefix}{key}.json", lambda k: k[len(prefix):-len(".json")]),
-                     sorted(keys))
-    return ({k: v for records, _ in found for k, v in records.items()},
-            {k: v for _, errors in found for k, v in errors.items()})
+    return read_records(s3, prefix, lambda k: k[len(prefix):-len(".json")], keys={f"{prefix}{key}.json" for key in keys})
 
 
 def _touched(keys, listings, shared):

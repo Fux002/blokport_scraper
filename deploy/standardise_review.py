@@ -260,13 +260,22 @@ def _results(s3, rows):
     return {pair: select.Results(s3, *pair, shas, verdicts) for pair, (shas, verdicts) in sorted(wanted.items())}
 
 
+def _asked(results, tag, src):
+    """The page's read results of a run tag's source (_results). served_photo asks only about what _results read, so a
+    source it did not read is a bug: raised, never answered."""
+    if (tag, src) not in results:
+        raise LookupError(f"the results of {tag}/{src} were not read for this page")
+    return results[(tag, src)]
+
+
 def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
     """One page of the listings the ledger hides: {"total" (rows of `reason`, or all), "counts" ({reason: rows} over
     every hidden row), "offset", "limit", "rows"}. Every row is placed and counted from the stored rows and keys alone
     (_bases), in a stable order applied before the page is cut; only the page's rows are then worked: the removed ones'
-    photos (_removed_photos), the stored decisions of their listings alone and the results their photos are asked
-    about (decisions.context keys and results), the applier asked about each action (served_photo, row_actions), the
-    live click, the images signed: a few rows at a time."""
+    photos (_removed_photos), the choice records of their listings and those sharing a photo with them (the owner
+    choices, removals and clicks are small stores, read whole) and the results their photos are asked about
+    (decisions.context keys and results), the applier asked about each action (served_photo, row_actions), the live
+    click, the images signed: a few rows at a time."""
     products = hidden_products()
     photo_listings, tiles = sheet(s3)
     by_sku = {l["sku"]: l for l in photo_listings + tiles}
@@ -280,7 +289,7 @@ def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
     results = _results(s3, [row for _, row in rows])
     try:
         ctx = decisions.context(s3, photo_listings, exclude, keys=[row["listing"] for _, row in rows],
-                                results=lambda tag, src: results.get((tag, src)) or select.Results(s3, tag, src, (), ()))
+                                results=lambda tag, src: _asked(results, tag, src))
     except decisions.InvalidDecisions as exc:
         raise Unavailable(str(exc)) from exc
     stores, at = ctx.stores, _now()

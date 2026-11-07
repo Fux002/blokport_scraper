@@ -20,6 +20,7 @@ from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, STANDARDISE as
 from stone_pipeline.io import imagestore
 
 A, B, D = "a" * 64, "b" * 64, "d" * 64
+_REAL_SHEET = rv.sheet                                          # before the autouse fixture stands it in
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 CLN = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
@@ -647,7 +648,7 @@ class _Sheets:
 
 def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories_changed(monkeypatch):
     s3, raw = _Sheets(), []
-    monkeypatch.undo()                                                       # the autouse stand-in of rv.sheet
+    monkeypatch.setattr(rv, "sheet", _REAL_SHEET)              # the real one back, every other stand-in kept (conftest's too)
     monkeypatch.setattr(rv, "_SHEET", {})
     monkeypatch.setattr(rv, "fetch_attributes", lambda client: True)
     monkeypatch.setattr(rv, "sheet_and_photos", lambda client: raw.append(1) or ("csv", {}))
