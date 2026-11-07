@@ -22,7 +22,7 @@ def test_defaulted_dimension_lists_flagged_not_held():
     r.length, r.width, r.height = 2.64, 1.76, 1.76   # a usable pack default (e.g. a block whose depth defaulted)
     r.add_flag(ReviewFlag(field="height", code=FlagCode.dimension_defaulted,
                           confidence=Confidence.low, method="pack_default"))
-    validate_row(r)
+    validate_row(r, source_code="test")
     assert not any(x.rule == "dimension_defaulted" for x in r.reject_reasons), "a defaulted dim must LIST, not hold"
     assert any(f.code == FlagCode.dimension_defaulted for f in r.review_flags), "the flag stays for later correction"
 
@@ -31,12 +31,12 @@ def test_fetch_failed_dimension_still_held():
     r = _row()                                       # derive left the dims None + flagged unavailable
     r.add_flag(ReviewFlag(field="height", code=FlagCode.dimension_unavailable,
                           confidence=Confidence.none, method="fetch_failed"))
-    validate_row(r)
+    validate_row(r, source_code="test")
     assert any(x.rule == "dimension_unavailable" for x in r.reject_reasons), "a fetch-failed dim still holds for retry"
 
 
 def test_zero_dimension_still_invalid():
     r = _row()
     r.length, r.width, r.height = 3.40, 0.0, 2.05    # a real size that parsed to 0 -> data error, held
-    validate_row(r)
+    validate_row(r, source_code="test")
     assert any(x.rule == "dimension_invalid" for x in r.reject_reasons), "a parsed-0 dimension is a data error, held"

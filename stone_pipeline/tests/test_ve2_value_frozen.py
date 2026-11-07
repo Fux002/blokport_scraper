@@ -9,6 +9,7 @@ archived Key. Recognition keeps the full vocabulary (archived values stay matcha
 
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -44,12 +45,12 @@ def test_restricted_values_absent_file(tmp_path):
 
 # --- acked_products: Medusa-held values exempt an existing product -----------
 
-def _ledger_product(lg, sku, *, color=None, finish=None, quality=None, type_=None, medusa_id=None):
+def _ledger_product(lg, sku, *, color=None, finish=None, quality=None, type_=None, category=None, medusa_id=None):
     now = now_iso()
     lg.upsert("product", {"sku": sku, "source": sku.split("-")[0].lower(), "surrogate_key": sku.split("-")[-1],
                           "color": color, "finish": finish, "quality": quality, "type": type_,
-                          "medusa_id": medusa_id, "state": "synced", "created_at": now, "updated_at": now},
-              pk=("sku",))
+                          "category": category, "medusa_id": medusa_id, "state": "synced",
+                          "created_at": now, "updated_at": now}, pk=("sku",))
 
 
 def test_acked_products_only_includes_medusa_held(tmp_path):
@@ -58,6 +59,13 @@ def test_acked_products_only_includes_medusa_held(tmp_path):
         _ledger_product(lg, "ZUCCHI-2", color="Grey", medusa_id=None)   # not acked: never exempt
         out = acked_products(lg)
     assert out == {"ZUCCHI-1": {("color", norm("Beige")), ("finish", norm("Polished"))}}
+
+
+def test_acked_products_includes_category(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _ledger_product(lg, "ZUCCHI-1", category="Tiles", medusa_id="M1")
+        out = acked_products(lg)
+    assert out == {"ZUCCHI-1": {("category", norm("Tiles"))}}
 
 
 # --- validate value_frozen ---------------------------------------------------
@@ -115,27 +123,67 @@ def test_value_frozen_exemption_is_value_specific():
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
 
 
-def _active_category():
-    from stone_pipeline.config.settings import active_categories
-    cats = active_categories()
-    if not cats:
-        pytest.skip("no active category with a pcat id in this env")
-    return cats[0]
-
-
 def test_value_frozen_holds_a_new_product_in_an_archived_category():
-    cat = _active_category()
-    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id=cat.pcat_id)
-    validate.validate_row(row, frozen={"category": {norm(cat.label)}}, acked={}, source_code="zucchi")
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="pcat_tiles")
+    validate.validate_row(row, frozen={"category": {norm("Tiles")}}, acked={},
+                          category_labels={"pcat_tiles": "Tiles"}, source_code="zucchi")
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
 
 
 def test_value_frozen_exempts_an_existing_product_in_an_archived_category():
-    cat = _active_category()
-    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id=cat.pcat_id)
-    validate.validate_row(row, frozen={"category": {norm(cat.label)}},
-                          acked={"ZUCCHI-1": {("category", norm(cat.label))}}, source_code="zucchi")
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="pcat_tiles")
+    validate.validate_row(row, frozen={"category": {norm("Tiles")}},
+                          acked={"ZUCCHI-1": {("category", norm("Tiles"))}},
+                          category_labels={"pcat_tiles": "Tiles"}, source_code="zucchi")
     assert "value_frozen" not in {r.rule for r in row.reject_reasons}
+
+
+def test_category_label_fails_loud_for_a_pcat_not_in_attributes():
+    # a pcat with no attributes.csv category row must NOT be silently skipped: fail loud
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="ghost")
+    with pytest.raises(ValueError):
+        validate.validate_row(row, frozen={"category": {norm("Tiles")}}, acked={},
+                              category_labels={}, source_code="zucchi")
+
+
+def test_category_labels_come_from_attributes_not_the_registry(monkeypatch):
+    # finding 1: the label map is sourced from attributes.csv (the same table the row's pcat comes from), so
+    # an env override on the Category REGISTRY pcat can never make the category silently skip the check.
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.reference.medusa_files import read_attributes
+    if not SETTINGS.paths.attributes_csv.exists():
+        pytest.skip("no attributes.csv")
+    cats = {a.sourceid: a.value for a in read_attributes(SETTINGS.paths.attributes_csv, require_status=False)
+            if a.category == "category" and a.sourceid}
+    if not cats:
+        pytest.skip("no category rows in attributes.csv")
+    monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
+                        lambda *a, **k: {"color": {norm("Beige")}})
+    monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "an-override-that-differs-from-attributes")
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(SETTINGS.paths.workspace_root / "nonexistent.ledger"))
+    _frozen, _acked, category_labels = validate._frozen_and_acked("zucchi")
+    assert category_labels == cats   # straight from attributes.csv, unaffected by the registry override
+
+
+def test_frozen_and_acked_with_no_ledger_holds_everything(tmp_path, monkeypatch):
+    monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
+                        lambda *a, **k: {"color": {norm("Beige")}})
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "nonexistent.ledger"))
+    frozen, acked, _cats = validate._frozen_and_acked("zucchi")
+    assert frozen and acked == {}   # no ledger -> nobody exempt -> every restricted value held
+
+
+def test_frozen_and_acked_reads_a_real_ledger(tmp_path, monkeypatch):
+    from stone_pipeline.ledger import writethrough
+    lpath = tmp_path / "dev.ledger"
+    with Ledger.open(lpath, env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        _ledger_product(lg, "ZUCCHI-1", color="Beige", medusa_id="M1")
+    monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
+                        lambda *a, **k: {"color": {norm("Beige")}})
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
+    _frozen, acked, _cats = validate._frozen_and_acked("zucchi")
+    assert acked.get("ZUCCHI-1") == {("color", norm("Beige"))}
 
 
 def test_frozen_and_acked_raises_on_a_corrupt_ledger(tmp_path, monkeypatch):
@@ -146,8 +194,18 @@ def test_frozen_and_acked_raises_on_a_corrupt_ledger(tmp_path, monkeypatch):
     bad = tmp_path / "dev.ledger"
     bad.write_bytes(b"this is not a sqlite database")
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(bad))
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.DatabaseError):
         validate._frozen_and_acked("zucchi")
+
+
+def test_emit_ledger_sku_equals_the_emitted_variant_sku():
+    # 5a: one SKU rule, so the ledger key (populate via emit._sku) and the emitted Variant Sku (sku_for) are
+    # identical for the same row -- they can no longer drift.
+    from stone_pipeline.stages import emit
+    from stone_pipeline.stages.product_state import sku_for
+    cfg = SimpleNamespace(source_code="zucchi")
+    row = CanonicalRow(src_site="zucchi", surrogate_key="A1")
+    assert emit._sku(row, cfg) == sku_for(row, cfg) == "ZUCCHI-A1"
 
 
 def test_a_restricted_palette_colour_does_not_fail_load(monkeypatch):

@@ -151,7 +151,7 @@ def test_a_shape_is_made_to_order_whatever_area_the_vendor_publishes(ref, cfg):
         assert r.made_to_order is True
         assert r.inventory_quantity is None
         assert r.inventory_method == "made_to_order"
-        validate.validate_row(r)
+        validate.validate_row(r, source_code="test")
         assert not any(x.rule == "stock_undetermined" for x in r.reject_reasons)
 
 

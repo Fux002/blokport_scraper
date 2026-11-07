@@ -21,7 +21,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
 from stone_pipeline.reference.loaders.common import norm
-from stone_pipeline.stages.emit import sku_of
+from stone_pipeline.stages.product_state import sku_from
 
 log = logfmt.get_logger("validate")
 
@@ -92,27 +92,33 @@ class ValidationResult:
     rejects: list[CanonicalRow] = field(default_factory=list)
 
 
-def _category_label(row: CanonicalRow) -> str | None:
-    """The row's category value NAME (the attributes.csv 'category' value / Category.label), reverse-mapped
-    from its pcat id. The ledger stores product.category by this same name, so value_frozen holds/exempts a
-    category consistently with colour/finish/quality/type."""
+def _category_label(row: CanonicalRow, category_labels: dict[str, str]) -> str | None:
+    """The row's category value NAME, reverse-mapped from its pcat id through attributes.csv's category rows
+    (`category_labels`): the SAME table the row's pcat (format_resolve.category_pcat_for_branch) and the ledger
+    name (populate._category_name_for) come from, so an env pcat override on the Category REGISTRY can never
+    make the label disagree. A pcat with no attributes.csv row fails LOUD rather than skipping the check."""
     if not row.category_pcat_id:
         return None
-    return next((c.label for c in active_categories() if c.pcat_id == row.category_pcat_id), None)
+    label = category_labels.get(row.category_pcat_id)
+    if label is None:
+        raise ValueError(f"category pcat {row.category_pcat_id!r} has no row in attributes.csv; cannot "
+                         "value-freeze-check its category (a misconfigured pcat, not the row's data)")
+    return label
 
 
-def _frozen_value_pairs(row: CanonicalRow) -> tuple[tuple[str, str | None], ...]:
+def _frozen_value_pairs(row: CanonicalRow, category_labels: dict[str, str]) -> tuple[tuple[str, str | None], ...]:
     """(attribute category, the resolved value name) for each controlled value a product carries. category is
     included by its NAME (not its pcat id): category_invalid only checks the pcat is an active one, so an
     archived-but-still-active category (e.g. Tiles) would otherwise let new products emit into it."""
-    return (("color", row.color_name), ("finish", row.finish_name),
-            ("quality", row.quality_name), ("type", row.type_name), ("category", _category_label(row)))
+    return (("color", row.color_name), ("finish", row.finish_name), ("quality", row.quality_name),
+            ("type", row.type_name), ("category", _category_label(row, category_labels)))
 
 
 def validate_row(row: CanonicalRow, require_images: bool = False, *,
                  frozen: dict[str, set[str]] | None = None,
                  acked: dict[str, set[tuple[str, str]]] | None = None,
-                 source_code: str | None = None) -> None:
+                 category_labels: dict[str, str] | None = None,
+                 source_code: str) -> None:
     for id_field in REQUIRED_ID_FIELDS:
         if not getattr(row, id_field, None):
             row.add_reject(RejectReason(rule="required_id_null", detail=id_field))
@@ -181,42 +187,51 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
     if frozen:
         if not source_code:   # fail loud: a missing source_code must not silently exempt no one / hold all
             raise ValueError("validate value_frozen needs source_code to key the acked-product exemption")
-        sku = sku_of(source_code, row.surrogate_key or "")
+        sku = sku_from(source_code, row.surrogate_key)
         exempt = (acked or {}).get(sku, frozenset())
-        for category, name in _frozen_value_pairs(row):
+        for category, name in _frozen_value_pairs(row, category_labels or {}):
             if name and norm(name) in frozen.get(category, ()) and (category, norm(name)) not in exempt:
                 row.add_reject(RejectReason(rule="value_frozen", detail=f"{category}={name}"))
 
 
-def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
-    """The VE2 inputs for value_frozen, built ONCE per run. `frozen` comes from attributes.csv (the single
-    authority, restricted_values); it is empty in the expand phase, so the acked lookup (which opens the
-    ledger) is SKIPPED entirely then -- today's cost is zero. When values are restricted, `acked` is read from
-    the ledger if one exists; with no ledger (local / CI) it stays empty, so every restricted value is held.
-    A corrupt or wrong-env ledger raises out of Ledger.open: the ledger is the live source, so this fails loud
-    rather than silently exempting no one."""
+def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]],
+                                                 dict[str, str]]:
+    """The VE2 inputs for value_frozen, built ONCE per run: (frozen, acked, category_labels). `frozen` comes
+    from attributes.csv (the single authority, restricted_values); it is empty in the expand phase, so the rest
+    (which read attributes.csv again and open the ledger) is SKIPPED -- today's cost is zero. When values are
+    restricted, `category_labels` maps each category pcat id to its name from attributes.csv (so the category
+    check uses the same table the row's pcat comes from, not the env-overridable registry), and `acked` is read
+    from the ledger if one exists; with no ledger (local / CI) `acked` stays empty, so every restricted value is
+    held. A corrupt or wrong-env ledger raises out of Ledger.open (the ledger is the live source, fail loud)."""
+    from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
     from stone_pipeline.reference.loaders import restricted_values
     frozen = restricted_values()
     if not frozen:
-        return frozen, {}
+        return frozen, {}, {}
+    from stone_pipeline.reference.medusa_files import read_attributes
+    category_labels = {a.sourceid: a.value
+                       for a in read_attributes(SETTINGS.paths.attributes_csv,
+                                                require_status=ATTRIBUTES_STATUS_REQUIRED)
+                       if a.category == "category" and a.sourceid}
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.ledger.existing import acked_products
     path = writethrough.ledger_path()
     if not path.exists():
-        return frozen, {}
+        return frozen, {}, category_labels
     with Ledger.open(path, env=writethrough.ENV_NAME,
                      backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
-        return frozen, acked_products(lg)
+        return frozen, acked_products(lg), category_labels
 
 
 def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False,
         *, source_code: str) -> ValidationResult:
     result = ValidationResult()
     handles: dict[str, str] = {}
-    frozen, acked = _frozen_and_acked(source_code)
+    frozen, acked, category_labels = _frozen_and_acked(source_code)
     for row in rows:
-        validate_row(row, require_images=require_images, frozen=frozen, acked=acked, source_code=source_code)
+        validate_row(row, require_images=require_images, frozen=frozen, acked=acked,
+                     category_labels=category_labels, source_code=source_code)
         # global uniqueness of handle/slug after namespacing (system bug if not)
         if row.handle:
             if row.handle in handles and handles[row.handle] != row.surrogate_key:

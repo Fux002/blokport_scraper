@@ -64,8 +64,16 @@ def load_known_products(path: Path | None = None) -> KnownProducts:
     return known
 
 
+def sku_from(source_code: str, surrogate_key) -> str:
+    """The ONE SKU rule: `{source_code}-{surrogate_key}` upper-cased. The single place the shape lives, so the
+    ledger SKU (populate via emit._sku), the emitted Variant Sku (sku_for) and validate's value_frozen
+    exemption all build the identical SKU for the same row. Exact historical behaviour: no coercion of the
+    surrogate, so a caller with only (source_code, surrogate_key) matches the row path byte-for-byte."""
+    return f"{source_code}-{surrogate_key}".upper()
+
+
 def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
-    return f"{cfg.source_code}-{row.surrogate_key}".upper()
+    return sku_from(cfg.source_code, row.surrogate_key)
 
 
 def inventory_str(row: CanonicalRow) -> str:
