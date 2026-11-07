@@ -21,7 +21,8 @@ from botocore.exceptions import ClientError
 from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import process as proc
 from stone_pipeline.config import categories as registry
-from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.io import imagestore
 from stone_pipeline.stages import images

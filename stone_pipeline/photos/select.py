@@ -35,7 +35,8 @@ from botocore.exceptions import ClientError
 from stone_pipeline.photos.publish import MISSING, chosen_prefix, excluded, pool_map
 from stone_pipeline.photos.source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
                                        remove_candidate, round_prefix, undecided)
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
 

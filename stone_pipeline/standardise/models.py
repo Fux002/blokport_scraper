@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, outline
 
 

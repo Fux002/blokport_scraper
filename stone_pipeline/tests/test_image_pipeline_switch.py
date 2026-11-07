@@ -18,7 +18,8 @@ import pytest
 from stone_pipeline.photos import batch as gpu
 from stone_pipeline.photos import process as proc
 from stone_pipeline.config import server, store
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS, STANDARDISE as C, ImageProcessingConfig, ImagesConfig
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS, ImageProcessingConfig, ImagesConfig
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import SourceConfig, load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import populate, writethrough

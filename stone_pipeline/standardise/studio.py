@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 BASE_PATH = Path(__file__).parent / "assets" / "studio_base.jpg"
 FACE = np.array([[211, 258.1], [804, 185.1], [795, 833.4], [213, 702.6]], np.float32)   # TL, TR, BR, BL of its slab face

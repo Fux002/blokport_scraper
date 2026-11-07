@@ -13,7 +13,7 @@ import pytest
 from stone_pipeline.photos import batch as gpu
 from stone_pipeline.photos import process as runner
 from stone_pipeline.photos import select as sel_mod
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 
@@ -1164,16 +1164,16 @@ def test_a_run_s_size_is_set_per_run_and_a_malformed_value_fails_loud(monkeypatc
 
 
 def _idle_ceiling_read_by_settings(value):
-    """IDLE_GPU_VCPUS as a fresh interpreter's settings read it, with SCRAPER_STANDARDISE_IDLE_GPU_VCPUS set to value (None:
-    unset). A subprocess, because settings reads the environment once, at import."""
+    """IDLE_GPU_VCPUS as a fresh interpreter's standardise settings read it, with SCRAPER_STANDARDISE_IDLE_GPU_VCPUS
+    set to value (None: unset). A subprocess, because they read the environment once, at import."""
     import os
     import subprocess
     import sys
     env = {k: v for k, v in os.environ.items() if not k.endswith("STANDARDISE_IDLE_GPU_VCPUS")}
     if value is not None:
         env["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"] = value
-    out = subprocess.run([sys.executable, "-c", "from stone_pipeline.config.settings import STANDARDISE as C; "
-                          "print(C.IDLE_GPU_VCPUS)"], env=env, capture_output=True, text=True, check=True)
+    code = "from stone_pipeline.config.standardise_settings import STANDARDISE as C; print(C.IDLE_GPU_VCPUS)"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
     return out.stdout.strip()
 
 

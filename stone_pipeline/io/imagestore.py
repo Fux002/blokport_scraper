@@ -31,7 +31,8 @@ import re
 from typing import Optional
 from urllib.parse import quote, unquote
 
-from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE
+from stone_pipeline.config.settings import ENV_SEGMENT
+from stone_pipeline.config.standardise_settings import STANDARDISE
 
 IMPROVED_SUBDIR = "improved"                 # the hosted-image folder name
 SCRAPED_SUBDIR = "scraped"

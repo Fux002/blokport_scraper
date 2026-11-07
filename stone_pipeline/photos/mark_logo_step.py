@@ -39,7 +39,8 @@ from pathlib import Path
 
 
 from stone_pipeline.photos.source import LOGO_STEP, logo_step_key, round_prefix
-from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.ledger import snapshot
 

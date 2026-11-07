@@ -305,7 +305,7 @@ def test_each_preset_is_the_configuration_it_replaced(preset, inline):
 
 def test_a_pooled_preset_keeps_its_retries_and_sizes_the_pool():
     from botocore.config import Config
-    from stone_pipeline.config.settings import STANDARDISE
+    from stone_pipeline.config.standardise_settings import STANDARDISE
     from stone_pipeline.io import storage
     before = boto3.client("s3", region_name=S3_REGION, config=Config(
         retries={"mode": "standard", "max_attempts": 10}).merge(Config(max_pool_connections=STANDARDISE.STORE_WORKERS)))

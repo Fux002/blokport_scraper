@@ -9,7 +9,7 @@ from dataclasses import replace
 import cv2
 import numpy as np
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import layout
 from stone_pipeline.standardise import marks as proto
 

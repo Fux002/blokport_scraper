@@ -13,7 +13,8 @@ import pytest
 
 from stone_pipeline.photos import mark_logo_step as m
 from stone_pipeline.photos.source import logo_step_key, round_prefix
-from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 

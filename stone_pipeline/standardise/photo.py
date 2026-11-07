@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import blend, closeup, kinds, layout, scene, studio, views
 
 

@@ -18,7 +18,8 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 
-from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, STANDARDISE as C, VARIANTS_EXPORT_STATUS_REQUIRED
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, VARIANTS_EXPORT_STATUS_REQUIRED
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 from stone_pipeline.standardise import index, tile_stone, tile_views

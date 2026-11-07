@@ -30,7 +30,8 @@ from stone_pipeline.photos.publish import NoConflictSet, chosen_prefix, pool_map
 from stone_pipeline.io.medusa_inputs import fetch_attributes
 from stone_pipeline.photos.source import round_prefix, sheet_and_photos
 from stone_pipeline.config import categories, settings
-from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import PROCESS_RETRIES, aws_client, pooled

@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from stone_pipeline.config.categories import category
-from stone_pipeline.config.settings import STANDARDISE
+from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.io import staging
 from stone_pipeline.run import run_source
 

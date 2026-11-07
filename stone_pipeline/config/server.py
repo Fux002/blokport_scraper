@@ -908,7 +908,7 @@ def _query(query, names):
 def _page_param(value, name, default, low, high=None):
     """A whole-number query parameter (plain ASCII digits, at most REVIEW_PAGE_DIGITS of them) of at least low (and at
     most high, when given), default when absent; a 400 naming it otherwise."""
-    from stone_pipeline.config.settings import STANDARDISE as C
+    from stone_pipeline.config.standardise_settings import STANDARDISE as C
     if value is None:
         return default
     digits = re.fullmatch(f"[0-9]{{1,{C.REVIEW_PAGE_DIGITS}}}", value)
@@ -920,7 +920,7 @@ def _page_param(value, name, default, low, high=None):
 
 def _get_photos_hidden(params, body, query):
     # ?reason=<one of the review reasons>&offset=<0..>&limit=<1..REVIEW_PAGE_MAX>, each at most once
-    from stone_pipeline.config.settings import STANDARDISE as C
+    from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
     def answer(rv):
         q = _query(query, ("reason", "offset", "limit"))

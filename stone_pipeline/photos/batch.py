@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.photos.publish import pool_map
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.core import env
 
 _DONE = ("SUCCEEDED", "FAILED")

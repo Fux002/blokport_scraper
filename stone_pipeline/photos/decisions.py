@@ -58,7 +58,8 @@ from stone_pipeline.photos.publish import (NoConflictSet, chosen_prefix, click_r
                                        owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
                                        read_records, records_by_sku, write_click)
 from stone_pipeline.photos.source import sheet_and_photos
-from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import PROCESS_RETRIES, aws_client

@@ -15,7 +15,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from stone_pipeline.photos import close as close
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import photo
 
 A, B, D = "a" * 64, "b" * 64, "d" * 64

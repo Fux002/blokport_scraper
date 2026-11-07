@@ -20,7 +20,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS, STANDARDISE, VARIANTS_EXPORT_STATUS_REQUIRED
+from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
+from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.layout import write_sync_md

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from stone_pipeline.config import settings
+from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("io.storage")
@@ -29,7 +30,7 @@ log = logfmt.get_logger("io.storage")
 # A preset is the botocore Config options a client is built with (plain options, so this module imports without
 # boto3); each site names the one it needs, so a difference between clients is a choice made where it is used.
 BOTOCORE_DEFAULTS = None                     # no Config: botocore's own retries, timeouts and pool
-PROCESS_RETRIES = {"retries": {"mode": "standard", "max_attempts": settings.STANDARDISE.AWS_MAX_ATTEMPTS}}
+PROCESS_RETRIES = {"retries": {"mode": "standard", "max_attempts": STANDARDISE.AWS_MAX_ATTEMPTS}}
 BOUNDED = {"connect_timeout": settings.AWS_BOUNDED_CONNECT_SECONDS, "read_timeout": settings.AWS_BOUNDED_READ_SECONDS,
            "retries": {"max_attempts": settings.AWS_BOUNDED_MAX_ATTEMPTS, "mode": "standard"}}
 FAIL_FAST = {"connect_timeout": settings.AWS_FAIL_FAST_CONNECT_SECONDS,

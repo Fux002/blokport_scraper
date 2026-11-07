@@ -11,7 +11,8 @@ import cv2
 import numpy as np
 import pytest
 
-from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.io import imagestore

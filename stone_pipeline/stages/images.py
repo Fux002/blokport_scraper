@@ -33,7 +33,8 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 
-from stone_pipeline.config.settings import SETTINGS, STANDARDISE, Confidence
+from stone_pipeline.config.settings import SETTINGS, Confidence
+from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.io import download as dl

@@ -248,7 +248,7 @@ def _finish(rec: dict, proc: subprocess.Popen, rc: int | None, counts: dict | No
 def _follow_up(rec: dict) -> None:
     """After a full produce (stage all), the photos run (with STANDARDISE.AUTO on): its own run, on the sheet this produce
     just published. A run slot taken in between (an op claimed it) is logged; the next produce starts it again."""
-    from stone_pipeline.config.settings import STANDARDISE
+    from stone_pipeline.config.standardise_settings import STANDARDISE
     if _stopping or not (STANDARDISE.AUTO and rec.get("status") == "succeeded" and rec.get("stage") in _PHOTOS_AFTER):
         return
     follow, code = start_run(stage="photos")

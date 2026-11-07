@@ -6,7 +6,7 @@
           the whole photo, upscaled; never composited (that would invent a tile we cannot see)
 Usage: python keep_scene.py <in_dir> <out_dir> <block|tile>
 """
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 import cv2
 import numpy as np
 
