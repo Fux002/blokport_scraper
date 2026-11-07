@@ -28,7 +28,7 @@ from botocore.config import Config
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import aws_config, chosen_prefix, pool_map, read_conflicts, read_records
+from deploy.standardise_publish import NoConflictSet, aws_config, chosen_prefix, pool_map, read_conflicts, read_records
 from deploy.fetch_inputs import fetch_attributes
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config import settings
@@ -149,7 +149,7 @@ def _url(s3, key):
 
 def _now():
     """Now as the page writes a decision's time (toISOString, UTC): the time a candidate decision is checked at."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _accepted(ctx, doc):
@@ -206,12 +206,21 @@ def _bases(s3, products, by_sku):
             row = _joined(found, listing, "owner_removed")
         elif (listing["key"] if listing else found["listing"]) in chosen:
             row = _joined(found, listing, "chosen_not_linked")
-        elif sku in review:
-            row = review[sku]
+        elif sku in review:                            # the sheet's handle: a re-bind moves it after the run wrote it
+            row = review[sku] if listing is None else {**review[sku], "listing": listing["key"]}
         else:
             row = _joined(found, listing, "not_worked_yet")
         out.append((sku, row, listing))
     return sorted(out, key=lambda item: (item[1]["source"] or "", item[1]["listing"] or "", item[0]))
+
+
+def _conflicts(s3, sources):
+    """The produce's stored conflict set of these sources (publish.read_conflicts); Unavailable (a 503) before the first
+    produce stores one, never a crash."""
+    try:
+        return read_conflicts(s3, sources)
+    except NoConflictSet as exc:
+        raise Unavailable(str(exc)) from exc
 
 
 def _removed_photos(s3, page, exclude):
@@ -221,7 +230,7 @@ def _removed_photos(s3, page, exclude):
     removed = [(sku, listing) for sku, row, listing in page if row["reason"] == "owner_removed" and listing is not None]
     if not removed:
         return {}
-    conflicts = read_conflicts(s3, {l["source"] for _, l in removed})
+    conflicts = _conflicts(s3, {l["source"] for _, l in removed})
     blocked = {sku: exclude | {s for s in l["photos"] if (l["source"], s) in conflicts} for sku, l in removed}
     asked = {sku: select.candidates(l, blocked[sku]) for sku, l in removed}
     by_source = {}
@@ -394,7 +403,7 @@ def click(s3, sku, sha, at):
     src = listing["source"]
     if _has_choice(s3, listing["key"]):
         return 409, {"reason": "chosen_not_linked", "error": f"{sku} has a chosen photo; the next relink shows it"}
-    conflicts = read_conflicts(s3, {src})
+    conflicts = _conflicts(s3, {src})
     blocked = decisions.excluded() | {s for s in listing["photos"] if (src, s) in conflicts}
     # what the run folders hold of the photos the two states ask about (select.Round shas), never a whole folder: the
     # listing's candidates (listing_state judges only those) and the clicked photo (click_state)

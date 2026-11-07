@@ -696,3 +696,41 @@ def test_a_sha_or_time_with_a_trailing_newline_or_a_non_ascii_digit_is_400(monke
     monkeypatch.setattr(rv, "client", lambda: "s3")
     monkeypatch.setattr(rv, "click", lambda *a: pytest.fail("reached"))
     assert server.dispatch("PUT", ["photos", "clicks", "SEN-ONE"], body)[0] == 400
+
+
+def test_a_candidate_decision_is_checked_at_the_millisecond_the_page_would_write(monkeypatch):
+    # review of #556: _now() floored to the second ('.000Z'), so an action could be withheld for up to a second
+    from datetime import datetime, timezone
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 7, 14, 5, 9, 123456, tzinfo=timezone.utc)
+    monkeypatch.setattr(rv, "datetime", _Clock)
+    assert rv._now() == "2026-11-07T14:05:09.123Z" and dec.moment(rv._now()) is not None
+
+
+def test_a_row_names_its_listing_by_the_sheet_s_handle_not_the_one_stored_with_the_run(monkeypatch):
+    # review of #556: a variety re-bind moves the handle; review.json kept the old one until the next full run
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": {**_row(ONE), "listing": "old-handle"}}).encode()})
+    row = rv.hidden(s3)["rows"][0]
+    assert row["listing"] == "one" and all(d["id"] == "one" for d in _offered(row))
+
+
+def test_a_removed_row_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{imagestore.owner_removed_key("SEN-ONE"): json.dumps(
+        {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "reason": C.REMOVED_REASON, "at": AT}).encode()})
+    del s3.objects[imagestore.conflicts_key("sentas")]
+    with pytest.raises(rv.Unavailable, match="no conflict set"):
+        rv.hidden(s3)
+
+
+def test_a_click_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    del s3.objects[imagestore.conflicts_key("sentas")]
+    with pytest.raises(rv.Unavailable, match="no conflict set"):
+        rv.click(s3, "SEN-ONE", B, AT)
+    assert s3.written == []
