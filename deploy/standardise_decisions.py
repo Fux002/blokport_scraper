@@ -262,7 +262,7 @@ def _one_listing_per_conflict(docs, listings, shared, stores):
     """The errors of a "use" giving a conflict photo (listings of several stones show it) to a second listing: it is
     one listing's, by the owner's own decision, until that decision is withdrawn (a removal, or another photo chosen for
     it in this file). Decisions are taken by listing key, so the same file names the same holder."""
-    decided = {d.get("id") for d in docs}
+    decided = {d.get("id") for d in docs if d.get("action") != "withdraw"}   # a withdraw releases no photo it holds
     holders = {}
     for doc in sorted((d for d in docs if d.get("action") == "use" and d.get("id") in listings), key=lambda d: d["id"]):
         photo = (listings[doc["id"]]["source"], doc["sha"])

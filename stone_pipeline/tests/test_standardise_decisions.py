@@ -240,6 +240,15 @@ def test_a_withdraw_has_exactly_its_fields():
         dec.plan(_bucket(), [_withdraw("one", sha=B)], LISTINGS, exclude=set())
 
 
+def test_a_withdraw_beside_a_use_never_frees_a_conflict_photo_its_listing_holds():
+    # review of #555: a withdraw counted as the listing's new decision, so the stored holder of conflict photo E looked
+    # released and a use gave E to its partner too: E chosen by both
+    s3 = _bucket()
+    _apply(s3, [_use("leathered", E)])
+    with pytest.raises(dec.InvalidDecisions, match="already the owner's choice for leathered"):
+        dec.plan(s3, [_withdraw("leathered", at=LATER), _use("polished", E, at=LATER)], LISTINGS, exclude=set())
+
+
 def test_a_clean_of_a_source_whose_image_pipeline_is_off_is_refused(monkeypatch):
     # its products show the scraped photos and the process never works on it: a click would wait for ever
     monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
