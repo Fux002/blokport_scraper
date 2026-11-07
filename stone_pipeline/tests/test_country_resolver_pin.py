@@ -55,14 +55,15 @@ def _vocabulary() -> list[str]:
 
 
 def test_all_three_resolver_paths_agree_over_the_real_vocabulary(ref):
-    # reference.to_iso (the one binder), the pre-C5 derive._to_iso binding (resolve_iso with the ref's
-    # fields), and server._country_iso must give the identical answer for every real and adversarial input.
+    # reference.to_iso (the one binder derive + the matcher call), the pre-C5 derive._to_iso binding
+    # (resolve_iso with the ref's fields), and the server's origin validation (_resolve_origin_iso, now the
+    # shared resolver over its cached table) must give the identical answer for every real/adversarial input.
     vocab = _vocabulary()
     assert len(vocab) > 100                                   # the real country table is loaded, not empty
     for v in vocab:
         new = ref.to_iso(v)
         old_derive = resolve_iso(v, ref.country_codes, ref.valid_iso_codes)
-        srv = server._country_iso(v)
+        srv = server._resolve_origin_iso(v)
         assert new == old_derive == srv, f"resolver disagreement on {v!r}: {new!r} / {old_derive!r} / {srv!r}"
 
 

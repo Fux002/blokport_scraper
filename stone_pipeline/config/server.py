@@ -118,21 +118,21 @@ def _gap_as_card(item: dict) -> dict:
             "current_action": item.get("decision"), "decided": False}
 
 
-def _country_iso(raw: str) -> str | None:
-    """Resolve a country NAME or ISO2 to a canonical ISO-3166 alpha-2, or None if it is not a real country.
-    Name-first (so 'UK' -> GB) then a bare valid ISO2 -- mirrors derive._to_iso. Validates the operator's
-    mint origin so a garbage country is never stored. Loaded per call (admin low-QPS)."""
-    from stone_pipeline.core.text import match_key
+@functools.lru_cache(maxsize=1)
+def _country_tables():
+    """The country name->ISO table and its valid ISO-2 set, loaded ONCE: the file does not change under a
+    running admin server, so origin validation reuses the shared resolver with no per-call CSV read."""
     from stone_pipeline.reference.loaders import load_country_codes
-    v = (raw or "").strip()
-    if not v:
-        return None
     codes = load_country_codes()
-    if hit := codes.get(match_key(v)):
-        return hit
-    if len(v) == 2 and v.isalpha() and v.upper() in set(codes.values()):
-        return v.upper()
-    return None
+    return codes, frozenset(codes.values())
+
+
+def _resolve_origin_iso(raw: str) -> str | None:
+    """Validate an operator-supplied country to a canonical ISO-3166 alpha-2, or None if it is not a real
+    country, through the ONE shared resolver (loaders.resolve_iso: name-first so 'UK' -> GB, then a bare
+    valid ISO2) over the cached country table -- the same resolution derive and the matcher use."""
+    from stone_pipeline.reference.loaders import resolve_iso
+    return resolve_iso(raw, *_country_tables())
 
 
 def _attach_image_progress(rows: list[dict]) -> None:
@@ -651,7 +651,7 @@ def _put_review_decide(params, body, query):
             return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
         color = colors[proj.norm(raw_color)]
     raw_origin = _str(body, "origin")
-    origin = _country_iso(raw_origin) if raw_origin else ""
+    origin = _resolve_origin_iso(raw_origin) if raw_origin else ""
     if raw_origin and not origin:
         return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
     from stone_pipeline.stages.curate import active_branches, gen_key
@@ -782,7 +782,7 @@ def _put_origin(params, body, query):
         return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
     isos = []
     for c in _str_list(body.get("countries"), "countries"):
-        if not (iso := _country_iso(c)):
+        if not (iso := _resolve_origin_iso(c)):
             return 400, {"error": f"country {c!r} is not a real ISO-3166 country"}
         isos.append(iso)
     try:
