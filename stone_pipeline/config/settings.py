@@ -858,6 +858,22 @@ class SyncConfig:
 
 
 @dataclass(frozen=True)
+class RunConfig:
+    """How a produce/build/clean run is scoped, read ONCE from the env (project rule: config-driven, no
+    argparse). SCRAPER_ prefix, legacy BLOKPORT_ also read (SCRAPER_ wins). The `__main__` entry of
+    stone_pipeline.build / .produce / .clean reads these; the core functions take the same values as
+    explicit arguments. The config server's runner sets them on the produce subprocess's env."""
+    # how far a produce/build goes: one of build.STAGES (scrape|catalog|republish|inventory|all). SCRAPER_RUN_STAGE.
+    stage: str = (env.getenv("BLOKPORT_RUN_STAGE", "all") or "all").strip().lower()
+    # which scrapers; empty -> every enabled source (as a scoped list omitted did). SCRAPER_RUN_SOURCES (comma-separated).
+    sources: tuple[str, ...] = tuple(s.strip() for s in (env.getenv("BLOKPORT_RUN_SOURCES", "") or "").split(",") if s.strip())
+    # verify-only: re-run the consistency gate on the existing files, ignoring stage/sources. SCRAPER_RUN_VERIFY.
+    verify: bool = _env_bool("BLOKPORT_RUN_VERIFY", False)
+    # housekeeping (stone_pipeline.clean): report only, remove nothing. SCRAPER_CLEAN_DRY_RUN.
+    clean_dry_run: bool = _env_bool("BLOKPORT_CLEAN_DRY_RUN", False)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
     code_version: str = "0.1.0"
@@ -874,6 +890,7 @@ class Settings:
     lots: LotConfig = field(default_factory=LotConfig)
     variety_colour: VarietyColourConfig = field(default_factory=VarietyColourConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    run: RunConfig = field(default_factory=RunConfig)
 
     # The source proven first (section 14). develi is absent from the supplied
     # data, so polonine is the clean named-variety proving source.

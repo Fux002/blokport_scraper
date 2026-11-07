@@ -244,7 +244,7 @@ def test_build_republish_runs_pipeline_and_catalog(monkeypatch):
     calls = []
     monkeypatch.setattr(build, "_scrape", lambda s: calls.append(("scrape", s)) or 0)
     monkeypatch.setattr(build, "_catalog", lambda: calls.append(("catalog", None)) or 0)
-    assert build.main(["--stage", "republish"]) == 0
+    assert build.run(None, "republish") == 0
     assert calls == [("scrape", None), ("catalog", None)]     # full pipeline + catalog, like `all`
 
 
@@ -252,14 +252,14 @@ def test_produce_republish_skips_the_live_scrape(monkeypatch):
     calls = []
     monkeypatch.setattr(produce, "_fetch_inputs", lambda: calls.append(("fetch", None)))
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
-    monkeypatch.setattr(produce.build, "main", lambda argv: calls.append(("build", argv)) or 0)
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append(("build", sources, stage)) or 0)
     from stone_pipeline.ledger import snapshot
     from deploy import upload_artifacts
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)      # produce's own persist + publish
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
     monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: 0)       # (wave 4g), off in this step test
-    assert produce.main(["--stage", "republish"]) == 0
-    assert calls == [("fetch", None), ("build", ["--stage", "republish"])]   # NO scrape
+    assert produce.run(None, "republish") == 0
+    assert calls == [("fetch", None), ("build", None, "republish")]   # NO scrape
 
 
 def test_runner_accepts_republish_stage():

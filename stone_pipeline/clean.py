@@ -6,8 +6,8 @@ them -- keeping the LATEST per source -- plus stale inventory runs, OS cruft (.D
 ORPHAN generated images (image_pipeline/{images,to_upload}/<Key>.png whose variant Key is no
 longer in the catalog -- a stone that was removed or renamed).
 
-    python -m stone_pipeline.clean            # report + remove
-    python -m stone_pipeline.clean --dry-run  # report only, remove nothing
+    python -m stone_pipeline.clean                        # report + remove
+    SCRAPER_CLEAN_DRY_RUN=1 python -m stone_pipeline.clean  # report only, remove nothing
 
 NEVER touches: to_upload/ (deliverables), from_medusa/ (Medusa downloads), catalog_source/
 (source of truth), review/, images/inbox (your drop folder), or any generated image whose Key
@@ -20,7 +20,6 @@ from __future__ import annotations
 import csv
 import json
 import shutil
-import sys
 from pathlib import Path
 
 from stone_pipeline.catalog import latest_run_dirs
@@ -148,9 +147,8 @@ def delete_source_data(sources: list[str]) -> dict[str, int]:
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
-    dry = "--dry-run" in argv or "-n" in argv
+def main() -> int:
+    dry = SETTINGS.run.clean_dry_run
     counts = run(dry_run=dry)
     verb = "would remove" if dry else "removed"
     print(f"clean ({'dry-run' if dry else 'done'}): {verb} "

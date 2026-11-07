@@ -1,15 +1,15 @@
 """One-command build of a full upload phase, in dependency order, self-verifying.
 
-    python -m stone_pipeline.build                          # every enabled source -> catalog -> verify
-    python -m stone_pipeline.build --verify                 # only re-run the consistency gate
-    python -m stone_pipeline.build --sources zucchi         # ONE source -> catalog -> verify
-    python -m stone_pipeline.build --stage scrape --sources zucchi   # that source's products+stock ONLY
-    python -m stone_pipeline.build --stage catalog          # re-consolidate the SHARED catalog + verify
-    python -m stone_pipeline.build --stage republish        # re-run pipeline + catalog from the LAST scrape
-    python -m stone_pipeline.build --stage inventory        # cheap stock-only refresh, all sources
-    python -m stone_pipeline.build --stage inventory --sources zucchi   # one source's stock only
+    python -m stone_pipeline.build                                       # every enabled source -> catalog -> verify
+    SCRAPER_RUN_VERIFY=1 python -m stone_pipeline.build                  # only re-run the consistency gate
+    SCRAPER_RUN_SOURCES=zucchi python -m stone_pipeline.build            # ONE source -> catalog -> verify
+    SCRAPER_RUN_STAGE=scrape SCRAPER_RUN_SOURCES=zucchi python -m stone_pipeline.build   # that source's products+stock ONLY
+    SCRAPER_RUN_STAGE=catalog python -m stone_pipeline.build             # re-consolidate the SHARED catalog + verify
+    SCRAPER_RUN_STAGE=republish python -m stone_pipeline.build           # re-run pipeline + catalog from the LAST scrape
+    SCRAPER_RUN_STAGE=inventory python -m stone_pipeline.build           # cheap stock-only refresh, all sources
+    SCRAPER_RUN_STAGE=inventory SCRAPER_RUN_SOURCES=zucchi python -m stone_pipeline.build   # one source's stock only
 
-The two axes are independent: `--sources` picks WHICH scrapers (default: all enabled), `--stage`
+The two axes are independent: SCRAPER_RUN_SOURCES picks WHICH scrapers (default: all enabled), SCRAPER_RUN_STAGE
 picks HOW FAR (scrape / catalog / inventory / all, the default). A per-source scrape is safe on live data --
 products, stock and the delist are all SKU-prefix scoped to that source, and the shared catalog is
 rebuilt only by the catalog stage, which always consolidates every source's latest run.
@@ -29,11 +29,10 @@ refresh from_medusa/<env>/variants_export.csv -- so the production loop is:
 
 from __future__ import annotations
 
-import sys
-
 from stone_pipeline import catalog as catalog_mod
 from stone_pipeline import inventory as inventory_mod
 from stone_pipeline import run as run_mod
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("build")
@@ -46,22 +45,17 @@ STAGES = ("scrape", "catalog", "republish", "inventory", "all")
 _FULL_STAGES = ("all", "republish")   # run BOTH the per-source pipeline and the shared catalog
 
 
-def _arg(argv: list[str], flag: str) -> str | None:
-    """Value of `--flag val` or `--flag=val` in argv, else None (missing) / '' (flag, no value)."""
-    for i, a in enumerate(argv):
-        if a == flag:
-            return argv[i + 1] if i + 1 < len(argv) else ""
-        if a.startswith(flag + "="):
-            return a.split("=", 1)[1]
-    return None
-
-
-def parse_scope(argv: list[str]) -> tuple[list[str] | None, str]:
-    """(sources, stage) from argv. sources None -> every enabled source; stage defaults to 'all'."""
-    raw = _arg(argv, "--sources")
-    sources = [s.strip() for s in raw.split(",") if s.strip()] if raw else None
-    stage = (_arg(argv, "--stage") or "all").strip().lower()
-    return sources, stage
+def verify_gate() -> int:
+    """Re-run ONLY the consistency gate on the existing files (SCRAPER_RUN_VERIFY). Ignores stage/sources."""
+    errors, warnings = catalog_mod.verify_consistency()
+    for w in warnings:
+        print(f"  ! {w}")
+        log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
+    for e in errors:
+        print(f"  ✗ {e}")
+        log.error("consistency error", extra={"extra_fields": {"error": e}})  # visible in CloudWatch
+    print("consistency gate: PASS" if not errors else "consistency gate: FAIL")
+    return 1 if errors else 0
 
 
 def _scrape(sources: list[str] | None) -> int:
@@ -99,23 +93,12 @@ def _inventory(sources: list[str] | None) -> int:
     return inventory_mod.main(sources or [])
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
-
-    if "--verify" in argv:
-        errors, warnings = catalog_mod.verify_consistency()
-        for w in warnings:
-            print(f"  ! {w}")
-            log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
-        for e in errors:
-            print(f"  ✗ {e}")
-            log.error("consistency error", extra={"extra_fields": {"error": e}})  # visible in CloudWatch
-        print("consistency gate: PASS" if not errors else "consistency gate: FAIL")
-        return 1 if errors else 0
-
-    sources, stage = parse_scope(argv)
+def run(sources: list[str] | None, stage: str) -> int:
+    """Build the given stage over the given sources (None -> every enabled source). The param-driven core:
+    the __main__ entry and produce call it with explicit values -- no argv. Validates the stage at the
+    boundary (unknown -> rc 2, naming the allowed set), as the CLI did."""
     if stage not in STAGES:
-        print(f"unknown --stage {stage!r}; expected one of {', '.join(STAGES)}")
+        print(f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}")
         log.error("build: unknown stage", extra={"extra_fields": {"stage": stage}})
         return 2
 
@@ -149,6 +132,14 @@ def main(argv: list[str] | None = None) -> int:
     scope = ", ".join(sources) if sources else "all enabled sources"
     print(f"\n{stage} complete ({scope}) -- see to_upload/ (and the ledger write-through)")
     return 0
+
+
+def main() -> int:
+    """The __main__ entry: read the run scope from the env ONCE (SETTINGS.run), then dispatch. No argv."""
+    cfg = SETTINGS.run
+    if cfg.verify:
+        return verify_gate()
+    return run(list(cfg.sources) or None, cfg.stage)
 
 
 if __name__ == "__main__":

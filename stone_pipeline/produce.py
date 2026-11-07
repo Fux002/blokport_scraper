@@ -7,13 +7,13 @@ scrape -> build; `python -m stone_pipeline.build` stays the laptop path (scrape 
 then build against the local data). The split is deliberate: build assumes data/ is already there,
 produce guarantees it. No em dashes (design principle 2).
 
-    python -m stone_pipeline.produce                     # fetch -> scrape all -> build all
-    python -m stone_pipeline.produce --sources zucchi     # ...that source only
-    python -m stone_pipeline.produce --stage inventory    # fetch -> scrape -> stock-only refresh
-    python -m stone_pipeline.produce --stage catalog      # NO scrape: just re-consolidate outputs
-    python -m stone_pipeline.produce --stage republish    # NO scrape: re-run pipeline + catalog from cache
+    python -m stone_pipeline.produce                                  # fetch -> scrape all -> build all
+    SCRAPER_RUN_SOURCES=zucchi python -m stone_pipeline.produce        # ...that source only
+    SCRAPER_RUN_STAGE=inventory python -m stone_pipeline.produce       # fetch -> scrape -> stock-only refresh
+    SCRAPER_RUN_STAGE=catalog python -m stone_pipeline.produce         # NO scrape: just re-consolidate outputs
+    SCRAPER_RUN_STAGE=republish python -m stone_pipeline.produce       # NO scrape: re-run pipeline + catalog from cache
 
-`--stage` / `--sources` pass straight through to build; `catalog` and `republish` skip the live scrape
+SCRAPER_RUN_STAGE / SCRAPER_RUN_SOURCES scope the build (read once in settings.SETTINGS.run); `catalog` and `republish` skip the live scrape
 and reuse the last scrape (catalog only consolidates; republish re-runs the whole pipeline + catalog, so
 an operator decision like a backbone-leaf approval releases the products it just made valid without a
 supplier re-fetch). Ledger write-through is the caller's job (the runner sets it).
@@ -21,13 +21,11 @@ supplier re-fetch). Ledger write-through is the caller's job (the runner sets it
 
 from __future__ import annotations
 
-import sys
-
 from stone_pipeline import build
 from stone_pipeline.core import env, logfmt
 
 log = logfmt.get_logger("produce")
-from stone_pipeline.config.settings import IS_PRODUCTION   # noqa: E402  (log first: settings may fail loud)
+from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS   # noqa: E402  (log first: settings may fail loud)
 
 
 # Stages that skip the live supplier fetch and reuse the last scrape in data/.
@@ -217,16 +215,16 @@ def _finalize_control_plane(stage: str) -> None:
         log.exception("control-plane finalize (diagnostics/admission) failed; non-fatal")
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def run(sources: list[str] | None, stage: str, verify: bool = False) -> int:
+    """A full produce (fetch export inputs -> live scrape -> build -> persist + publish) scoped to `stage`
+    and `sources` (None -> every enabled source). The param-driven core: the __main__ entry calls it with
+    the values from SETTINGS.run; no argv. `verify` re-checks only (no fetch/scrape), delegating to build."""
+    # verify is a pure re-check of what is already built: no fetch, no scrape -- delegate straight.
+    if verify:
+        return build.verify_gate()
 
-    # --verify is a pure re-check of what is already built: no fetch, no scrape -- delegate straight.
-    if "--verify" in argv:
-        return build.main(argv)
-
-    sources, stage = build.parse_scope(argv)
     if stage not in build.STAGES:
-        return build.main(argv)   # let build report the unknown stage consistently
+        return build.run(sources, stage)   # let build report the unknown stage consistently
 
     _fetch_inputs()
     _mirror_archived()   # VE2: freeze archived varieties from the FRESH export before any source is recorded
@@ -238,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             log.error("produce aborted: live scrape failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
-    rc = build.main(argv)
+    rc = build.run(sources, stage)
     _finalize_control_plane(stage)
     if stage in _CATALOG_STAGES:
         from stone_pipeline.ledger import writethrough
@@ -261,6 +259,12 @@ def main(argv: list[str] | None = None) -> int:
     if rc == 0:
         _log_frozen_waiting()
     return _persist_and_publish(stage, rc)
+
+
+def main() -> int:
+    """The __main__ entry: read the run scope from the env ONCE (SETTINGS.run), then run. No argv."""
+    cfg = SETTINGS.run
+    return run(list(cfg.sources) or None, cfg.stage, cfg.verify)
 
 
 def _persist_and_publish(stage: str, rc: int) -> int:

@@ -262,14 +262,47 @@ def _build_command(rec: dict) -> list[str]:
     stdout). Every other stage is a produce: FULL produce = stone_pipeline.produce (fetch export inputs
     -> LIVE scrape -> build), NOT bare `stone_pipeline.build`: build assumes data/ is already scraped
     (the laptop path), so on a fresh host (a new ECS task with empty data/) it would produce nothing.
-    produce guarantees the inputs first. `--stage` scopes HOW FAR (scrape / catalog / all) and
-    `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
+    produce guarantees the inputs first. The run SCOPE (stage, sources) is passed on the subprocess ENV
+    (SCRAPER_RUN_STAGE / SCRAPER_RUN_SOURCES, see _produce_run_env), not argv -- the project rule is
+    config-driven, no CLI flag plumbing (produce reads settings.SETTINGS.run)."""
     if rec.get("stage") == "photos":
         return [sys.executable, "-u", "-m", "stone_pipeline.photos.process"]
-    cmd = [sys.executable, "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
-    if rec.get("scope"):
-        cmd += ["--sources", ",".join(rec["scope"])]
-    return cmd
+    return [sys.executable, "-m", "stone_pipeline.produce"]
+
+
+# The run-scope vars (both prefixes) a produce child must NOT inherit: its scope is fully the run record.
+_RUN_SCOPE_VARS = tuple(p + s for p in ("SCRAPER_", "BLOKPORT_")
+                        for s in ("RUN_STAGE", "RUN_SOURCES", "RUN_VERIFY"))
+
+
+def _produce_run_env(rec: dict) -> dict:
+    """The run scope for a produce subprocess (SCRAPER_ prefix; produce reads it via settings.SETTINGS.run).
+    ALWAYS sets all three so the child's scope is fully the run record, never inherited: the stage, the
+    sources (empty string = every enabled source, as a missing scope did), and verify off."""
+    return {"SCRAPER_RUN_STAGE": rec.get("stage", "all"),
+            "SCRAPER_RUN_SOURCES": ",".join(rec["scope"]) if rec.get("scope") else "",
+            "SCRAPER_RUN_VERIFY": "0"}
+
+
+def _child_env(rec: dict, photos: bool) -> dict:
+    """The environment for a run's subprocess. The run id reaches produce's deliverables manifest; a photos
+    run hands its summary back and is told close/clicks-only by its own record. For a PRODUCE child the run
+    SCOPE comes ONLY from the record: any inherited RUN_STAGE / RUN_SOURCES / RUN_VERIFY (SCRAPER_ or legacy
+    BLOKPORT_) is dropped first, since an empty SCRAPER_RUN_SOURCES would fall through to a stray
+    BLOKPORT_RUN_SOURCES (env.getenv reads '' as unset). A photos child uses the env as-is (its relink passes
+    explicit args)."""
+    e = dict(os.environ)
+    if not photos:
+        for k in _RUN_SCOPE_VARS:
+            e.pop(k, None)
+    e.update({"SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"]})
+    if photos:
+        e.update({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec)),
+                  "SCRAPER_STANDARDISE_CLOSE_ONLY": "true" if rec["close_only"] else "false",
+                  "SCRAPER_STANDARDISE_CLICKS_ONLY": "true" if rec["clicks_only"] else "false"})
+    else:
+        e.update(_produce_run_env(rec))
+    return e
 
 
 def _summary_path(rec: dict) -> Path:
@@ -311,13 +344,7 @@ def _launch_local(rec: dict) -> None:
         if refused is None:
             proc = subprocess.Popen(
                 _build_command(rec),
-                # the run id reaches the deliverables manifest produce publishes; a photos run hands its summary back
-                # and is told whether it is close-only by its own run alone, never by the service's env
-                env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"],
-                     **({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec)),
-                         "SCRAPER_STANDARDISE_CLOSE_ONLY": "true" if rec["close_only"] else "false",
-                         "SCRAPER_STANDARDISE_CLICKS_ONLY": "true" if rec["clicks_only"] else "false"}
-                        if photos else {})},
+                env=_child_env(rec, photos),
                 # A produce's stdout is the image-progress print() noise (drop it); its stderr carries the structured
                 # logfmt logs + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's
                 # cause. The photo process reports on stdout, so its two streams are captured as one.

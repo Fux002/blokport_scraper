@@ -765,7 +765,7 @@ def relink():
     goes to stderr. The pipeline is imported only when a relink is due."""
     from stone_pipeline import produce
     with open(os.devnull, "w") as quiet, redirect_stdout(quiet):
-        return produce.main(["--stage", "republish"])
+        return produce.run(None, "republish")
 
 
 def reap(run_id):
