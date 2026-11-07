@@ -428,6 +428,17 @@ POST can be retried safely.
   combinations its listed products use.
 - Uncertain entities are held, not served (no resolvable type, texture not live), so
   nothing lists broken.
+- **Archived and internal values/varieties (VE2).** Medusa may mark an attribute value
+  (type, colour, finish, quality, category) `archived` or `internal`, and a variety
+  `archived`. To turn this on, Blokport adds a `status` (`active`|`archived`) and `internal`
+  (`true`|`false`) column to `attributes.csv`, and a `status` column to the `variants_export`
+  it sends; until those columns exist every value reads active and the scraper is unchanged.
+  Once present, the scraper stops **assigning** a restricted value to anything new (pickers
+  hide it, a mint onto it is held for the operator, a speculative combination on it drops)
+  but keeps every product or variety that **already carries** it (Medusa still owns their
+  fate). The scraper's two step-C flags (`ATTRIBUTES_STATUS_REQUIRED`,
+  `VARIANTS_EXPORT_STATUS_REQUIRED`) flip to required only after Blokport's prod release, so a
+  dropped column then fails loud. Full contract: **ARCHIVED_AND_INTERNAL.md**.
 
 ---
 

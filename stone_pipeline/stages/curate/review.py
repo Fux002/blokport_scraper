@@ -60,7 +60,8 @@ def review_card(kind: str, variant: str, reason: str, evidence: dict, *, stone_t
                 nearest_existing: str = "", score="", model_prob="") -> dict:
     """One shape for every review-queue card (variants_to_confirm) so the operator queue is uniform no
     matter which hold path built it, and no arm can silently omit a column. `kind` names WHY the card exists
-    (new, similar, collision, no_type, new_type, code, retired; the origin queue adds origin):
+    (new, similar, collision, no_type, new_type, code, retired; the origin queue adds origin; the VE2 freeze
+    adds archived_type, archived_value and archived_variety -- see ARCHIVED_AND_INTERNAL.md):
     it explains, it never limits what the operator may state. `evidence` is review_evidence()
     (src/scraped/src_url/image/description); its keys never collide with the card fields, so the spread is
     additive."""

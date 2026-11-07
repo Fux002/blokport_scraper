@@ -326,8 +326,8 @@ def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monk
     res = curate.build_curation(rows, ref)
     card = next((p for p in res.pending_confirm
                  if p.get("kind") == "archived_value" and p["variant"] == "Novum Only Quality"), None)
-    if card is not None:   # only if the quality dimension emptied for this mint
-        assert "Reactivate it in Blokport" in card["reason"] and "quality in Review" not in card["reason"]
+    assert card is not None                               # the quality dimension emptied -> the card is raised
+    assert "Reactivate it in Blokport" in card["reason"] and "quality in Review" not in card["reason"]
 
 
 def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path):
@@ -386,3 +386,48 @@ def test_render_dump_attributes_writes_status_and_internal(tmp_path):
         rows = list(csv.DictReader(h))
     assert "status" in rows[0] and "internal" in rows[0]
     assert rows[0]["status"] == "active" and rows[0]["internal"] == "false"
+
+
+# --- review follow-up pins (PR7): the behaviours PR5 shipped, now covered directly -------------------------
+
+def test_the_curate_index_reads_the_archived_flag_from_the_export(tmp_path, monkeypatch):
+    # LOW (PR5): load_all_existing must populate each variety's `archived` from the export STATUS column, not
+    # only when a test sets it on the index by hand (existing.py line "archived": r.archived).
+    p = tmp_path / "variants_export.csv"
+    with p.open("w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)", "status"])
+        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "", "", "", "archived"])
+        w.writerow(["v2", "slab_marble_statuario_1", "Statuario", "", "", "", "active"])
+    monkeypatch.setattr(cur_existing, "existing_varieties_file", lambda: p)
+    slab = cur_existing.load_all_existing()["slab"]
+    assert slab.by_name_type[(proj.norm("Carrara"), "marble")]["archived"] is True
+    assert slab.by_name_type[(proj.norm("Statuario"), "marble")]["archived"] is False
+
+
+def test_the_archived_value_card_leaves_the_colour_field_empty(ref, monkeypatch):
+    # LOW (PR5): prefilling the restricted colour on an archived_value card would just hold again, so the
+    # card's colour field is left empty (minting.py raises the card with no color=).
+    views.mint("Novum Empty Colour", stone_type="Granite")
+    monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"color": {proj.norm("Pink")}})
+    res = curate.build_curation([_mk_row("Novum Empty Colour", "Pink")], ref)
+    card = next((p for p in res.pending_confirm
+                 if p.get("kind") == "archived_value" and p["variant"] == "Novum Empty Colour"), None)
+    assert card is not None and card["color"] == ""
+
+
+def test_render_combinations_passes_its_own_ledger_to_the_acked_rebuild(tmp_path, monkeypatch):
+    # LOW (PR5): render_combinations must hand build_combinations the ledger it was given (acked_ledger=ledger),
+    # so the render rebuilds its acked tuples from THAT ledger, not the default on-disk one.
+    from stone_pipeline.ledger import render
+    from stone_pipeline.ledger.db import Ledger
+    captured = {}
+
+    def _fake(export_p, attrs_p, backbones, products=None, assigned=None, exclude=None, *, acked_ledger=None):
+        captured["ledger"] = acked_ledger
+        return [], {}, []
+
+    monkeypatch.setattr(tree_build, "build_combinations", _fake)
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        render.render_combinations(lg, tmp_path / "combos.csv")
+    assert captured["ledger"] is lg

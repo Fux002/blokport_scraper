@@ -32,6 +32,13 @@ def _statement_rows() -> list[dict]:
                                               "ORDER BY source, spelling_norm").fetchall()]
 
 
+def statement_rows() -> list[dict]:
+    """Every stored operator statement as a row dict (source, spelling_norm, spelling, verdict, name,
+    stone_type, color, origin_iso, widen, asked_by). The public reader other packages use; the review
+    API's VE2 re-confirm check reads it to compare a decision against what is already stored."""
+    return _statement_rows()
+
+
 def _write_statement(conn, source: str, spelling: str, verdict: str, *, name: str | None = None,
                      stone_type: str | None = None, color: str | None = None, origin_iso: str | None = None,
                      widen: bool = False, asked_by: str = "") -> None:

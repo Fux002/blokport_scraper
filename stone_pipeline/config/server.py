@@ -546,7 +546,7 @@ def _all_reconfirm(listings, canonical: str, stone_type: str, color: str, origin
     only at variety level, so the per-listing comparison needs the row."""
     from stone_pipeline.config import decisions_store
     from stone_pipeline.matching import projections as proj
-    rows = {(proj.norm(r["source"]), proj.norm(r["spelling_norm"])): r for r in decisions_store._statement_rows()}
+    rows = {(proj.norm(r["source"]), proj.norm(r["spelling_norm"])): r for r in decisions_store.statement_rows()}
     want = (proj.norm(canonical), proj.norm(stone_type), proj.norm(color), (origin or "").upper(), bool(widen))
     for source, scraped in listings:
         sp = proj.norm(scraped)
