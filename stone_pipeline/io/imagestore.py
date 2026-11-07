@@ -1,7 +1,7 @@
 """Single source of truth for the product-image S3 layout.
 
 The manifest key and the raw / scraped / improved / standard path conventions live HERE and nowhere else, so
-the consumers -- images.py (hosts photos and links products to them) and the photo process (deploy.standardise_*,
+the consumers -- images.py (hosts photos and links products to them) and the photo process (stone_pipeline.photos,
 reads scraped/, publishes standard/) -- never each hard-code the layout. Change the layout once, in this file. No em
 dashes (design principle 2).
 
@@ -11,7 +11,7 @@ Layout (under the env segment, e.g. dev/):
     products/scraped/<src>/<hash>.jpg       a raw ORIGINAL kept alongside processing (keep_scraped): the photo
                                             process's input
     products/improved/<src>/<hash>.jpg      the HOSTED image (size-reduced, re-encoded)
-    products/standard/<view>/<src>/<hash>.jpg  a STANDARDISED image of that photo (deploy.standardise_publish):
+    products/standard/<view>/<src>/<hash>.jpg  a STANDARDISED image of that photo (stone_pipeline.photos.publish):
                                             view = main (showroom), white, studio (side view), close
     products/standard/cutout/<src>/<hash>.webp|.json  the 3D slab of that photo: the cut-out and its outline
     products/standard/<view>|cutout/<src>/<listing hash>.*  a TILE listing's views and 3D tile, rendered from its
@@ -109,7 +109,7 @@ def skus_in(keys, prefix: str) -> set[str]:
 
 
 def owner_removed_prefix() -> str:
-    """The listings the owner removed (deploy.standardise_decisions), one record per SKU: the photo process never works on
+    """The listings the owner removed (stone_pipeline.photos.decisions), one record per SKU: the photo process never works on
     them and the image stage links nothing standardised to them."""
     return f"{ENV_SEGMENT}/{STANDARDISE.TEST_PREFIX}/{STANDARDISE.REMOVED_DIR}/"
 
@@ -141,7 +141,7 @@ def conflicts_source(key: str) -> Optional[str]:
 
 def assigned_prefix() -> str:
     """Beside the published views: for each published photo several stones' listings show (a conflict), the SKUs the
-    owner assigned it to (deploy.standardise_publish); the image stage links it for those products only."""
+    owner assigned it to (stone_pipeline.photos.publish); the image stage links it for those products only."""
     return f"{_PRODUCTS}/{STANDARD_SUBDIR}/{ASSIGNED_SUBDIR}/"
 
 

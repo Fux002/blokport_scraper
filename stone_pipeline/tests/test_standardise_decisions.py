@@ -1,4 +1,4 @@
-"""The owner's decisions on the hidden listings (deploy.standardise_decisions), with an S3 stand-in: a "use" becomes the
+"""The owner's decisions on the hidden listings (stone_pipeline.photos.decisions), with an S3 stand-in: a "use" becomes the
 owner's choice record of the listing (by SKU), extended to the listings of the same stone that show the photo and never
 to a listing of another stone; a "remove" becomes a removal record by SKU; a "clean" becomes the owner's click record by
 SKU, written and read only by publish.write_click and read_clicks. The judge's verdicts are never touched. Every
@@ -15,9 +15,9 @@ import boto3
 import pytest
 from botocore.exceptions import ClientError
 
-from deploy import standardise_decisions as dec
-from deploy import standardise_publish as pub
-from deploy import standardise_select as select
+from stone_pipeline.photos import decisions as dec
+from stone_pipeline.photos import publish as pub
+from stone_pipeline.photos import select as select
 from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
 from stone_pipeline.io import imagestore
 

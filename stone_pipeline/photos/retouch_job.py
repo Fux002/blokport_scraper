@@ -1,5 +1,5 @@
 """Take straps, racks, sample cards, stickers and writing off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of
-deploy.standardise_source, which then starts from the result. Two phases, because the machine holds one set of models at a
+stone_pipeline.photos.source, which then starts from the result. Two phases, because the machine holds one set of models at a
 time: find the marks on every photo, free those models, then edit. Writes <run prefix>/retouched/<sha>.jpg, or
 retouch_held/<sha>.json when a result is refused. A debug run (RECORD=true) also writes what was found to retouch_marks/<sha>.jpg,
 for a person to check, and under retouch_debug/<sha>/ the masks and every model output in the order the crops were edited
@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from deploy.standardise_source import _encode, _exists, _get, _photo_keys, made, photo_source, run_prefix, sheet_photos
+from stone_pipeline.photos.source import _encode, _exists, _get, _photo_keys, made, photo_source, run_prefix, sheet_photos
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client

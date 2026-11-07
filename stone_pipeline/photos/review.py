@@ -3,11 +3,11 @@ under /config/v1/photos. Blokport's page renders each row's `actions`; an empty 
 
   hidden    the listings the ledger hides for want of a standardised photo (inventory reason no_photo), one row each:
             the owner's removal (owner_removed), a choice record not linked yet (chosen_not_linked), the full photos
-            run's row (review.json: deploy.standardise_select.review_row, the tiles publish could not render), or
+            run's row (review.json: stone_pipeline.photos.select.review_row, the tiles publish could not render), or
             none of these (not_worked_yet); the owner's live click; each photo's images as presigned GET URLs made
             afresh on every request (STANDARDISE.REVIEW_URL_TTL_SECONDS), never stored.
   spend     the month's process budget and cleaning cap, each run's spend, and the cleaning cap's paid uses.
-  click     the owner's click to clean one photo, through the one decisions writer (deploy.standardise_decisions:
+  click     the owner's click to clean one photo, through the one decisions writer (stone_pipeline.photos.decisions:
             checked, then applied inside the photo process's run lock).
   withdraw  the click withdrawn, through the same writer.
 
@@ -23,12 +23,12 @@ from collections import Counter
 from datetime import datetime, timezone
 
 
-from deploy import standardise_decisions as decisions
-from deploy import standardise_run as proc
-from deploy import standardise_select as select
-from deploy.standardise_publish import NoConflictSet, chosen_prefix, pool_map, read_conflicts, read_records
+from stone_pipeline.photos import decisions as decisions
+from stone_pipeline.photos import process as proc
+from stone_pipeline.photos import select as select
+from stone_pipeline.photos.publish import NoConflictSet, chosen_prefix, pool_map, read_conflicts, read_records
 from deploy.fetch_inputs import fetch_attributes
-from deploy.standardise_source import round_prefix, sheet_and_photos
+from stone_pipeline.photos.source import round_prefix, sheet_and_photos
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import logfmt

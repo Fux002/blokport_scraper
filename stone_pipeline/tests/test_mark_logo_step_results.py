@@ -1,4 +1,4 @@
-"""deploy.mark_logo_step_results: at the deploy that retired the logo step, every result the step made (RUN_TAG, a source
+"""stone_pipeline.photos.mark_logo_step: at the deploy that retired the logo step, every result the step made (RUN_TAG, a source
 watermarked in a pre-migration config.db snapshot) gets its logo-step marker, so the photo process never completes it
 nor makes its close-up again without that step. DRY_RUN is explicit, a migrated snapshot is refused, and a second run
 marks nothing."""
@@ -11,8 +11,8 @@ import sqlite3
 import boto3
 import pytest
 
-from deploy import mark_logo_step_results as m
-from deploy.standardise_source import logo_step_key, round_prefix
+from stone_pipeline.photos import mark_logo_step as m
+from stone_pipeline.photos.source import logo_step_key, round_prefix
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64

@@ -1,4 +1,4 @@
-"""Publish the chosen photos (deploy.standardise_select: one record per listing under <CLEAN_TAG>/chosen/, together the
+"""Publish the chosen photos (stone_pipeline.photos.select: one record per listing under <CLEAN_TAG>/chosen/, together the
 complete choice whatever runs made them): each listing's one good photo, its views
 (showroom, white, side view, close-up) copied from the run that made it into <env>/products/standard/<view>/<src>/<sha>.jpg,
 where the image stage links products to them. A chosen photo of a whole slab (a single slab or one half of an open book:
@@ -10,7 +10,7 @@ The folder is made to match the choice exactly: a view or 3D slab no longer chos
 person turned down never stays live. Only a view that is missing or other than its run's is copied (server-side, same
 bytes) and a cut-out is deterministic, so a re-run is safe and changes nothing. A photo on the reviewed exclude list
 (EXCLUDE_PATH, one sha per line) is never published, whatever chose it. No choice records at all is refused: the folder
-would be emptied. The last step of the photo process (deploy.standardise_run), inside its lock.
+would be emptied. The last step of the photo process (stone_pipeline.photos.process), inside its lock.
 A tile listing is never shown from its own photos (owner 2026-11-02: warehouse racks): its views and 3D tile are rendered
 here from its variety's published slab stone (stone_pipeline.standardise.tile_plan), once the slabs' 3D cut-outs are
 made, under the listing's own name (imagestore.listing_sha), with a record of what they were made from written last
@@ -33,7 +33,7 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE a
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 
-EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
+EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
 _MADE_FROM = "made-from"                     # the outline's S3 metadata: what its 3D slab was made from (made_from)
 
@@ -45,7 +45,7 @@ def chosen_prefix(root):
 
 
 def owner_prefix(root):
-    """Where the owner's photo choice of each listing is kept (deploy.standardise_decisions): <clean tag root>owner/<SKU>
+    """Where the owner's photo choice of each listing is kept (stone_pipeline.photos.decisions): <clean tag root>owner/<SKU>
     .json, one record per listing by SKU (a variety re-bind moves the handle, never the SKU)."""
     return f"{root}{C.OWNER_DIR}/"
 
@@ -478,7 +478,7 @@ def publish(client, root, sheet, photos, say=print, *, assigned, held):
     produce's conflict set): one is published only when the owner assigned it to someone, with a file naming who, so the
     produce links it for those products only (a record that names it otherwise is a choice made before it was a
     conflict: not published). held = {(source, sha)} of the photos of the listings the run leaves exactly as published
-    (deploy.standardise_run: a choice record, its own or the owner's, that cannot be read): their views, 3D slabs and
+    (stone_pipeline.photos.process: a choice record, its own or the owner's, that cannot be read): their views, 3D slabs and
     assignment files stay whatever the readable records say; every other listing is published and removed as usual."""
     by_key, _ = read_choices(client, root)            # one that cannot be read is held by the run (held)
     chosen = [by_key[key] for key in sorted(by_key)]

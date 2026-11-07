@@ -9,7 +9,7 @@ import math
 import boto3
 import pytest
 
-from deploy import standardise_select as sel
+from stone_pipeline.photos import select as sel
 from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import clean, judge
 
@@ -462,7 +462,7 @@ class _Bucket:
 
 def test_a_round_read_for_a_few_photos_holds_exactly_what_the_whole_folder_says_of_them():
     # review of #555: a click listed the source's whole run folder (dev v2/zucchi: 56,840 keys) for one listing's photos
-    from deploy.standardise_source import LOGO_STEP, REDRAW
+    from stone_pipeline.photos.source import LOGO_STEP, REDRAW
     keys = []
     for sha in (A, B, D):
         keys += [f"{GPU}{sha}.main.jpg", f"{GPU}{sha}.slab.png", f"{GPU}{sha}.studio.jpg", f"{GPU}noslab/{sha}.json",
@@ -499,7 +499,7 @@ def test_the_results_of_a_few_photos_are_the_round_s_results_and_nothing_more():
 
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
     # the hosted edit leaves the straps: the cleaned copy is retouched like any photo
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     key = f"dev/products/scraped/sentas/{A}.jpg"
     cleaned, retouched = f"{CL}cleaned/{A}.jpg", f"{CL}retouched/{A}.jpg"
     held = json.dumps({"reason": "retouch: too large", "stays_as_shot": False}).encode()
@@ -514,7 +514,7 @@ def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
 
 
 def test_a_photo_with_a_cleaned_copy_is_still_retouched():
-    from deploy import standardise_retouch as rt
+    from stone_pipeline.photos import retouch_job as rt
     assert not rt.retouched(_Bucket({f"{CL}cleaned/{A}.jpg": b""}), CL, A)
 
 
@@ -738,7 +738,7 @@ def test_the_last_total_saved_is_the_latest_even_when_saves_overlap():
 
 
 def test_a_stop_cancels_the_pool_s_work_not_yet_started():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     done = []
 
     def work(i):
@@ -1401,7 +1401,7 @@ def _open_book(*extra):
 
 
 def test_an_open_book_without_its_slab_is_not_finished_until_completed_or_tried():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     assert not src.finished(_Bucket(_open_book()), GPU, A)
     assert not src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png")), GPU, A)          # completed: its outline checked once
     assert src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png", src.checked_key(GPU, A))), GPU, A)
@@ -1425,7 +1425,7 @@ def _book_result(changed, views=("main", "white", "studio", "close")):
 
 
 def test_completing_an_open_book_drawn_the_same_adds_its_close_view_then_its_slab_then_the_note():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Written(_open_book())
     assert src.rework(s3, GPU, A, _book_result(changed=False), "complete") == "completed"
     # what was judged stays; the slab last: the result is complete; which half it is, beside it
@@ -1435,7 +1435,7 @@ def test_completing_an_open_book_drawn_the_same_adds_its_close_view_then_its_sla
 
 
 def test_completing_an_open_book_this_version_draws_differently_draws_a_candidate_for_the_judge():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Written(_open_book())
     assert src.rework(s3, GPU, A, _book_result(changed=True), "complete") == "redrawn for the judge"
     assert all(k.startswith(src.candidate_prefix(GPU)) for k in s3.written)          # the result itself untouched
@@ -1459,7 +1459,7 @@ def test_a_new_whole_slab_result_records_which_slab_it_is_before_its_slab_and_it
 @pytest.mark.parametrize("res", ["close-up", "held"])
 def test_an_open_book_that_is_no_open_book_on_its_rerun_is_marked_tried_and_never_rerun(res):
     import numpy as np
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     s3 = _Written(_open_book())
     img = np.zeros((20, 30, 3), np.uint8)
@@ -1482,7 +1482,7 @@ def _slab_result(*views):
 
 
 def test_a_whole_slab_made_under_the_older_outline_rule_is_checked_once():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     assert not src.finished(_Bucket(_whole()), GPU, A) and src.again(_Bucket(_whole()), GPU, A) == "recheck"
     assert src.finished(_Bucket(_whole(src.checked_key(GPU, A))), GPU, A)
     assert src.finished(_Bucket(_whole(src.candidate_key(GPU, A))), GPU, A)           # its redraw waits for the judge
@@ -1492,12 +1492,12 @@ def test_a_whole_slab_made_under_the_older_outline_rule_is_checked_once():
 
 def test_a_whole_slab_the_retired_logo_step_made_is_never_rechecked():
     """A re-run would start from the photo with its logo and redraw views no judge saw (logo_step_key)."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     assert src.finished(_Bucket(_whole(src.logo_step_key(GPU, A))), GPU, A)
 
 
 def test_a_recheck_drawn_the_same_only_notes_it():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     s3 = _Written(_whole())
     assert src.rework(s3, GPU, A, Result(kind="slab", unchanged=True), "recheck") == "outline unchanged"
@@ -1508,7 +1508,7 @@ def test_a_recheck_drawn_the_same_only_notes_it():
 def test_a_recheck_drawn_differently_draws_a_complete_candidate_and_never_touches_the_result():
     """A separate set under redraw/, named as a result is, which slab it is and the slab first, main last, its
     completion marker last of all; the stored result, its verdict and what is published of it stay as they are."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Slice(_whole(f"{GPU}judged/{A}.json"))
     before = dict(s3.objects)
     assert src.rework(s3, GPU, A, _slab_result("main", "white", "studio", "close"), "recheck") == "redrawn for the judge"
@@ -1519,7 +1519,7 @@ def test_a_recheck_drawn_differently_draws_a_complete_candidate_and_never_touche
 
 
 def test_every_file_is_encoded_before_the_first_write(monkeypatch):
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Slice(_whole())
     res = _slab_result("main", "white")
     real = src._encode
@@ -1533,7 +1533,7 @@ def test_every_file_is_encoded_before_the_first_write(monkeypatch):
 @pytest.mark.parametrize("res", ["held", "close-up"])
 def test_a_recheck_that_gives_no_whole_slab_keeps_the_stored_result_and_notes_it_checked(res):
     import numpy as np
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     s3 = _Written(_whole())
     img = np.zeros((20, 30, 3), np.uint8)
@@ -1546,7 +1546,7 @@ def test_a_recheck_that_gives_no_whole_slab_keeps_the_stored_result_and_notes_it
 
 def test_a_new_whole_slab_is_noted_as_drawn_under_the_current_outline_rule_and_a_close_up_is_not():
     import numpy as np
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     from stone_pipeline.standardise.photo import Result
     img = np.zeros((20, 30, 3), np.uint8)
     whole, close = _Written({}), _Written({})
@@ -1580,7 +1580,7 @@ class _Slice(_Written):
 def _completing(monkeypatch, s3, standardise):
     """main() over one old open book (A) of slice 0 of sentas, with the models and the photo steps stood in."""
     import numpy as np
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("RUN_TAG", "v9")
     monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
@@ -1596,13 +1596,13 @@ def _completing(monkeypatch, s3, standardise):
 def _tried(stored):
     """Where a redo that gave nothing is noted: an open book's completion in noslab/ (main), a recheck in its note, kept
     as it is (never noslab/ over a live result)."""
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     return (f"{GPU}noslab/{A}.json", "reason") if stored == "open book" else (src.checked_key(GPU, A), "kept")
 
 
 @pytest.mark.parametrize("stored", ["open book", "older outline"])
 def test_a_redo_that_crashes_is_noted_tried_never_held_over_the_published_result(monkeypatch, stored):
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Slice(_open_book() if stored == "open book" else _whole())
 
     def crash(*a, **k):
@@ -1617,7 +1617,7 @@ def test_a_redo_that_crashes_is_noted_tried_never_held_over_the_published_result
 
 @pytest.mark.parametrize("stored", ["open book", "older outline"])
 def test_a_redo_that_broke_the_gpu_twice_is_noted_and_never_run_again(monkeypatch, stored):
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Slice(_open_book(f"{GPU}crashed/{A}.json") if stored == "open book" else _whole(f"{GPU}crashed/{A}.json"))
 
     def crash(*a, **k):
@@ -1644,14 +1644,14 @@ def test_a_completion_cut_short_by_a_passing_storage_error_leaves_no_half_and_is
 
 
 def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_missing():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": TimeoutError("lost")})
     with pytest.raises(TimeoutError):
         src.rework(s3, GPU, A, _book_result(changed=False, views=("close",)), "complete")
     assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.json", f"delete {GPU}{A}.close.jpg"]
 
 
-# --- the owner's choice (deploy.standardise_decisions) and shared photos -------------------------------------------
+# --- the owner's choice (stone_pipeline.photos.decisions) and shared photos -------------------------------------------
 def _selection(s3, listings, rounds, owner=None, conflicts=None, exclude=()):
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.sources = s3, listings, set(exclude), ["sentas"]

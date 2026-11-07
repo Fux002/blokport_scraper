@@ -3,7 +3,7 @@ REAL outline step (outline.find_slabs) runs with its inner steps observed, never
 written under <env>/standardise-test/diag/ and nowhere else: <sha>.json (the detector's boxes, the outline's corners, the
 photo edges it runs into, each end's joint profile with its strongest joints and the trim taken, the neighbours, the
 reason), <sha>.mask.png (the slab mask the corners were fitted to) and <sha>.overlay.jpg. Only the survey models load.
-Env: SRC; ONLY_KEY = the S3 key of a JSON list of shas (as deploy.standardise_source); DIAG_TAG (optional) writes under
+Env: SRC; ONLY_KEY = the S3 key of a JSON list of shas (as stone_pipeline.photos.source); DIAG_TAG (optional) writes under
 diag/<DIAG_TAG>/ instead; RUN_TAG (optional) reads that run's retouched copy of a photo when it has one, as its
 standardise job did.
 Same photos, same files: a re-run overwrites them with the same content.
@@ -21,7 +21,7 @@ from contextlib import contextmanager
 import cv2
 import numpy as np
 
-from deploy import standardise_source as source
+from stone_pipeline.photos import source as source
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client

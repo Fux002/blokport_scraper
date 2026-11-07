@@ -2,12 +2,12 @@
 retired logo step made, so the photo process never adds to it without that step.
 
 Why: later steps make views of a stored result again from a re-run of its photo: completing an outdated open book (its
-close view and 3D slab, unjudged: deploy.standardise_source.rework), the close-only run (its close-up again, every
-close-up rule, unjudged: deploy.standardise_close), and the outline recheck (a whole slab drawn differently is redrawn
-as a candidate the judge scores before it replaces the result: rework, deploy.standardise_select.settle). A result the
+close view and 3D slab, unjudged: stone_pipeline.photos.source.rework), the close-only run (its close-up again, every
+close-up rule, unjudged: stone_pipeline.photos.close), and the outline recheck (a whole slab drawn differently is redrawn
+as a candidate the judge scores before it replaces the result: rework, stone_pipeline.photos.select.settle). A result the
 retired logo step made had its logo taken off with a reference copy; a re-run now has no such step, so what it makes
 starts from the photo with its logo, not the logo-free copy the result was judged as. The marker (logo-step/<sha>.json,
-deploy.standardise_source.logo_step_key) stops all three, whatever the rule: the result keeps its judged views, its
+stone_pipeline.photos.source.logo_step_key) stops all three, whatever the rule: the result keeps its judged views, its
 choice and its close.jpg as they are. A per-photo marker, data, never a source setting.
 
 Which results, by data:
@@ -38,7 +38,7 @@ from contextlib import closing
 from pathlib import Path
 
 
-from deploy.standardise_source import LOGO_STEP, logo_step_key, round_prefix
+from stone_pipeline.photos.source import LOGO_STEP, logo_step_key, round_prefix
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.ledger import snapshot

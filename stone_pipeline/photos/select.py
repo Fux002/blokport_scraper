@@ -1,5 +1,5 @@
 """Choose each listing's one good photo (user 2026-11-01: one very good image per listing is enough; it gives every view).
-The steps deploy.standardise_run calls in order; hosted calls only, no model runs here. Two run tags take part: the
+The steps stone_pipeline.photos.process calls in order; hosted calls only, no model runs here. Two run tags take part: the
 standardiser's run over the scraped photos and its run over the copies a hosted edit model cleaned. Every answer is
 stored next to the image it is about, so a re-run reads it back and never pays twice; one listing's failure is
 reported and never stops the others.
@@ -32,8 +32,8 @@ from datetime import datetime, timezone
 import httpx
 from botocore.exceptions import ClientError
 
-from deploy.standardise_publish import MISSING, chosen_prefix, excluded, pool_map
-from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
+from stone_pipeline.photos.publish import MISSING, chosen_prefix, excluded, pool_map
+from stone_pipeline.photos.source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
                                        remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -98,7 +98,7 @@ class Spend:
 
     def refuse(self):
         """The cap's error for work the budget left cannot cover, the budget marked as reached; nothing is reserved (a
-        GPU round with not one slice that fits: deploy.standardise_batch.run_round)."""
+        GPU round with not one slice that fits: stone_pipeline.photos.batch.run_round)."""
         with self._lock:
             return self._refusal()
 
@@ -153,7 +153,7 @@ class _Locks:
 
 class Candidates(_Locks):
     """The candidates of one run folder (`out`, its keys relative to it): what a recheck drew of whole slabs this
-    version draws differently (deploy.standardise_source.candidate_prefix), named as a run folder's results are, so
+    version draws differently (stone_pipeline.photos.source.candidate_prefix), named as a run folder's results are, so
     verdict judges one as it judges a result; complete: those whose completion marker is written."""
 
     def __init__(self, out, keys):
@@ -213,7 +213,7 @@ class Round(_Locks):
     @functools.cached_property
     def older_outline(self):
         """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED, no candidate waiting for the
-        judge), not made by the retired logo step: the GPU checks each once (deploy.standardise_source.rework)."""
+        judge), not made by the retired logo step: the GPU checks each once (stone_pipeline.photos.source.rework)."""
         return (self.finished & self.slabs) - self.checked - self.redrawn - self.held - self.logo_step
 
     @functools.cached_property
@@ -224,7 +224,7 @@ class Round(_Locks):
 
     @functools.cached_property
     def outdated(self):
-        """The results the GPU works on again, once each (deploy.standardise_source.rework): those made before an open
+        """The results the GPU works on again, once each (stone_pipeline.photos.source.rework): those made before an open
         book's halves had their slab (a side view, no slab, not tried again, not settled by an outline recheck, none
         waiting for the judge), and the older_outline ones; never one the retired logo step made. Worked out once per
         Round: settle reads the rounds again after it changes them."""
@@ -492,7 +492,7 @@ def click_state(client, rounds, listing, exclude, click, state):
     listing's (listing_state). "blocked" with why it cannot be used now (its record, record_problem; the owner chose a
     photo; the listing not fully judged yet; its photo one a cleaned copy cannot fix; no edit model left to try),
     "cleaned" (its copy is made and goes through the GPU and the judge), "done" (a photo of the listing passes), or
-    "ready". Waiting for a budget is not a state of the click: the run's admission says so (deploy.standardise_run)."""
+    "ready". Waiting for a budget is not a state of the click: the run's admission says so (stone_pipeline.photos.process)."""
     if click is None:
         return None
     if state == "owner":
@@ -656,7 +656,7 @@ class CleanPlan:
     whatever the gate says now). `send`: ((sha, why, models), ...) its photos for new edits when no collected copy
     passes, each sent to its `models` in turn until a copy passes (cheapest first). pay does exactly this and never
     more, so clean_price is its worst case on the cleaning cap and the GPU round and judge of its one copy are priced
-    by deploy.standardise_batch.price."""
+    by stone_pipeline.photos.batch.price."""
     listing: dict
     collect: tuple
     send: tuple
@@ -851,7 +851,7 @@ def read_rounds(client, tags, sources):
 
 
 def owner_choice(record, listing, exclude, conflicts, rounds):
-    """(tag, sha) of the owner's choice record of a listing (deploy.standardise_decisions; by SKU, so a re-bind that moves
+    """(tag, sha) of the owner's choice record of a listing (stone_pipeline.photos.decisions; by SKU, so a re-bind that moves
     the handle keeps it) while it still applies, else None; the one check, every run. It applies while its photo is one
     of the listing's, not excluded, and the tag's result exists (a choice that can never be published is never picked
     again and again). A photo listings of another stone show (conflicts) is the listing's only by the owner's own
@@ -869,12 +869,12 @@ def owner_choice(record, listing, exclude, conflicts, rounds):
 
 class Selection:
     """The listings one run works on and what the two run tags hold for them (rounds: read_rounds, re-read after each
-    GPU round). owner = {SKU: the owner's choice record} (deploy.standardise_decisions); conflicts = {(source, sha):
+    GPU round). owner = {SKU: the owner's choice record} (stone_pipeline.photos.decisions); conflicts = {(source, sha):
     listing keys} of the photos listings of several stones show (index.shared_photos); chosen = [(tag, source, sha)] of
-    what the listings a run may publish show now (deploy.standardise_run.live_choices): an outdated one goes to the GPU
+    what the listings a run may publish show now (stone_pipeline.photos.process.live_choices): an outdated one goes to the GPU
     too, its listing not picked again (its verdict and choice stand); clicks = {SKU: the owner's click to clean one
     photo} (publish.clicks_prefix); frozen = {(source, sha)} of the photos of the listings whose choice record cannot be
-    read (deploy.standardise_run): left exactly as published, so their pending redraws wait (settle)."""
+    read (stone_pipeline.photos.process): left exactly as published, so their pending redraws wait (settle)."""
 
     def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks, frozen):
         if not run_tag or not clean_tag or run_tag == clean_tag:
@@ -973,7 +973,7 @@ def _by_source(pairs):
 
 def settle(sel, spend, deadline):
     """(failures, stopped): every complete candidate of the run tags (a recheck drawn differently:
-    deploy.standardise_source.draw_candidate) judged through verdict, as a new result is, each started before the
+    stone_pipeline.photos.source.draw_candidate) judged through verdict, as a new result is, each started before the
     deadline; then each settled (settle_one). A promotion or removal that fails stops the run loud, before report and
     publish: the next run finishes it. A photo of a listing left exactly as published (sel.frozen) is skipped, its
     candidate kept: it settles normally once that listing's choice record can be read again. The rounds are read again
@@ -1034,7 +1034,7 @@ def judge_all(sel, spend, deadline):
 
 def clean_all(sel, plans, spend, deadline):
     """(failures, stopped): each admitted plan paid (pay), each started before the deadline; admission
-    (deploy.standardise_run.admit) has already held their worst case within both budgets, so which listings are paid
+    (stone_pipeline.photos.process.admit) has already held their worst case within both budgets, so which listings are paid
     never depends on which thread reaches the cap first."""
     by_key = {plan.listing["key"]: plan for plan in plans}
     return _each([plan.listing for plan in plans], lambda l: pay(sel.client, sel.rounds, by_key[l["key"]], spend), deadline)
@@ -1043,7 +1043,7 @@ def clean_all(sel, plans, spend, deadline):
 def report(sel, waits, marks, merge=False):
     """{"chosen", "tracked", "pending", "click_problems", "review"} of this run's listings; `waits` = {listing key: why
     its click's new edit waits} and `marks` = {listing key: why its other new edits wait} from the run's admission
-    (deploy.standardise_run.admit), so a click or a mark that waits says so on the review list, and each blocked click
+    (stone_pipeline.photos.process.admit), so a click or a mark that waits says so on the review list, and each blocked click
     is a problem line (click_state). review = {SKU: review_row} of each listing without a good photo (tracked or
     pending), for review.json. merge (a clicks-only run, over a few listings): tracked.csv keeps every other listing's
     row exactly as it is and only this run's listings' rows are replaced (merged_tracked); else it is this run's list. Each listing with a good photo gets its choice record (a

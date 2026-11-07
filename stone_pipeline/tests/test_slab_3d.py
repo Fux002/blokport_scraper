@@ -106,7 +106,7 @@ T0 = datetime(2026, 11, 2, tzinfo=timezone.utc)
 
 
 def test_only_a_chosen_whole_slab_not_excluded_gets_a_3d_slab():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     run = f"{ENV_SEGMENT}/standardise-test/v2/sentas/"
     made = {f"{run}{A}.main.jpg": T0, f"{run}{A}.slab.png": T0, f"{run}{B}.main.jpg": T0}        # B: a close-up
     chosen = [{"source": "sentas", "sha": A, "prefix": run}, {"source": "sentas", "sha": B, "prefix": run}]
@@ -115,7 +115,7 @@ def test_only_a_chosen_whole_slab_not_excluded_gets_a_3d_slab():
 
 
 def test_a_3d_slab_is_made_again_exactly_when_what_it_is_made_from_changed():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     sa, sb, sc, za = ("sentas", A), ("sentas", B), ("sentas", C3), ("zucchi", A)
     todo = {sa: "v2/a.slab.png", sb: "v2-clean/b.slab.png", sc: "v2/c.slab.png", za: "v2/za.slab.png"}
     made = {"v2/a.slab.png": '"e1"', "v2-clean/b.slab.png": '"e2"', "v2/c.slab.png": '"e3"', "v2/za.slab.png": '"e4"'}
@@ -127,7 +127,7 @@ def test_a_3d_slab_is_made_again_exactly_when_what_it_is_made_from_changed():
 
 
 def test_a_new_cut_out_version_makes_every_3d_slab_again(monkeypatch):
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     s, slab = ("sentas", A), "v2/a.slab.png"
     stamp = pub.made_from(slab, "e1")
     monkeypatch.setattr(C, "CUTOUT_VERSION", C.CUTOUT_VERSION + 1)
@@ -149,7 +149,7 @@ class _Recorder:
 
 
 def test_a_3d_slab_is_written_outline_out_first_and_back_last_with_what_it_was_made_from():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     s = ("sentas", A)
     webp, meta = pub.cutout_keys(s)
     client = _Recorder(_slab_png(300, 200, _rect(300, 200)))
@@ -159,7 +159,7 @@ def test_a_3d_slab_is_written_outline_out_first_and_back_last_with_what_it_was_m
 
 
 def test_a_slab_that_is_not_one_loses_its_old_3d_slab_and_the_run_goes_on():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     s = ("sentas", A)
     client = _Recorder(b"not an image")
     assert not pub._publish_cutout(client, s, "v2/a.slab.png", '"e1"')
@@ -167,7 +167,7 @@ def test_a_slab_that_is_not_one_loses_its_old_3d_slab_and_the_run_goes_on():
 
 
 def test_a_3d_slab_no_longer_chosen_is_removed_with_the_views():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     keep, old = pub.cutout_keys(("sentas", A)), pub.cutout_keys(("sentas", B))
     assert pub.stale({k: T0 for k in keep + old}, keep) == sorted(old)
 

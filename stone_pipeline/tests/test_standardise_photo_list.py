@@ -44,7 +44,7 @@ def test_a_photo_list_reads_back_as_written():
 
 
 def test_a_missing_photo_list_fails_loud(monkeypatch):
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
 
     def get(client, key):
         raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")

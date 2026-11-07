@@ -279,7 +279,7 @@ def _seen_by(row: CanonicalRow, sku: Optional[str], views: dict[str, dict[str, s
     """The published views as one product sees them, the one place that decides. A product the owner removed sees none:
     no standardised thumbnail, gallery, 3D or version is linked to it, even a photo published for a sibling of its stone,
     and with the pool known it has no standardised photo (hidden under the no_photo rule). A photo products of several
-    stones show (conflicts) is a product's only when its assignment file names it (deploy.standardise_publish); without
+    stones show (conflicts) is a product's only when its assignment file names it (stone_pipeline.photos.publish); without
     a file, nobody's."""
     if sku in removed:
         return {}
@@ -322,7 +322,7 @@ Lead = tuple[str, str, str]                            # (products base url, sou
 
 def listing_lead(row: CanonicalRow, views: dict[str, set[str]], cfg) -> Optional[Lead]:
     """A tile product's lead: only the set rendered for the listing itself from its variety's slab stone
-    (deploy.standardise_publish.publish_tiles names it after the listing's handle, imagestore.listing_sha); None when
+    (stone_pipeline.photos.publish.publish_tiles names it after the listing's handle, imagestore.listing_sha); None when
     there is none. Never one of the row's photos: a tile without its own set stays hidden rather than borrow a photo it
     shares with a slab (that slab's stone, possibly in another finish). None too when a dimension of the row was filled
     from the pack's defaults: the rendered tile would show a size the vendor never gave (the sheet carries only the
@@ -413,7 +413,7 @@ def _load_standard_views(cfg) -> Optional[dict[str, dict[str, str]]]:
 
 
 def _load_owner_removed(cfg) -> Optional[set[str]]:
-    """The SKUs of the products the owner removed (imagestore.owner_removed_prefix, deploy.standardise_decisions): none in
+    """The SKUs of the products the owner removed (imagestore.owner_removed_prefix, stone_pipeline.photos.decisions): none in
     local mode. None when storage cannot be read: like an unread photo pool, the run then cannot tell. Any other error is
     a bug and fails loud: it must never quietly freeze which products are listed."""
     from botocore.exceptions import BotoCoreError, ClientError
@@ -430,7 +430,7 @@ def _load_owner_removed(cfg) -> Optional[set[str]]:
 
 def _load_assigned(cfg) -> Optional[dict[tuple[str, str], set[str]]]:
     """{(source, sha): SKUs} of the published photos listings of several stones show, with the products the owner assigned
-    each to (deploy.standardise_publish): none in local mode. None when storage cannot be read (the run cannot tell); any
+    each to (stone_pipeline.photos.publish): none in local mode. None when storage cannot be read (the run cannot tell); any
     other error fails loud."""
     from botocore.exceptions import BotoCoreError, ClientError
 

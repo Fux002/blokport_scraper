@@ -9,7 +9,7 @@ runner's `photos` stage, started after each full produce on the owner's button. 
      click both budgets can finish (run.admit) is cleaned, run through the GPU and judged (steps 4 to 6 for those
      listings alone) before step 2; a click they cannot finish is not paid and waits, named in the run's problems.
      Step 4 then admits the clicks that became ready this run first, then the marks, by the same rule
-  2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG,
+  2. GPU: their first photos the standardiser has not run yet (stone_pipeline.photos.batch), under STANDARDISE.RUN_TAG,
      and every chosen result outdated (a whole slab drawn under an older outline rule: live_choices), its listing not
      picked again; then settle: a recheck drawn differently is a candidate beside its result, judged as a new result
      is, promoted over it on a pass or discarded on a fail (select.settle)
@@ -18,12 +18,12 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   5. GPU: the cleaned copies, through every step a scraped photo takes, under STANDARDISE.CLEAN_TAG
   6. judge: the cleaned copies' results
   7. report: one choice record per listing, tracked.csv (the review list) and summary.json, under the clean tag
-  8. publish: the published folder made to match the choice records (deploy.standardise_publish), then review.json (the
+  8. publish: the published folder made to match the choice records (stone_pipeline.photos.publish), then review.json (the
      hidden-listings page's list: the report's rows and the tiles publish could not render; a close-only run leaves it)
   9. relink: when the folder changed, produce --stage republish, so the new photos are linked in this same run
 With SCRAPER_STANDARDISE_CLOSE_ONLY on (the runner sets it for a close_only photos run), steps 1 to 7 are one close-up
 round instead: every chosen photo's close-up not made yet under the current rule made again from the photo its run
-started from (deploy.standardise_close, a GPU job per slice, under the same lock, budget, window and run id), then
+started from (stone_pipeline.photos.close, a GPU job per slice, under the same lock, budget, window and run id), then
 publish and relink as above; its summary is close-summary.json.
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
 GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. The judge
@@ -59,11 +59,11 @@ from datetime import datetime, timezone
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from deploy import standardise_batch as gpu
-from deploy import standardise_close as close
-from deploy import standardise_publish as publish
-from deploy import standardise_select as select
-from deploy.standardise_source import sheet_and_photos
+from stone_pipeline.photos import batch as gpu
+from stone_pipeline.photos import close as close
+from stone_pipeline.photos import publish as publish
+from stone_pipeline.photos import select as select
+from stone_pipeline.photos.source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.core import env
@@ -246,7 +246,7 @@ def whole_slabs(s3, records):
 
 def photo_listings(sheet, photos):
     """The sheet's listings shown from their own photos (index.listings): every one but a tile listing, which is
-    rendered from its variety's slab stone at publish (deploy.standardise_publish), never through the GPU and judge."""
+    rendered from its variety's slab stone at publish (stone_pipeline.photos.publish), never through the GPU and judge."""
     return [l for l in index.listings(sheet, photos) if l["format"] != C.TILE_FORMAT]
 
 
@@ -257,7 +257,7 @@ def tile_listings(sheet, photos):
 
 
 def removed_listings(s3):
-    """The SKUs of the listings the owner removed (deploy.standardise_decisions)."""
+    """The SKUs of the listings the owner removed (stone_pipeline.photos.decisions)."""
     keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.owner_removed_prefix())
             for o in page.get("Contents", [])]
     return imagestore.owner_removed_skus(keys)
@@ -265,7 +265,7 @@ def removed_listings(s3):
 
 def owner_records(s3, root):
     """({SKU: the owner's photo choice record}, {SKU: why its record could not be read}) under the clean tag's root
-    (deploy.standardise_decisions)."""
+    (stone_pipeline.photos.decisions)."""
     return publish.records_by_sku(s3, publish.owner_prefix(root))
 
 

@@ -1,6 +1,6 @@
 """One GPU round of a standardise run on AWS Batch: the listed photos of each source, in slices of RUN_SLICE, each slice a
 retouch job then a standardise job that starts when the retouch ended (STANDARDISE_ROUND), or one close-only job
-(CLOSE_ROUND: deploy.standardise_close), every job reading the slice's own fixed photo list (ONLY_KEY). Both kinds share
+(CLOSE_ROUND: stone_pipeline.photos.close), every job reading the slice's own fixed photo list (ONLY_KEY). Both kinds share
 one path: sized to the month's budget, reserved and settled, the GPU pool's ceiling raised for the round and always set
 back, a round that fails, times out or is stopped stopping its jobs. Queue and job definition come from the
 environment (SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF), never named here."""
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from deploy.standardise_publish import pool_map
+from stone_pipeline.photos.publish import pool_map
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import env
 
@@ -90,7 +90,7 @@ def submit(batch, s3, queue, jobdef, tag, todo, run_id, ids):
 
 
 def submit_close(batch, s3, queue, jobdef, tag, todo, run_id, ids):
-    """Store each slice's photo list (the run's own files, run_id) and submit its close-only job (deploy.standardise_close:
+    """Store each slice's photo list (the run's own files, run_id) and submit its close-only job (stone_pipeline.photos.close:
     the chosen photos' close-ups made again), appending each job id to ids as it is submitted. todo = {source: shas of its
     chosen photos}; tag: the clean tag, whose choice records the job reads."""
     for src, n, shas in slices(todo):
@@ -169,7 +169,7 @@ def worst_seconds(n_slices, window, work=STANDARDISE_ROUND):
 def price(todo, window, work=STANDARDISE_ROUND):
     """The most a round of `todo` ({source: shas}) takes of the process budget, its results judged: the GPU's worst case
     (worst_seconds) and, when the judge looks at its results (work.judged), one verdict per photo. The one price of GPU
-    work: a round is sized by it (fitting) and the clean step admits by it (deploy.standardise_run.admit), so no round
+    work: a round is sized by it (fitting) and the clean step admits by it (stone_pipeline.photos.process.admit), so no round
     starts work whose results the budget cannot then judge."""
     photos = sum(len(shas) for shas in todo.values())
     return gpu_usd(worst_seconds(len(slices(todo)), window, work)) + (photos * C.JUDGE_PRICE_USD if work.judged else 0.0)

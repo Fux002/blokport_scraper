@@ -56,7 +56,7 @@ def test_a_close_up_lead_shows_the_views_it_has():
 
 
 def test_only_the_chosen_photos_are_published_each_with_the_views_its_run_made():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     run, cleaned = f"{ENV_SEGMENT}/standardise-test/full/sentas/", f"{ENV_SEGMENT}/standardise-test/full-clean/sentas/"
     made = {f"{run}{A}.main.jpg", f"{run}{A}.white.jpg", f"{run}{A}.studio.jpg", f"{run}{A}.close.jpg", f"{run}{A}.slab.png",
             f"{run}{B}.main.jpg", f"{run}{B}.white.jpg", f"{cleaned}{C_}.main.jpg"}                 # B: judged, not chosen
@@ -67,7 +67,7 @@ def test_only_the_chosen_photos_are_published_each_with_the_views_its_run_made()
 
 
 def test_a_published_view_no_longer_chosen_is_removed():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     keep, old = imagestore.standard_key("sentas", A, "main"), imagestore.standard_key("sentas", B, "main")
     assert pub.stale([keep, old], [keep]) == [old]
 
@@ -81,23 +81,23 @@ class _Bucket:
 
 
 def test_a_photo_already_finished_or_held_is_not_worked_on_again():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     out = "dev/standardise-test/full/sentas/"
     bucket = _Bucket([f"{out}{A}.main.jpg", f"{out}held/{B}.json"])
     assert src.finished(bucket, out, A) and src.finished(bucket, out, B) and not src.finished(bucket, out, C_)
 
 
 def test_a_photo_already_retouched_or_refused_is_not_retouched_again():
-    from deploy import standardise_retouch as rt
+    from stone_pipeline.photos import retouch_job as rt
     out = "dev/standardise-test/full/sentas/"
     bucket = _Bucket([f"{out}retouched/{A}.jpg", f"{out}retouch_held/{B}.json"])
     assert rt.retouched(bucket, out, A) and rt.retouched(bucket, out, B) and not rt.retouched(bucket, out, C_)
 
 
 def _retouch_job(monkeypatch, keys, sheet):
-    """deploy.standardise_retouch.main over one slice of sentas whose bucket holds `keys`: the photos it searched for
+    """stone_pipeline.photos.retouch_job.main over one slice of sentas whose bucket holds `keys`: the photos it searched for
     marks, None when it searched none (no model was loaded)."""
-    from deploy import standardise_retouch as rt
+    from stone_pipeline.photos import retouch_job as rt
     out = rt.run_prefix("sentas")
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.delenv("MARKS_SURVEY", raising=False)
@@ -126,7 +126,7 @@ def test_a_photo_without_a_result_is_still_searched_for_marks(monkeypatch):
 
 
 def test_an_excluded_photo_is_never_published_whatever_chose_it():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     run = f"{ENV_SEGMENT}/standardise-test/full/sentas/"
     made = {f"{run}{A}.main.jpg", f"{run}{A}.white.jpg", f"{run}{B}.main.jpg"}
     chosen = [{"source": "sentas", "sha": A, "prefix": run}, {"source": "sentas", "sha": B, "prefix": run}]
@@ -135,7 +135,7 @@ def test_an_excluded_photo_is_never_published_whatever_chose_it():
 
 
 def test_the_exclude_list_reads_one_sha_per_line_with_comments():
-    from deploy import standardise_publish as pub
+    from stone_pipeline.photos import publish as pub
     text = f"# a cut-out that took in the floor\n{A}  # sentas, open book over the wall slabs\n\n"
     assert pub.read_exclude(text) == {A}
 
@@ -153,7 +153,7 @@ def test_a_lead_block_is_shown_once():
 
 def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():
     import numpy as np
-    from deploy import standardise_retouch as rt
+    from stone_pipeline.photos import retouch_job as rt
     none = np.zeros((40, 60), np.uint8)
     lamp = none.copy(); lamp[10:14, 20:24] = 1
     assert rt.survey_note(None) == {"marks": False, "flares": False}
@@ -162,14 +162,15 @@ def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():
 
 
 def test_a_run_can_be_limited_to_a_list_of_photos():
-    from deploy import standardise_source as src
+    from stone_pipeline.photos import source as src
     keys = [f"dev/products/scraped/sentas/{s}.jpg" for s in (A, B, C_)]
     assert src.only(keys, None) == keys                                  # no list: every photo
     assert src.only(keys, [C_, A]) == [keys[0], keys[2]]                 # the listed ones, in the run's own order
 
 
 def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet_and_photo_list(monkeypatch):
-    from deploy import fetch_inputs, standardise_source as src
+    from deploy import fetch_inputs
+    from stone_pipeline.photos import source as src
     from stone_pipeline.config import settings
     calls = []
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)

@@ -1,7 +1,7 @@
 """Make the close-ups of the chosen photos again (RUN_MODE=standardise-close), on the GPU, without standardising them again;
-submitted by deploy.standardise_run with CLOSE_ONLY=true, one job per slice of a source's chosen photos.
+submitted by stone_pipeline.photos.process with CLOSE_ONLY=true, one job per slice of a source's chosen photos.
 
-For each chosen photo of SRC (deploy.standardise_select's records under <CLEAN_TAG>/chosen/), narrowed to the slice's
+For each chosen photo of SRC (stone_pipeline.photos.select's records under <CLEAN_TAG>/chosen/), narrowed to the slice's
 fixed list (ONLY_KEY): a photo its run made a whole slab of (<sha>.slab.png: a single slab, or an open book's half,
 which <sha>.slab.json records; a result made before that was recorded is decided against that slab.png) goes, from the photo
 its run started from, through only what the close-up needs (outline, detector, eraser: photo.close_view; no
@@ -9,7 +9,7 @@ upscaler, inpainting, judge or hosted edit). The new close-up replaces <prefix><
 when the photo gets none: by the close-up rule, for a reason of its own (photo.NoCloseUp: its run refused it, it is off
 the product sheet, one of its own inputs is missing or no image, it no longer gives the slabs its run found), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
 slab of it. Each photo done is recorded (with the reason when it has none) under <prefix>close_v<CLOSEUP_VERSION>/, so
-a re-run goes on where it stopped and a new close-up rule does every photo again; deploy.standardise_publish then
+a re-run goes on where it stopped and a new close-up rule does every photo again; stone_pipeline.photos.publish then
 publishes it, or takes the published one down. A photo the retired logo step made (logo_step_key) is never made again,
 whatever the rule: its remake would start from the photo with its logo, unjudged; its close.jpg stays as it is.
 
@@ -32,8 +32,8 @@ import sys
 import uuid
 
 
-from deploy.standardise_publish import _objects, chosen_prefix, read_choices
-from deploy.standardise_source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
+from stone_pipeline.photos.publish import _objects, chosen_prefix, read_choices
+from stone_pipeline.photos.source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
                                        passing_storage_error, read_slab, sheet_photos, slab_record_key, start,
                                        start_edits)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
