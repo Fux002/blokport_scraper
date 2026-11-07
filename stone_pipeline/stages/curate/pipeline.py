@@ -71,7 +71,12 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
                for lst in result.new_variants.values() for v in lst}
     pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}
-    gaps = decision_audit.audit(rows, existing, created, operator, pending_spellings)
+    # VE2: the (source, spelling) a freeze card holds this run; a mint held by one of these is already
+    # surfaced, so decision_audit suppresses its duplicate "not applied" gap (only these kinds, keyed by both).
+    _VE2_HOLD_KINDS = {"archived_type", "archived_value", "archived_variety"}
+    held_ve2 = {(proj.norm(p.get("src", "")), proj.norm(p.get("scraped", "")))
+                for p in result.pending_confirm if p.get("kind") in _VE2_HOLD_KINDS}
+    gaps = decision_audit.audit(rows, existing, created, operator, pending_spellings, held_ve2)
     decisions.write_decision_gaps(gaps)
     result.counts["decision_gaps"] = len(gaps)
     if gaps:

@@ -143,6 +143,64 @@ def _load_products(path: Path | None) -> dict[str, dict]:
     return out
 
 
+# The emitted products sheet's id columns, in COMBINATION_COLUMNS order (product_category_id, type_id,
+# variation_id, finish_id, color_id, quality_id), so a product tuple intersects the fan-out tuples directly.
+_PRODUCT_TUPLE_COLS = ("Product Category 1", "STN Type Id", "STN Variation Id",
+                       "STN Finish Id", "STN Color Id", "STN Quality Id")
+
+
+def _load_product_tuples(path: Path | None) -> set[tuple]:
+    """The EXACT (category, type, variation, finish, colour, quality) id tuple of every emitted product, from
+    the same products sheet build_combinations already reads (VE2 PR5). Used to KEEP an emitted product's own
+    combination when a value is restricted: the fan-out is filtered to assignable values, then these exact
+    tuples are re-added ONLY where the fan-out already produced them (an intersection), so the result stays a
+    subset of today's set. A row missing any id is skipped (it is not a priceable combination)."""
+    out: set[tuple] = set()
+    if not path or not Path(path).exists():
+        return out
+    with Path(path).open(encoding="utf-8-sig", newline="") as h:
+        for r in csv.DictReader(h):
+            t = tuple((r.get(col) or "").strip() for col in _PRODUCT_TUPLE_COLS)
+            if all(t):
+                out.add(t)
+    return out
+
+
+def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str], ledger=None) -> tuple[set[tuple], int]:
+    """(tuples, unrebuilt) for the ledger-ACKED products (medusa_id set), in COMBINATION_COLUMNS order, so a
+    product live in Medusa keeps its combination even when this run emitted nothing for it (held for a
+    transient reason, or its source produced nothing). Reconstructed from ledger/existing.acked_products (the
+    ONE ledger reader) with names mapped to ids through the attributes vocabulary (`attr`, the single
+    authority) and the variation id from the export (keyed by normalized Key). `ledger`, when given, is read
+    directly (ledger.verify passes the ledger it was given); else the per-env ledger is opened if it exists.
+    `unrebuilt` counts acked products whose tuple could not be fully rebuilt (a missing id/vid), surfaced as a
+    finding rather than dropped silently. Empty when there is no ledger."""
+    from stone_pipeline.ledger.existing import acked_products
+    if ledger is not None:
+        acked = acked_products(ledger)
+    else:
+        from stone_pipeline.ledger import writethrough
+        from stone_pipeline.ledger.db import Ledger
+        path = writethrough.ledger_path()
+        if not path.exists():
+            return set(), 0
+        with Ledger.open(path, env=writethrough.ENV_NAME,
+                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+            acked = acked_products(lg)
+    out: set[tuple] = set()
+    unrebuilt = 0
+    for carried in acked.values():
+        d = dict(carried)   # {dimension: norm(value)}, one value per dimension
+        t = (attr["category"].get(d.get("category", "")), attr["type"].get(d.get("type", "")),
+             nkey_to_vid.get(d.get("variation_key", "")), attr["finish"].get(d.get("finish", "")),
+             attr["color"].get(d.get("color", "")), attr["quality"].get(d.get("quality", "")))
+        if all(t):
+            out.add(t)
+        else:
+            unrebuilt += 1
+    return out, unrebuilt
+
+
 def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
     """review/tree_uncovered_variations.csv 'assign_type' -> {variant_name_lower: type_id}: a stone
     type the user gives a variation the scrape never typed, so it gets allocated to combinations on
@@ -216,6 +274,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                        exclude_ids: set[str] | None = None,
                        retired_keys: set[str] | None = None,
                        leaf_overlay: "dict[tuple[str, str], dict[str, list[str]]] | None" = None,
+                       acked_ledger=None,
                        ) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
     uncovered). exclude_ids = variation IDs slated for deletion in Medusa (variants_to_delete);
@@ -238,6 +297,13 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     retired_keys = retired_keys or set()
     by_key, by_cat_name, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
+    # VE2 PR5: the restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
+    # in the expand phase (no status column), so the fan-out below is byte-identical until then.
+    restricted_ids = {a.sourceid for a in read_attributes(
+        Path(attributes_csv), require_status=attributes_status_required(Path(attributes_csv)))
+        if not a.assignable and a.sourceid}
+    emitted_tuples = _load_product_tuples(products_csv)
+    archived_keys: set[str] = set()
     # Operator leaf decisions as attribute IDs, keyed (variety_norm, stone_type_norm) -- precomputed once so
     # the per-row lookup below is a dict hit, not a re-map of every decision each of ~36k rows.
     overlay_ids: dict[tuple[str, str], tuple[set, set]] = {}
@@ -261,6 +327,8 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         # a row missing Id or Key is skipped, not a KeyError (the cold-start guard only checks the export
         # EXISTS; read_variants_export fails loud on a missing Key or Name column, an absent Id reads empty).
         vid, key, name = r.id, r.key, r.name
+        if r.archived and key:
+            archived_keys.add(key)   # VE2 PR5: a frozen variety is counted frozen, not uncovered (below)
         # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
         # combination references a variation that will not exist after the Medusa cleanup.
         if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
@@ -322,8 +390,8 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                     combinations.add((cat, typ, vid, f, c, q))
         return True
 
-    covered = 0
-    uncovered: list[dict] = []
+    row_meta: list[tuple] = []        # (key, vid, name, prefix), classified AFTER the assignable filter
+    premissing: dict[str, str] = {}   # vid -> missing diagnostic when the fan-out produced nothing even pre-filter
     for key, vid, name in export_rows:
         prefix = key.split("_", 1)[0]
         nl = match_key(name)   # canonical: joins by_cat_name/variety/assigned_types keyed the same
@@ -377,18 +445,59 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         # No colour/quality default: a variation nothing describes is UNCOVERED (the review file asks the
         # operator), never priced under the catalogue's most common colour.
         finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
-        if add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
-            covered += 1
-        else:
+        row_meta.append((key, vid, name, prefix))
+        if not add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
             missing = [n for n, v in (("type", typ), ("finish", finishes), ("colour", colors), ("quality", quals))
                        if not v]
-            uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix, "missing": "+".join(missing)})
+            premissing[vid] = "+".join(missing)
 
-    stats = {"covered": covered, "uncovered": len(uncovered),
+    # VE2 PR5: fan out only to ASSIGNABLE values. Drop a fan-out tuple carrying a restricted attribute id
+    # (category pcat / type / finish / colour / quality; the variation-id position is a different namespace,
+    # never matched). Then RE-ADD the keep-set INTERSECTED with the fan-out, so the result is always a SUBSET
+    # of today's set and nothing new is ever added. The keep-set is the emitted products' exact tuples UNION
+    # the ledger-ACKED products' tuples -- a product live in Medusa keeps its combination even when this run
+    # emitted nothing for it (held for a transient reason, or its source produced nothing). Dormant: an empty
+    # restricted set leaves `combinations` untouched (byte-identical); the ledger is opened only when restricted.
+    vidx = COMBINATION_COLUMNS.index("variation_id")
+    missing_product_tuples = len(emitted_tuples - combinations)
+    unrebuilt_acked = 0
+    if restricted_ids:
+        acked_tuples, unrebuilt_acked = _acked_combination_tuples(
+            attr, {match_key(k): v for k, v, _ in export_rows}, acked_ledger)
+        keep_set = set(emitted_tuples) | acked_tuples
+        attr_pos = tuple(i for i, col in enumerate(COMBINATION_COLUMNS) if col != "variation_id")
+        assignable = {c for c in combinations if not restricted_ids.intersection(c[p] for p in attr_pos)}
+        combinations = assignable | (combinations & keep_set)
+
+    # Classify coverage AFTER the filter: a variety left with no combination (its only values were restricted)
+    # goes to uncovered -- or frozen, if its variety Key is archived (not awaiting an operator decision).
+    covered_vids = {c[vidx] for c in combinations}
+    covered = 0
+    frozen_count = 0
+    uncovered: list[dict] = []
+    for key, vid, name, prefix in row_meta:
+        if vid in covered_vids:
+            covered += 1
+        elif key in archived_keys:
+            frozen_count += 1
+        else:
+            # dormant: a vid with a pre-filter diagnostic keeps it (even the empty '' main writes when only the
+            # category pcat was missing); "restricted" is only for a vid dropped BY the filter (not pre-filter).
+            uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix,
+                              "missing": premissing[vid] if vid in premissing else "restricted"})
+    stats = {"covered": covered, "uncovered": len(uncovered), "frozen": frozen_count,
              "combination_rows": len(combinations),
-             "variations": len({c[2] for c in combinations}),
+             "variations": len({c[vidx] for c in combinations}),
              "categories": len({c[0] for c in combinations}),
+             "product_tuples_absent_from_fanout": missing_product_tuples,
+             "acked_tuples_unrebuilt": unrebuilt_acked,
              "category_finish_counts": {k: len(v) for k, v in cat_finishes.items()}}
+    if missing_product_tuples:
+        log.warning("emitted product tuples absent from the fan-out (kept none of these; a separate finding)",
+                    extra={"extra_fields": {"count": missing_product_tuples}})
+    if unrebuilt_acked:
+        log.warning("acked products whose combination tuple could not be rebuilt (a missing id/vid); not kept",
+                    extra={"extra_fields": {"count": unrebuilt_acked}})
     return combinations, stats, uncovered
 
 

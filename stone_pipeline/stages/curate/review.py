@@ -101,6 +101,19 @@ def named_with_types(c, name: str) -> str:
 
 
 # --- the HOLD outcomes one gapped row can take --------------------------------------------------------------
+def hold_archived_variety(c, clean: str, variety_name: str, variety_type: str, row) -> None:
+    """VE2 PR5: a gapped scrape matches an ARCHIVED variety. The alias row is still emitted (reactivating the
+    variety auto-binds the listing and this card clears on the next produce), but a NEW alias onto a frozen
+    variety never reaches the export the matcher reads -- the lane never serves an archived variation -- so
+    the listing would otherwise stay a tree gap forever with no card. Surface it once, here. The card carries
+    the owner's TYPE so it has its own (name, type) ref: write_confirm_file never merges it into a type-less
+    collision card of the same name, and a decide gets the type prefilled."""
+    c.pending_confirm.append(review_card("archived_variety", title_case(clean),
+        f"This listing matches {variety_name}, which is archived in Medusa. Bind it to an active variety or "
+        f"mint it as new in Review, or reactivate {variety_name} in Blokport.",
+        review_evidence(row), stone_type=title_case(variety_type)))
+
+
 def hold_collision(c, clean: str, stone_type: str, owner_names: list[str], row) -> None:
     """ONE surface, SEVERAL varieties: the operator picks which variety it is (globally, or for this vendor
     only), or mints it new. The one review card for every collision, whichever path found it."""

@@ -12,9 +12,11 @@ from __future__ import annotations
 from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.reference.loaders.common import norm
 
-# The product columns that carry a controlled attribute VALUE by NAME. `category` is stored as its canonical
-# name too (populate._category_name_for), so a product acked into an archived-but-active category is exempt.
-_VALUE_COLUMNS = ("color", "finish", "quality", "type", "category")
+# The product columns carrying a frozen-checkable VALUE: the controlled attributes (by canonical name; category
+# is stored by name too, populate._category_name_for) plus `variation_key`, the variety Key (VE2 PR5: a product
+# is exempt from a frozen variety only when Medusa already holds it on the SAME Key). All are folded through
+# `norm` symmetrically for membership, so the Key matches regardless of its slug separators.
+_VALUE_COLUMNS = ("color", "finish", "quality", "type", "category", "variation_key")
 
 
 def acked_products(ledger: Ledger) -> dict[str, set[tuple[str, str]]]:

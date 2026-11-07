@@ -37,12 +37,17 @@ def _gap(kind: str, source: str, scraped: str, name: str, stone_type: str, origi
 
 
 def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set[tuple[str, str]],
-          decisions: Decisions, pending_spellings: set[str]) -> list[dict]:
+          decisions: Decisions, pending_spellings: set[str],
+          held_ve2: set[tuple[str, str]] = frozenset()) -> list[dict]:
     """The decisions this produce did NOT honour. `existing` and `created` are (norm name, norm type) sets of
     the varieties in the reference and the ones minted this run; `decisions` is the one operator-decisions
     object the produce ran with; `pending_spellings` are the norm scraped spellings still carried by a pending
-    variety card."""
+    variety card. `held_ve2` is the (norm source, norm spelling) pairs held by a VE2 freeze card this run
+    (archived_type / archived_value / archived_variety): a mint held for one of those is already surfaced, so
+    its gap is suppressed -- keyed by (source, spelling) and only for those kinds, so no other vendor's gap
+    and no non-VE2 hold is affected."""
     gaps: list[dict] = []
+    ve2_spellings = {sp for _, sp in held_ve2}   # a GLOBAL mint ('' source) is held by ANY vendor's VE2 card
     by_listing: dict[tuple[str, str], list[CanonicalRow]] = {}
     for r in rows:
         by_listing.setdefault((_norm(r.src_site), _norm(r.variety_match_key or r.raw_name)), []).append(r)
@@ -51,7 +56,15 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
         if st.is_mint:
             name = st.name or st.display or spelling
             target = (_norm(name), _norm(st.stone_type))
-            if target not in existing and target not in created:
+            # A mint held THIS produce by a VE2 freeze (restricted type, empty-after-drop value, archived
+            # variety) already surfaces its own card, so do NOT also raise a "not applied" gap (one hold, one
+            # entry). A VENDOR-scoped statement matches only its own (source, spelling) hold; a GLOBAL statement
+            # ('' source) applies to every vendor, so it is held by that spelling's VE2 card from ANY vendor.
+            # Only the VE2 kinds, so another vendor's gap and the retired/no_type holds are untouched. The gap
+            # still fires for a mint silently ignored with NO card.
+            held = ((_norm(st.source), spelling) in held_ve2
+                    or (not _norm(st.source) and spelling in ve2_spellings))
+            if target not in existing and target not in created and not held:
                 gaps.append(_gap("mint", st.source, spelling, name, st.stone_type or "", st.origin_iso or "",
                                  f"Mint not applied: no variety '{name}' ({st.stone_type}) exists after this produce."))
         elif spelling in pending_spellings:

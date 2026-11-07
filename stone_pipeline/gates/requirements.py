@@ -131,17 +131,19 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Stock could not be determined", kind="decision",
                 recovery="The scrape carries no stock signal. Fix the adapter to read it, or set the stock. "
                          "Lists on the next produce.", stage="Derive"),
-    Requirement("value_frozen", "no resolved attribute value is archived or internal, unless Medusa already "
-                                "holds this product with it",
-                "restricted_values (attributes.csv status/internal); an existing acked product is exempt "
+    Requirement("value_frozen", "no resolved attribute value OR variety is archived or internal, unless Medusa "
+                                "already holds this product with it",
+                "restricted_values (attributes.csv status/internal) + the archived variety Keys (variants_export "
+                "status); an existing acked product on the same value/variety is exempt "
                 "(ledger/existing.acked_products), a new one is held",
-                title="Attribute value is archived or internal (frozen)", kind="decision",
-                recovery="The colour, finish, quality, type or category this product resolved to is archived or "
-                         "internal in Medusa, so a NEW product may not use it (an existing listing keeps it). "
-                         "Reactivate the value in Blokport, or the supplier's listing changes to an active value. "
-                         "A colour filled from the variety can be re-decided in Review (amend the colour); a "
-                         "scraped colour/finish/quality or a Key's type has no Review action. Lists on the next "
-                         "produce once the value is assignable.", stage="Match Variation / Reconcile"),
+                title="Attribute value or variety is archived or internal (frozen)", kind="decision",
+                recovery="The colour, finish, quality, type, category OR variety this product resolved to is "
+                         "archived or internal in Medusa, so a NEW product may not use it (an existing listing on "
+                         "it keeps flowing). Reactivate the value or variety in Blokport, bind the product to "
+                         "another (active) variety, or the supplier's listing changes to an active value. A colour "
+                         "filled from the variety can be re-decided in Review (amend the colour); a scraped "
+                         "colour/finish/quality or a Key's type has no Review action. Lists on the next produce "
+                         "once the value and variety are assignable.", stage="Match Variation / Reconcile"),
 )
 
 MEDUSA_RULES: frozenset[str] = frozenset(r.rule for r in MEDUSA_REQUIREMENTS)

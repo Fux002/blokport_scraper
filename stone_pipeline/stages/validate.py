@@ -110,7 +110,12 @@ def _frozen_value_pairs(row: CanonicalRow, category_labels: dict[str, str]) -> t
     included by its NAME (not its pcat id): category_invalid only checks the pcat is an active one, so an
     archived-but-still-active category (e.g. Tiles) would otherwise let new products emit into it."""
     return (("color", row.color_name), ("finish", row.finish_name), ("quality", row.quality_name),
-            ("type", row.type_name), ("category", _category_label(row, category_labels)))
+            ("type", row.type_name), ("category", _category_label(row, category_labels)),
+            # VE2 PR5: the resolved variety Key is a frozen dimension too -- a product binding to an archived
+            # variety is HELD (exempt only when Medusa already holds this SKU on the SAME Key). This surfaces,
+            # in validate's held_breakdown, what the sync lane would otherwise hold silently. The Key is
+            # resolved upstream at match_variation (Stage 4), before this stage.
+            ("variation_key", row.variation_key))
 
 
 def validate_row(row: CanonicalRow, require_images: bool = False, *,
@@ -193,6 +198,21 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
                 row.add_reject(RejectReason(rule="value_frozen", detail=f"{category}={name}"))
 
 
+def _archived_variation_keys() -> set[str]:
+    """The variety Keys the Medusa export marks archived (VE2 PR5), read through the one variants_export
+    reader. Empty when the export is absent or carries no status column (the expand phase), so the Key freeze
+    is dormant until then. A frozen dimension sourced from the EXPORT, independent of attributes.csv."""
+    export = SETTINGS.paths.export_file
+    if not export.exists():
+        return set()
+    from stone_pipeline.reference.loaders import variants_status_required
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    # the one reader already reads an absent status column as active and respects the step-C flag, so no
+    # column means an empty set (dormant) without a separate gate.
+    return {v.key for v in read_variants_export(export, require_status=variants_status_required(export))
+            if v.archived and v.key}
+
+
 def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]],
                                                  dict[str, str]]:
     """The VE2 inputs for value_frozen, built ONCE per run: (frozen, acked, category_labels). `frozen` comes
@@ -205,13 +225,18 @@ def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, 
     from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
     from stone_pipeline.reference.loaders import restricted_values
     frozen = restricted_values()
-    if not frozen:
-        return frozen, {}, {}
+    archived_keys = _archived_variation_keys()
+    if not frozen and not archived_keys:
+        return {}, {}, {}
     from stone_pipeline.reference.medusa_files import read_attributes
     category_labels = {a.sourceid: a.value
                        for a in read_attributes(SETTINGS.paths.attributes_csv,
                                                 require_status=ATTRIBUTES_STATUS_REQUIRED)
-                       if a.category == "category" and a.sourceid}
+                       if a.category == "category" and a.sourceid} if frozen else {}
+    if archived_keys:
+        # the variety Key is a frozen dimension sourced from the EXPORT status (not attributes.csv), so it can
+        # be non-empty even when no attribute value is restricted. Folded through norm, matching validate_row.
+        frozen = {**frozen, "variation_key": {norm(k) for k in archived_keys}}
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.ledger.existing import acked_products

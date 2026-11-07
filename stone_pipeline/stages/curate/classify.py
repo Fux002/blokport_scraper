@@ -17,8 +17,9 @@ from stone_pipeline.stages.curate.aliasing import alias_and_backfill, collision_
 from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
                                                   variety_identity)
 from stone_pipeline.stages.curate.minting import mint
-from stone_pipeline.stages.curate.review import (hold_code, hold_collision, hold_for_type, hold_new,
-                                                 hold_new_type, hold_similar, review_evidence)
+from stone_pipeline.stages.curate.review import (hold_archived_variety, hold_code, hold_collision,
+                                                 hold_for_type, hold_new, hold_new_type, hold_similar,
+                                                 review_evidence)
 from stone_pipeline.stages.format_resolve import branch_of
 
 
@@ -115,6 +116,18 @@ def _reject_or_decide(c: Curation, row, gap, name: str, stone_type: str, clean: 
     return False
 
 
+def _archived_owner_name(c: Curation, owner: tuple[str, str], row) -> str | None:
+    """The display name of an alias OWNER (norm name, norm type) that is archived in Medusa, else None. VE2:
+    a NEW alias onto an archived variety never serves, so classify surfaces a card instead of a silent gap.
+    Checked in the ROW'S OWN branch only: an archived block Key must not flag a slab listing (whose 'mint as
+    new' would create a duplicate) -- the listing binds to the variety in its own category."""
+    imp = c.imports.get(branch_of(row))
+    if imp is None:
+        return None
+    e = imp.by_name_type.get(owner)
+    return e["Name"] if (e and e.get("archived")) else None
+
+
 def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: str) -> bool:
     """RESOLVE to an EXISTING variety by exact surface (an alias beats a new variant). A generic colour+type
     trade name is its OWN variety and skips alias routing (never promoted into a premium named stone).
@@ -141,7 +154,10 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
     if same_type:
         named = next((o for o in same_type if o[0] == proj.norm(clean)), None)
         if named or len({o[0] for o in same_type}) == 1:
-            alias_and_backfill(c, named or same_type[0], name, clean, stone_type, row, gap)
+            owner = named or same_type[0]
+            alias_and_backfill(c, owner, name, clean, stone_type, row, gap)
+            if (vname := _archived_owner_name(c, owner, row)):   # VE2: alias still recorded; surface the hold
+                hold_archived_variety(c, clean, vname, owner[1], row)
         else:
             hold_collision(c, clean, stone_type, sorted({o[0] for o in same_type}), row)
         return True
@@ -184,6 +200,8 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
         # tier happened to rank first, so it is held for the operator to state the variety instead.
         if d.verdict == "alias" and nt and (stone_type or len(_canonical_types(c, nn)) == 1):
             c.alias_new.setdefault((nn, nt), set()).add(name)
+            if (vname := _archived_owner_name(c, (nn, nt), row)):   # VE2: fuzzy-confirmed alias onto archived
+                hold_archived_variety(c, clean, vname, nt, row)
             return True
         if d.verdict in ("alias", "review"):
             hold_similar(c, clean, stone_type, nearest, row, gap, d.prob)
