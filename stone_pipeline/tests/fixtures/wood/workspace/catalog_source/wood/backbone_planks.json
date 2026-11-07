@@ -1,0 +1,84 @@
+{
+ "posts": [
+  {
+   "variant": "Rustic Oak",
+   "category": "Planks",
+   "stone_type": "Oak",
+   "color": [
+    "Natural"
+   ],
+   "finishes": [
+    "Oiled",
+    "Lacquered",
+    "Waxed",
+    "Brushed",
+    "Sanded"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "plank_oak_rustic_oak_fa846ec9-8953-5d7f-a7a7-b9a8ddea0a04"
+  },
+  {
+   "variant": "Black Walnut",
+   "category": "Planks",
+   "stone_type": "Walnut",
+   "color": [
+    "Brown"
+   ],
+   "finishes": [
+    "Oiled",
+    "Lacquered",
+    "Waxed",
+    "Brushed",
+    "Sanded"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "plank_walnut_black_walnut_f1a008b9-0173-5c3d-81cd-e137936766bd"
+  },
+  {
+   "variant": "White Ash",
+   "category": "Planks",
+   "stone_type": "Ash",
+   "color": [
+    "Light"
+   ],
+   "finishes": [
+    "Oiled",
+    "Lacquered",
+    "Waxed",
+    "Brushed",
+    "Sanded"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "plank_ash_white_ash_61165db9-7394-52dd-8db8-4688d75a7fc9"
+  },
+  {
+   "variant": "Siberian Larch",
+   "category": "Planks",
+   "stone_type": "Larch",
+   "color": [
+    "Natural"
+   ],
+   "finishes": [
+    "Oiled",
+    "Lacquered",
+    "Waxed",
+    "Brushed",
+    "Sanded"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "plank_larch_siberian_larch_bf20a7c4-64f6-58e1-a903-600aac5a36b8"
+  }
+ ]
+}
