@@ -589,3 +589,34 @@ def test_no_decision_is_planned_before_the_produce_stored_the_conflict_set(monke
 def test_nothing_runs_without_an_explicit_environment(monkeypatch, tmp_path, capsys):
     rc, s3, held = _main(monkeypatch, tmp_path, [_use("one", B)], env=None)
     assert rc == 2 and s3.written == [] and held == [] and "SCRAPER_ENV" in capsys.readouterr().out
+
+
+# --- one decision from the page reads only what it touches (review of #555: a click must answer inside 15 s) ----------
+@pytest.mark.parametrize("docs", [[_clean("one", B)], [_use("block-1", F)], [_use("leathered", E)], [_withdraw("one")],
+                                  [_remove("two")]])
+def test_a_narrow_plan_is_the_full_plan_and_reads_only_the_choice_records_it_touches(docs):
+    s3 = _bucket()
+    for key in ("one", "two", "three", "block-1", "block-2", "leathered", "polished"):
+        s3.objects[f"{CHOSEN}{key}.json"] = json.dumps({"key": key, "sha": "c" * 64, "tag": C.RUN_TAG}).encode()
+    read = []
+    get = s3.get_object
+    s3.get_object = lambda Bucket, Key: read.append(Key) or get(Bucket, Key)
+    full = dec.plan(s3, docs, LISTINGS, exclude=set())
+    read.clear()
+    narrow = dec.plan(s3, docs, LISTINGS, exclude=set(), narrow=True)
+    assert vars(narrow) == vars(full)
+    touched = {k[len(CHOSEN):-len(".json")] for k in read if k.startswith(CHOSEN)}
+    group = {"block-1": {"block-1", "block-2"}, "leathered": {"leathered", "polished"}}
+    assert touched == group.get(docs[0]["id"], {docs[0]["id"]})
+
+
+def test_decide_takes_the_sheet_it_is_given_and_reads_none(monkeypatch):
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: pytest.fail("the sheet was read again"))
+
+    @contextmanager
+    def exclusive(client, owner, on_lost=None):
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", exclusive)
+    s3 = _bucket()
+    p = dec.decide(s3, [_clean("one", B)], dry_run=False, say=lambda line: None, sheet=LISTINGS, narrow=True)
+    assert set(p.clicks) == {"SEN-ONE"} and _click(s3, "SEN-ONE")["sha"] == B

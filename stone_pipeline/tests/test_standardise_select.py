@@ -456,6 +456,27 @@ class _Bucket:
         return _Pages()
 
 
+def test_a_round_read_for_a_few_photos_holds_exactly_what_the_whole_folder_says_of_them():
+    # review of #555: a click listed the source's whole run folder (dev v2/zucchi: 56,840 keys) for one listing's photos
+    from deploy.standardise_source import LOGO_STEP, REDRAW
+    keys = []
+    for sha in (A, B, D):
+        keys += [f"{GPU}{sha}.main.jpg", f"{GPU}{sha}.slab.png", f"{GPU}{sha}.studio.jpg", f"{GPU}noslab/{sha}.json",
+                 f"{GPU}{LOGO_STEP}{sha}.json", f"{GPU}{C.OUTLINE_CHECKED}{sha}.json", f"{GPU}held/{sha}.json",
+                 f"{GPU}judged/{sha}.json", f"{GPU}cleaned/{sha}.jpg", f"{GPU}attempts/{sha}.nano2.json",
+                 f"{GPU}attempts/{sha}.kontext.request.json", f"{GPU}attempts/{sha}.flux3.jpg",
+                 f"{GPU}{REDRAW}{sha}.done.json", f"{GPU}{REDRAW}judged/{sha}.json"]
+    bucket = _Bucket({k: b"{}" for k in keys})
+    whole, few = sel.Round(bucket, "v9", "sentas"), sel.Round(bucket, "v9", "sentas", shas=[A, B])
+    names = ("finished", "slabs", "studio", "noslab", "logo_step", "checked", "held", "judged", "cleaned")
+    for name in names:
+        assert getattr(few, name) == getattr(whole, name) - {D} == {A, B}, name
+    for name in ("requested", "edited", "attempts"):
+        assert getattr(few, name) == {a for a in getattr(whole, name) if not a.startswith(D)}, name
+    assert few.redraw.complete == whole.redraw.complete - {D} and few.redraw.judged == whole.redraw.judged - {D}
+    assert few.redrawn == {A, B} and few.prefix == whole.prefix
+
+
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
     # the hosted edit leaves the straps: the cleaned copy is retouched like any photo
     from deploy import standardise_source as src

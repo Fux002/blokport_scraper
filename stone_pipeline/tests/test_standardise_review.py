@@ -82,7 +82,7 @@ def _bucket(**extra):
 @pytest.fixture(autouse=True)
 def _sheet(monkeypatch):
     """The product sheet's listings (tiles too) and the decisions applier's own reading of them; no lock held."""
-    monkeypatch.setattr(rv, "sheet_listings", lambda s3: [ONE, TWO, TILE])
+    monkeypatch.setattr(rv, "sheet", lambda s3: ([ONE, TWO], [TILE]))
     monkeypatch.setattr(dec, "photo_listings", lambda s3: [ONE, TWO])
     monkeypatch.setattr(dec, "image_pipeline_off", lambda: set())
 
@@ -234,12 +234,12 @@ def _clicks(s3):
 def test_a_click_on_a_hidden_listing_s_fixable_photo_is_queued_through_the_one_writer(monkeypatch):
     _hidden_in_ledger(monkeypatch, ONE)
     written = []
-    monkeypatch.setattr(rv.decisions, "decide", lambda s3, docs, dry_run, say: written.append((docs, dry_run))
-                        or dec.plan(s3, docs, [ONE, TWO], set()))
+    monkeypatch.setattr(rv.decisions, "decide", lambda s3, docs, dry_run, say, sheet, narrow: written.append(
+        (docs, dry_run, sheet, narrow)) or dec.plan(s3, docs, sheet, set(), narrow=narrow))
     s3 = _bucket()
     assert rv.click(s3, "SEN-ONE", B, AT) == (200, {"sku": "SEN-ONE", "status": "queued"})
     doc = {"id": "one", "action": "clean", "source": "sentas", "sha": B, "at": AT}
-    assert written == [([doc], False)]                                          # applied once, under the lock
+    assert written == [([doc], False, [ONE, TWO], True)]    # applied once, under the lock, on the sheet read once
 
 
 def test_a_queued_click_is_the_record_the_photos_run_reads(monkeypatch):
@@ -315,6 +315,65 @@ def test_a_click_while_a_photos_run_holds_the_lock_is_409_naming_the_run(monkeyp
     s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "20261107T090000Z"}).encode()})
     code, body = rv.click(s3, "SEN-ONE", B, AT)
     assert (code, body["reason"], body["run_id"]) == (409, "run_active", "20261107T090000Z") and s3.written == []
+
+
+def test_a_click_never_lists_a_whole_run_folder(monkeypatch):
+    # review of #555: dev v2/zucchi holds 56,840 keys; a click reads only its listing's photos
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket()
+    listed = []
+    pages = s3.get_paginator
+
+    def paginator(name):
+        inner = pages(name)
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                listed.append(Prefix)
+                return inner.paginate(Bucket=Bucket, Prefix=Prefix)
+        return _Pages()
+    s3.get_paginator = paginator
+    assert rv.click(s3, "SEN-ONE", B, AT)[1]["status"] == "queued"
+    assert RUN not in listed and CLN not in listed and f"{ROOT}chosen/" not in listed
+
+
+def test_a_click_reads_only_its_listing_s_candidates_and_the_clicked_photo(monkeypatch):
+    # dev SEN-6978 has 114 photos: what the run judges (its first JUDGE_MAX_PER_LISTING) and the click are all a click asks
+    many = [f"{i:x}" * 64 for i in range(1, 7)]
+    listing = _listing("long", *many)
+    monkeypatch.setattr(rv, "sheet", lambda s3: ([ONE, TWO, listing], [TILE]))
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: [ONE, TWO, listing])
+    _hidden_in_ledger(monkeypatch, listing)
+    s3 = _bucket(**{f"{RUN}{s}.main.jpg": b"m" for s in many},
+                 **{f"{RUN}judged/{s}.json": _verdict("fail", "light_reflection") for s in many})
+    listed = []
+    pages = s3.get_paginator
+
+    def paginator(name):
+        inner = pages(name)
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                listed.append(Prefix)
+                return inner.paginate(Bucket=Bucket, Prefix=Prefix)
+        return _Pages()
+    s3.get_paginator = paginator
+    assert rv.click(s3, "SEN-LONG", many[5], AT)[1]["status"] == "queued"
+    read = {sha for sha in many if any(sha in prefix for prefix in listed)}
+    assert read == set(many[:C.JUDGE_MAX_PER_LISTING]) | {many[5]}
+
+
+def test_a_click_while_a_decisions_apply_holds_the_lock_says_so(monkeypatch):
+    _hidden_in_ledger(monkeypatch, ONE)
+
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "decisions-20261107T120000Z"}).encode()})
+    code, body = rv.click(s3, "SEN-ONE", B, AT)
+    assert code == 409 and "a decisions apply holds the lock" in body["error"] and "photos run" not in body["error"]
 
 
 def test_a_click_on_an_unknown_sku_is_404(monkeypatch):

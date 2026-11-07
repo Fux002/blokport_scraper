@@ -32,7 +32,6 @@ from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
-from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("photos.review")
 
@@ -53,9 +52,11 @@ def client():
     return boto3.client("s3", region_name=S3_REGION, config=aws_config())
 
 
-def sheet_listings(s3):
-    """Every listing of the product sheet (index.listings), tiles too: what a SKU names."""
-    return index.listings(*sheet_and_photos(s3))
+def sheet(s3):
+    """(photo listings, tile listings) of the product sheet, by the photo process's own split (standardise_run): the
+    photo listings are the ones decisions are about, a tile listing is rendered from its variety's slab stone."""
+    raw = sheet_and_photos(s3)
+    return proc.photo_listings(*raw), proc.tile_listings(*raw)
 
 
 # --- what the ledger hides --------------------------------------------------------------------------------------------
@@ -217,20 +218,36 @@ def _say(line):
     log.info("photo decision", extra={"extra_fields": {"line": line}})
 
 
-def _decide(s3, doc):
-    """(Plan, None) of the one decision applied, or (None, the refusal): 422 when invalid, 409 while a run holds the
-    lock."""
+def run_active(s3, exc):
+    """The 409 while the run lock is held, naming its holder: a decisions apply ("decisions-...") or a photos run."""
+    holder = proc.lock_holder(s3)
+    who = "a decisions apply" if (holder or "").startswith("decisions-") else "a photos run"
+    return 409, {"reason": "run_active", "run_id": holder,
+                 "error": f"{who} holds the lock ({holder or exc}): try again after it"}
+
+
+def _decide(s3, doc, photo_listings, dry_run=False):
+    """(Plan, None) of the one decision planned, and unless dry_run applied, on the sheet already read and the narrow
+    read (decisions.plan), or (None, the refusal): 422 when invalid, 409 while the lock is held."""
     try:
-        return decisions.decide(s3, [doc], dry_run=False, say=_say), None
+        return decisions.decide(s3, [doc], dry_run=dry_run, say=_say, sheet=photo_listings, narrow=True), None
     except decisions.InvalidDecisions as exc:
         return None, (422, {"reason": "refused", "error": str(exc)})
     except proc.RunActive as exc:
-        return None, (409, {"reason": "run_active", "run_id": proc.lock_holder(s3),
-                            "error": f"a photos run holds the lock ({exc}): try again after it"})
+        return None, run_active(s3, exc)
 
 
 def _listing(s3, sku):
-    return next((l for l in sheet_listings(s3) if l["sku"] == sku), None)
+    """(the listing with this SKU or None, the sheet's photo listings): the sheet read once per request."""
+    photo_listings, tiles = sheet(s3)
+    return next((l for l in photo_listings + tiles if l["sku"] == sku), None), photo_listings
+
+
+def _has_choice(s3, key):
+    """Whether this listing has a choice record (<root>chosen/<listing>.json): its own key listed, nothing read."""
+    wanted = f"{chosen_prefix(ROOT)}{key}.json"
+    return any(o["Key"] == wanted for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=wanted)
+               for o in page.get("Contents", []))
 
 
 def _unknown(sku):
@@ -245,22 +262,24 @@ def click(s3, sku, sha, at):
     else the decisions applier, once, inside the run lock: 422 with its reason (a tile, a source with the process off,
     an excluded or conflict photo, one a cleaned copy cannot fix, an older decision), 409 run_active while a photos run
     holds the lock, or 200 queued."""
-    listing = _listing(s3, sku)
+    listing, photo_listings = _listing(s3, sku)
     if listing is None:
         return _unknown(sku)
     doc = {"id": listing["key"], "action": "clean", "source": listing["source"], "sha": sha, "at": at}
     if sku not in hidden_products():
-        try:
-            decisions.decide(s3, [doc], dry_run=True, say=lambda line: None)
-        except decisions.InvalidDecisions as exc:
-            return 422, {"reason": "refused", "error": str(exc)}
+        _, refused = _decide(s3, doc, photo_listings, dry_run=True)
+        if refused is not None and refused[0] == 422:
+            return refused
         return 409, {"reason": "not_hidden", "error": f"{sku} is not hidden for want of a photo"}
     src = listing["source"]
-    if listing["key"] in chosen_listings(s3):
+    if _has_choice(s3, listing["key"]):
         return 409, {"reason": "chosen_not_linked", "error": f"{sku} has a chosen photo; the next relink shows it"}
-    rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), [src])
     conflicts = read_conflicts(s3, {src})
     blocked = excluded() | {s for s in listing["photos"] if (src, s) in conflicts}
+    # what the run folders hold of the photos the two states ask about (select.Round shas), never a whole folder: the
+    # listing's candidates (listing_state judges only those) and the clicked photo (click_state)
+    asked = set(select.candidates(listing, blocked)) | {sha}
+    rounds = [(tag, {src: select.Round(s3, tag, src, asked)}) for tag in (C.RUN_TAG, C.CLEAN_TAG)]
     state = select.listing_state(s3, rounds, listing, blocked, None)    # a clean lifts the owner's choice (decisions)
     record = {"sku": sku, "listing": listing["key"], "source": src, "sha": sha, "at": at}
     found = select.click_state(s3, rounds, listing, blocked, record, state)
@@ -270,15 +289,16 @@ def click(s3, sku, sha, at):
         return 200, {"sku": sku, "status": "already_cleaned"}
     if found == ("blocked", select.NO_MODEL_LEFT):
         return 200, {"sku": sku, "status": "nothing_left_to_try"}
-    _, refused = _decide(s3, doc)
+    _, refused = _decide(s3, doc, photo_listings)
     return refused or (200, {"sku": sku, "status": QUEUED})
 
 
 def withdraw(s3, sku, at):
     """The owner's click on the listing with this SKU withdrawn, through the decisions applier: (status, body). 200
     withdrawn, or no_click when none is stored; 422 when older than the decision stored; 409 run_active."""
-    listing = _listing(s3, sku)
+    listing, photo_listings = _listing(s3, sku)
     if listing is None:
         return _unknown(sku)
-    plan, refused = _decide(s3, {"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at})
+    plan, refused = _decide(s3, {"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at},
+                            photo_listings)
     return refused or (200, {"sku": sku, "status": "withdrawn" if plan.deletions else "no_click"})

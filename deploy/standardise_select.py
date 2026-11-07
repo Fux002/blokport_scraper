@@ -170,15 +170,28 @@ def read_candidates(client, out):
     return Candidates(out, [o["Key"][len(out):] for page in pages for o in page.get("Contents", [])])
 
 
+# Where a run folder keeps what it holds of one photo: <sha>.<view> at its top, then each folder by <sha>. Round reads
+# exactly these, so a Round of a few photos (shas) lists each of them here and nothing else.
+ROUND_FOLDERS = ("", "noslab/", LOGO_STEP, C.OUTLINE_CHECKED, "held/", "judged/", "cleaned/", "attempts/", REDRAW,
+                 f"{REDRAW}judged/")
+
+
 class Round(_Locks):
     """What one run tag holds for one source, its keys listed once: finished photos, the whole slabs among them, held
     ones, verdicts, cleaned copies and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted
     request), and the candidates of an outline recheck (redraw)."""
 
-    def __init__(self, client, tag, src):
+    def __init__(self, client, tag, src, shas=None):
+        """shas: read only what the folder holds of these photos (their keys under each of ROUND_FOLDERS, listed a few
+        at a time), the same sets the whole folder gives restricted to them: a check about one listing never lists the
+        source's whole run folder."""
         self.prefix = round_prefix(tag, src)
-        keys = [o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=self.prefix)
-                for o in page.get("Contents", [])]
+        prefixes = [self.prefix] if shas is None else [f"{self.prefix}{folder}{sha}" for sha in sorted(set(shas))
+                                                       for folder in ROUND_FOLDERS]
+        listed = pool_map(C.STORE_WORKERS, lambda prefix: [
+            o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+            for o in page.get("Contents", [])], prefixes)
+        keys = [k for part in listed for k in part]
         self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
