@@ -349,7 +349,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_stays_exactly_as_published
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D), _listing("partner", D)])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
-        [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
+        [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}))
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None,
                  close_only=close_only)
     assert {k: v for k, v in s3.objects.items() if k.startswith(("dev/products/", "prod/products/"))} == published
@@ -367,7 +367,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: {"changed": False})
     import time
@@ -394,7 +394,7 @@ def test_a_listing_whose_own_choice_record_cannot_be_read_is_left_as_published_a
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     given = {}
     monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: (
@@ -632,7 +632,7 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": []}
+        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     import time
     summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -641,6 +641,42 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
     assert summary["published"]["changed"] and summary["month_spent_usd"] == 1.0
     stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
     assert stored["pending_listings"] == ["new"] and stored["problem_list"] == ["sentas d: no result after the GPU round"]
+
+
+def _reviewed_process(monkeypatch, close_only=False):
+    """One run of the process over listing "new" (hidden: its row from the report) and a tile listing publish could not
+    render; what publish saw of the review list when it ran, and the bucket."""
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png(),
+              imagestore.conflicts_key("sentas"): b"{}"})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("done", A), _listing("new", D)])
+    monkeypatch.setattr(proc, "tile_listings", lambda sheet, photos: [_listing("tile-1", fmt="tile")])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "close_round", lambda *a: ([], {"close_only": True}, {}))
+    row = {"listing": "new", "source": "sentas", "format": "slab", "reason": "pending", "why": None, "click": None,
+           "photos": []}
+    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
+        [], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": [], "review": {"SEN-NEW": row}}))
+    seen = []
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: seen.append(
+        f"{ROOT}review.json" in s3.objects) or {"changed": False, "tiles_hidden": {"tile-1": "no tile of this size fits"}})
+    import time
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=close_only)
+    return s3, seen, row
+
+
+def test_the_review_list_is_written_after_publish_with_the_hidden_tiles_and_carries_no_url(monkeypatch):
+    s3, seen, row = _reviewed_process(monkeypatch)
+    body = s3.objects[f"{ROOT}{C.REVIEW_FILE}"]["Body"]
+    assert seen == [False] and json.loads(body) == {"SEN-NEW": row, "SEN-TILE-1": {
+        "listing": "tile-1", "source": "sentas", "format": "tile", "reason": "tile_no_stone",
+        "why": "no tile of this size fits", "click": None, "photos": []}}
+    assert b"http" not in body and body == json.dumps(json.loads(body), sort_keys=True).encode()   # same run, same bytes
+
+
+def test_a_close_only_run_leaves_the_review_list_as_it_is(monkeypatch):
+    s3, _, _ = _reviewed_process(monkeypatch, close_only=True)
+    assert f"{ROOT}{C.REVIEW_FILE}" not in s3.objects
 
 
 def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_is_rechecked(monkeypatch):
@@ -654,7 +690,7 @@ def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(listings=sel.listings, todo=sel.gpu_todo())
-        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -673,7 +709,7 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(owner=sel.owner, conflicts=sel.conflicts)
-        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish",
                         lambda s3, root, sheet, photos, say, assigned, held: handed.update(assigned) or {"changed": False})
@@ -697,7 +733,7 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
         with pytest.raises(select.Halted, match="work window"):
             spend.reserve(0.01)
         seen.append(1)
-        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 0.05, say=lambda m: None)
     assert seen == [1]
@@ -728,7 +764,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     select.judge_all(sel, spend, float("inf"))
     select.clean_all(sel, sel.plans()[0], spend, float("inf"))
     assert asked == [b"mb"] and spend.spent == pytest.approx(0.02)
-    result = select.report(sel, {})
+    result = select.report(sel, {}, {})
     assert [c["sha"] for c in result["chosen"]] == [B]
     assert json.loads(s3.objects[f"{ROOT}chosen/one.json"]["Body"])["sha"] == B
     assert picked() == []                                           # a whole slab now: never picked again
@@ -749,7 +785,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
     assert select.clean_all(sel, sel.plans()[0], spend, float("inf")) == ([], False)
     s3.written.clear()
-    assert [c["sha"] for c in select.report(sel, {})["chosen"]] == [A]
+    assert [c["sha"] for c in select.report(sel, {}, {})["chosen"]] == [A]
     assert spend.spent == 0 and s3.written == [f"{ROOT}tracked.csv"]   # the kept record is not written again
 
 
@@ -769,7 +805,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
     s3.written.clear()
-    assert [c["sha"] for c in select.report(sel, {})["chosen"]] == [A] and spend.spent == 0
+    assert [c["sha"] for c in select.report(sel, {}, {})["chosen"]] == [A] and spend.spent == 0
     assert f"{ROOT}chosen/one.json" not in s3.written                # the same choice: its record stays
     out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held=frozenset())
     assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects

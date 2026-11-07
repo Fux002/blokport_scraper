@@ -18,7 +18,8 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   5. GPU: the cleaned copies, through every step a scraped photo takes, under STANDARDISE.CLEAN_TAG
   6. judge: the cleaned copies' results
   7. report: one choice record per listing, tracked.csv (the review list) and summary.json, under the clean tag
-  8. publish: the published folder made to match the choice records (deploy.standardise_publish)
+  8. publish: the published folder made to match the choice records (deploy.standardise_publish), then review.json (the
+     hidden-listings page's list: the report's rows and the tiles publish could not render; a close-only run leaves it)
   9. relink: when the folder changed, produce --stage republish, so the new photos are linked in this same run
 With SCRAPER_STANDARDISE_CLOSE_ONLY on (the runner sets it for a close_only photos run), steps 1 to 7 are one close-up
 round instead: every chosen photo's close-up not made yet under the current rule made again from the photo its run
@@ -246,6 +247,12 @@ def photo_listings(sheet, photos):
     return [l for l in index.listings(sheet, photos) if l["format"] != C.TILE_FORMAT]
 
 
+def tile_listings(sheet, photos):
+    """The sheet's tile listings (index.listings): publish renders them from their variety's slab stone, and the review
+    list names those it could not render (tiles_hidden)."""
+    return [l for l in index.listings(sheet, photos) if l["format"] == C.TILE_FORMAT]
+
+
 def removed_listings(s3):
     """The SKUs of the listings the owner removed (deploy.standardise_decisions)."""
     keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.owner_removed_prefix())
@@ -425,16 +432,17 @@ def admit(sel, plans, left, cap_left, window):
 
 def clean_step(sel, plans, spend, clean, deadline, window):
     """The clean step over `plans`: admitted (admit), then paid (select.clean_all on the cleaning cap). (problems,
-    stopped, the plans paid, the clicks that wait): what could not be paid or read, and a line per send that waits (a
-    click by its listing, the marks counted); {listing key: why} of the clicks whose own new edit waits, for the review
-    list."""
+    stopped, the plans paid, the clicks that wait, the marks that wait): what could not be paid or read, and a line per
+    send that waits (a click by its listing, the marks counted); {listing key: why} of the clicks whose own new edit
+    waits and {listing key: why} of the other new edits that wait (the marks), each for the review list."""
     goes, waits = admit(sel, plans, spend.left(), clean.left(), window)
     clicks = {plan.listing["key"] for plan in plans if plan.sends_click}   # a wait of the click's own new edit
     problems = [f"{key}: the owner's click waits: {why}" for key, why in waits.items() if key in clicks]
     if marks := [why for key, why in waits.items() if key not in clicks]:
         problems += [f"the marks of {marks.count(why)} listings wait: {why}" for why in dict.fromkeys(marks)]
     found, stopped = hosted(lambda s, cap, d: select.clean_all(s, goes, cap, d), sel, clean, deadline)
-    return problems + found, stopped, goes, {key: why for key, why in waits.items() if key in clicks}
+    return (problems + found, stopped, goes, {key: why for key, why in waits.items() if key in clicks},
+            {key: why for key, why in waits.items() if key not in clicks})
 
 
 def owed_copy(sel, listing):
@@ -473,15 +481,17 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     run of either kind finishes it at its start (select.finish, in process) before anything is published."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
     problems = []
-    # no cleaning cap: no click can be paid, so every ready one says what it waits for
+    # no cleaning cap: no edit can be paid, so every ready click and every mark says what it waits for
     waiting = {} if clean is not None else {l["key"]: NO_CAP for l in sel.listings if l["sku"] in sel.clicks}
+    marks_waiting = {} if clean is not None else {l["key"]: NO_CAP for l in sel.listings}
 
     def cleaning(work):
         plans, failures = work.plans()
         if work is not sel:                            # the clicks' step: only the owner's clicks
             plans = [plan for plan in plans if plan.click]
-        found, stopped, goes, waits = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
+        found, stopped, goes, waits, marks = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
         waiting.update(waits)
+        marks_waiting.update(marks)
         return [f"{key}: {why}" for key, why in failures] + found, stopped, goes
     clicked = sel.only([l for l in sel.listings if l["sku"] in sel.clicks], sel.clicks)
     finishing = []                                     # the clicks' step finishes only what it admitted and owes
@@ -512,7 +522,7 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     if not ended:
         through(then, deadline, clock, problems)
     problems = list(dict.fromkeys(problems))           # a click waiting at both clean steps is named once
-    result = select.report(sel, waiting)
+    result = select.report(sel, waiting, marks_waiting)
     by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
@@ -569,7 +579,7 @@ def unreadable_problems(frozen, decisions):
 def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
     """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one of `frozen`, whose
     choice record cannot be read: the owner's decision is unknown, so it is left exactly as published, its photos'
-    pending redraws included), work on them and report: (problems, counts, kept)."""
+    pending redraws included), work on them and report: (problems, counts, kept, {SKU: its review row})."""
     removed, records = removed_listings(s3), decisions.chosen
     workable = [l for l in listings if l not in frozen]
     found = todo(workable, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
@@ -583,7 +593,7 @@ def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
     problems, result = run(batch, sel, spend, clean, run_id, deadline, say)
     counts = {"listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings)}
-    return problems, counts, {"pending_listings": result["pending"]}
+    return problems, counts, {"pending_listings": result["pending"]}, result["review"]
 
 
 def close_round(s3, batch, spend, run_id, deadline, root, say, frozen):
@@ -636,11 +646,12 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     closing.daemon = True
     closing.start()
     try:
-        if close_only:
+        if close_only:                                 # a close-up round reviews no listing: the review list stays
             problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say, {l["key"] for l in frozen})
+            review = None
         else:
-            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions,
-                                                  frozen)
+            problems, counts, kept, review = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
+                                                          decisions, frozen)
     finally:
         closing.cancel()
     problems += conflicted + unreadable_problems(frozen, decisions)
@@ -661,7 +672,21 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
                   Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
                                   sort_keys=True).encode(),
                   ContentType="application/json")
+    if review is not None:
+        write_review(s3, root, review, hidden, tile_listings(sheet, photos))
     return summary
+
+
+def write_review(s3, root, review, tiles_hidden, tiles):
+    """The review list (review.json, after publish: only publish knows the tiles it could not render): this run's rows
+    (select.review_row) and a row per hidden tile (tile_no_stone, publish's why), by SKU, the same bytes for the same
+    rows."""
+    by_key = {l["key"]: l for l in tiles}
+    rows = {**review, **{by_key[key]["sku"]: {"listing": key, "source": by_key[key]["source"], "format": C.TILE_FORMAT,
+                                              "reason": "tile_no_stone", "why": why, "click": None, "photos": []}
+                         for key, why in tiles_hidden.items()}}
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{C.REVIEW_FILE}", Body=json.dumps(rows, sort_keys=True).encode(),
+                  ContentType="application/json")
 
 
 def clean_summary(clean):

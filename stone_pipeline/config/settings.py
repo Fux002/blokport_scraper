@@ -1032,6 +1032,13 @@ class STANDARDISE:
     # The owner's click to clean one photo of a hidden listing: <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this>/<SKU>.json
     # (percent-encoded) = {sku, listing, source, sha, at}. Only the intent: the next photos run cleans it within the cap.
     CLICKS_DIR = "clicks"
+    # The review list of the hidden-listings page: <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this> = {SKU: row} of the listings a
+    # full photos run left without a good photo and the tiles publish could not render (deploy.standardise_select.
+    # review_row); it carries no URL. The config API serves it joined with the ledger (GET /config/v1/photos/hidden),
+    # each photo's images as presigned GET URLs made afresh on every request, valid this long (Blokport's page fetches
+    # the list again when an image no longer loads).
+    REVIEW_FILE = "review.json"
+    REVIEW_URL_TTL_SECONDS = 900
     # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
     # the review list gives for it.
     CONFLICT_REASON = "photo_conflict"
