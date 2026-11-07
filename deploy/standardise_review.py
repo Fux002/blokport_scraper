@@ -253,11 +253,11 @@ def _say(line):
     log.info("photo decision", extra={"extra_fields": {"line": line}})
 
 
-def _decide(s3, doc):
-    """(Plan, None) of the one decision applied, or (None, the refusal): 422 when invalid, 409 while a run holds the
-    lock."""
+def _decide(s3, docs, dry_run=False, say=_say):
+    """(Plan, None) of the decisions planned (and unless dry_run applied: decisions.decide), or (None, the refusal): 422
+    when one is invalid, 409 while a photos run holds the lock (naming its run)."""
     try:
-        return decisions.decide(s3, [doc], dry_run=False, say=_say), None
+        return decisions.decide(s3, docs, dry_run=dry_run, say=say), None
     except decisions.InvalidDecisions as exc:
         return None, (422, {"reason": "refused", "error": str(exc)})
     except proc.RunActive as exc:
@@ -307,7 +307,7 @@ def click(s3, sku, sha, at):
         return 200, {"sku": sku, "status": "already_cleaned"}
     if found == ("blocked", select.NO_MODEL_LEFT):
         return 200, {"sku": sku, "status": "nothing_left_to_try"}
-    _, refused = _decide(s3, doc)
+    _, refused = _decide(s3, [doc])
     return refused or (200, {"sku": sku, "status": QUEUED})
 
 
@@ -317,5 +317,19 @@ def withdraw(s3, sku, at):
     listing = _listing(s3, sku)
     if listing is None:
         return _unknown(sku)
-    plan, refused = _decide(s3, {"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at})
+    plan, refused = _decide(s3, [{"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at}])
     return refused or (200, {"sku": sku, "status": "withdrawn" if plan.deletions else "no_click"})
+
+
+# --- POST /photos/decisions --------------------------------------------------------------------------------------------
+def apply_decisions(s3, docs, dry_run):
+    """The page's export (decision documents) planned, and unless dry_run applied, by the decisions applier: (status,
+    body). 200 {dry_run, applied, owner_choices, removals, cleans, replaced (records a later decision replaces), lines
+    (the plan as the CLI prints it)}; 422 with the applier's reasons (nothing written); 409 run_active."""
+    lines = []
+    plan, refused = _decide(s3, docs, dry_run=dry_run, say=lines.append)
+    if refused:
+        return refused
+    return 200, {"dry_run": dry_run, "applied": not dry_run, "owner_choices": len(plan.owner),
+                 "removals": len(plan.removals), "cleans": len(plan.clicks), "replaced": len(plan.deletions),
+                 "lines": lines}

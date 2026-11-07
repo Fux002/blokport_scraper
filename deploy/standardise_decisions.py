@@ -98,6 +98,12 @@ def read_decisions(text):
         docs = json.loads(text)
     except json.JSONDecodeError as exc:
         raise InvalidDecisions(f"the export is not JSON: {exc}") from exc
+    return check_docs(docs)
+
+
+def check_docs(docs):
+    """The export's documents when they are a JSON array of objects (the config API's POST /photos/decisions body);
+    InvalidDecisions otherwise."""
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         raise InvalidDecisions("the export must be a JSON array of decision objects")
     return docs
