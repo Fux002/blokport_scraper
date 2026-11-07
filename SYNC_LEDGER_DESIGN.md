@@ -765,11 +765,12 @@ the scraper records acked ids.
 When a Medusa environment is re-seeded, every internal id changes but every Key
 survives. The ledger absorbs this without a manual re-pin.
 
-- `RunContext.backend_id_fingerprint` is checked at startup. This is a read-only
-  call to Medusa (one of the two reads the scraper makes, principle 1.4, fixes M2),
-  or it can be derived from the acked ids already in the ledger to avoid any live
-  read. On a mismatch the scraper does not abort: it marks all `medusa_id` columns
-  in that env's ledger stale and the affected entities `needs_resync`.
+- The ledger's `backend_id_fingerprint` (ledger_meta) is a per-deployment brand + env
+  hash (`writethrough.backend_fingerprint`), computed locally with NO Medusa read, and
+  checked when the ledger is opened: a restored ledger whose fingerprint differs fails
+  loud (a wrong-brand snapshot, or a re-seed). (A separate startup check of the backend
+  id SET against a pinned settings value once lived in reference-data `check_fingerprint`;
+  it was a no-op -- nothing was ever pinned -- and has been removed.)
 - The next pull re-resolves every id as Medusa applies each entity by Key and
   canonical name, and the acks repopulate the ledger. Keys carry the identity
   across the re-seed, so this is automatic.
@@ -1082,12 +1083,12 @@ stated, so on the first delta they could be re-created or orphaned. State that
 products and inventory are also seeded by SKU at bootstrap, starting `synced` with
 their real Medusa ids.
 
-**M2. The cross-env fingerprint guard contradicts "the scraper never reads Medusa."**
-Sections 1.4 and 8.5 say the only read from Medusa is the optional attribute refresh,
-but the cross-env guard (2) and the re-seed check (9) compare against "the live
-backend fingerprint" at startup, which requires reading Medusa's id set. Reconcile:
-either acknowledge the fingerprint read as a second read-only Medusa call, or derive
-the fingerprint from the acked ids already in the ledger so no live read is needed.
+**M2. RESOLVED. The fingerprint needs no Medusa read.** The only fingerprint today is the
+ledger's `backend_id_fingerprint`, a local brand + env hash (`writethrough.backend_fingerprint`)
+stamped in `ledger_meta` and checked on open; it reads nothing from Medusa. The earlier
+backend-id-SET check (reference-data `check_fingerprint`), which would have needed Medusa's
+id set, was a no-op (nothing was ever pinned) and has been removed, so the contradiction no
+longer exists.
 
 **M3. `payload_hash` inputs are unspecified.** The whole dirty/synced decision rests
 on `payload_hash`, but the doc never lists the fields it covers. Omit a field Medusa

@@ -23,7 +23,7 @@ from typing import Any, Optional
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
-from stone_pipeline.config.settings import IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS, STANDARDISE
+from stone_pipeline.config.settings import SETTINGS, STANDARDISE
 from stone_pipeline.config.sources import SourceConfig, load_source
 from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod
@@ -36,7 +36,6 @@ from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import ReferenceData
-from stone_pipeline.reference.fingerprint import check_fingerprint
 from stone_pipeline.state.writeback import WriteBack
 from stone_pipeline.stages import (
     constants,
@@ -381,7 +380,6 @@ def _start(source: str, adapter: AdapterBase, acquired: Acquired, mode: OutputMo
     run_log.info(f"run start on {acquired.origin} ({acquired.frame.height} rows)")
 
     ref = loaders.load_all()
-    check_fingerprint(ref)                          # warns/raises on a reference drift; return unused
 
     manifest = Manifest(
         run_id=run_id,
@@ -921,15 +919,6 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
 def main(argv: Optional[list[str]] = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     target = argv[0] if argv else SETTINGS.spine_source
-    # Fail fast in production if the SALES CHANNEL is unset: it is a single per-env id with no fallback
-    # (settings returns "" in prod, never a dev id), and a blank sales channel emits channel-less =
-    # INVISIBLE products. company_id is NOT required here: it is set per-scraper (source_cfg.company_id,
-    # constants.py) and an empty one resolves by vendor name on Medusa's side, so a global company id is
-    # not needed for a valid prod run.
-    if IS_PRODUCTION and not SALES_CHANNEL_ID:
-        log.error("production run requires SCRAPER_SALES_CHANNEL_ID "
-                  "(refusing to emit channel-less, invisible products)")
-        return 1
     try:
         if target == "all":
             requested = expected_sources()

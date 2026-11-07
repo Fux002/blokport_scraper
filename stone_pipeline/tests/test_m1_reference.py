@@ -13,11 +13,6 @@ import pytest
 
 from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.reference import loaders
-from stone_pipeline.reference.fingerprint import (
-    FingerprintMismatch,
-    check_fingerprint,
-    compute_fingerprint,
-)
 
 
 @pytest.fixture(scope="module")
@@ -81,16 +76,6 @@ def test_6a_trace_reproduces_against_real_upload(ref):
     # can be re-seeded (fresh ids), so the variation hit-rate is informational here,
     # not asserted -- the id-resolution guarantee being tested is the attribute ids above.
     _ = variation_resolved
-
-
-def test_fingerprint_pins_then_detects_drift(ref):
-    live = compute_fingerprint(ref)
-    assert len(live) == 16
-    # empty pinned value => pin-on-first-run, no abort
-    assert check_fingerprint(ref, pinned="") == live
-    # a different pinned value => abort
-    with pytest.raises(FingerprintMismatch):
-        check_fingerprint(ref, pinned="deadbeefdeadbeef")
 
 
 def test_variety_identity_collapse_rules():
