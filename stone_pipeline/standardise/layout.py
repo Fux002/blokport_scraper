@@ -296,14 +296,6 @@ def enlarged(slabs, esr):
     return out
 
 
-def _cover(img, w, h):
-    """img scaled to cover a w x h frame, bottom-anchored (the floor stays at the bottom), centred across."""
-    s = max(w / img.shape[1], h / img.shape[0])
-    big = cv2.resize(img, (int(np.ceil(img.shape[1] * s)), int(np.ceil(img.shape[0] * s))), interpolation=cv2.INTER_LINEAR)
-    x = (big.shape[1] - w) // 2
-    return big[big.shape[0] - h:, x:x + w].copy()
-
-
 def _trim_side(lab, alpha, band):
     """alpha with what is not this stone cut from its left side (rotated to reach the others): per row, walking out
     from just inside the edge, the first pixel unlike the stone beside it starts what is cut. Along the rows the cut
