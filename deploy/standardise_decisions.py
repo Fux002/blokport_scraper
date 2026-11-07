@@ -51,17 +51,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import boto3
 
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (NoConflictSet, aws_config, chosen_prefix, click_record, clicks_prefix, excluded,
+from deploy.standardise_publish import (NoConflictSet, chosen_prefix, click_record, clicks_prefix, excluded,
                                        owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
                                        read_records, records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
-from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import PROCESS_RETRIES, aws_client
 from stone_pipeline.standardise import index
 
 # The page's document shape per action (its contract, not a setting): exactly these fields. A clean names no tag: the
@@ -537,7 +537,7 @@ def main() -> int:
     except (OSError, InvalidDecisions) as exc:
         print(f"ERROR: {exc}; nothing applied")
         return 2
-    s3 = boto3.client("s3", region_name=S3_REGION, config=aws_config())
+    s3 = aws_client("s3", config=PROCESS_RETRIES)
     print(f"==> {len(docs)} owner decisions from {path}")
     try:
         decide(s3, docs, dry)

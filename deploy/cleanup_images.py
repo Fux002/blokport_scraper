@@ -15,9 +15,9 @@ Called by the reset lifecycle only, never on a schedule.
 """
 from __future__ import annotations
 
-import boto3
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 # Subfolders under <env>/products/ that hold hosted PRODUCT images, counted each on their own; everything else under
 # products/ (the raw-root layout, the retired enhancer's enhanced/ and discarded/ markers) is swept as "other". The
@@ -40,7 +40,7 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
     if IS_PRODUCTION and S3_BUCKET == _DEV_S3_BUCKET:
         raise RuntimeError(
             f"production image wipe targeting the DEV bucket {_DEV_S3_BUCKET} -- refusing (set BLOKPORT_S3_BUCKET)")
-    client = client or boto3.client("s3", region_name=S3_REGION)
+    client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
     products_root = f"{ENV_SEGMENT}/products/"
     variations_root = f"{ENV_SEGMENT}/variations/"        # the protected sibling -- must never appear in a key
     counts: dict[str, int] = {}

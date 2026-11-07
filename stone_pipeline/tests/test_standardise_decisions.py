@@ -11,6 +11,7 @@ import io
 import json
 from contextlib import contextmanager
 
+import boto3
 import pytest
 from botocore.exceptions import ClientError
 
@@ -532,7 +533,7 @@ def _main(monkeypatch, tmp_path, decisions, dry="false", lock=None, env="product
         monkeypatch.delenv("SCRAPER_ENV", raising=False)
     else:
         monkeypatch.setenv("SCRAPER_ENV", env)
-    monkeypatch.setattr(dec.boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(dec, "photo_listings", lambda client: LISTINGS)
     held = []
 

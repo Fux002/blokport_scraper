@@ -27,7 +27,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
@@ -37,12 +36,6 @@ from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
 _MADE_FROM = "made-from"                     # the outline's S3 metadata: what its 3D slab was made from (made_from)
-
-
-def aws_config():
-    """The one client configuration of the photo process: a throttled AWS call is retried (botocore standard mode,
-    AWS_MAX_ATTEMPTS times), never fatal."""
-    return Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})
 
 
 def chosen_prefix(root):

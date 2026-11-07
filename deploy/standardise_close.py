@@ -31,14 +31,14 @@ import os
 import sys
 import uuid
 
-import boto3
 
 from deploy.standardise_publish import _objects, chosen_prefix, read_choices
 from deploy.standardise_source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
                                        passing_storage_error, read_slab, sheet_photos, slab_record_key, start,
                                        start_edits)
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import models, photo
 
 PROGRESS_EVERY = 25          # photos between progress lines
@@ -261,7 +261,7 @@ def main() -> int:
         return 2
     only = os.environ.get("ONLY_KEY", "").strip()
     job = os.environ.get("AWS_BATCH_JOB_ID", "").strip() or f"local-{uuid.uuid4()}"     # outside Batch: one job per run
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/"
     records = chosen(client, root)
     if not records:

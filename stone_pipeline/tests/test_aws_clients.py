@@ -206,7 +206,7 @@ def test_the_image_stage_clients_honour_the_profile(built, monkeypatch):
 @pytest.mark.parametrize("profile, expected", [(PROFILE, PROFILE), ("", None)])
 def test_the_staging_backend_client_honours_its_profile(built, profile, expected):
     from stone_pipeline.io import storage
-    storage.S3StorageBackend(bucket="b", region=S3_REGION, key_prefix="p", public_base="https://x/", profile=profile,
+    storage.S3StorageBackend(bucket="b", key_prefix="p", public_base="https://x/", profile=profile,
                              dry_run=False)._get_client()
     assert built == [_s3(DEFAULTS, expected)]
 
@@ -277,3 +277,44 @@ def test_the_readers_open_it_unbound(opened):
                  scrape_status.ledger_product_counts):
         _drive(call)
     assert seen == [_unbound(path)] * 7
+
+
+# --- the factory: each preset builds a real client configured as the inline Config it replaced (no network) -------
+def _effective(client):
+    c = client.meta.config
+    return (client.meta.region_name, c.retries, c.connect_timeout, c.read_timeout, c.max_pool_connections)
+
+
+@pytest.mark.parametrize("preset, inline", [
+    ("BOTOCORE_DEFAULTS", None),
+    ("PROCESS_RETRIES", {"retries": {"mode": "standard", "max_attempts": 10}}),
+    ("FAIL_FAST", {"connect_timeout": 3, "read_timeout": 10, "retries": {"max_attempts": 2}}),
+    ("BOUNDED", {"connect_timeout": 5, "read_timeout": 30, "retries": {"max_attempts": 3, "mode": "standard"}})])
+def test_each_preset_is_the_configuration_it_replaced(preset, inline):
+    from botocore.config import Config
+    from stone_pipeline.io import storage
+    before = boto3.client("s3", region_name=S3_REGION, config=None if inline is None else Config(**inline))
+    assert _effective(storage.aws_client("s3", config=getattr(storage, preset))) == _effective(before)
+
+
+def test_a_pooled_preset_keeps_its_retries_and_sizes_the_pool():
+    from botocore.config import Config
+    from stone_pipeline.config.settings import STANDARDISE
+    from stone_pipeline.io import storage
+    before = boto3.client("s3", region_name=S3_REGION, config=Config(
+        retries={"mode": "standard", "max_attempts": 10}).merge(Config(max_pool_connections=STANDARDISE.STORE_WORKERS)))
+    after = storage.aws_client("s3", config=storage.pooled(storage.PROCESS_RETRIES, STANDARDISE.STORE_WORKERS))
+    assert _effective(after) == _effective(before) and after.meta.config.max_pool_connections == 32
+
+
+def test_the_factory_never_shares_a_preset_with_the_client_it_builds():
+    # botocore keeps the options it is given; a client must never be able to change the preset the next one uses
+    from stone_pipeline.io import storage
+    storage.aws_client("s3", config=storage.PROCESS_RETRIES).meta.config.retries["max_attempts"] = 99
+    assert storage.PROCESS_RETRIES == {"retries": {"mode": "standard", "max_attempts": 10}}
+
+
+def test_the_config_is_a_choice_every_caller_states():
+    from stone_pipeline.io import storage
+    with pytest.raises(TypeError):
+        storage.aws_client("s3")                                                # config is required, by keyword

@@ -8,6 +8,7 @@ import io
 import json
 import sqlite3
 
+import boto3
 import pytest
 
 from deploy import mark_logo_step_results as m
@@ -114,7 +115,7 @@ def test_every_run_tag_result_of_the_marked_sources_is_marked_once(bucket):
 def test_main_prints_the_count_and_writes_nothing_on_a_dry_run(bucket, monkeypatch, capsys):
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("CONFIG_DB_SNAPSHOTS", "prod-bucket/production/scraper/config/config.db@v1")
-    monkeypatch.setattr(m.boto3, "client", lambda *a, **k: bucket)
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: bucket)
     assert m.main() == 0
     assert "would mark (DRY_RUN) 4 results of ['varsha']" in capsys.readouterr().out
     assert bucket.written == []

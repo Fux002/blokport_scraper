@@ -37,10 +37,10 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-import boto3
 
 from deploy.standardise_source import LOGO_STEP, logo_step_key, round_prefix
-from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.ledger import snapshot
 
 REASON = ("made with the retired logo step (2026-11-02): never completed and its close-up never made again without it; "
@@ -118,7 +118,7 @@ def mark(client, sources, write) -> dict[str, list[str]]:
 
 def main() -> int:
     write = not dry_run()
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     sources = evidence(client)
     marked = mark(client, sources, write)
     for src, shas in marked.items():

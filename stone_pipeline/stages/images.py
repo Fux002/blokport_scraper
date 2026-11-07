@@ -70,7 +70,7 @@ def _build_backend(cfg) -> Optional[storage.StorageBackend]:
                 "production run targeting the DEV S3 bucket -- refusing to write/stamp prod images "
                 f"into {_DEV_S3_BUCKET}. Set BLOKPORT_S3_BUCKET to the prod bucket.")
         return storage.S3StorageBackend(
-            bucket=s3.bucket, region=s3.region, key_prefix=s3.staging_prefix,
+            bucket=s3.bucket, key_prefix=s3.staging_prefix,
             public_base=cfg.public_base, profile=s3.credentials_profile, dry_run=s3.dry_run,
         )
     return None  # passthrough
@@ -154,11 +154,8 @@ def _list_etags(prefix: str) -> dict[str, str]:
 
 def _list_objects(prefix: str) -> dict[str, str]:
     """{key: ETag} under an S3 prefix. Raises on any S3 failure: the callers decide the policy."""
-    import boto3
-
     s3 = SETTINGS.s3
-    client = boto3.Session(profile_name=s3.credentials_profile or None,
-                           region_name=s3.region).client("s3")
+    client = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS, profile=s3.credentials_profile)
     return {obj["Key"]: obj["ETag"].strip('"')
             for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix)
             for obj in page.get("Contents", [])}
@@ -191,9 +188,8 @@ def _readonly_manifest() -> dict[str, str]:
     supplier url. Best-effort: {} if S3/boto3 is unreachable (then source urls are
     kept so a fully-offline run still works)."""
     try:
-        import boto3
         s3 = SETTINGS.s3
-        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+        client = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS, profile=s3.credentials_profile)
         obj = client.get_object(Bucket=s3.bucket, Key=imagestore.MANIFEST_KEY)
         data = json.loads(obj["Body"].read().decode("utf-8"))
         return data if isinstance(data, dict) else {}
@@ -451,10 +447,8 @@ def _load_assigned(cfg) -> Optional[dict[tuple[str, str], set[str]]]:
 
 def _put_object(key: str, body: bytes) -> None:
     """Write one JSON object. Raises on any S3 failure: the callers decide the policy."""
-    import boto3
-
     s3 = SETTINGS.s3
-    client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    client = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS, profile=s3.credentials_profile)
     client.put_object(Bucket=s3.bucket, Key=key, Body=body, ContentType="application/json")
 
 
@@ -470,10 +464,8 @@ def _stored_object(key: str) -> Optional[bytes]:
 
 def _get_object(key: str) -> bytes:
     """One object's bytes. Raises on any S3 failure: the callers decide the policy."""
-    import boto3
-
     s3 = SETTINGS.s3
-    client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    client = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS, profile=s3.credentials_profile)
     return client.get_object(Bucket=s3.bucket, Key=key)["Body"].read()
 
 

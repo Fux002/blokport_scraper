@@ -156,6 +156,15 @@ if not _S3_BUCKET_ENV and not _is_blokport_dev():
         "SCRAPER_S3_BUCKET to this brand's own bucket.")
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
+# The AWS clients' configurations (io/storage.aws_client presets). BOUNDED: the image and catalog tools, timed and
+# retried so a network stall cannot hang a build. FAIL_FAST: the ledger snapshot, whose stop-path save must not burn
+# the ECS stop timeout on a hung call. The photo process's retries are STANDARDISE.AWS_MAX_ATTEMPTS.
+AWS_BOUNDED_CONNECT_SECONDS = 5
+AWS_BOUNDED_READ_SECONDS = 30
+AWS_BOUNDED_MAX_ATTEMPTS = 3
+AWS_FAIL_FAST_CONNECT_SECONDS = 3
+AWS_FAIL_FAST_READ_SECONDS = 10
+AWS_FAIL_FAST_MAX_ATTEMPTS = 2
 
 # The config runner's ceiling on one run: it kills a run past it as wedged (Terraform sets 4 h on the service). The
 # photo process fits its work window inside it and treats a run lock not refreshed for this long as a killed run's.

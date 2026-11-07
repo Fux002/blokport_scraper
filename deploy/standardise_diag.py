@@ -18,13 +18,13 @@ import re
 import sys
 from contextlib import contextmanager
 
-import boto3
 import cv2
 import numpy as np
 
 from deploy import standardise_source as source
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import marks, models, outline, photo
 
 # The inner steps of find_slabs whose calls are recorded: (module, name). find_slabs looks each up at call time.
@@ -185,7 +185,7 @@ def main() -> int:
     if not src or not os.environ.get("ONLY_KEY", "").strip():
         print("ERROR: SRC and ONLY_KEY are required; aborting")
         return 2
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     wanted = source.listed_shas(client)
     keys = source.only(source.scraped_keys(client, src), wanted)
     missing = sorted(set(wanted) - {imagestore.sha_from_url(k) for k in keys})

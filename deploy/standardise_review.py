@@ -22,19 +22,18 @@ import threading
 from collections import Counter
 from datetime import datetime, timezone
 
-import boto3
-from botocore.config import Config
 
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import NoConflictSet, aws_config, chosen_prefix, pool_map, read_conflicts, read_records
+from deploy.standardise_publish import NoConflictSet, chosen_prefix, pool_map, read_conflicts, read_records
 from deploy.fetch_inputs import fetch_attributes
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config import settings
-from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import PROCESS_RETRIES, aws_client, pooled
 
 log = logfmt.get_logger("photos.review")
 
@@ -53,8 +52,7 @@ class Unavailable(RuntimeError):
 def client():
     """The photo routes' S3 client: the process's configuration, with a connection per worker (STORE_WORKERS reads at
     once; botocore's default pool of 10 made them queue and reconnect)."""
-    return boto3.client("s3", region_name=S3_REGION,
-                        config=aws_config().merge(Config(max_pool_connections=C.STORE_WORKERS)))
+    return aws_client("s3", config=pooled(PROCESS_RETRIES, C.STORE_WORKERS))
 
 
 _SHEET = {}                                            # {"key", "value"}: the sheet as last parsed (sheet)
