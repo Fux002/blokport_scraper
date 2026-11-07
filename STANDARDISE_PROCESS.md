@@ -588,7 +588,7 @@ source, sha, tag, at}`, the fields per action below) is applied with `python -m 
 (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`). It prints the environment and bucket
 first. It checks every decision before writing anything: the listing is on the sheet; the action is known with exactly
 the page's fields; `at` is an ISO UTC timestamp; the source is the listing's; the photo is one of the listing's and not
-excluded; the tag's result exists; for a clean, the photo is no conflict photo and the photos run would use the click
+excluded; the tag's result exists; for a clean, the source's image pipeline is on, the photo is no conflict photo and the photos run would use the click
 (`select.click_problem`: its result failed the judge only for what an edit fixes, or a hold an edit fixes); and the
 decision is not older than the one already stored for the listing (its choice, removal or click), so an old export
 applied again never undoes a later decision. A stored decision of the listing that cannot be read (its choice, removal
@@ -630,6 +630,34 @@ the listing's SKU: a variety decided later re-binds the product and moves its ha
   listing with an owner-chosen photo takes that photo down: the next photos run publishes the listing again only when
   the cleaned copy passes (or another of its results passes the judge), and until then it is hidden by the no_photo
   rule. A listing whose photo already passes is not cleaned: the click waits, unpaid, until the listing is worked again.
+- **withdraw**: the listing's click file goes, nothing else (the page's "withdraw" on a click); a listing without a click
+  is left as it is. Fields `{id, action: "withdraw", source, at}`; refused when older than the decision stored.
+
+The config API's photo routes (below) go through the same applier (`standardise_decisions.decide`), one decision at a
+time, so a click from the page and one from an export are checked and written the one way.
+
+## The hidden-listings page (config API)
+
+A full photos run writes `<CLEAN_TAG>/review.json` after publish: `{SKU: row}` of each listing it left without a good
+photo and each tile publish could not render (`select.review_row`, `run.write_review`). A close-only run leaves it.
+It carries no URL. The config API serves it under `/config/v1/photos` (`deploy.standardise_review`):
+
+- `GET /photos/hidden`: `{"rows": [...]}`, one row per listing the ledger hides (inventory reason `no_photo`), by source
+  then listing. Its reason is, in order: `owner_removed` (a removal record), `chosen_not_linked` (a choice record: the
+  next relink shows it), the run's row, else `not_worked_yet`. A run's row says `pending`, `excluded`,
+  `photo_conflict`, `clean_failed`, `not_fixable`, `awaiting_auto` (with `why`, its marks' wait) or `awaiting_click`;
+  a tile's `tile_no_stone`. The row's click is the clicks store's: the run's state while it is the same click, `queued`
+  once clicked since. Each photo carries `clickable` and `urls` (`original`, `result`, `cleaned`): presigned GET URLs made
+  afresh on every request, valid `REVIEW_URL_TTL_SECONDS` (900). Each row's `actions`: `clean` while a photo is
+  clickable, `withdraw` while a click is stored; none is a read-only row.
+- `GET /photos/spend?month=YYYY-MM` (this UTC month when omitted): the process budget and the cleaning cap, each run's
+  spend, the files that cannot be read, and the cleaning cap's paid uses.
+- `PUT /photos/clicks/{sku}` `{sha, at}` (the SKU percent-encoded): 200 `queued`, `already_cleaned` or
+  `nothing_left_to_try` (the last two write nothing); 409 `not_hidden`, `chosen_not_linked` or `run_active` (with the
+  lock holder's `run_id`); 422 the applier's refusal; 404 an unknown SKU.
+- `DELETE /photos/clicks/{sku}` `{at}`: 200 `withdrawn` or `no_click`; 409 `run_active`; 422; 404.
+
+A store the answer depends on that cannot be read (the ledger, `review.json`) is a 503 naming it, never an empty list.
 
 Why removals are a per-environment store and not a reviewed file like the exclude list: the exclude list is about a
 photo (its sha, the same in every environment) and is an engineering review; a removal is the owner's decision about one
