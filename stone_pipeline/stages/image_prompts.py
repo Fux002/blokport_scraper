@@ -3,9 +3,9 @@
 One module, three modes -- all write the SAME file (image_pipeline/prompts_to_generate.json,
 the only file the generator reads):
 
-  build()               new product-backed variants only   (normal pipeline / no args)
-  build_refresh(done)   product-backed images not yet re-made with the best model  (one-time quality pass)
-  build_for_keys(keys)  a specific set of variant Keys      (`--keys K1 K2 …`: fix a few bad images)
+  build()                         new product-backed variants only   (normal pipeline / no args)
+  build_with_upgrades(done, cap)  the produce's queue: the new ones plus up to `cap` older textures re-made
+  build_for_keys(keys)            a specific set of variant Keys      (`--keys K1 K2 …`: fix a few bad images)
 
 `output_name` IS the variant Key, so the generator writes {Key}.png and the S3 upload OVERWRITES
 that one object -- one image name per variant, replaced in place, never a new name. The generator
@@ -139,25 +139,6 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
     return _write(items, out_path, "new")
 
 
-def build_refresh(refreshed: set[str], out_path: Path | None = None) -> Path:
-    """Product-backed variants whose {Key}.png was made with an OLDER model, to re-make ONCE with the
-    current best model -- a one-time QUALITY pass, not the new-image queue. A variant qualifies only if it
-    ALREADY has an image AND backs a product (a variant with no product does not need a fresh texture; an
-    imageless one is build()'s job). `refreshed` is the durable set of Keys already re-made with the best
-    model, so a re-run never regenerates -- and re-charges -- the same image twice. Driven by
-    refresh_images, which owns that marker and the cost gate."""
-    backed, ktype, variants = product_backed_keys(), _backbone_types(), _variants()
-    items = []
-    for key in sorted(backed):
-        r = variants.get(key)
-        if not r or not (r.get("Image") or "").strip() or key in refreshed:
-            continue
-        item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
-        if item:
-            items.append(item)
-    return _write(items, out_path, "refresh")
-
-
 UPGRADE_MODE = "upgrade"          # queue-item marker: an EXISTING texture being re-made, not a new mint
 
 
@@ -217,8 +198,6 @@ def build_for_keys(keys: list[str], out_path: Path | None = None) -> Path:
 if __name__ == "__main__":
     import sys
     args = sys.argv[1:]
-    # the one-time quality refresh (build_refresh) is driven by `python -m stone_pipeline.refresh_images`,
-    # which owns the durable "already refreshed" marker + the cost gate, so it is not a raw prompt mode here.
     if args[:1] == ["--keys"]:
         p = build_for_keys(args[1:])
     else:

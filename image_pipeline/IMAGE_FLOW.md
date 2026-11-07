@@ -73,27 +73,17 @@ Both scripts are resumable (skip files already produced), so re-running continue
 ```
 python -m stone_pipeline.stages.image_prompts              # new product-backed variants (normal)
 python -m stone_pipeline.stages.image_prompts --keys K1 K2 # just these variant Keys (fix a few)
-python -m stone_pipeline.refresh_images                    # one-time quality refresh, product-backed only
 ```
 `output_name` is the variant Key, so every mode overwrites `{Key}.png` in place — one image per
 variant, never a new name. Need the fal key first: `export FAL_KEY=$(aws ssm get-parameter
 --name /blokport-<env>/FAL_KEY --with-decryption --query Parameter.Value --output text)`.
 
-## Refresh the poor-quality images (one-time, product-backed only, cost-gated)
-Many live images were made by an earlier, worse model. `refresh_images` re-makes each PRODUCT-BACKED
-variant's image ONCE with the current best model, and only those (a variant with no product does not
-need a fresh texture). A durable S3 marker (`<env>/variations/_refreshed.json`) records every Key already
-refreshed, so a re-run never regenerates -- or re-charges -- the same image twice.
-```
-python -m stone_pipeline.refresh_images                 # DRY RUN: how many + est. cost, spends nothing
-BLOKPORT_REFRESH_APPLY=1 python -m stone_pipeline.refresh_images   # generate + upload + mark
-```
-- Selection = product-backed AND already-imaged AND not-yet-refreshed. It writes the queue, runs the
-  generator + rb + upload (reused runners), overwrites each `{Key}.png` in place, then adds the Keys to
-  the marker. Imageless variants are build()'s new-image queue, not a refresh.
-- **Cost:** product-backed set (~362) x ~$0.10/img `max` tier ≈ **~$36** one-time. The marker guarantees
-  you never pay twice for the same image. Needs `fal_client` + `torch` + `FAL_KEY`; on a box without the
-  stack the dry run still reports the plan.
+## Re-making older textures (the produce's upgrade drip)
+Many live images were made by an earlier, worse model. Each produce queues, next to the new mints, up to
+`images.upgrade_batch` (`BLOKPORT_IMAGE_UPGRADE_BATCH`, 0 = off) PRODUCT-BACKED variants whose texture was
+not made by the current best model (`image_prompts.build_with_upgrades`), and the texture job re-makes them
+with the mints. A durable S3 marker (`<env>/variations/_refreshed.json`, `stone_pipeline.refresh_images`)
+records every Key made by the best model, so each texture is re-made, and paid for, once.
 
 ## Notes / caveats
 - **Base image per category:** each prompt carries its own `base_image_url` — slab

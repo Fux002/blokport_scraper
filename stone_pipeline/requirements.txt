@@ -16,7 +16,7 @@ numpy>=1.26
 pillow>=10.0
 
 # fal-client + requests: the hosted FLUX texture generation (stone_pipeline.prepare_variant_images,
-# refresh_images, catalog); lightweight, no torch.
+# catalog); lightweight, no torch.
 fal-client>=0.4
 requests>=2.31
 
