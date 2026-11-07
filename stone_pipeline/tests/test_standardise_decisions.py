@@ -208,6 +208,76 @@ def test_a_later_clean_replaces_the_earlier_one():
     assert _click(s3, "SEN-ONE") == {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "sha": B, "at": LATER}
 
 
+# --- withdrawing a click (the hidden-listings page's DELETE /photos/clicks, through the one writer) ------------------
+def _withdraw(key, at=AT, **extra):
+    return {"id": key, "action": "withdraw", "source": "sentas", "at": at, **extra}
+
+
+def test_a_withdraw_removes_the_listing_s_click_and_nothing_else():
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B), _use("two", D)])
+    before = {k: v for k, v in s3.objects.items() if "/clicks/" not in k}
+    p = dec.plan(s3, [_withdraw("one", at=LATER)], LISTINGS, exclude=set())
+    assert p.deletions == [next(k for k in s3.objects if "/clicks/" in k)] and not (p.owner or p.removals or p.clicks)
+    dec.apply(s3, p)
+    assert _click(s3, "SEN-ONE") is None and s3.objects == before
+
+
+def test_a_withdraw_of_a_listing_without_a_click_changes_nothing():
+    s3 = _bucket()
+    assert dec.plan(s3, [_withdraw("one")], LISTINGS, exclude=set()).empty()
+
+
+def test_a_withdraw_older_than_the_stored_click_is_refused():
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B, at=LATER)])
+    with pytest.raises(dec.InvalidDecisions, match="older than the decision already stored"):
+        dec.plan(s3, [_withdraw("one")], LISTINGS, exclude=set())
+
+
+def test_a_withdraw_has_exactly_its_fields():
+    with pytest.raises(dec.InvalidDecisions, match="a withdraw has exactly the fields"):
+        dec.plan(_bucket(), [_withdraw("one", sha=B)], LISTINGS, exclude=set())
+
+
+def test_a_clean_of_a_source_whose_image_pipeline_is_off_is_refused(monkeypatch):
+    # its products show the scraped photos and the process never works on it: a click would wait for ever
+    monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
+    with pytest.raises(dec.InvalidDecisions, match="image pipeline is off"):
+        dec.plan(_bucket(), [_clean("one", B)], LISTINGS, exclude=set())
+
+
+# --- deciding in process (the config API's routes call this, the CLI too) ---------------------------------------------
+def _decide(monkeypatch, docs, dry_run, lock=None):
+    s3, held = _bucket(), []
+    monkeypatch.setattr(dec, "photo_listings", lambda client: LISTINGS)
+
+    @contextmanager
+    def exclusive(client, owner, on_lost=None):
+        if lock:
+            raise lock
+        held.append(owner["run_id"].startswith("decisions-"))
+        yield
+        held.append(False)
+    monkeypatch.setattr(dec.proc, "exclusive", exclusive)
+    return dec.decide(s3, docs, dry_run=dry_run, say=lambda line: None), s3, held
+
+
+def test_decide_applies_the_plan_inside_the_run_lock_and_returns_it(monkeypatch):
+    p, s3, held = _decide(monkeypatch, [_clean("one", B)], dry_run=False)
+    assert held == [True, False] and set(p.clicks) == {"SEN-ONE"} and _click(s3, "SEN-ONE")["sha"] == B
+
+
+def test_decide_dry_run_returns_the_plan_writes_nothing_and_takes_no_lock(monkeypatch):
+    p, s3, held = _decide(monkeypatch, [_clean("one", B)], dry_run=True)
+    assert held == [] and s3.written == [] and set(p.clicks) == {"SEN-ONE"}
+
+
+def test_decide_raises_run_active_and_writes_nothing_while_a_photos_run_holds_the_lock(monkeypatch):
+    with pytest.raises(dec.proc.RunActive):
+        _decide(monkeypatch, [_clean("one", B)], dry_run=False, lock=dec.proc.RunActive("held"))
+
+
 @pytest.mark.parametrize("stored, older", [(_clean("one", B, at=LATER), _use("one", A)),
                                           (_use("one", A, at=LATER), _clean("one", B)),
                                           (_clean("one", B, at=LATER), _remove("one")),

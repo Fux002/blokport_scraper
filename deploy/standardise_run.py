@@ -165,6 +165,17 @@ def _acquire(s3, owner, now):
     raise RunActive(f"s3://{S3_BUCKET}/{LOCK} changed hands while starting; run again")
 
 
+def lock_holder(s3):
+    """The run id the run lock names (a photos run's, or a decisions apply's "decisions-..."), None when no lock is held:
+    who to wait for, for an answer that cannot be given while a run holds it."""
+    try:
+        return json.loads(s3.get_object(Bucket=S3_BUCKET, Key=LOCK)["Body"].read()).get("run_id")
+    except ClientError as exc:
+        if _code(exc) in publish.MISSING:
+            return None
+        raise
+
+
 def _release(s3, etag):
     """Remove the lock only while it is still this run's (a delete conditional on its ETag); a 409 while it is still
     ours is tried once more."""

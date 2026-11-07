@@ -1054,6 +1054,24 @@ def test_a_lock_released_while_we_looked_at_it_is_taken_on_the_next_try():
         assert s3.locks[runner.LOCK]["owner"] == "R2"
 
 
+def test_the_lock_holder_is_the_run_id_its_body_names_and_none_without_a_lock():
+    # the config API's photo routes answer 409 with it, so the page can say which run to wait for
+    import io
+    from botocore.exceptions import ClientError
+
+    class _Body:
+        def __init__(self, body):
+            self.body = body
+
+        def get_object(self, Bucket, Key):
+            if self.body is None:
+                raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+            assert Key == runner.LOCK
+            return {"Body": io.BytesIO(self.body)}
+    assert runner.lock_holder(_Body(json.dumps({"run_id": "20261107T100000Z", "tags": []}).encode())) == "20261107T100000Z"
+    assert runner.lock_holder(_Body(None)) is None
+
+
 def test_the_lock_is_released_even_when_the_run_fails():
     s3 = _LockS3()
     with pytest.raises(RuntimeError):
