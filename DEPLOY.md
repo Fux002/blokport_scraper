@@ -297,6 +297,12 @@ The run wires both ends automatically:
 - **start:** `deploy/fetch_inputs.py` downloads `from_medusa/` from S3 into the task.
 - **end:** `deploy/upload_artifacts.py` uploads `to_upload/` + `review/` back to S3.
 
+**Running these paths on a laptop dirties the committed seed.** `from_medusa/development/` holds committed
+files (`attributes.csv`, `ports.csv`, `variants_export_base.csv`). Running the config server's `boot()`/`serve()`,
+a standardise sheet read or a produce locally, with AWS credentials, refreshes them in place from S3, and a produce
+also leaves an untracked `products_export.csv`. Restore with `git checkout -- from_medusa/` and
+`rm -f from_medusa/*/products_export.csv`, and never commit them. A plain import writes nothing.
+
 So you **maintain the export** by dropping a fresh Medusa export into
 `<env>/scraper/from_medusa/` after each Medusa import (or seed it once — already done
 for dev). If it's absent, the matcher just treats every variant as new. Auto-fetching
