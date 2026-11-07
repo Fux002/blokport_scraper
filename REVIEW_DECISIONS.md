@@ -71,6 +71,9 @@ never limits what may be stated.
 | `retired` | the variety was retired; un-retire or leave | name, type |
 | `origin` | bound fine, the vendor's country is not in the stone's documented list | name, type, the vendor's origin |
 | `decision_gap` | a decision the last produce did NOT honour (mint whose variety does not exist, alias whose listings bound elsewhere, origin not at the operator rung, reject whose card remains); `current_action` names the decision | name, type, origin as decided; restate it, or clear it with DELETE |
+| `archived_type` | a NEW variety would mint under a stone type that is archived or internal in Medusa (VE2) | name, colour as read; `stone_type` the archived type |
+| `archived_value` | a NEW variety's only colour (or quality) would be a restricted value, so the required dimension is empty after the drop (VE2); never a guessed default | name, `stone_type`; **colour left empty** (prefilling the restricted value would hold again) |
+| `archived_variety` | a gapped scrape matches an archived variety; the alias is still recorded but the lane never serves it, so it is surfaced once instead of staying a silent tree gap (VE2) | name; `stone_type` the owner's type (so the card keeps its own `name\|type` ref) |
 
 A name whose title and site tag name two different stones that both exist (Azul White: onyx and quartzite)
 is no longer typed from the title: the type stays open, the matcher's origin rung binds the stone the
