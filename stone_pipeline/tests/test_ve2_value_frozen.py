@@ -138,12 +138,15 @@ def test_value_frozen_exempts_an_existing_product_in_an_archived_category():
     assert "value_frozen" not in {r.rule for r in row.reject_reasons}
 
 
-def test_category_label_fails_loud_for_a_pcat_not_in_attributes():
-    # a pcat with no attributes.csv category row must NOT be silently skipped: fail loud
-    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="ghost")
-    with pytest.raises(ValueError):
-        validate.validate_row(row, frozen={"category": {norm("Tiles")}}, acked={},
-                              category_labels={}, source_code="zucchi")
+def test_a_row_on_a_pcat_absent_from_attributes_is_not_held_or_crashed():
+    # a category pcat with no attributes.csv row can never be restricted (restricted_values comes only from
+    # those rows), so it returns None. One such row (an env-override pcat) must NOT raise or hold while another
+    # value is restricted -- one dead row never crashes the source's produce.
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="env_override_pcat",
+                       color_name="Grey")
+    validate.validate_row(row, frozen={"color": {norm("Pink")}}, acked={},
+                          category_labels={}, source_code="zucchi")   # must not raise
+    assert "value_frozen" not in {r.rule for r in row.reject_reasons}
 
 
 def test_category_labels_come_from_attributes_not_the_registry(monkeypatch):
@@ -198,14 +201,20 @@ def test_frozen_and_acked_raises_on_a_corrupt_ledger(tmp_path, monkeypatch):
         validate._frozen_and_acked("zucchi")
 
 
-def test_emit_ledger_sku_equals_the_emitted_variant_sku():
+@pytest.mark.parametrize("surrogate, expected", [
+    ("A1", "ZUCCHI-A1"),
+    (None, "ZUCCHI-NONE"),      # no coercion: str(None).upper(); re-adding `or ""` would give "ZUCCHI-"
+    ("a1", "ZUCCHI-A1"),        # upper-cased
+    (" a1 ", "ZUCCHI- A1 "),    # not stripped
+])
+def test_emit_ledger_sku_equals_the_emitted_variant_sku(surrogate, expected):
     # 5a: one SKU rule, so the ledger key (populate via emit._sku) and the emitted Variant Sku (sku_for) are
-    # identical for the same row -- they can no longer drift.
+    # identical for the same row AND equal the exact expected value -- re-adding any coercion fails this.
     from stone_pipeline.stages import emit
     from stone_pipeline.stages.product_state import sku_for
     cfg = SimpleNamespace(source_code="zucchi")
-    row = CanonicalRow(src_site="zucchi", surrogate_key="A1")
-    assert emit._sku(row, cfg) == sku_for(row, cfg) == "ZUCCHI-A1"
+    row = CanonicalRow(src_site="zucchi", surrogate_key=surrogate)
+    assert emit._sku(row, cfg) == sku_for(row, cfg) == expected
 
 
 def test_a_restricted_palette_colour_does_not_fail_load(monkeypatch):

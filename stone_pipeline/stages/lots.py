@@ -33,6 +33,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.stages.product_state import sku_from
 
 log = logfmt.get_logger("lots")
 
@@ -141,7 +142,7 @@ def replacements(rows: list[CanonicalRow], cfg: SourceConfig) -> dict[str, tuple
     out: dict[str, list] = {}
     for row in rows:
         if row.lot_code and row.src_lot_ref:
-            entry = out.setdefault(f"{cfg.source_code}-{row.src_lot_ref}".upper(), [row.lot_code, 0])
+            entry = out.setdefault(sku_from(cfg.source_code, row.src_lot_ref), [row.lot_code, 0])
             entry[1] += 1
     return {sku: (code, pieces) for sku, (code, pieces) in out.items()}
 
@@ -219,7 +220,7 @@ def _measured(pieces: list[dict]) -> list[dict]:
 
 def _in_medusa(bundle: CanonicalRow, cfg: SourceConfig, pieces: list[dict], known_skus: frozenset[str]) -> bool:
     """Whether this bundle was already sent as a lot: any of its pieces exists in Medusa."""
-    return any(f"{cfg.source_code}-{bundle.src_natural_key}-{p['position']}".upper() in known_skus for p in pieces)
+    return any(sku_from(cfg.source_code, f"{bundle.src_natural_key}-{p['position']}") in known_skus for p in pieces)
 
 
 def _count(text: Optional[str]) -> Optional[int]:

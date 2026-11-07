@@ -96,14 +96,13 @@ def _category_label(row: CanonicalRow, category_labels: dict[str, str]) -> str |
     """The row's category value NAME, reverse-mapped from its pcat id through attributes.csv's category rows
     (`category_labels`): the SAME table the row's pcat (format_resolve.category_pcat_for_branch) and the ledger
     name (populate._category_name_for) come from, so an env pcat override on the Category REGISTRY can never
-    make the label disagree. A pcat with no attributes.csv row fails LOUD rather than skipping the check."""
+    make the label disagree. A pcat with no row in that table returns None, NOT a value-freeze check: a
+    restricted value only ever comes from an attributes.csv row, so a category absent from it can never be
+    restricted, and format_resolve may activate a config-supplied pcat not yet in attributes.csv. None is the
+    true answer (nothing to freeze), never a silent skip of a value that IS restricted."""
     if not row.category_pcat_id:
         return None
-    label = category_labels.get(row.category_pcat_id)
-    if label is None:
-        raise ValueError(f"category pcat {row.category_pcat_id!r} has no row in attributes.csv; cannot "
-                         "value-freeze-check its category (a misconfigured pcat, not the row's data)")
-    return label
+    return category_labels.get(row.category_pcat_id)
 
 
 def _frozen_value_pairs(row: CanonicalRow, category_labels: dict[str, str]) -> tuple[tuple[str, str | None], ...]:
