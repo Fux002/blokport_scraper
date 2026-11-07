@@ -96,10 +96,13 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     dead = ledger.execute(f"SELECT COUNT(*) AS n FROM inventory i WHERE {_STOCK_DEAD}").fetchone()["n"]
     waiting = ledger.execute(f"SELECT COUNT(*) AS n {_UNHIDE_WAITING}", (now_iso(),)).fetchone()["n"]
     out["inventory"] = {"total": total, "delta": _count_inventory_lane(ledger), "dead": dead, "waiting": waiting}
-    # E13: variation reconcile signal. `retiring` already surfaces in out["variation"] (a state count);
-    # `orphaned` = synced, rendered varieties with 0 products (a source removal's shared orphan, or the old
-    # side of a re-key awaiting retire). A distinct bucket, NOT a state, so it never double-counts the
-    # histogram -- the operator can drive it toward zero by retiring the dead ones.
+    # E13: `orphaned` = synced, rendered (in_full=1) varieties with 0 products. DEPRECATED, to be removed
+    # (C13): under the union seed model a rendered variety with no scraped product is a valid base/seed
+    # catalogue member (dev 11-06: 36,077 of 36,600), so this is NOT an actionable drift signal and cannot
+    # be "driven to zero". The real removals surface elsewhere: an explicit removal or a re-key old side is
+    # held `retiring` (retire_variation), already a `variation` state count; a variety dropped from the
+    # catalogue is in_full=0 (excluded here) and pruned to `retiring` at reset. Value kept unchanged until
+    # Blokport stops reading it (Release 2).
     orphaned = ledger.execute(
         "SELECT COUNT(*) AS n FROM variation v WHERE v.state = 'synced' AND v.in_full = 1 "
         "AND NOT EXISTS (SELECT 1 FROM product p WHERE p.variation_key = v.key)").fetchone()

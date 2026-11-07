@@ -814,3 +814,15 @@ def test_inventory_ack_without_qty_is_backward_compatible(tmp_path):
                       pk=("sku",))
         assert ack(ledger, "inventory", "S-1") == 1                               # legacy: clears delta
         assert ledger.get("inventory", "sku", "S-1")["last_synced_qty"] == 8
+
+
+def test_variation_reconcile_orphaned_counts_the_current_computation(tmp_path):
+    # C13 pin (behaviour unchanged, the field is DEPRECATED): orphaned = synced AND in_full=1 AND no product.
+    # Pins today's computation so Release 2's removal is a deliberate, caught change.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_seed_1", state="synced")                 # in_full=1, no product -> counted
+        _variation(ledger, "slab_live_2", state="synced")                 # in_full=1, has a product -> NOT counted
+        _product(ledger, "P-2", "slab_live_2", state="synced")
+        _variation(ledger, "slab_dropped_3", state="synced", in_full=0)   # dropped from catalogue -> NOT counted
+        _variation(ledger, "slab_retiring_4", state="retiring")           # actionable removal -> NOT counted here
+        assert status(ledger)["variation_reconcile"] == {"orphaned": 1}

@@ -72,9 +72,12 @@ arrives on `removed(kind=variation)` and Medusa deletes it. Net: one new variant
 ## Reconcile (GET /sync/v1/status)
 
 Per-entity state histograms + `inventory:{total, delta}` (reconcile inventory as `total - delta`).
-`variation.retiring` surfaces retiring varieties; `variation_reconcile.orphaned` counts synced, rendered
-varieties with 0 products (a source-removal orphan or a re-key old side awaiting retire) so the operator
-can drive drift to zero. Counts are raw histograms, NOT servable counts.
+`variation.retiring` surfaces retiring varieties -- the actionable removals: an explicit removal or a
+re-key old side is held `retiring` until Medusa acks the delete. `variation_reconcile.orphaned` counts
+synced, rendered (in_full=1) varieties with 0 products; this is DEPRECATED and will be removed (C13):
+under the union seed model a rendered variety with no scraped product is a valid base/seed catalogue
+member, not drift, so the count cannot be driven to zero and is not actionable -- watch `variation.retiring`
+for real removals instead. Counts are raw histograms, NOT servable counts.
 
 ## Invariants
 
