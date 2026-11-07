@@ -228,13 +228,14 @@ def _durable(handler):
 
 # -- run: the produce trigger ------------------------------------------------------------------------------
 def _post_run(params, body, query):
-    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"|..., "close_only": bool}
-    # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate); close_only
-    # (stage photos only, an operator's action) makes the chosen photos' close-ups again.
+    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"|..., "close_only": bool,
+    # "clicks_only": bool}. sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog ->
+    # gate); close_only (stage photos only, an operator's action) makes the chosen photos' close-ups again;
+    # clicks_only (stage photos only, the hidden-listings page's "run now") works only the listings with a click.
     from stone_pipeline.config import runner
     b = _dict(body)
-    rec, code = runner.start_run(_sources_of(b), _str(b, "stage") or "all",
-                                 close_only=b.get("close_only", False))   # (record, status)
+    rec, code = runner.start_run(_sources_of(b), _str(b, "stage") or "all", close_only=b.get("close_only", False),
+                                 clicks_only=b.get("clicks_only", False))   # (record, status)
     return code, rec
 
 

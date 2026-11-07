@@ -36,7 +36,10 @@ and removes it, if it is still its own, when publish has ended. SIGTERM (the ser
 round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
 Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY (not for a close-only run), SCRAPER_STANDARDISE_BUDGET_USD
 (all required); SCRAPER_STANDARDISE_CLEAN_BUDGET_USD (unset: no edit is paid); SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record;
-SCRAPER_STANDARDISE_CLOSE_ONLY (set by the runner, true only for a close_only run): the close-up round instead of 1 to 7.
+SCRAPER_STANDARDISE_CLOSE_ONLY (set by the runner, true only for a close_only run): the close-up round instead of 1 to 7;
+SCRAPER_STANDARDISE_CLICKS_ONLY (set by the runner, true only for a clicks_only run): steps 1 to 7 for the listings with
+the owner's click alone (the clicks' steps), their rows merged into tracked.csv and review.json, summary
+clicks-summary.json.
 Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
 or no produce has stored the conflict set yet;
 4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
@@ -467,7 +470,7 @@ def through(steps, deadline, clock, problems):
     return False
 
 
-def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic):
+def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic, clicks_only=False):
     """The GPU and hosted steps, then the report: (problems, report). The clean step (clean_step: admitted, then paid)
     comes twice. First the owner's clicks whose listing is ready (select.clean_plan: fully judged, no pass, a model left):
     cleaned, through the GPU and judged before any other work, the selection read again after. Then the run's own
@@ -478,7 +481,9 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     the automatic edits, select.authorised); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has
     its share; after each of the run's GPU rounds the outline recheck's candidates are settled (select.settle); the
     report always runs, so what is chosen is recorded and published, unless a promotion failed: raised, and the next
-    run of either kind finishes it at its start (select.finish, in process) before anything is published."""
+    run of either kind finishes it at its start (select.finish, in process) before anything is published. clicks_only
+    (a clicks-only run, its selection only the listings with a click): the clicks' steps alone, and its report merges
+    into the review list (select.report merge)."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
     problems = []
     # no cleaning cap: no edit can be paid, so every ready click and every mark says what it waits for
@@ -519,10 +524,10 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     ended = through(first, deadline, clock, problems)
     if first:
         sel.refresh()                                  # the clicks' steps stored new results and verdicts
-    if not ended:
+    if not ended and not clicks_only:
         through(then, deadline, clock, problems)
     problems = list(dict.fromkeys(problems))           # a click waiting at both clean steps is named once
-    result = select.report(sel, waiting, marks_waiting)
+    result = select.report(sel, waiting, marks_waiting, merge=clicks_only)
     by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
@@ -576,24 +581,27 @@ def unreadable_problems(frozen, decisions):
     return [f"{l['key']}: {decisions.unreadable[l['sku']]}: left exactly as published" for l in frozen]
 
 
-def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
+def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen, clicks_only):
     """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one of `frozen`, whose
     choice record cannot be read: the owner's decision is unknown, so it is left exactly as published, its photos'
-    pending redraws included), work on them and report: (problems, counts, kept, {SKU: its review row})."""
+    pending redraws included), only those with the owner's click when clicks_only, work on them and report: (problems,
+    counts, kept, {SKU: its review row}, the SKUs worked)."""
     removed, records = removed_listings(s3), decisions.chosen
     workable = [l for l in listings if l not in frozen]
     found = todo(workable, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
                  decisions.picks)
+    if clicks_only:
+        found = [l for l in found if l["sku"] in decisions.clicks]
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
                            live_choices(workable, records, removed, decisions), decisions.clicks,
                            {(l["source"], sha) for l in frozen for sha in l["photos"]})
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
-    problems, result = run(batch, sel, spend, clean, run_id, deadline, say)
+    problems, result = run(batch, sel, spend, clean, run_id, deadline, say, clicks_only=clicks_only)
     counts = {"listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings)}
-    return problems, counts, {"pending_listings": result["pending"]}, result["review"]
+    return problems, counts, {"pending_listings": result["pending"]}, result["review"], [l["sku"] for l in found]
 
 
 def close_round(s3, batch, spend, run_id, deadline, root, say, frozen):
@@ -624,12 +632,15 @@ def close_round(s3, batch, spend, run_id, deadline, root, say, frozen):
     return problems, {"close_only": True, "photos": photos, "to_do": to_do}, {}
 
 
-def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False):
+def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False, clicks_only=False):
     """Clear, work (photos_round, or close_round when close_only), report and publish (steps 0 to 8), inside the lock: the
     run's summary (counts), also kept with what is pending and the problems under the clean tag (summary.json, or
     close-summary.json for a close-only run). Both publish only the conflict photos the owner assigned (assignments):
     a close-only run republishes the same choices, so it decides them the same way. At the end of the work window paid
-    work stops (no hosted call or GPU round starts after it)."""
+    work stops (no hosted call or GPU round starts after it). clicks_only: steps 1 to 7 over the listings with the
+    owner's click alone, its summary clicks-summary.json and its rows merged into the review list (merge_review)."""
+    if close_only and clicks_only:
+        raise ValueError("a photos run is close-only or clicks-only, never both")
     root = f"{ROOT}{C.CLEAN_TAG}/"
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
@@ -650,8 +661,8 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
             problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say, {l["key"] for l in frozen})
             review = None
         else:
-            problems, counts, kept, review = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
-                                                          decisions, frozen)
+            problems, counts, kept, review, worked = photos_round(s3, batch, spend, clean, run_id, deadline, root, say,
+                                                                  listings, decisions, frozen, clicks_only)
     finally:
         closing.cancel()
     problems += conflicted + unreadable_problems(frozen, decisions)
@@ -668,13 +679,51 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     summary = {"run_id": run_id, **counts, "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped, **clean_summary(clean)}
-    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{'close-summary' if close_only else 'summary'}.json",
+    name = "close-summary" if close_only else "clicks-summary" if clicks_only else "summary"
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{name}.json",
                   Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
                                   sort_keys=True).encode(),
                   ContentType="application/json")
-    if review is not None:
+    if clicks_only:
+        merge_review(s3, root, review, worked)
+    elif review is not None:
         write_review(s3, root, review, hidden, tile_listings(sheet, photos))
     return summary
+
+
+class ReviewUnreadable(RuntimeError):
+    """The stored review list is not a JSON object of rows: never read as empty, so a merge never drops its rows."""
+
+
+def read_review(s3, root):
+    """{SKU: row} of the stored review list (review.json); {} when there is none yet. ReviewUnreadable otherwise."""
+    key = f"{root}{C.REVIEW_FILE}"
+    try:
+        body = s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+    except ClientError as exc:
+        if _code(exc) in publish.MISSING:
+            return {}
+        raise
+    try:
+        rows = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ReviewUnreadable(f"the review list {key} cannot be read: {exc}") from exc
+    if not isinstance(rows, dict):
+        raise ReviewUnreadable(f"the review list {key} is not an object of rows")
+    return rows
+
+
+def _put_review(s3, root, rows):
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{C.REVIEW_FILE}", Body=json.dumps(rows, sort_keys=True).encode(),
+                  ContentType="application/json")
+
+
+def merge_review(s3, root, review, worked):
+    """A clicks-only run's rows merged into the review list (manager ruling C1, 2026-11-07): the rows of the SKUs it
+    worked replaced by its own (a listing now chosen loses its row), every other row left as stored (the same bytes,
+    the file sorted by SKU). Inside the run lock, like every write of the process."""
+    gone = set(worked)
+    _put_review(s3, root, {**{sku: row for sku, row in read_review(s3, root).items() if sku not in gone}, **review})
 
 
 def write_review(s3, root, review, tiles_hidden, tiles):
@@ -685,8 +734,7 @@ def write_review(s3, root, review, tiles_hidden, tiles):
     rows = {**review, **{by_key[key]["sku"]: {"listing": key, "source": by_key[key]["source"], "format": C.TILE_FORMAT,
                                               "reason": "tile_no_stone", "why": why, "click": None, "photos": []}
                          for key, why in tiles_hidden.items()}}
-    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{C.REVIEW_FILE}", Body=json.dumps(rows, sort_keys=True).encode(),
-                  ContentType="application/json")
+    _put_review(s3, root, rows)
 
 
 def clean_summary(clean):
@@ -783,7 +831,11 @@ def hand_over(summary):
 
 
 def main() -> int:
-    close_only = env.env_bool("STANDARDISE_CLOSE_ONLY")
+    close_only, clicks_only = env.env_bool("STANDARDISE_CLOSE_ONLY"), env.env_bool("STANDARDISE_CLICKS_ONLY")
+    if close_only and clicks_only:
+        print("ERROR: SCRAPER_STANDARDISE_CLOSE_ONLY and SCRAPER_STANDARDISE_CLICKS_ONLY are both set: a photos run is "
+              "one kind; aborting")
+        return 2
     if missing := unconfigured(close_only):
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
@@ -798,9 +850,10 @@ def main() -> int:
     clean = cleaning_cap(s3, run_id, close_only)
     stop_on_signal(spend, clean)                       # before the lock: a stop at any point releases it
     try:
-        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only},
+        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only,
+                            "clicks_only": clicks_only},
                        on_lost=lambda: halt((spend, clean), "the run lock was taken over")):
-            summary = process(s3, batch, spend, clean, run_id, deadline, close_only=close_only)
+            summary = process(s3, batch, spend, clean, run_id, deadline, close_only=close_only, clicks_only=clicks_only)
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4

@@ -42,6 +42,9 @@ class _S3:
 
     def get_object(self, Bucket, Key):
         import io
+        from botocore.exceptions import ClientError
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def put_object(self, Bucket, Key, Body, ContentType):
@@ -1124,6 +1127,35 @@ def test_a_review_row_carries_the_owner_s_click_in_its_one_state(monkeypatch):
     assert row["click"]["state"] == "waiting" and row["click"]["why"] == "month photo budget reached"
     assert _reviewed(s3, rounds, clicks={"SEN-1": {"error": "not json"}})["SEN-1"]["click"] == {
         "sha": None, "at": None, "state": "blocked", "why": "its file cannot be read: not json"}
+
+
+# --- a clicks-only run merges its listings into the review list (manager ruling C1, 2026-11-07) -----------------------
+OLD_TRACKED = ("source,listing,format,photos,what_happened\r\n"
+               'sentas,other,slab,2,"x: v9: judge fail (light_reflection) | y, z"\r\n'
+               "sentas,slab-1,slab,2,an older run's notes\r\n"
+               "sentas,third,block,1,q\r\n")
+
+
+def test_a_merging_report_replaces_only_its_own_listings_rows_and_leaves_the_others_byte_identical(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects["r/tracked.csv"] = OLD_TRACKED.encode()
+    s = _selection(s3, [_listing(A, B)], rounds)
+    s.root, s.clicks = "r/", {}
+    sel.report(s, {}, {}, merge=True)
+    lines = s3.objects["r/tracked.csv"].decode().split("\r\n")
+    old = OLD_TRACKED.split("\r\n")
+    assert lines[:3] == [old[0], old[1], old[3]] and lines[3].startswith("sentas,slab-1,slab,2,") and lines[4:] == [""]
+    sel.report(s, {}, {}, merge=False)                                  # a full run: its own listings' rows only
+    assert s3.objects["r/tracked.csv"].decode().split("\r\n")[1].startswith("sentas,slab-1,")
+    assert len(s3.objects["r/tracked.csv"].decode().split("\r\n")) == 3
+
+
+def test_a_merging_report_before_any_review_list_writes_its_own_rows(monkeypatch):
+    s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s = _selection(s3, [_listing(A, B)], rounds)
+    s.root, s.clicks = "r/", {}
+    sel.report(s, {}, {}, merge=True)
+    assert s3.objects["r/tracked.csv"].decode().split("\r\n")[1].startswith("sentas,slab-1,")
 
 
 # --- an unparsed verdict is asked again (review 2026-11-06, A2.6) -----------------------------------------------------

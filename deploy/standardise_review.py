@@ -16,18 +16,16 @@ A store that cannot be read (the ledger, review.json) is Unavailable: said, neve
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from datetime import datetime, timezone
 
 import boto3
-from botocore.exceptions import ClientError
 
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import MISSING, aws_config, chosen_prefix, read_conflicts, read_records
+from deploy.standardise_publish import aws_config, chosen_prefix, read_conflicts, read_records
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import logfmt
@@ -82,20 +80,12 @@ def hidden_products():
 
 # --- GET /photos/hidden -------------------------------------------------------------------------------------------------
 def read_review(s3):
-    """{SKU: row} of the last full photos run's review list; {} before any (no file). Unavailable when unreadable."""
+    """{SKU: row} of the photos runs' review list (standardise_run.read_review); {} before any. Unavailable when it
+    cannot be read."""
     try:
-        body = s3.get_object(Bucket=S3_BUCKET, Key=f"{ROOT}{C.REVIEW_FILE}")["Body"].read()
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in MISSING:
-            return {}
-        raise
-    try:
-        rows = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise Unavailable(f"the review list {ROOT}{C.REVIEW_FILE} cannot be read: {exc}") from exc
-    if not isinstance(rows, dict):
-        raise Unavailable(f"the review list {ROOT}{C.REVIEW_FILE} is not an object of rows")
-    return rows
+        return proc.read_review(s3, ROOT)
+    except proc.ReviewUnreadable as exc:
+        raise Unavailable(str(exc)) from exc
 
 
 def live_click(record, seen):
