@@ -41,6 +41,6 @@ prod is a config/env change, never a code edit. The full command list is in
 
 ## Categories
 
-slab / block / tile are the `CATEGORIES` tuple in `config/settings.py`; a category
-is active once its Medusa `pcat_id` is set there (no code change). Tiles mirror
+slab / block / tile are the `CATEGORIES` tuple in `config/categories.py`; a category
+is active once its Medusa `pcat_id` is in the env's `attributes.csv` (no code change). Tiles mirror
 slabs (`tile_` Keys built deterministically). See `CATEGORY_GUIDE.md`.

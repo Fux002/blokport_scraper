@@ -323,7 +323,7 @@ def test_variant_image_link_falls_back_when_s3_unreachable():
 def test_plural_format_tag_resolves():
     # a scraper that tags its format in the plural ('Slabs'/'Blocks'/'Tiles') must still resolve the
     # explicit tag, not silently fall through to the slab default.
-    from stone_pipeline.config.settings import category
+    from stone_pipeline.config.categories import category
     assert category("Slabs").name == "slab"
     assert category("Blocks").name == "block"
     assert category("Tiles").name == "tile"

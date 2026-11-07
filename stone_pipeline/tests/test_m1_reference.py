@@ -11,7 +11,8 @@ import csv
 
 import pytest
 
-from stone_pipeline.config.settings import SETTINGS, category
+from stone_pipeline.config.categories import category
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.reference import loaders
 
 

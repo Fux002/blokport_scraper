@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from stone_pipeline.config.settings import CATEGORIES, category
+from stone_pipeline.config.categories import CATEGORIES, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.stages.curate import gen_key, image_filename
 

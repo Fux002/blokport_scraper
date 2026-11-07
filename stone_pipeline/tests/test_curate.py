@@ -112,11 +112,11 @@ def test_new_variant_emitted_for_active_categories(ref, monkeypatch):
 
 def test_active_branches_gates_tiles_on_config(monkeypatch):
     import dataclasses
-    from stone_pipeline.config import settings
+    from stone_pipeline.config import categories
     assert curate.active_branches() == ("slab", "block", "tile")  # tiles active (dev pcat set)
     # clearing the Medusa category id deactivates the category, no code change
-    tile = dataclasses.replace(settings._BY_NAME["tile"], pcat_id="")
-    monkeypatch.setitem(settings._BY_NAME, "tile", tile)
+    tile = dataclasses.replace(categories._BY_NAME["tile"], pcat_id="")
+    monkeypatch.setitem(categories._BY_NAME, "tile", tile)
     assert curate.active_branches() == ("slab", "block")
 
 

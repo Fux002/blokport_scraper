@@ -65,7 +65,7 @@ def test_category_is_slabs_pcat(emitted):
 
 
 def ref_pcat():
-    from stone_pipeline.config.settings import category
+    from stone_pipeline.config.categories import category
     return category("slab").pcat_id
 
 

@@ -19,7 +19,8 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key
+from stone_pipeline.config.categories import CATEGORIES, category_for_key
+from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core import logfmt
 from stone_pipeline.reference.medusa_files import read_variants_export
 

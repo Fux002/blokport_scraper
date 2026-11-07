@@ -241,10 +241,10 @@ def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
 def test_stone_declares_the_category_roles():
     # the stone pack's roles: slab is the default/fallback form, block is the uncut/bulk form (drives is_block),
     # tile mirrors slab. This is what makes the historical slab/block/tile behaviour pack-driven, not hardcoded.
-    from stone_pipeline.config import settings
-    assert settings.default_form_name() == "slab"
-    assert settings.bulk_form_name() == "block"
-    assert settings.category("tile").mirror_of == "slab"
+    from stone_pipeline.config import categories
+    assert categories.default_form_name() == "slab"
+    assert categories.bulk_form_name() == "block"
+    assert categories.category("tile").mirror_of == "slab"
 
 
 def test_name_heuristics_are_pack_driven(monkeypatch):

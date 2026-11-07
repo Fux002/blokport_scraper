@@ -20,9 +20,9 @@ def ref():
 
 def _deactivate_tiles(monkeypatch):
     import dataclasses
-    from stone_pipeline.config import settings
-    monkeypatch.setitem(settings._BY_NAME, "tile",
-                        dataclasses.replace(settings._BY_NAME["tile"], pcat_id=""))
+    from stone_pipeline.config import categories
+    monkeypatch.setitem(categories._BY_NAME, "tile",
+                        dataclasses.replace(categories._BY_NAME["tile"], pcat_id=""))
 
 
 def _clear_tile_reference(ref):

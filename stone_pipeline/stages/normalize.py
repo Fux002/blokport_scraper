@@ -16,7 +16,8 @@ from dataclasses import dataclass
 
 from stone_pipeline.adapters.tokens import clean_variety, explicit_type_word
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, default_form_name
+from stone_pipeline.config.categories import bulk_form_name, default_form_name
+from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag

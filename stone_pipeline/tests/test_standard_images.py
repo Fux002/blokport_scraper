@@ -171,10 +171,10 @@ def test_a_run_can_be_limited_to_a_list_of_photos():
 def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet_and_photo_list(monkeypatch):
     from deploy import fetch_inputs
     from stone_pipeline.photos import source as src
-    from stone_pipeline.config import settings
+    from stone_pipeline.config import categories, settings
     calls = []
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)
-    monkeypatch.setattr(settings, "refresh_category_pcats", lambda: calls.append("refresh"))
+    monkeypatch.setattr(categories, "refresh_category_pcats", lambda: calls.append("refresh"))
     monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or b"{}")
     monkeypatch.setattr(src.index, "build", lambda text, photos: calls.append("index") or {})
     assert src.sheet_photos(object()) == {}
@@ -184,9 +184,9 @@ def test_a_run_reads_its_environment_s_current_categories_before_its_product_she
 
 def _slab_category(monkeypatch, pcat="pcat_S"):
     from dataclasses import replace
-    from stone_pipeline.config import settings
-    slab = replace(settings.category("slab"), pcat_id=pcat)
-    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
+    from stone_pipeline.config import categories
+    slab = replace(categories.category("slab"), pcat_id=pcat)
+    monkeypatch.setattr(categories, "_BY_NAME", {**categories._BY_NAME, slab.name: slab})
 
 
 def test_the_product_index_follows_the_categories_refreshed_from_the_export(monkeypatch):

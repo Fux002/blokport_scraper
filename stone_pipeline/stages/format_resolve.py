@@ -28,7 +28,8 @@ from collections import Counter
 from dataclasses import dataclass
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, Confidence, bulk_form_name, category, default_form_name, SETTINGS
+from stone_pipeline.config.categories import CATEGORIES, bulk_form_name, category, default_form_name
+from stone_pipeline.config.settings import Confidence, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.reference.loaders import ReferenceData

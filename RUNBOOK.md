@@ -226,7 +226,7 @@ separate generated lane.)
 ## Categories
 
 Slabs, Blocks, and Tiles are the same material with a different id per format.
-Tiles are ACTIVE (their Medusa category id is set in `config/settings.py`).
+Tiles are ACTIVE (their Medusa category id is in the env's `attributes.csv`, read by `config/categories.py`).
 Tiles MIRROR slabs (same varieties/finishes, deterministic `tile_` Keys); blocks
 have their own finishes. A category activates automatically once its `pcat_id` is
 set in the registry — see `CATEGORY_GUIDE.md` to add one. Until a category's

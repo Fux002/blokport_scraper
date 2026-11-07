@@ -4,7 +4,7 @@ emission of the alias additions in the import-file shape (phase 3)."""
 
 from __future__ import annotations
 
-from stone_pipeline.config.settings import category
+from stone_pipeline.config.categories import category
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key

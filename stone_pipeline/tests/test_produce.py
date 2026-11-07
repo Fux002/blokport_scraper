@@ -216,12 +216,12 @@ def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_developm
     # on an exception cannot block a cold start. A real S3/credential failure in production must abort the
     # produce: matching against a stale or absent export would hold every variety and exit 0.
     from deploy import fetch_inputs
-    from stone_pipeline.config import settings
+    from stone_pipeline.config import categories
 
     def _boom():
         raise RuntimeError("s3 unreachable")
     monkeypatch.setattr(fetch_inputs, "main", _boom)
-    monkeypatch.setattr(settings, "refresh_category_pcats", lambda: None)
+    monkeypatch.setattr(categories, "refresh_category_pcats", lambda: None)
     monkeypatch.setattr(produce, "IS_PRODUCTION", True, raising=False)
     with pytest.raises(SystemExit):
         produce._fetch_inputs()

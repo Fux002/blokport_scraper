@@ -26,7 +26,8 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, default_form_name
+from stone_pipeline.config.categories import CATEGORIES, default_form_name
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
 from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required

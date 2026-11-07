@@ -24,7 +24,7 @@ from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import load_backbone
-from stone_pipeline.config.settings import CATEGORIES
+from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.stages import curate, match_variation
 from stone_pipeline.stages.curate import ImportFile
 from stone_pipeline.stages.curate.context import CurationResult

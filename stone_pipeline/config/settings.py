@@ -14,13 +14,12 @@ defaults are the dev-staging values observed in the real upload example.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack  # dependency-free (yaml only); no import cycle
 from stone_pipeline.core import env  # neutral SCRAPER_ env prefix (BLOKPORT_ fallback); no import cycle
-from stone_pipeline.reference.medusa_files import read_attributes  # stdlib + core.text only; no import cycle
 
 # Repository root: this file is stone_pipeline/config/settings.py, so two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -309,11 +308,13 @@ class Paths:
     # committed base itself is pristine, so lifecycle falls back to it.
     variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
-    # per-category backbone files derive from the CATEGORIES registry.
+    # per-category backbone files derive from the CATEGORIES registry (config/categories.py).
     @property
     def backbone_json(self) -> Path:        # the DEFAULT-FORM backbone (the pack's primary category), NOT
         # literally slab -- a non-stone pack whose default form is not named 'slab' would otherwise crash here
-        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path.
+        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path. Imported here, not at
+        # the top: the registry imports settings, so settings reads it only once both are loaded.
+        from stone_pipeline.config.categories import category, default_form_name
         return category(default_form_name()).backbone_path
 
     # A specific category's backbone is category(<name>).backbone_path -- no per-product-type accessor.
@@ -481,7 +482,7 @@ class BackendConstants:
     """Section 3.1 static values. Defaults observed in the real upload example
     (dev-staging environment). Per-source overrides live in sources.yaml."""
 
-    # Category pcat ids derive from the CATEGORIES registry (single source of truth).
+    # Category pcat ids derive from the CATEGORIES registry (config/categories.py, single source of truth).
     # A specific category's pcat is category(<name>).pcat_id -- no per-product-type accessor.
 
     # Owner ids, from env vars (settings top). sales_channel_id: one per env. company_id: the
@@ -618,7 +619,7 @@ class CurationConfig:
     variant_image_base: str = env.getenv(
         "BLOKPORT_VARIANT_IMAGE_BASE",
         f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/variations/")
-    # Base images per category derive from the CATEGORIES registry (image_prompts
+    # Base images per category derive from the CATEGORIES registry (config/categories.py; image_prompts
     # selects by Key prefix; these accessors remain for any direct callers).
     # A specific category's base image is category(<name>).base_image -- no per-product-type accessor.
 
@@ -634,151 +635,6 @@ class CurationConfig:
     enable_alias_model: bool = True
     alias_char_floor: float = 0.94
     alias_char_review_floor: float = 0.88
-
-
-# --- Category registry: the SINGLE source of truth for categories --------------
-@dataclass(frozen=True)
-class Category:
-    """One product category. Adding a category = ONE entry here (plus its data
-    files); every stage derives the category set from this list, so a misspelled
-    or unwired category fails loudly instead of silently becoming a slab.
-
-    The behaviour flags let a category opt out of the stone-variety model: slab/
-    block/tile are FORMS of one stone variety (shared vocabulary, fan-out, texture
-    -swap images), whereas e.g. accessories would set shares_variety_vocab=False,
-    fan_out=False, base_image="" (own vocabulary, own backbone, real photos)."""
-
-    name: str                   # canonical lowercase; also the variant Key prefix
-    plural: str                 # inbox folder + tree-build group key
-    label: str                  # Medusa category name / backbone "category" value
-    pcat_id: str                # Medusa product-category id ("" until created)
-    backbone_filename: str      # under catalog_source/
-    base_image: str             # fal.ai base for texture generation ("" = real photo)
-    shares_variety_vocab: bool  # shares the stone-variety vocabulary (slab/block/tile)
-    fan_out: bool               # a new variety is also created in this category
-    mirror_of: str | None       # backbone mirrors this category's (tile -> slab) else None
-    volume_per_kg: str = ""     # static "Volume per kg (m³/kg)" written into every variant
-    pcat_env_var: str | None = None  # env override for pcat_id (bootstrap); kept so a post-fetch refresh
-                                     # re-derives pcat_id the SAME way construction did (see refresh_category_pcats)
-    bulk_form: bool = False     # the uncut/solid form (block for stone): drives row.is_block + the block-scale
-                                # dimension/freight branch. A domain with no such form leaves this unset everywhere.
-    default_form: bool = False  # the form a row falls back to when its format is unresolved; also the finish and
-                                # dimension fallback source. Exactly one category declares it (pack-validated).
-
-    @property
-    def active(self) -> bool:
-        """Live once its Medusa category id exists."""
-        return bool(self.pcat_id)
-
-    @property
-    def backbone_path(self) -> Path:
-        return _catalog_source_file(self.backbone_filename)   # pack-namespaced (stone flat); never stone-fallback
-
-
-# DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod
-# Medusa assign different ids), so it must come from the env's own download, never a hardcoded
-# value. Read it from from_medusa/<env>/attributes.csv (the same file the reference loads) so a
-# prod run uses prod pcats and a dev run uses dev pcats -- the ids can never cross. The literals
-# below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
-def _env_category_pcats() -> dict[str, str]:
-    path = _FROM_MEDUSA / "attributes.csv"
-    if not path.exists():
-        return {}
-    return {a.value: a.sourceid for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED)
-            if a.category == "category" and a.sourceid}
-
-
-_ENV_PCATS = _env_category_pcats()  # {'Slabs': pcat, 'Blocks': pcat, 'Tiles': pcat} for THIS env
-
-
-def _pcat(label: str, env_var: str | None = None) -> str:
-    """A category's Medusa pcat for THIS env, sourced ONLY from the env's Medusa export
-    (from_medusa/<env>/attributes.csv) -- never hardcoded. An explicit env-var override is allowed.
-    A category absent from the export stays "" (inactive, emits nothing), so dev and prod ids can
-    never cross and no stale literal can leak."""
-    if env_var and env.getenv(env_var):
-        return env.getenv(env_var)
-    return _ENV_PCATS.get(label, "")
-
-# The category list is declared by the active product-domain pack (config/domains/<pack>.yaml). Adding a
-# category = ADD AN ENTRY THERE; every category-derived constant in the pipeline recomputes from this tuple
-# at import. The Medusa pcat id stays env-derived (_pcat, from the env's attributes.csv), never in the pack,
-# so dev/prod ids never cross. `_BY_NAME` below is the runtime index the helpers read (activation via the
-# env pcat, and tests, can flip a category). The stone pack reproduces the historical slab/block/tile tuple
-# exactly. Full recipe: CATEGORY_GUIDE.md.
-def _build_categories() -> "tuple[Category, ...]":
-    return tuple(
-        Category(
-            c["name"], c["plural"], c["label"],
-            _pcat(c["label"], c.get("pcat_env_var")), c["backbone_filename"], c["base_image"],
-            shares_variety_vocab=c["shares_variety_vocab"], fan_out=c["fan_out"],
-            mirror_of=c.get("mirror_of"), volume_per_kg=c.get("volume_per_kg", ""),
-            pcat_env_var=c.get("pcat_env_var"),
-            bulk_form=c.get("bulk_form", False), default_form=c.get("default_form", False))
-        for c in active_pack().categories
-    )
-
-
-CATEGORIES: tuple[Category, ...] = _build_categories()
-
-_BY_NAME = {c.name: c for c in CATEGORIES}
-_BY_LABEL_CF = {c.label.casefold(): c for c in CATEGORIES}  # plural label, casefolded
-
-
-def category(name: str) -> "Category | None":
-    # accept the singular name ('slab') OR the plural label ('Slabs') so a scraper that tags
-    # its format in the plural ('Blocks'/'Tiles') still resolves the explicit tag instead of
-    # silently falling through to the slab default.
-    key = (name or "").strip().casefold()
-    return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
-
-
-def category_for_key(key: str) -> "Category | None":
-    """The category a variant Key belongs to, by its prefix (slab_..., tile_...)."""
-    return _BY_NAME.get((key or "").split("_", 1)[0].casefold())
-
-
-def default_form_name() -> str:
-    """The category a row falls back to when its format is unresolved (also the finish/dimension fallback
-    source). Declared by the pack's `default_form: true`; fail loud if the pack declares none (a pack that
-    passes _validate_shape always has exactly one, so this raise is only a defence against a bypassed load)."""
-    for c in _BY_NAME.values():
-        if c.default_form:
-            return c.name
-    raise RuntimeError("active domain pack declares no default_form category")
-
-
-def bulk_form_name() -> "str | None":
-    """The uncut/solid form's category name (block for stone), or None when the domain has no such form.
-    Drives row.is_block and the block-scale dimension/freight branch."""
-    for c in _BY_NAME.values():
-        if c.bulk_form:
-            return c.name
-    return None
-
-
-def active_categories() -> tuple[Category, ...]:
-    # iterate _BY_NAME (the runtime registry) so tests can flip a category's pcat
-    return tuple(c for c in _BY_NAME.values() if c.active)
-
-
-def refresh_category_pcats() -> None:
-    """Re-read the category pcats from the from_medusa/<env>/attributes.csv now on disk and rebuild the
-    runtime registry (_BY_NAME et al., which the helpers read).
-
-    _ENV_PCATS is read ONCE at import, as a bootstrap from whatever export is on disk then. But a produce
-    downloads a FRESH attributes.csv AFTER import (produce._fetch_inputs), so a running task whose local
-    export changed meaning -- a new Medusa pcat id, or a corrected category label -- would otherwise keep
-    gating on the stale import snapshot: every row rejected category_invalid (validate) and new-variety
-    fan-out silently disabled (curate), both off the frozen active_categories(). Call this once the fresh
-    export is on disk so the registry reflects the live pcats. Each category's pcat_id is re-derived the
-    SAME way construction did (_pcat honours its env override), so the refresh is a faithful recompute,
-    not a second code path. Idempotent: a no-op when the export is unchanged."""
-    global _ENV_PCATS, _BY_NAME, _BY_LABEL_CF
-    _ENV_PCATS = _env_category_pcats()
-    rebuilt = tuple(replace(c, pcat_id=_pcat(c.label, c.pcat_env_var)) for c in _BY_NAME.values())
-    _BY_NAME = {c.name: c for c in rebuilt}
-    _BY_LABEL_CF = {c.label.casefold(): c for c in rebuilt}
 
 
 @dataclass(frozen=True)

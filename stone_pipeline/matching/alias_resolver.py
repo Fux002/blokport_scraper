@@ -118,7 +118,7 @@ def from_backbones():
     nearest variety's colours + aliases. Keyed by (name, type), the variety identity: one name is held by
     several types ('Aqua Blue' granite, marble, ...), and a name-only key kept whichever loaded last. The
     resolver is deterministic (no labelled-data requirement), so it is ALWAYS available (never (None, {}))."""
-    from stone_pipeline.config.settings import CATEGORIES
+    from stone_pipeline.config.categories import CATEGORIES
     from stone_pipeline.matching import projections as proj
     from stone_pipeline.reference.loaders import load_backbone
 

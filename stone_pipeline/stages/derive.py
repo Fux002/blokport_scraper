@@ -17,7 +17,8 @@ import re
 
 from stone_pipeline.config import domain
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence, bulk_form_name, category, default_form_name
+from stone_pipeline.config.categories import CATEGORIES, bulk_form_name, category, default_form_name
+from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
