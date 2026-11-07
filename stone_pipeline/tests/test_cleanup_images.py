@@ -6,7 +6,7 @@ publishes the chosen photos again at no cost."""
 
 from __future__ import annotations
 
-from deploy import cleanup_images
+from stone_pipeline.io import image_wipe as cleanup_images
 from stone_pipeline.config.settings import ENV_SEGMENT
 
 

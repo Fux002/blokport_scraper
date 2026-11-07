@@ -27,7 +27,7 @@ from stone_pipeline.photos import decisions as decisions
 from stone_pipeline.photos import process as proc
 from stone_pipeline.photos import select as select
 from stone_pipeline.photos.publish import NoConflictSet, chosen_prefix, pool_map, read_conflicts, read_records
-from deploy.fetch_inputs import fetch_attributes
+from stone_pipeline.io.medusa_inputs import fetch_attributes
 from stone_pipeline.photos.source import round_prefix, sheet_and_photos
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C

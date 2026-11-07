@@ -8,7 +8,7 @@ import pytest
 from boto3.exceptions import RetriesExceededError
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
 
-from deploy import fetch_inputs
+from stone_pipeline.io import medusa_inputs as fetch_inputs
 from stone_pipeline.config import settings
 from stone_pipeline.reference import sync_variants_base
 
@@ -160,12 +160,12 @@ def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, m
             open(filename, "w", encoding="utf-8").write(incoming)
     monkeypatch.setattr(boto3, "client", lambda *a, **k: _Client())
     monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
-    fetch_inputs.main()
+    fetch_inputs.fetch_all()
     assert local.read_text(encoding="utf-8").count("slab_x_") == 10          # the full local export stays
 
 
 def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
-    """Run fetch_inputs.main against a fake S3 holding one object `name` with body `incoming`."""
+    """Run fetch_inputs.fetch_all against a fake S3 holding one object `name` with body `incoming`."""
     class _Client:
         def get_paginator(self, _):
             return type("P", (), {"paginate": lambda self, **k: [{"Contents": [{"Key": f"{fetch_inputs.ENV_SEGMENT}/scraper/from_medusa/{name}"}]}]})()
@@ -174,7 +174,7 @@ def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
             open(filename, "w", encoding="utf-8").write(incoming)
     monkeypatch.setattr(boto3, "client", lambda *a, **k: _Client())
     monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
-    fetch_inputs.main()
+    fetch_inputs.fetch_all()
 
 
 def _committed_base(tmp_path, rows=10):

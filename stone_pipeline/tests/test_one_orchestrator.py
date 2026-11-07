@@ -15,7 +15,7 @@ import pytest
 from stone_pipeline import produce
 from stone_pipeline.config import runner
 from stone_pipeline.ledger import snapshot, writethrough
-from deploy import upload_artifacts
+from stone_pipeline.io import deliverables as upload_artifacts
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(writethrough, "enabled", lambda: False)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: calls.append("persist"))
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
-    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: calls.append(("publish", run_id)) or 0)
+    monkeypatch.setattr(upload_artifacts, "upload_all", lambda run_id=None: calls.append(("publish", run_id)) or 0)
     return calls
 
 
@@ -43,7 +43,7 @@ def test_a_publish_failure_fails_the_produce(stubbed, monkeypatch):
 
     def _boom(run_id=None):
         raise RuntimeError("S3 unreachable")
-    monkeypatch.setattr(upload_artifacts, "main", _boom)
+    monkeypatch.setattr(upload_artifacts, "upload_all", _boom)
     assert produce.run(None, "all") != 0
 
 

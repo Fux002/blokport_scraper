@@ -14,7 +14,7 @@ from stone_pipeline.config import server, store
 
 def _record_all(monkeypatch, calls, restore_config_raises=False):
     from stone_pipeline.ledger import snapshot
-    from deploy import fetch_inputs
+    from stone_pipeline.io import medusa_inputs as fetch_inputs
 
     def rc(*a, **k):
         calls.append("restore_config")

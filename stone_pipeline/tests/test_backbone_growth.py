@@ -254,10 +254,10 @@ def test_produce_republish_skips_the_live_scrape(monkeypatch):
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append(("build", sources, stage)) or 0)
     from stone_pipeline.ledger import snapshot
-    from deploy import upload_artifacts
+    from stone_pipeline.io import deliverables as upload_artifacts
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)      # produce's own persist + publish
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
-    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: 0)       # (wave 4g), off in this step test
+    monkeypatch.setattr(upload_artifacts, "upload_all", lambda run_id=None: 0)       # (wave 4g), off in this step test
     assert produce.run(None, "republish") == 0
     assert calls == [("fetch", None), ("build", None, "republish")]   # NO scrape
 

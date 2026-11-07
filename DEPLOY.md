@@ -294,8 +294,10 @@ development/  (ENV_NAME = development|production)  -- DURABLE state that MUST su
 (`products/`, `variations/`) are siblings of `scraper/` under `ENV_SEGMENT`, not inside it.
 
 The run wires both ends automatically:
-- **start:** `deploy/fetch_inputs.py` downloads `from_medusa/` from S3 into the task.
-- **end:** `deploy/upload_artifacts.py` uploads `to_upload/` + `review/` back to S3.
+- **start:** `stone_pipeline.io.medusa_inputs.fetch_all` downloads `from_medusa/` from S3 into the task (by hand:
+  `python -m deploy.fetch_inputs`).
+- **end:** `stone_pipeline.io.deliverables.upload_all` uploads `to_upload/` + `review/` back to S3 (by hand:
+  `python -m deploy.upload_artifacts`).
 
 **Running these paths on a laptop dirties the committed seed.** `from_medusa/development/` holds committed
 files (`attributes.csv`, `ports.csv`, `variants_export_base.csv`). Running the config server's `boot()`/`serve()`,

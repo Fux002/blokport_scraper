@@ -223,7 +223,7 @@ resource "aws_batch_job_queue" "this" {
 }
 
 # --- Batch: the texture job definition ---------------------------------------
-# RUN_MODE=generate-textures -> stone_pipeline.prepare_variant_images (deploy/texture_trigger submits it,
+# RUN_MODE=generate-textures -> stone_pipeline.prepare_variant_images (stone_pipeline.io.texture_job submits it,
 # one job for the whole queue of new-variant textures).
 resource "aws_batch_job_definition" "this" {
   name                  = local.name
