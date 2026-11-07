@@ -587,7 +587,8 @@ photo to it). The page keeps one document per listing; its export (a JSON array 
 source, sha, tag, at}`, the fields per action below) is applied with `python -m deploy.standardise_decisions`
 (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`). It prints the environment and bucket
 first. It checks every decision before writing anything: the listing is on the sheet; the action is known with exactly
-the page's fields; `at` is an ISO UTC timestamp; the source is the listing's; the photo is one of the listing's and not
+the page's fields; `at` is an ISO UTC timestamp, no further ahead of the server's clock than `DECISION_AHEAD_SECONDS`
+(300: a decision from the future would block every later one on its listing); the source is the listing's; the photo is one of the listing's and not
 excluded; the tag's result exists; for a clean, the source's image pipeline is on, the photo is no conflict photo and the photos run would use the click
 (`select.click_problem`: its result failed the judge only for what an edit fixes, or a hold an edit fixes); and the
 decision is not older than the one already stored for the listing (its choice, removal or click), so an old export

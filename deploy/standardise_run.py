@@ -532,7 +532,8 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
     if result["pending"]:
-        problems.append(f"{len(result['pending'])} listings not fully judged (listed in {sel.root}summary.json)")
+        problems.append(f"{len(result['pending'])} listings not fully judged (listed in "
+                        f"{sel.root}{summary_file(False, clicks_only)})")
     problems += result["click_problems"]                 # a click blocked (click_state), for any listing of the run
     return problems, result
 
@@ -679,13 +680,12 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     summary = {"run_id": run_id, **counts, "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped, **clean_summary(clean)}
-    name = "close-summary" if close_only else "clicks-summary" if clicks_only else "summary"
-    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{name}.json",
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{summary_file(close_only, clicks_only)}",
                   Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
                                   sort_keys=True).encode(),
                   ContentType="application/json")
     if clicks_only:
-        merge_review(s3, root, review, worked)
+        merge_review(s3, root, review, worked, hidden, tile_listings(sheet, photos))
     elif review is not None:
         write_review(s3, root, review, hidden, tile_listings(sheet, photos))
     return summary
@@ -718,23 +718,34 @@ def _put_review(s3, root, rows):
                   ContentType="application/json")
 
 
-def merge_review(s3, root, review, worked):
+def summary_file(close_only, clicks_only):
+    """The name of a run's summary under the clean tag: each kind of photos run keeps its own."""
+    return "close-summary.json" if close_only else "clicks-summary.json" if clicks_only else "summary.json"
+
+
+def tile_rows(tiles_hidden, tiles):
+    """{SKU: row} of the tiles publish could not render (tile_no_stone, publish's why)."""
+    by_key = {l["key"]: l for l in tiles}
+    return {by_key[key]["sku"]: {"listing": key, "source": by_key[key]["source"], "format": C.TILE_FORMAT,
+                                 "reason": "tile_no_stone", "why": why, "click": None, "photos": []}
+            for key, why in tiles_hidden.items()}
+
+
+def merge_review(s3, root, review, worked, tiles_hidden, tiles):
     """A clicks-only run's rows merged into the review list (manager ruling C1, 2026-11-07): the rows of the SKUs it
-    worked replaced by its own (a listing now chosen loses its row), every other row left as stored (the same bytes,
+    worked replaced by its own (a listing now chosen loses its row), the tiles' rows by its publish's (publish renders
+    every tile in every run kind: a tile it rendered loses its row), every other row left as stored (the same bytes,
     the file sorted by SKU). Inside the run lock, like every write of the process."""
     gone = set(worked)
-    _put_review(s3, root, {**{sku: row for sku, row in read_review(s3, root).items() if sku not in gone}, **review})
+    kept = {sku: row for sku, row in read_review(s3, root).items()
+            if sku not in gone and row["reason"] != "tile_no_stone"}
+    _put_review(s3, root, {**kept, **review, **tile_rows(tiles_hidden, tiles)})
 
 
 def write_review(s3, root, review, tiles_hidden, tiles):
     """The review list (review.json, after publish: only publish knows the tiles it could not render): this run's rows
-    (select.review_row) and a row per hidden tile (tile_no_stone, publish's why), by SKU, the same bytes for the same
-    rows."""
-    by_key = {l["key"]: l for l in tiles}
-    rows = {**review, **{by_key[key]["sku"]: {"listing": key, "source": by_key[key]["source"], "format": C.TILE_FORMAT,
-                                              "reason": "tile_no_stone", "why": why, "click": None, "photos": []}
-                         for key, why in tiles_hidden.items()}}
-    _put_review(s3, root, rows)
+    (select.review_row) and a row per hidden tile (tile_rows), by SKU, the same bytes for the same rows."""
+    _put_review(s3, root, {**review, **tile_rows(tiles_hidden, tiles)})
 
 
 def clean_summary(clean):

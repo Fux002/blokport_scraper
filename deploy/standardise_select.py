@@ -267,7 +267,6 @@ class Results:
 
 
 
-
 def _finished(keys):
     """The photos with a result: <sha>.main.jpg at the folder's top."""
     return {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}

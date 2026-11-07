@@ -28,7 +28,7 @@ from botocore.config import Config
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import aws_config, chosen_prefix, pool_map, read_conflicts, read_records
+from deploy.standardise_publish import NoConflictSet, aws_config, chosen_prefix, pool_map, read_conflicts, read_records
 from deploy.fetch_inputs import fetch_attributes
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config import settings
@@ -43,8 +43,7 @@ ACTIONS = ("use", "clean", "withdraw", "remove")      # the page's contract, in 
 CLICKABLE = ("awaiting_click", "awaiting_auto", "owner_removed")   # the reasons a click may still change
 RESULT_STATES = ("unchecked", "not_judged", "unparsed", "outdated", "pass", "fail")   # a result image exists
 QUEUED = "queued"                                    # a click stored since the last full run: no run has read it yet
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_MONTH = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")     # matched whole (fullmatch)
 
 
 class Unavailable(RuntimeError):
@@ -150,7 +149,7 @@ def _url(s3, key):
 
 def _now():
     """Now as the page writes a decision's time (toISOString, UTC): the time a candidate decision is checked at."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _accepted(ctx, doc):
@@ -207,12 +206,21 @@ def _bases(s3, products, by_sku):
             row = _joined(found, listing, "owner_removed")
         elif (listing["key"] if listing else found["listing"]) in chosen:
             row = _joined(found, listing, "chosen_not_linked")
-        elif sku in review:
-            row = review[sku]
+        elif sku in review:                            # the sheet's handle: a re-bind moves it after the run wrote it
+            row = review[sku] if listing is None else {**review[sku], "listing": listing["key"]}
         else:
             row = _joined(found, listing, "not_worked_yet")
         out.append((sku, row, listing))
     return sorted(out, key=lambda item: (item[1]["source"] or "", item[1]["listing"] or "", item[0]))
+
+
+def _conflicts(s3, sources):
+    """The produce's stored conflict set of these sources (publish.read_conflicts); Unavailable (a 503) before the first
+    produce stores one, never a crash."""
+    try:
+        return read_conflicts(s3, sources)
+    except NoConflictSet as exc:
+        raise Unavailable(str(exc)) from exc
 
 
 def _removed_photos(s3, page, exclude):
@@ -222,7 +230,7 @@ def _removed_photos(s3, page, exclude):
     removed = [(sku, listing) for sku, row, listing in page if row["reason"] == "owner_removed" and listing is not None]
     if not removed:
         return {}
-    conflicts = read_conflicts(s3, {l["source"] for _, l in removed})
+    conflicts = _conflicts(s3, {l["source"] for _, l in removed})
     blocked = {sku: exclude | {s for s in l["photos"] if (l["source"], s) in conflicts} for sku, l in removed}
     asked = {sku: select.candidates(l, blocked[sku]) for sku, l in removed}
     by_source = {}
@@ -252,13 +260,22 @@ def _results(s3, rows):
     return {pair: select.Results(s3, *pair, shas, verdicts) for pair, (shas, verdicts) in sorted(wanted.items())}
 
 
+def _asked(results, tag, src):
+    """The page's read results of a run tag's source (_results). served_photo asks only about what _results read, so a
+    source it did not read is a bug: raised, never answered."""
+    if (tag, src) not in results:
+        raise LookupError(f"the results of {tag}/{src} were not read for this page")
+    return results[(tag, src)]
+
+
 def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
     """One page of the listings the ledger hides: {"total" (rows of `reason`, or all), "counts" ({reason: rows} over
     every hidden row), "offset", "limit", "rows"}. Every row is placed and counted from the stored rows and keys alone
     (_bases), in a stable order applied before the page is cut; only the page's rows are then worked: the removed ones'
-    photos (_removed_photos), the stored decisions of their listings alone and the results their photos are asked
-    about (decisions.context keys and results), the applier asked about each action (served_photo, row_actions), the
-    live click, the images signed: a few rows at a time."""
+    photos (_removed_photos), the choice records of their listings and those sharing a photo with them (the owner
+    choices, removals and clicks are small stores, read whole) and the results their photos are asked about
+    (decisions.context keys and results), the applier asked about each action (served_photo, row_actions), the live
+    click, the images signed: a few rows at a time."""
     products = hidden_products()
     photo_listings, tiles = sheet(s3)
     by_sku = {l["sku"]: l for l in photo_listings + tiles}
@@ -272,7 +289,7 @@ def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
     results = _results(s3, [row for _, row in rows])
     try:
         ctx = decisions.context(s3, photo_listings, exclude, keys=[row["listing"] for _, row in rows],
-                                results=lambda tag, src: results.get((tag, src)) or select.Results(s3, tag, src, (), ()))
+                                results=lambda tag, src: _asked(results, tag, src))
     except decisions.InvalidDecisions as exc:
         raise Unavailable(str(exc)) from exc
     stores, at = ctx.stores, _now()
@@ -290,7 +307,7 @@ def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
 
 # --- GET /photos/spend --------------------------------------------------------------------------------------------------
 def valid_month(month):
-    return isinstance(month, str) and bool(_MONTH.match(month))
+    return isinstance(month, str) and bool(_MONTH.fullmatch(month))
 
 
 def _month(s3, directory, month):
@@ -299,13 +316,28 @@ def _month(s3, directory, month):
     too."""
     found, broken = read_records(s3, proc.spend_prefix(directory, month), lambda key: key.rsplit("/", 1)[1][:-len(".json")])
     for run_id, record in list(found.items()):
-        if not isinstance(record.get("usd"), (int, float)) or isinstance(record["usd"], bool):
-            broken[run_id] = f"usd is {record.get('usd')!r}, not a number"
+        if why := _spend_shape(record):
+            broken[run_id] = why
             del found[run_id]
     runs = [{"run_id": run_id, "usd": record["usd"]} for run_id, record in sorted(found.items())]
     uses = sorted(({"run_id": run_id, **use} for run_id, record in found.items() for use in record.get("uses", [])),
                   key=lambda u: (u["at"], u["run_id"], u["sha"], u["model"], u["call"]))
     return runs, uses, [{"run_id": run_id, "error": why} for run_id, why in sorted(broken.items())]
+
+
+_USE_FIELDS = ("at", "sha", "model", "call")            # what every listed paid call names (select.clean_photo)
+
+
+def _spend_shape(record):
+    """Why a spend file is not {"usd": a number, "uses": [a use naming _USE_FIELDS]}, or None: one of another shape is
+    listed unreadable, never summed or sorted."""
+    if not isinstance(record.get("usd"), (int, float)) or isinstance(record["usd"], bool):
+        return f"usd is {record.get('usd')!r}, not a number"
+    uses = record.get("uses", [])
+    if not isinstance(uses, list) or not all(isinstance(u, dict) and all(isinstance(u.get(f), str) for f in _USE_FIELDS)
+                                             for u in uses):
+        return f"uses is not a list of paid calls each naming {', '.join(_USE_FIELDS)}"
+    return None
 
 
 def spend(s3, month):
@@ -327,7 +359,7 @@ def check_body(body, fields):
     ValueError names what is wrong."""
     if not isinstance(body, dict) or set(body) != set(fields):
         raise ValueError(f"the body is exactly {{{', '.join(fields)}}}")
-    if "sha" in fields and not (isinstance(body["sha"], str) and _SHA.match(body["sha"])):
+    if "sha" in fields and not (isinstance(body["sha"], str) and decisions.SHA.fullmatch(body["sha"])):
         raise ValueError(f"sha {body['sha']!r} is not a photo's sha256")
     if decisions.moment(body["at"]) is None:
         raise ValueError(f"at {body['at']!r} is not an ISO UTC timestamp (2026-11-07T10:00:00.000Z)")
@@ -387,7 +419,8 @@ def click(s3, sku, sha, at):
     if listing is None:
         return _unknown(sku)
     doc = {"id": listing["key"], "action": "clean", "source": listing["source"], "sha": sha, "at": at}
-    if sku not in hidden_products():
+    # a tile (never a photo listing: the applier refuses it, 422 first) or a listing the ledger does not hide
+    if all(l["sku"] != sku for l in photo_listings) or sku not in hidden_products():
         _, refused = _decide(s3, [doc], dry_run=True, sheet=photo_listings, narrow=True)
         if refused is not None and refused[0] == 422:
             return refused
@@ -395,7 +428,7 @@ def click(s3, sku, sha, at):
     src = listing["source"]
     if _has_choice(s3, listing["key"]):
         return 409, {"reason": "chosen_not_linked", "error": f"{sku} has a chosen photo; the next relink shows it"}
-    conflicts = read_conflicts(s3, {src})
+    conflicts = _conflicts(s3, {src})
     blocked = decisions.excluded() | {s for s in listing["photos"] if (src, s) in conflicts}
     # what the run folders hold of the photos the two states ask about (select.Round shas), never a whole folder: the
     # listing's candidates (listing_state judges only those) and the clicked photo (click_state)
