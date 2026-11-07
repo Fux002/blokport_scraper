@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
 # image also carries its pin tag (prod-<sha12> / prod-gpu-<sha12>), which the ECR lifecycle keeps (DEPLOY.md).
-prod_image_tag     = "d11da5b62972619db3f689f09d0936d3e54a93fd"     # + parallel scrape (#513), sentas Drive cards (#516), GPU image recipe (#508), #517-#521, corners (#514), status zeros (#522)
+prod_image_tag     = "c11507910ec28039d3acd55a4b3c115157320da6"     # full review wave A (#530-#548: sync lanes/acks/manifest, control plane, matcher type-first, photos click/isolation, infra pins/rolls), D7 base deliverable (#545), VE2 archived/internal dormant (#549-#553)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
