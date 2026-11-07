@@ -18,7 +18,7 @@ ONE self-verifying command builds the whole upload set in the correct order:
 
 ```bash
 python -m stone_pipeline.build            # run all -> catalog -> combinations -> consistency gate
-python -m stone_pipeline.build --verify   # re-run ONLY the consistency gate on the existing files
+SCRAPER_RUN_VERIFY=1 python -m stone_pipeline.build   # re-run ONLY the consistency gate on the existing files
 # then follow to_upload/<env>/SYNC_STEPS.md to upload
 
 # <env> is development by default. For the production set, prefix the command:
@@ -169,7 +169,7 @@ heuristics, no sampling):
 
 If anything fails, the build exits non-zero and names the problem (e.g. "N combination variation ids
 are NOT in the current export — stale combinations"). Re-run it any time with
-`python -m stone_pipeline.build --verify`. This is what guarantees the upload set is internally
+`SCRAPER_RUN_VERIFY=1 python -m stone_pipeline.build`. This is what guarantees the upload set is internally
 consistent — you do not have to verify it by hand.
 
 ## Production (development -> production)

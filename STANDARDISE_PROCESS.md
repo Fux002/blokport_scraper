@@ -43,7 +43,7 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
                       changed; then every tile listing's views and 3D tile rendered from its variety's slab
                       stone (CPU, only what changed); then what is no longer chosen or rendered is removed
       11. unlock      only if the lock is still this run's
-      12. relink      when step 10 changed anything: produce --stage republish, inside the same process (never a
+      12. relink      when step 10 changed anything: produce (the republish stage), inside the same process (never a
                       child, so a run the runner stops takes it along), so the new photos go live in the same press
       13. idle        the GPU pool's ceiling set back to idle once more: lowered at a round's end while its instances
                       still ran, Batch keeps it at what they held; by now the pool has drained

@@ -32,30 +32,30 @@ def stubbed(monkeypatch):
 
 
 def test_a_catalog_produce_persists_then_publishes_with_the_run_id(stubbed, monkeypatch):
-    monkeypatch.setattr(produce.build, "main", lambda argv: stubbed.append("build") or 0)
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: stubbed.append("build") or 0)
     monkeypatch.setenv("SCRAPER_RUN_ID", "run-7")
-    assert produce.main([]) == 0
+    assert produce.run(None, "all") == 0
     assert stubbed == ["fetch", "scrape", "build", "finalize", "persist", ("publish", "run-7")]
 
 
 def test_a_publish_failure_fails_the_produce(stubbed, monkeypatch):
-    monkeypatch.setattr(produce.build, "main", lambda argv: 0)
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: 0)
 
     def _boom(run_id=None):
         raise RuntimeError("S3 unreachable")
     monkeypatch.setattr(upload_artifacts, "main", _boom)
-    assert produce.main([]) != 0
+    assert produce.run(None, "all") != 0
 
 
 def test_a_failed_build_persists_and_publishes_nothing(stubbed, monkeypatch):
-    monkeypatch.setattr(produce.build, "main", lambda argv: stubbed.append("build") or 3)
-    assert produce.main([]) == 3
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: stubbed.append("build") or 3)
+    assert produce.run(None, "all") == 3
     assert "persist" not in stubbed and not any(isinstance(c, tuple) for c in stubbed)
 
 
 def test_a_scrape_only_stage_persists_but_publishes_nothing(stubbed, monkeypatch):
-    monkeypatch.setattr(produce.build, "main", lambda argv: stubbed.append("build") or 0)
-    assert produce.main(["--stage", "scrape"]) == 0
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: stubbed.append("build") or 0)
+    assert produce.run(None, "scrape") == 0
     assert "persist" in stubbed and not any(isinstance(c, tuple) for c in stubbed)
 
 

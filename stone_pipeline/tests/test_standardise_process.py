@@ -1399,13 +1399,13 @@ def test_the_relink_is_the_produce_s_republish_in_this_process_with_its_progress
     from stone_pipeline import produce
     seen = []
 
-    def republish(argv):
-        seen.append(argv)
+    def republish(sources, stage):
+        seen.append((sources, stage))
         print("image 1 of 4,313")
         return 0
-    monkeypatch.setattr(produce, "main", republish)
+    monkeypatch.setattr(produce, "run", republish)
     assert proc.relink() == 0
-    assert seen == [["--stage", "republish"]] and "image 1" not in capsys.readouterr().out
+    assert seen == [(None, "republish")] and "image 1" not in capsys.readouterr().out
 
 
 # --- the trigger: the runner's photos stage ---------------------------------------------------------------------------

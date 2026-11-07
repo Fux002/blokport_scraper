@@ -45,28 +45,30 @@ def test_default_run_is_all_sources_full_stage():
     assert code == 202 and rec["stage"] == "all"
     assert seen["rec"]["scope"] is None                       # no subset -> produce runs every enabled source
     assert runner._build_command(seen["rec"]) == [
-        sys.executable, "-m", "stone_pipeline.produce", "--stage", "all"]   # full produce (fetch -> scrape -> build)
+        sys.executable, "-m", "stone_pipeline.produce"]       # full produce (fetch -> scrape -> build); no argv flags
+    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "all"}   # scope on the env
 
 
 def test_single_source_scrape_scopes_the_command():
     seen, launch = _capture()
     rec, code = runner.start_run(sources=["zucchi"], stage="scrape", launch=launch)
     assert code == 202 and rec["stage"] == "scrape" and rec["sources"] == ["zucchi"]
-    assert runner._build_command(seen["rec"])[-4:] == ["--stage", "scrape", "--sources", "zucchi"]
+    assert "--" not in " ".join(runner._build_command(seen["rec"]))   # no argv flags
+    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "scrape", "SCRAPER_RUN_SOURCES": "zucchi"}
 
 
 def test_catalog_stage_carries_no_sources():
     seen, launch = _capture()
     rec, code = runner.start_run(stage="catalog", launch=launch)
     assert code == 202 and rec["stage"] == "catalog"
-    assert "--sources" not in runner._build_command(seen["rec"])
+    assert "SCRAPER_RUN_SOURCES" not in runner._produce_run_env(seen["rec"])
 
 
 def test_inventory_stage_scopes_to_one_source():
     seen, launch = _capture()
     rec, code = runner.start_run(sources=["zucchi"], stage="inventory", launch=launch)
     assert code == 202 and rec["stage"] == "inventory"
-    assert runner._build_command(seen["rec"])[-4:] == ["--stage", "inventory", "--sources", "zucchi"]
+    assert runner._produce_run_env(seen["rec"]) == {"SCRAPER_RUN_STAGE": "inventory", "SCRAPER_RUN_SOURCES": "zucchi"}
 
 
 def test_unknown_stage_is_rejected():
@@ -94,7 +96,7 @@ def test_catalog_stage_ignores_a_source_scope():
     seen, launch = _capture()
     rec, code = runner.start_run(sources=["zucchi"], stage="catalog", launch=launch)
     assert code == 202 and seen["rec"]["scope"] is None        # scope ignored for catalog
-    assert "--sources" not in runner._build_command(seen["rec"])
+    assert "SCRAPER_RUN_SOURCES" not in runner._produce_run_env(seen["rec"])
 
 
 

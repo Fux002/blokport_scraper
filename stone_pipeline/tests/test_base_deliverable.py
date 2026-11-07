@@ -192,11 +192,11 @@ def test_a_produce_without_a_catalog_publishes_nothing(stage, monkeypatch):
     monkeypatch.setattr(produce, "_fetch_inputs", lambda: None)
     monkeypatch.setattr(produce, "_live_scrape", lambda s: 0)
     monkeypatch.setattr(produce, "_finalize_control_plane", lambda stage: None)
-    monkeypatch.setattr(produce.build, "main", lambda argv: 0)
+    monkeypatch.setattr(produce.build, "run", lambda sources, stage: 0)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
     monkeypatch.setattr(ua, "main", lambda run_id=None: published.append(run_id) or 0)
-    assert produce.main(["--stage", stage]) == 0
+    assert produce.run(None, stage) == 0
     assert published == []
 
 

@@ -262,14 +262,22 @@ def _build_command(rec: dict) -> list[str]:
     stdout). Every other stage is a produce: FULL produce = stone_pipeline.produce (fetch export inputs
     -> LIVE scrape -> build), NOT bare `stone_pipeline.build`: build assumes data/ is already scraped
     (the laptop path), so on a fresh host (a new ECS task with empty data/) it would produce nothing.
-    produce guarantees the inputs first. `--stage` scopes HOW FAR (scrape / catalog / all) and
-    `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
+    produce guarantees the inputs first. The run SCOPE (stage, sources) is passed on the subprocess ENV
+    (SCRAPER_RUN_STAGE / SCRAPER_RUN_SOURCES, see _produce_run_env), not argv -- the project rule is
+    config-driven, no CLI flag plumbing (produce reads settings.SETTINGS.run)."""
     if rec.get("stage") == "photos":
         return [sys.executable, "-u", "-m", "stone_pipeline.photos.process"]
-    cmd = [sys.executable, "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
+    return [sys.executable, "-m", "stone_pipeline.produce"]
+
+
+def _produce_run_env(rec: dict) -> dict:
+    """The run-scope env for a produce subprocess (SCRAPER_ prefix: produce reads it via settings.SETTINGS.run).
+    SCRAPER_RUN_STAGE always; SCRAPER_RUN_SOURCES only when the run is scoped to specific sources (omitted ->
+    every enabled source, as a missing --sources did)."""
+    env = {"SCRAPER_RUN_STAGE": rec.get("stage", "all")}
     if rec.get("scope"):
-        cmd += ["--sources", ",".join(rec["scope"])]
-    return cmd
+        env["SCRAPER_RUN_SOURCES"] = ",".join(rec["scope"])
+    return env
 
 
 def _summary_path(rec: dict) -> Path:
@@ -317,7 +325,7 @@ def _launch_local(rec: dict) -> None:
                      **({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec)),
                          "SCRAPER_STANDARDISE_CLOSE_ONLY": "true" if rec["close_only"] else "false",
                          "SCRAPER_STANDARDISE_CLICKS_ONLY": "true" if rec["clicks_only"] else "false"}
-                        if photos else {})},
+                        if photos else _produce_run_env(rec))},
                 # A produce's stdout is the image-progress print() noise (drop it); its stderr carries the structured
                 # logfmt logs + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's
                 # cause. The photo process reports on stdout, so its two streams are captured as one.
