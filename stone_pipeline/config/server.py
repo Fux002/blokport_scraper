@@ -895,8 +895,33 @@ def _photo_body(rv, body, fields):
         raise _BadRequest(str(exc)) from exc
 
 
+def _page_param(qs, name, default, low, high=None):
+    """A whole-number query parameter of at least low (and at most high, when given), default when absent; a 400 naming
+    it otherwise."""
+    if name not in qs:
+        return default
+    value = qs[name][0]
+    if not value.isdigit() or int(value) < low or (high is not None and int(value) > high):
+        raise _BadRequest(f"{name} must be a whole number from {low}{f' to {high}' if high is not None else ''}, "
+                          f"got {value!r}")
+    return int(value)
+
+
 def _get_photos_hidden(params, body, query):
-    return _photos(lambda rv: (200, rv.hidden(rv.client())))
+    # ?reason=<one of the review reasons>&offset=<0..>&limit=<1..REVIEW_PAGE_MAX>, each at most once
+    from stone_pipeline.config.settings import STANDARDISE as C
+
+    def answer(rv):
+        qs = parse_qs(query, keep_blank_values=True)
+        if repeated := sorted(name for name in ("reason", "offset", "limit") if len(qs.get(name, ())) > 1):
+            raise _BadRequest(f"{', '.join(repeated)} given more than once")
+        reason = qs["reason"][0] if "reason" in qs else None
+        if reason is not None and reason not in rv.select.REVIEW_REASONS:
+            raise _BadRequest(f"reason must be one of {', '.join(rv.select.REVIEW_REASONS)}, got {reason!r}")
+        offset = _page_param(qs, "offset", 0, 0)
+        limit = _page_param(qs, "limit", C.REVIEW_PAGE_DEFAULT, 1, C.REVIEW_PAGE_MAX)
+        return 200, rv.hidden(rv.client(), reason, offset, limit)
+    return _photos(answer)
 
 
 def _get_photos_spend(params, body, query):

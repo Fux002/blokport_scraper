@@ -208,6 +208,76 @@ def test_no_action_a_row_offers_is_refused_by_the_applier(monkeypatch):
         dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=set())                      # never InvalidDecisions
 
 
+# --- the hidden list a page at a time (manager 2026-11-07: dev's full list was 48 s and 13 MB in one answer) ----------
+def _many(monkeypatch, n):
+    """n hidden listings, each with a run's row (awaiting_click on its photo A-like sha), and the bucket."""
+    listings = [_listing(f"l{i:02d}", f"{i + 16:x}" * 32) for i in range(n)]
+    monkeypatch.setattr(rv, "sheet", lambda s3: (listings, [TILE]))
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: listings)
+    _hidden_in_ledger(monkeypatch, *listings, TILE, UNSEEN)
+    review = {l["sku"]: _row(l) for l in listings}
+    review["SEN-TILE-1"] = {**_row(TILE, "tile_no_stone", photos=[]), "why": "no tile fits"}
+    s3 = _bucket(**{REVIEW: json.dumps(review).encode(),
+                    **{f"{RUN}{l['photos'][0]}.main.jpg": b"m" for l in listings},
+                    **{f"{RUN}judged/{l['photos'][0]}.json": _verdict("fail", "light_reflection") for l in listings}})
+    return listings, s3
+
+
+def test_the_list_is_ordered_then_sliced_and_counts_every_hidden_row(monkeypatch):
+    listings, s3 = _many(monkeypatch, 7)
+    first = rv.hidden(s3, None, 0, 3)
+    assert (first["total"], first["offset"], first["limit"]) == (9, 0, 3)
+    assert first["counts"] == {"awaiting_click": 7, "not_worked_yet": 1, "tile_no_stone": 1}
+    whole = [r["sku"] for r in rv.hidden(s3, None, 0, 100)["rows"]]
+    assert whole == sorted(whole, key=lambda sku: next((l["key"] for l in listings + [TILE, UNSEEN] if l["sku"] == sku)))
+    pages = [r["sku"] for off in (0, 3, 6) for r in rv.hidden(s3, None, off, 3)["rows"]]
+    assert pages == whole and rv.hidden(s3, None, 9, 3)["rows"] == []
+    tiles = rv.hidden(s3, "tile_no_stone", 0, 50)
+    assert tiles["total"] == 1 and [r["sku"] for r in tiles["rows"]] == ["SEN-TILE-1"]
+    assert tiles["counts"] == first["counts"]                            # counts never filtered
+
+
+def test_only_the_page_s_photos_are_read_and_signed(monkeypatch):
+    listings, s3 = _many(monkeypatch, 7)
+    page = rv.hidden(s3, None, 2, 2)["rows"]
+    on_page = {p["sha"] for r in page for p in r["photos"]}
+    assert len(on_page) == 2 and all(any(sha in key for sha in on_page) for key in s3.signed)
+    judged = []
+    get = s3.get_object
+    s3.get_object = lambda Bucket, Key: (judged.append(Key) if "/judged/" in Key else None) or get(Bucket, Key)
+    rv.hidden(s3, None, 2, 2)
+    assert {k.rsplit("/", 1)[1][:-len(".json")] for k in judged} <= on_page
+
+
+def test_a_removed_listing_shows_its_photos_and_offers_use_and_clean_the_applier_accepts(monkeypatch):
+    # manager ruling (c): a removal is never a dead end on the page; a use or a clean lifts it (the applier's rule)
+    _hidden_in_ledger(monkeypatch, ONE)
+    s3 = _bucket(**{imagestore.owner_removed_key("SEN-ONE"): json.dumps(
+        {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "reason": C.REMOVED_REASON, "at": AT}).encode()})
+    row = rv.hidden(s3)["rows"][0]
+    assert row["reason"] == "owner_removed" and [p["sha"] for p in row["photos"]] == [A, B]
+    assert row["actions"] == ["use", "clean"] and all(p["urls"]["original"] for p in row["photos"])
+    docs = list(_offered(row))
+    for doc in docs:
+        dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=set())               # never InvalidDecisions
+    dec.apply(s3, dec.plan(s3, [next(d for d in docs if d["action"] == "use")], PHOTO_LISTINGS, exclude=set()))
+    assert imagestore.owner_removed_key("SEN-ONE") not in s3.objects    # the use lifted the removal
+
+
+def test_the_page_is_asked_for_by_reason_offset_and_limit_validated_at_the_route(monkeypatch):
+    seen = []
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "hidden", lambda s3, reason, offset, limit: seen.append((reason, offset, limit)) or {})
+    assert server.dispatch("GET", ["photos", "hidden"], None)[0] == 200
+    assert server.dispatch("GET", ["photos", "hidden"], None, "reason=pending&offset=50&limit=100")[0] == 200
+    assert seen == [(None, 0, C.REVIEW_PAGE_DEFAULT), ("pending", 50, 100)]
+    for query in ("reason=nope", "reason=", "offset=-1", "offset=x", "limit=0", f"limit={C.REVIEW_PAGE_MAX + 1}",
+                  "limit=1.5", "offset=1&offset=2", "reason=pending&reason=pending"):
+        code, body = server.dispatch("GET", ["photos", "hidden"], None, query)
+        assert code == 400 and query.split("=")[0] in body["error"], query
+    assert len(seen) == 2
+
+
 def test_a_review_list_that_cannot_be_read_is_said_never_served_empty(monkeypatch):
     _hidden_in_ledger(monkeypatch, ONE)
     with pytest.raises(rv.Unavailable, match="review.json"):
@@ -448,7 +518,7 @@ def test_a_withdraw_older_than_the_click_is_422_and_one_while_a_run_holds_the_lo
 def _served(monkeypatch):
     calls = []
     monkeypatch.setattr(rv, "client", lambda: "s3")
-    monkeypatch.setattr(rv, "hidden", lambda s3: calls.append(("hidden", s3)) or {"rows": []})
+    monkeypatch.setattr(rv, "hidden", lambda s3, reason, offset, limit: calls.append(("hidden", s3)) or {"rows": []})
     monkeypatch.setattr(rv, "spend", lambda s3, month: calls.append(("spend", month)) or {"month": month})
     monkeypatch.setattr(rv, "click", lambda s3, sku, sha, at: calls.append(("click", sku, sha, at)) or (200, {}))
     monkeypatch.setattr(rv, "withdraw", lambda s3, sku, at: calls.append(("withdraw", sku, at)) or (200, {}))
@@ -486,7 +556,8 @@ def test_a_withdraw_with_a_bad_body_is_400(_served):
 
 def test_a_store_that_cannot_be_read_is_503_naming_it(monkeypatch):
     monkeypatch.setattr(rv, "client", lambda: "s3")
-    monkeypatch.setattr(rv, "hidden", lambda s3: (_ for _ in ()).throw(rv.Unavailable("the ledger cannot be read")))
+    monkeypatch.setattr(rv, "hidden", lambda s3, reason, offset, limit: (_ for _ in ()).throw(
+        rv.Unavailable("the ledger cannot be read")))
     assert server.dispatch("GET", ["photos", "hidden"], None) == (503, {"error": "the ledger cannot be read"})
 
 

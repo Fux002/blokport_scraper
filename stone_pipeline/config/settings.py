@@ -1039,6 +1039,10 @@ class STANDARDISE:
     # the list again when an image no longer loads).
     REVIEW_FILE = "review.json"
     REVIEW_URL_TTL_SECONDS = 900
+    # GET /config/v1/photos/hidden serves the list a page at a time: this many rows unless asked, never more than the max
+    # (the per-row work, its reads and its signed images, is done for one page only).
+    REVIEW_PAGE_DEFAULT = 50
+    REVIEW_PAGE_MAX = 100
     # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
     # the review list gives for it.
     CONFLICT_REASON = "photo_conflict"

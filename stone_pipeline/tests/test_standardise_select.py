@@ -480,6 +480,19 @@ def test_a_round_read_for_a_few_photos_holds_exactly_what_the_whole_folder_says_
     assert few.redrawn == {A, B} and few.prefix == whole.prefix
 
 
+def test_the_results_of_a_few_photos_are_the_round_s_results_and_nothing_more():
+    # the hidden-listings page asks of a page's photos only what the decisions applier checks: 3 folders, not 10
+    keys = [f"{GPU}{s}.main.jpg" for s in (A, B, D)] + [f"{GPU}judged/{A}.json", f"{GPU}held/{B}.json",
+                                                        f"{GPU}judged/{D}.json", f"{GPU}cleaned/{A}.jpg"]
+    bucket = _Bucket({k: b"{}" for k in keys})
+    whole, few = sel.Round(bucket, "v9", "sentas"), sel.Results(bucket, "v9", "sentas", [A, B])
+    for name in ("finished", "judged", "held"):
+        assert getattr(few, name) == getattr(whole, name) - {D}, name
+    assert few.prefix == whole.prefix
+    with pytest.raises(AttributeError):
+        few.cleaned                                                     # never read: never answered
+
+
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
     # the hosted edit leaves the straps: the cleaned copy is retouched like any photo
     from deploy import standardise_source as src

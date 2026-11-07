@@ -193,7 +193,7 @@ class Round(_Locks):
             o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
             for o in page.get("Contents", [])], prefixes)
         keys = [k for part in listed for k in part]
-        self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
+        self.finished = _finished(keys)
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
         self.noslab = _shas(keys, "noslab/")
@@ -230,6 +230,29 @@ class Round(_Locks):
         Round: settle reads the rounds again after it changes them."""
         return ((self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step - self.checked
                 - self.redrawn) | self.older_outline
+
+
+class Results:
+    """What a run folder holds of a few photos for the decisions applier's checks (a "use" needs a result, a "clean"
+    reads its verdict or hold: decisions.refusals): prefix, finished, judged and held, read from RESULT_FOLDERS by sha,
+    the same sets a Round gives restricted to them. Nothing else is read, so nothing else is answered (AttributeError)."""
+
+    def __init__(self, client, tag, src, shas):
+        self.prefix = round_prefix(tag, src)
+        prefixes = [f"{self.prefix}{folder}{sha}" for sha in sorted(set(shas)) for folder in RESULT_FOLDERS]
+        listed = pool_map(C.STORE_WORKERS, lambda prefix: [
+            o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+            for o in page.get("Contents", [])], prefixes)
+        keys = [k for part in listed for k in part]
+        self.finished, self.judged, self.held = _finished(keys), _shas(keys, "judged/"), _shas(keys, "held/")
+
+
+RESULT_FOLDERS = ("", "judged/", "held/")
+
+
+def _finished(keys):
+    """The photos with a result: <sha>.main.jpg at the folder's top."""
+    return {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
 
 
 def _attempts(keys, suffix):

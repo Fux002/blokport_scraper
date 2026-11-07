@@ -234,12 +234,13 @@ def _choices_of(s3, keys):
             {k: v for _, errors in found for k, v in errors.items()})
 
 
-def _touched(docs, listings, shared):
-    """The listings a few decisions can reach (narrow): each decided listing, and every listing a photo of it is shared
-    with (its siblings, which a "use" reaches; its conflict partners, whose stored choice can hold the photo)."""
+def _touched(keys, listings, shared):
+    """The listings decisions on these listing keys can reach (narrow): each of them, and every listing a photo of it
+    is shared with (its siblings, which a "use" reaches; its conflict partners, whose stored choice can hold the
+    photo)."""
     out = set()
-    for doc in docs:
-        listing = listings.get(doc.get("id"))
+    for key in keys:
+        listing = listings.get(key)
         if listing is None:
             continue
         out.add(listing["key"])
@@ -263,18 +264,18 @@ class Context:
     off: set
 
 
-def context(s3, sheet, exclude, narrow=None):
+def context(s3, sheet, exclude, keys=None, results=None):
     """The Context of the photo listings `sheet`; InvalidDecisions before a produce has stored the conflict sets.
-    narrow: the decisions it is read for alone (a decision or two from the config API): only the choice records of the
-    listings they can reach (_touched) and the run tags' results of the photos they name, never a whole folder."""
+    keys: the listings it is read for alone (a click's decision, a page of the hidden list): only the choice records of
+    the listings decisions on them can reach (_touched), never every one. results: what answers a run tag's results
+    for a source, results(tag, src) (default: its whole folder, a Round, read once)."""
     listings = {l["key"]: l for l in sheet}
     try:                                              # the produce's conflict set, the sheet's sibling groups
         shared = index.groups(sheet, read_conflicts(s3, {l["source"] for l in sheet}))
     except NoConflictSet as exc:
         raise InvalidDecisions(str(exc)) from exc
-    touched = None if narrow is None else _touched(narrow, listings, shared)
-    shas = None if narrow is None else {d["sha"] for d in narrow if isinstance(d.get("sha"), str)}
-    return Context(s3, listings, _Stores(s3, listings, touched), shared, _rounds(s3, shas), exclude,
+    touched = None if keys is None else _touched(keys, listings, shared)
+    return Context(s3, listings, _Stores(s3, listings, touched), shared, results or _rounds(s3), exclude,
                    image_pipeline_off())
 
 
@@ -424,7 +425,9 @@ def plan(s3, docs, sheet, exclude, narrow=False):
     """The changes the decisions make (Plan), every decision checked first: InvalidDecisions names each bad one. Reads
     only; the same decisions against the same stores give the same plan, whatever their order in the file. narrow (a
     decision or two from the config API): the same plan, read narrow (context)."""
-    ctx = context(s3, sheet, exclude, docs if narrow else None)
+    ctx = (context(s3, sheet, exclude, [d.get("id") for d in docs],
+                   _rounds(s3, {d["sha"] for d in docs if isinstance(d.get("sha"), str)})) if narrow
+           else context(s3, sheet, exclude))
     listings, stores, shared = ctx.listings, ctx.stores, ctx.shared
     _check(ctx, docs)
     out = Plan()

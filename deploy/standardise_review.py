@@ -17,15 +17,17 @@ A store that cannot be read (the ledger, review.json) is Unavailable: said, neve
 from __future__ import annotations
 
 import re
+from collections import Counter
 import sqlite3
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 
 from deploy import standardise_decisions as decisions
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import aws_config, chosen_prefix, read_conflicts, read_records
+from deploy.standardise_publish import aws_config, chosen_prefix, pool_map, read_conflicts, read_records
 from deploy.standardise_source import round_prefix, sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import logfmt
@@ -35,7 +37,7 @@ log = logfmt.get_logger("photos.review")
 
 ROOT = decisions.ROOT
 ACTIONS = ("use", "clean", "withdraw", "remove")      # the page's contract, in the order the page lists them
-CLICKABLE = ("awaiting_click", "awaiting_auto")      # the reasons a click may still change
+CLICKABLE = ("awaiting_click", "awaiting_auto", "owner_removed")   # the reasons a click may still change
 RESULT_STATES = ("unchecked", "not_judged", "unparsed", "outdated", "pass", "fail")   # a result image exists
 QUEUED = "queued"                                    # a click stored since the last full run: no run has read it yet
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -47,7 +49,10 @@ class Unavailable(RuntimeError):
 
 
 def client():
-    return boto3.client("s3", region_name=S3_REGION, config=aws_config())
+    """The photo routes' S3 client: the process's configuration, with a connection per worker (STORE_WORKERS reads at
+    once; botocore's default pool of 10 made them queue and reconnect)."""
+    return boto3.client("s3", region_name=S3_REGION,
+                        config=aws_config().merge(Config(max_pool_connections=C.STORE_WORKERS)))
 
 
 def sheet(s3):
@@ -126,14 +131,16 @@ def _accepted(ctx, doc):
 def served_photo(s3, ctx, row, photo, at):
     """A review photo as served. clickable: its listing's reason still lets a click help, a cleaned copy could fix it,
     a model is left, and the applier would store the click; usable: the run tags whose result of it the applier would
-    take as the owner's choice ("use"). Its images signed now: the scraped photo, its result when one exists, its
-    cleaned copy when one was made."""
+    take as the owner's choice ("use"), asked only where the stored state has a result (results are never taken away,
+    so this never offers one that is not there). Its images signed now: the scraped photo, its result when one exists,
+    its cleaned copy when one was made."""
     sha, source = photo["sha"], row["source"]
     doc = {"id": row["listing"], "source": source, "sha": sha, "at": at}
     clickable = (row["reason"] in CLICKABLE and photo["fixable"] and bool(photo["clean"]["left"])
                  and _accepted(ctx, {**doc, "action": "clean"}))
+    stored = {C.RUN_TAG: photo["state"] in RESULT_STATES, C.CLEAN_TAG: photo["clean"]["copy"] in RESULT_STATES}
     return {**photo, "clickable": clickable,
-            "usable": [tag for tag in decisions.TAGS if _accepted(ctx, {**doc, "action": "use", "tag": tag})],
+            "usable": [tag for tag in decisions.TAGS if stored[tag] and _accepted(ctx, {**doc, "action": "use", "tag": tag})],
             "urls": {"original": _url(s3, f"{imagestore.scraped_prefix(source)}{sha}.jpg"),
                      "result": (_url(s3, f"{round_prefix(photo['tag'], source)}{sha}.main.jpg")
                                 if photo["state"] in RESULT_STATES else None),
@@ -158,24 +165,13 @@ def _joined(found, listing, reason):
             "format": listing["format"] if listing else None, "reason": reason, "why": None, "click": None, "photos": []}
 
 
-def hidden(s3):
-    """{"rows": [...]} of every listing the ledger hides, by source then listing: the owner's removal first, then a
-    choice record (chosen, the next relink links it), then the last full run's row, else not worked yet; each with the
-    live click (live_click), its photos served (served_photo) and its actions (row_actions). The stored decisions are
-    read once, by the decisions applier's own readers (decisions.context), so what is offered is what it accepts."""
-    products = hidden_products()
-    photo_listings, tiles = sheet(s3)
-    by_sku = {l["sku"]: l for l in photo_listings + tiles}
-    try:
-        ctx = decisions.context(s3, photo_listings, decisions.excluded())
-    except decisions.InvalidDecisions as exc:
-        raise Unavailable(str(exc)) from exc
-    stores, review, at = ctx.stores, read_review(s3), _now()
-    removed = imagestore.owner_removed_skus(stores.removal_keys)
-    chosen = {k[len(chosen_prefix(ROOT)):-len(".json")] for k in stores.record_keys}
-    clicks = {**stores.clicks, **{sku: {"error": why} for sku, items in stores.unreadable.items()
-                                  for what, _, why in items if what == "click"}}
-    rows = []
+def _bases(s3, products, by_sku):
+    """[(SKU, its row as stored, its listing or None)] of every listing the ledger hides, in the page's order (source,
+    listing, SKU), from review.json and the keys of the removals and choice records alone (no record read, nothing per
+    row): the owner's removal first, then a choice record (chosen, the next relink links it), then the last runs' row,
+    else not worked yet."""
+    review, removed, chosen = read_review(s3), proc.removed_listings(s3), chosen_listings(s3)
+    out = []
     for sku, found in products.items():
         listing = by_sku.get(sku)
         if sku in removed:
@@ -186,11 +182,77 @@ def hidden(s3):
             row = review[sku]
         else:
             row = _joined(found, listing, "not_worked_yet")
+        out.append((sku, row, listing))
+    return sorted(out, key=lambda item: (item[1]["source"] or "", item[1]["listing"] or "", item[0]))
+
+
+def _removed_photos(s3, page, exclude):
+    """{SKU: its photos} of the removed listings on the page (manager ruling (c): a removal is never a dead end): its
+    candidates (select.candidates: the photos the process judges, so the only ones with a result to use or clean),
+    each as a run's row has it (select.review_photo), over what the run folders hold of them alone."""
+    removed = [(sku, listing) for sku, row, listing in page if row["reason"] == "owner_removed" and listing is not None]
+    if not removed:
+        return {}
+    conflicts = read_conflicts(s3, {l["source"] for _, l in removed})
+    blocked = {sku: exclude | {s for s in l["photos"] if (l["source"], s) in conflicts} for sku, l in removed}
+    asked = {sku: select.candidates(l, blocked[sku]) for sku, l in removed}
+    by_source = {}
+    for sku, l in removed:
+        by_source.setdefault(l["source"], set()).update(asked[sku])
+    # one source at a time, each Round listing its photos' prefixes STORE_WORKERS at once (never pools in pools)
+    rounds = [(tag, {src: select.Round(s3, tag, src, shas) for src, shas in sorted(by_source.items())})
+              for tag in (C.RUN_TAG, C.CLEAN_TAG)]
+    return {sku: [select.review_photo(s3, rounds, l, sha, exclude, blocked[sku]) for sha in asked[sku]] for sku, l in removed}
+
+
+def _results(s3, rows):
+    """{(tag, source): select.Results} of the photos the page asks the applier about: a result to use (the stored
+    state has one) or a verdict to clean (fixable with a model left), read in parallel; nothing else is read."""
+    wanted = {}
+    for row in rows:
+        for p in row["photos"]:
+            if p["state"] in RESULT_STATES or (p["fixable"] and p["clean"]["left"]):
+                wanted.setdefault((C.RUN_TAG, row["source"]), set()).add(p["sha"])
+            if p["clean"]["copy"] in RESULT_STATES:
+                wanted.setdefault((C.CLEAN_TAG, row["source"]), set()).add(p["sha"])
+    # one (tag, source) at a time, each listing its photos' prefixes STORE_WORKERS at once (never pools in pools)
+    return {pair: select.Results(s3, *pair, shas) for pair, shas in sorted(wanted.items())}
+
+
+def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
+    """One page of the listings the ledger hides: {"total" (rows of `reason`, or all), "counts" ({reason: rows} over
+    every hidden row), "offset", "limit", "rows"}. Every row is placed and counted from the stored rows and keys alone
+    (_bases), in a stable order applied before the page is cut; only the page's rows are then worked: the removed ones'
+    photos (_removed_photos), the stored decisions of their listings alone and the results their photos are asked
+    about (decisions.context keys and results), the applier asked about each action (served_photo, row_actions), the
+    live click, the images signed: a few rows at a time."""
+    products = hidden_products()
+    photo_listings, tiles = sheet(s3)
+    by_sku = {l["sku"]: l for l in photo_listings + tiles}
+    bases = _bases(s3, products, by_sku)
+    counts = Counter(row["reason"] for _, row, _ in bases)
+    picked = [item for item in bases if reason is None or item[1]["reason"] == reason]
+    page = picked[offset:offset + limit]
+    exclude = decisions.excluded()
+    removed_photos = _removed_photos(s3, page, exclude)
+    rows = [(sku, {**row, "photos": removed_photos[sku]} if sku in removed_photos else row) for sku, row, _ in page]
+    results = _results(s3, [row for _, row in rows])
+    try:
+        ctx = decisions.context(s3, photo_listings, exclude, keys=[row["listing"] for _, row in rows],
+                                results=lambda tag, src: results.get((tag, src)) or select.Results(s3, tag, src, ()))
+    except decisions.InvalidDecisions as exc:
+        raise Unavailable(str(exc)) from exc
+    stores, at = ctx.stores, _now()
+    clicks = {**stores.clicks, **{sku: {"error": why} for sku, items in stores.unreadable.items()
+                                  for what, _, why in items if what == "click"}}
+
+    def served(item):
+        sku, row = item
         photos = [served_photo(s3, ctx, row, p, at) for p in row["photos"]]
         click = live_click(clicks.get(sku), row["click"])
-        rows.append({"sku": sku, **row, "click": click, "photos": photos,
-                     "actions": row_actions(ctx, row, photos, click, at)})
-    return {"rows": sorted(rows, key=lambda r: (r["source"] or "", r["listing"] or "", r["sku"]))}
+        return {"sku": sku, **row, "click": click, "photos": photos, "actions": row_actions(ctx, row, photos, click, at)}
+    return {"total": len(picked), "counts": dict(sorted(counts.items())), "offset": offset, "limit": limit,
+            "rows": pool_map(C.STORE_WORKERS, served, rows)}
 
 
 # --- GET /photos/spend --------------------------------------------------------------------------------------------------
