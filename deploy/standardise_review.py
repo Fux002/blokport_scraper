@@ -316,13 +316,28 @@ def _month(s3, directory, month):
     too."""
     found, broken = read_records(s3, proc.spend_prefix(directory, month), lambda key: key.rsplit("/", 1)[1][:-len(".json")])
     for run_id, record in list(found.items()):
-        if not isinstance(record.get("usd"), (int, float)) or isinstance(record["usd"], bool):
-            broken[run_id] = f"usd is {record.get('usd')!r}, not a number"
+        if why := _spend_shape(record):
+            broken[run_id] = why
             del found[run_id]
     runs = [{"run_id": run_id, "usd": record["usd"]} for run_id, record in sorted(found.items())]
     uses = sorted(({"run_id": run_id, **use} for run_id, record in found.items() for use in record.get("uses", [])),
                   key=lambda u: (u["at"], u["run_id"], u["sha"], u["model"], u["call"]))
     return runs, uses, [{"run_id": run_id, "error": why} for run_id, why in sorted(broken.items())]
+
+
+_USE_FIELDS = ("at", "sha", "model", "call")            # what every listed paid call names (select.clean_photo)
+
+
+def _spend_shape(record):
+    """Why a spend file is not {"usd": a number, "uses": [a use naming _USE_FIELDS]}, or None: one of another shape is
+    listed unreadable, never summed or sorted."""
+    if not isinstance(record.get("usd"), (int, float)) or isinstance(record["usd"], bool):
+        return f"usd is {record.get('usd')!r}, not a number"
+    uses = record.get("uses", [])
+    if not isinstance(uses, list) or not all(isinstance(u, dict) and all(isinstance(u.get(f), str) for f in _USE_FIELDS)
+                                             for u in uses):
+        return f"uses is not a list of paid calls each naming {', '.join(_USE_FIELDS)}"
+    return None
 
 
 def spend(s3, month):
@@ -404,7 +419,8 @@ def click(s3, sku, sha, at):
     if listing is None:
         return _unknown(sku)
     doc = {"id": listing["key"], "action": "clean", "source": listing["source"], "sha": sha, "at": at}
-    if sku not in hidden_products():
+    # a tile (never a photo listing: the applier refuses it, 422 first) or a listing the ledger does not hide
+    if all(l["sku"] != sku for l in photo_listings) or sku not in hidden_products():
         _, refused = _decide(s3, [doc], dry_run=True, sheet=photo_listings, narrow=True)
         if refused is not None and refused[0] == 422:
             return refused

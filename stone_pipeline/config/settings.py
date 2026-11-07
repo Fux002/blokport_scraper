@@ -1044,6 +1044,9 @@ class STANDARDISE:
     REVIEW_PAGE_DEFAULT = 50
     REVIEW_PAGE_MAX = 100
     REVIEW_PAGE_DIGITS = 9             # an offset or limit is at most this many ASCII digits (a longer one is a 400)
+    # How far ahead of this server's clock an owner's decision may be timed (a browser clock running ahead): a decision
+    # timed further ahead is refused, as it would be "later" than every decision made after it on its listing.
+    DECISION_AHEAD_SECONDS = 300
     # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
     # the review list gives for it.
     CONFLICT_REASON = "photo_conflict"

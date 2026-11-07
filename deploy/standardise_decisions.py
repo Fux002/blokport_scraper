@@ -48,7 +48,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import boto3
@@ -133,6 +133,9 @@ def _shape(doc, listings):
         return ["every field must be a non-empty string"]
     if moment(doc["at"]) is None:
         return [f"at {doc['at']!r} is not an ISO UTC timestamp (2026-11-02T10:00:00.000Z)"]
+    if moment(doc["at"]) > datetime.now(timezone.utc) + timedelta(seconds=C.DECISION_AHEAD_SECONDS):
+        return [f"at {doc['at']} is ahead of this server's clock by more than {C.DECISION_AHEAD_SECONDS} s: a decision "
+                "from the future would block every later one on its listing"]
     listing = listings.get(key)
     if listing is None:
         return ["not on the product sheet as a photo listing (a tile listing is rendered, never decided here)"]

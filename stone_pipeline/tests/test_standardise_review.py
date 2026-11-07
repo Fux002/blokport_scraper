@@ -179,8 +179,7 @@ def test_a_row_shows_the_live_click_the_run_s_state_while_it_is_the_same_and_que
 
 def _offered(row):
     """The decision documents each action the row offers stands for (what the page sends for it)."""
-    at = "2026-11-07T23:00:00.000Z"
-    base = {"id": row["listing"], "source": row["source"], "at": at}
+    base = {"id": row["listing"], "source": row["source"], "at": rv._now()}     # the page sends its own now
     for action in row["actions"]:
         if action == "use":
             yield from ({**base, "action": "use", "sha": p["sha"], "tag": tag} for p in row["photos"] for tag in p["usable"])
@@ -735,3 +734,38 @@ def test_a_click_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
     with pytest.raises(rv.Unavailable, match="no conflict set"):
         rv.click(s3, "SEN-ONE", B, AT)
     assert s3.written == []
+
+
+# --- the open #555 follow-ups ---------------------------------------------------------------------------------------------
+def test_a_click_on_a_tile_is_refused_by_the_applier_before_anything_else(monkeypatch):
+    # review of #555: a hidden tile with a choice record answered 409 chosen_not_linked instead of the promised 422
+    _hidden_in_ledger(monkeypatch, TILE)
+    s3 = _bucket(**{f"{ROOT}chosen/tile-1.json": json.dumps({"key": "tile-1", "sha": A}).encode()})
+    code, body = rv.click(s3, "SEN-TILE-1", B, AT)
+    assert code == 422 and "not on the product sheet as a photo listing" in body["error"] and s3.written == []
+
+
+@pytest.mark.parametrize("change", ["excluded", "pipeline_off"])
+def test_a_stale_run_row_never_offers_what_the_applier_now_refuses(monkeypatch, change):
+    # review of #555: the row says fixable from the last run; the exclude list or the source's switch changed since
+    _hidden_in_ledger(monkeypatch, ONE)
+    if change == "excluded":
+        monkeypatch.setattr(dec, "excluded", lambda: {B})
+    else:
+        monkeypatch.setattr(dec, "image_pipeline_off", lambda: {"sentas"})
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": _row(ONE, photos=[_photo(A, fixable=False, left=()), _photo(B)])}).encode()})
+    row = rv.hidden(s3)["rows"][0]
+    assert not row["photos"][1]["clickable"] and "clean" not in row["actions"]
+    for doc in _offered(row):
+        dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=dec.excluded())               # what is offered still applies
+
+
+def test_a_spend_file_of_the_wrong_shape_is_listed_unreadable_never_a_crash():
+    month = f"{ROOT[:-len(C.CLEAN_TAG) - 1]}{C.CLEAN_SPEND_DIR}/2026-11/"
+    good = {"at": AT, "source": "sentas", "sha": A, "model": "nano2", "call": "edit", "usd": 0.12}
+    s3 = _S3({f"{month}R1.json": json.dumps({"usd": 0.12, "uses": [good]}).encode(),
+              f"{month}R2.json": json.dumps({"usd": 1.0, "uses": "all of them"}).encode(),
+              f"{month}R3.json": json.dumps({"usd": 1.0, "uses": [{"sha": A}]}).encode()})
+    out = rv.spend(s3, "2026-11")["cleaning"]
+    assert out["uses"] == [{"run_id": "R1", **good}] and out["spent_usd"] == 0.12
+    assert [u["run_id"] for u in out["unreadable"]] == ["R2", "R3"]
