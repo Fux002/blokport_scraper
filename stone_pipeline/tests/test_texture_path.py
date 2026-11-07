@@ -60,13 +60,13 @@ def produce(request, tmp_path, monkeypatch):
     lean = request.param == "lean"
     monkeypatch.setattr(importlib.util, "find_spec",
                         lambda m: (None if lean else object()) if m in pvi.GEN_DEPS else real_find(m))
-    seen = {"published": [], "dispatched": [], "generated": []}
+    seen = {"published": [], "dispatched": [], "generated": [], "queue": queue}
 
-    def publish(path, key=None, client=None):
+    def publish(path, key, client=None):
         seen["published"].append((path, key))
         return seen.get("publish_ok", True)
 
-    def dispatch(queued, queue_key=None):
+    def dispatch(queued, queue_key):
         seen["dispatched"].append((queued, queue_key))
         return seen.get("job_id", "job-1")
     monkeypatch.setattr(pvi, "publish_prompts", publish)
@@ -84,7 +84,8 @@ def test_the_deployed_produce_queues_publishes_to_a_unique_key_and_dispatches_on
     assert _queue_textures() == 2
     assert produce["generated"] == []                                  # never generated in the produce
     [(path, key)] = produce["published"]
-    assert path == pvi.PROMPTS_LOCAL and key.startswith(pvi.TEXTURE_QUEUE_PREFIX) and key.endswith(".json")
+    assert path == produce["queue"]                                   # exactly the file the build wrote
+    assert key.startswith(pvi.TEXTURE_QUEUE_PREFIX) and key.endswith(".json")
     assert produce["dispatched"] == [(2, key)]                        # one job, bound to exactly that queue
 
 
@@ -151,12 +152,14 @@ def job(tmp_path, monkeypatch):
     items = [{"output_name": "slab_new"}, {"output_name": "slab_exists"},
              {"output_name": "slab_old", "mode": image_prompts.UPGRADE_MODE}]
 
-    def fetch(client=None):
+    def fetch(key, client=None):
+        assert key == "dev/scraper/texture_queues/job.json"           # exactly the dispatched queue
         pvi.PROMPTS_LOCAL.parent.mkdir(parents=True, exist_ok=True)
         pvi.PROMPTS_LOCAL.write_text(json.dumps(items), encoding="utf-8")
         return True
     monkeypatch.setattr(pvi, "PROMPTS_LOCAL", tmp_path / "prompts_to_generate.json")
     monkeypatch.setattr(pvi, "_fetch_published_prompts", fetch)
+    monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/job.json")
     from stone_pipeline.stages import emit_catalog
     monkeypatch.setattr(emit_catalog, "_s3_variation_keys", lambda: {"slab_exists", "slab_old"})
     monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
@@ -175,11 +178,40 @@ def test_the_gpu_job_generates_the_queue_minus_mints_already_on_s3_and_marks_a_c
     assert [i["output_name"] for i in json.loads(pvi.PROMPTS_LOCAL.read_text())] == ["slab_new", "slab_old"]
 
 
-@pytest.mark.parametrize("failure", ["failed", "missing"])
-def test_a_gpu_job_that_did_not_finish_cleanly_marks_nothing(job, failure):
-    job[failure] = ["genetate_images.py"] if failure == "failed" else ["slab_new"]
-    pvi.run()
-    assert job["marked"] == []                                       # the Keys stay eligible for the next run
+def test_a_partial_gpu_job_marks_only_what_landed_and_exits_partial(job, monkeypatch):
+    # loud (the failed-job alert) without a re-charge: what landed is marked best-model, so neither a retry nor
+    # the upgrade drip pays for it again; the failed Key stays unmarked for the next produce's queue
+    job["missing"] = ["slab_new"]
+    with pytest.raises(pvi.TexturesIncomplete, match="1 of 2"):
+        pvi.run()
+    assert job["marked"] == [["slab_old"]]
+    monkeypatch.setattr(pvi, "run", lambda: (_ for _ in ()).throw(pvi.TexturesIncomplete("1 of 2")))
+    assert pvi.main() == pvi.EXIT_PARTIAL
+
+
+def test_a_failed_script_is_partial_even_when_every_png_landed(job):
+    job["failed"] = ["rb_images.py"]
+    with pytest.raises(pvi.TexturesIncomplete, match="rb_images.py"):
+        pvi.run()
+    assert job["marked"] == [["slab_new", "slab_old"]]                # every texture landed: none paid again
+
+
+def test_the_job_exit_codes_are_distinct(monkeypatch):
+    monkeypatch.setattr(pvi, "run", lambda: 2)
+    assert pvi.main() == 0
+    monkeypatch.setattr(pvi, "run", lambda: (_ for _ in ()).throw(pvi.TextureJobFailed("missing ['FAL_KEY']")))
+    assert pvi.main() == pvi.EXIT_CANNOT_RUN
+    assert len({0, 1, 2, pvi.EXIT_CANNOT_RUN, pvi.EXIT_PARTIAL}) == 5   # never a crash's 1 or the shell's 2
+
+
+def test_what_a_partial_job_left_unmarked_is_queued_again_by_the_next_produce(monkeypatch):
+    # the failed upgrade (unmarked) leads the next drip; the failed mint (still imageless) is a mint again
+    marked = {"slab_old"}                                            # the partial job marked what landed
+    monkeypatch.setattr(image_prompts, "product_backed_keys", lambda: {"slab_new", "slab_old", "slab_up"})
+    monkeypatch.setattr(image_prompts, "_variants", lambda: {
+        "slab_new": {"Image": ""}, "slab_old": {"Image": "u"}, "slab_up": {"Image": "u"}})
+    assert image_prompts.upgrade_candidates(marked, cap=1) == ["slab_up"]
+    assert "slab_new" not in image_prompts.upgrade_candidates(marked, cap=10)   # imageless: build() mints it
 
 
 # --- one way: the texture code never imports the produce back ----------------------------------------------

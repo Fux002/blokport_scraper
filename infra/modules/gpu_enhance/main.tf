@@ -260,8 +260,20 @@ resource "aws_batch_job_definition" "this" {
     }
   })
 
+  # Retry ONLY an infrastructure failure (the GPU host went away): a job that exits on its own (a partial run, a
+  # job that cannot run, a crash) is never retried, because a retry would pay FAL again for what it generated.
+  # The job fails once, the failed-job alert below fires once, and the next produce re-queues what did not land.
+  # Batch retries when no rule matches, so the last rule exits on any reason.
   retry_strategy {
     attempts = 2
+    evaluate_on_exit {
+      action           = "RETRY"
+      on_status_reason = "Host EC2*"
+    }
+    evaluate_on_exit {
+      action    = "EXIT"
+      on_reason = "*"
+    }
   }
   timeout {
     # 5h ceiling: one texture job generates the whole queue of new-variant textures; generation is
@@ -382,6 +394,6 @@ resource "aws_cloudwatch_event_target" "texture_failed_sns" {
       id     = "$.detail.jobId"
       reason = "$.detail.statusReason"
     }
-    input_template = "\"Auto-texture job <job> (<id>) FAILED in ${local.name}: <reason>. New-variant images were NOT generated; their products stay HELD until a successful re-run.\""
+    input_template = "\"Auto-texture job <job> (<id>) FAILED in ${local.name}: <reason>. Some or all new-variant images were NOT generated; their products stay HELD until the next produce re-queues them.\""
   }
 }

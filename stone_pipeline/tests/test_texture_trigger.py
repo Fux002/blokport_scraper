@@ -36,28 +36,28 @@ def test_disabled_submits_nothing(monkeypatch):
     monkeypatch.setattr(tt, "SETTINGS", _cfg(enabled=False))
     batch = _FakeBatch()
     _install_boto3(monkeypatch, batch)
-    assert tt.submit_texture_job(5) is None and batch.calls == []
+    assert tt.submit_texture_job(5, "dev/scraper/texture_queues/k.json") is None and batch.calls == []
 
 
 def test_nothing_queued_submits_nothing(monkeypatch):
     monkeypatch.setattr(tt, "SETTINGS", _cfg())
     batch = _FakeBatch()
     _install_boto3(monkeypatch, batch)
-    assert tt.submit_texture_job(0) is None and batch.calls == []
+    assert tt.submit_texture_job(0, "dev/scraper/texture_queues/k.json") is None and batch.calls == []
 
 
 def test_missing_queue_or_jobdef_skips(monkeypatch):
     monkeypatch.setattr(tt, "SETTINGS", _cfg(queue="", job_definition=""))
     batch = _FakeBatch()
     _install_boto3(monkeypatch, batch)
-    assert tt.submit_texture_job(3) is None and batch.calls == []
+    assert tt.submit_texture_job(3, "dev/scraper/texture_queues/k.json") is None and batch.calls == []
 
 
 def test_submits_one_job_with_run_mode_override(monkeypatch):
     monkeypatch.setattr(tt, "SETTINGS", _cfg(queue="tex-q", job_definition="tex-jd"))
     batch = _FakeBatch(job_id="job-abc")
     _install_boto3(monkeypatch, batch)
-    job_id = tt.submit_texture_job(7)
+    job_id = tt.submit_texture_job(7, "dev/scraper/texture_queues/k.json")
     assert job_id == "job-abc" and len(batch.calls) == 1
     call = batch.calls[0]
     assert call["jobQueue"] == "tex-q" and call["jobDefinition"] == "tex-jd"
@@ -65,19 +65,13 @@ def test_submits_one_job_with_run_mode_override(monkeypatch):
     assert {"name": "RUN_MODE", "value": "generate-textures"} in env   # reuse the enhance jobdef, texture mode
     # dev defaults S3_DRY_RUN true; the texture job MUST write, or the upload silently no-ops
     assert {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"} in env
-    # no queue_key passed -> no BLOKPORT_TEXTURE_QUEUE_KEY override (legacy shared-key fallback)
-    assert not any(e["name"] == "BLOKPORT_TEXTURE_QUEUE_KEY" for e in env)
+    # every job is bound to EXACTLY the queue the produce published (no clobber race, no shared key)
+    assert {"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": "dev/scraper/texture_queues/k.json"} in env
 
 
-def test_submits_with_per_dispatch_queue_key(monkeypatch):
-    monkeypatch.setattr(tt, "SETTINGS", _cfg(queue="tex-q", job_definition="tex-jd"))
-    batch = _FakeBatch(job_id="job-xyz")
-    _install_boto3(monkeypatch, batch)
-    key = "dev/scraper/texture_queues/deadbeef.json"
-    assert tt.submit_texture_job(3, queue_key=key) == "job-xyz"
-    env = batch.calls[0]["containerOverrides"]["environment"]
-    # the job must be bound to EXACTLY the queue the produce published (no clobber race)
-    assert {"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": key} in env
+def test_a_job_cannot_be_submitted_without_its_queue_key():
+    import inspect
+    assert inspect.signature(tt.submit_texture_job).parameters["queue_key"].default is inspect.Parameter.empty
 
 
 def test_submit_failure_is_swallowed(monkeypatch):
@@ -88,4 +82,4 @@ def test_submit_failure_is_swallowed(monkeypatch):
             raise RuntimeError("batch down")
 
     _install_boto3(monkeypatch, _Boom())
-    assert tt.submit_texture_job(2) is None   # never raises -> can't fail the produce
+    assert tt.submit_texture_job(2, "dev/scraper/texture_queues/k.json") is None   # never raises -> can't fail the produce
