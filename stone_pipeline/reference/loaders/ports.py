@@ -17,9 +17,6 @@ class Ports:
     by_name: dict[str, str] = field(default_factory=dict)            # norm(name) -> port_id
     by_locode: dict[str, str] = field(default_factory=dict)          # UN/LOCODE -> port_id
 
-    def country_of(self, port_id: str | None) -> str | None:
-        return self.iso_by_port.get((port_id or "").strip())
-
     def resolve(self, token: str) -> str | None:
         """Resolve a sources.yaml port entry to a port id: a known id passes through,
         else a UN/LOCODE ('ITBDS') or a port name ('Brindisi') from ports.csv."""

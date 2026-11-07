@@ -37,11 +37,6 @@ _CACHE_LOCK = threading.Lock()
 _CACHE: dict = {"fp": object(), "rows": [], "alias": {}, "names": set(), "pairs": set(), "archived": set()}
 
 
-def _like_escape(s: str) -> str:
-    """Make LIKE wildcards literal so a search term with % or _ is not a wildcard."""
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def _fingerprint():
     """A cheap fingerprint of everything the index depends on: the ledger db (the variety rows) and config.db
     (the retired set), each as the main file's (size, mtime) plus the FRAMES in its WAL (the WAL's size).

@@ -23,7 +23,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
@@ -393,13 +393,6 @@ class Ledger:
         return self.conn.execute(
             f"SELECT * FROM {table} WHERE {pk_col} = ?", (pk_value,)
         ).fetchone()
-
-    def iter_state(self, table: str, state: str) -> Iterator[sqlite3.Row]:
-        """Rows of `table` in a given state, in the stable serve order (design L2)."""
-        cur = self.conn.execute(
-            f"SELECT * FROM {table} WHERE state = ? ORDER BY created_at, rowid", (state,)
-        )
-        yield from cur
 
     def counts(self, table: str) -> dict[str, int]:
         """state -> count for one table, for GET /sync/status and the run summary."""

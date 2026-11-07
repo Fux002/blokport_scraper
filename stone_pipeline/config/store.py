@@ -405,12 +405,6 @@ def migration_applied(name: str, path: str | Path | None = None) -> bool:
         return conn.execute("SELECT 1 FROM migration WHERE name = ?", (name,)).fetchone() is not None
 
 
-def mark_migration(name: str, path: str | Path | None = None) -> None:
-    with closing(open_store(path)) as conn:
-        conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)", (name, _now()))
-        conn.commit()
-
-
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
     """A connection for WRITING (creates the store when absent)."""
     return _connect(Path(path or config_db_path()))
