@@ -585,6 +585,10 @@ class ImagesConfig:
     # produces. Ships OFF (0) -- enable deliberately with BLOKPORT_IMAGE_UPGRADE_BATCH once the marker
     # reflects everything already upgraded, else an enabled run re-does images that are already best.
     upgrade_batch: int = _env_int("BLOKPORT_IMAGE_UPGRADE_BATCH", 0)
+    # How often one texture job reads and merges the best-model marker again when another job's write overtook its own
+    # (refresh_images.mark_best_model). Each refusal means some other job's write landed, and the GPU pool runs two
+    # texture jobs at once, so a few attempts cover every writer; past them the job reports itself partial.
+    marker_write_attempts: int = 5
     processing: ImageProcessingConfig = field(default_factory=ImageProcessingConfig)
 
     def __post_init__(self):

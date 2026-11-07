@@ -43,6 +43,7 @@ PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_g
 # queue, and overlapping mints never share (and clobber) one queue object. Env-scoped.
 TEXTURE_QUEUE_PREFIX = f"{ENV_SEGMENT}/scraper/texture_queues/"
 TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its exact queue key from here
+BATCH_JOB_ENV = "AWS_BATCH_JOB_ID"   # set by Batch in every job it runs: this process is the dispatched GPU task
 # Per-dispatch queue objects are ephemeral coordination, consumed by their GPU job within minutes. Delete
 # any older than this at publish time so the prefix self-heals instead of accumulating forever. Far above a
 # job's runtime (jobs finish in minutes; the Batch attempt ceiling is hours), so this can never delete a
@@ -62,8 +63,9 @@ EXIT_PARTIAL = 4      # it ran, but some textures did not land (they stay unmark
 
 class TextureJobError(RuntimeError):
     """The texture job did not finish its queue; main() turns it into the job's exit code, so the failed-job
-    alert fires instead of a quiet exit 0 with products HELD. Raised only as one of its two kinds below."""
-    exit_code: int
+    alert fires instead of a quiet exit 0 with products HELD. Raised as one of its two kinds below; one raised
+    unclassified exits as a job that could not run."""
+    exit_code: int = EXIT_CANNOT_RUN
 
 
 class TextureJobFailed(TextureJobError):
@@ -88,8 +90,14 @@ def _s3_client():
 
 
 def _target_keys(prompts_path: Path) -> list[str]:
-    """The variant Keys in the just-built queue (output_name IS the Key)."""
-    items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
+    """The variant Keys in the queue (output_name IS the Key). A queue that cannot be read, or is not a list of
+    objects, is one the job cannot do (TextureJobFailed): never a crash, and never read as an empty queue."""
+    try:
+        items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
+    except (OSError, ValueError) as exc:          # ValueError: JSONDecodeError and UnicodeDecodeError
+        raise TextureJobFailed(f"the texture queue {prompts_path} cannot be read: {exc}") from exc
+    if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+        raise TextureJobFailed(f"the texture queue {prompts_path} is not a list of objects")
     return [i["output_name"] for i in items if i.get("output_name")]
 
 
@@ -139,7 +147,7 @@ def _prune_stale_queue_keys(client) -> int:
 
 def _fetch_published_prompts(key: str, client=None) -> bool:
     """Download the dispatched queue `key` from S3 into PROMPTS_LOCAL. True if it landed; False when S3 is
-    unreachable or the object cannot be read (the caller fails the job loud)."""
+    unreachable, the object cannot be read, or it cannot be written here (the caller fails the job loud)."""
     client = client or _s3_client()
     if client is None:
         return False
@@ -147,7 +155,7 @@ def _fetch_published_prompts(key: str, client=None) -> bool:
     try:
         PROMPTS_LOCAL.parent.mkdir(parents=True, exist_ok=True)
         client.download_file(SETTINGS.s3.bucket, key, str(PROMPTS_LOCAL))
-    except (BotoCoreError, ClientError) as exc:
+    except (BotoCoreError, ClientError, OSError) as exc:   # OSError: the local directory or file write
         log.error("could not read the dispatched texture queue",
                   extra={"extra_fields": {"key": key, "error": str(exc)}})
         return False
@@ -182,10 +190,14 @@ def _prune_already_on_s3(prompts_path: Path, targets: list[str]) -> list[str]:
 
 def _resolve_queue() -> Path:
     """The queue to generate from. A dispatched job (TEXTURE_QUEUE_KEY_ENV set) uses exactly the queue its
-    produce published: it cannot rebuild one (no local export/products), so an unreadable queue fails the job.
-    A dev box (no key) builds the queue locally. Either way returns the path genetate_images.py reads."""
+    produce published: it cannot rebuild one (no local export/products), so an unreadable queue fails the job,
+    and so does a Batch job given no key. A dev box (no key, not in Batch) builds the queue locally. Either way
+    returns the path genetate_images.py reads."""
     key = os.environ.get(TEXTURE_QUEUE_KEY_ENV)
     if not key:
+        if os.environ.get(BATCH_JOB_ENV):
+            raise TextureJobFailed(f"a Batch texture job was started without {TEXTURE_QUEUE_KEY_ENV}; it cannot "
+                                   "rebuild the queue here (no local export)")
         return image_prompts.build()
     if not _fetch_published_prompts(key):
         raise TextureJobFailed(f"the dispatched texture queue {key} could not be read from S3")

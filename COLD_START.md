@@ -37,6 +37,13 @@ start fail LOUD instead.
   new-variant textures are queued but no GPU texture job will generate them (AUTO_TEXTURE off, the queue
   publish no-op'd, or the dispatch failed), a WARNING or ERROR states that N textures were not dispatched and
   their products stay HELD -- so an empty product lane is not read as a clean run.
+- **An unreadable best-model marker pauses the upgrade drip** (`<env>/variations/_refreshed.json`,
+  `refresh_images`). The produce then queues mints only, never upgrades: read as empty, the marker would make
+  it pay again for every texture already made by the best model. With mints queued, the dispatched texture
+  job generates them, refuses to rewrite the unreadable marker and exits partial (4), so the failed-job alert
+  fires. With NO mints, nothing is dispatched: the only sign is the produce's ERROR
+  `best-model marker unreadable: this produce queues mints only, no upgrades`, on every produce until the
+  marker is repaired. No FAL is spent and buyers see no change; only the upgrades wait.
 
 ## Known minor
 

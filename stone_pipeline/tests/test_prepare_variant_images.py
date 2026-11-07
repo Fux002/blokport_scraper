@@ -17,6 +17,7 @@ def _no_dispatched_queue(monkeypatch):
     # default for run() tests: a dev box (no dispatched queue key), so _resolve_queue builds locally (which
     # those tests monkeypatch). Tests of the dispatched path set the key explicitly.
     monkeypatch.delenv(pvi.TEXTURE_QUEUE_KEY_ENV, raising=False)
+    monkeypatch.delenv("AWS_BATCH_JOB_ID", raising=False)
 
 
 class _FakeS3:
@@ -132,6 +133,43 @@ def test_a_dispatched_job_whose_queue_cannot_be_read_fails(monkeypatch):
     monkeypatch.setattr(pvi.image_prompts, "build", lambda: pytest.fail("rebuilt instead of failing"))
     with pytest.raises(pvi.TextureJobFailed, match="gone.json"):
         pvi.run()
+
+
+def test_a_batch_job_without_its_queue_key_cannot_run(monkeypatch):
+    # Batch names every job it runs (AWS_BATCH_JOB_ID): a texture job there was dispatched, and one with no queue key
+    # cannot rebuild a queue (no local export), so it fails instead of finding nothing and exiting 0
+    monkeypatch.setenv("AWS_BATCH_JOB_ID", "job-1")
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: pytest.fail("rebuilt on the GPU task"))
+    with pytest.raises(pvi.TextureJobFailed, match=pvi.TEXTURE_QUEUE_KEY_ENV):
+        pvi.run()
+    assert pvi.main() == pvi.EXIT_CANNOT_RUN
+
+
+def test_a_queue_that_cannot_be_written_locally_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr(pvi, "PROMPTS_LOCAL", tmp_path / "q.json")
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    client = _FakeS3()
+
+    def disk_full(bucket, key, local):
+        raise OSError(28, "No space left on device")
+    client.download_file = disk_full
+    assert pvi._fetch_published_prompts("dev/scraper/texture_queues/xyz.json", client=client) is False
+
+
+@pytest.mark.parametrize("blob", [b"not json", b"\xff\xfe", b"{}", b'{"slab_a": 1}', b"[1]", b"null"],
+                         ids=["not-json", "not-utf8", "empty-object", "object", "not-objects", "null"])
+def test_a_malformed_queue_cannot_run(tmp_path, monkeypatch, blob):
+    q = tmp_path / "q.json"
+    q.write_bytes(blob)
+    monkeypatch.setattr(pvi, "_resolve_queue", lambda: q)
+    with pytest.raises(pvi.TextureJobFailed, match="queue"):
+        pvi.run()
+    assert pvi.main() == pvi.EXIT_CANNOT_RUN                     # not a crash's 1, and never a quiet 0
+
+
+def test_the_base_texture_error_has_an_exit_code(monkeypatch):
+    monkeypatch.setattr(pvi, "run", lambda: (_ for _ in ()).throw(pvi.TextureJobError("unclassified")))
+    assert pvi.main() == pvi.EXIT_CANNOT_RUN
 
 
 def test_a_dev_box_builds_its_queue_locally_and_reads_nothing_from_s3(tmp_path, monkeypatch):
