@@ -92,8 +92,7 @@ def test_run_generates_then_uploads_when_ready(tmp_path, monkeypatch):
                  encoding="utf-8")
     monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
     monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
-    import stone_pipeline.catalog as catalog
-    monkeypatch.setattr(catalog, "_generate_queued_images", lambda: [])   # pretend both generated
+    monkeypatch.setattr(pvi, "_generate_queued_images", lambda: [])   # pretend both generated
     seen = {}
     monkeypatch.setattr(pvi, "upload_variant_images",
                         lambda keys, client=None: seen.update(keys=keys) or (len(keys), []))

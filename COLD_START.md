@@ -32,9 +32,10 @@ start fail LOUD instead.
   `produce FATAL: cold-start stall ...` and a non-zero exit, instead of holding the entire catalogue
   silently. This runs regardless of the consistency gate's own result (a typed-0 run can pass the gate
   with 0 products and look clean). A FEW untyped varieties (the normal pass-1 hold) is not a stall.
-- **Missing textures are surfaced LOUDLY** (`catalog._auto_queue_images`, risk 2). If new-variant
-  textures are queued but `FAL_KEY` is not set for the produce, a WARNING states that N textures were not
-  generated and their products stay HELD -- so an empty product lane is not read as a clean run.
+- **Missing textures are surfaced LOUDLY** (`prepare_variant_images.queue_new_textures`, risk 2). If
+  new-variant textures are queued but no GPU texture job will generate them (AUTO_TEXTURE off, the queue
+  publish no-op'd, or the dispatch failed), a WARNING or ERROR states that N textures were not dispatched and
+  their products stay HELD -- so an empty product lane is not read as a clean run.
 
 ## Known minor
 

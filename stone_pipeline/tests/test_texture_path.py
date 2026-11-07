@@ -1,13 +1,13 @@
 """The one texture path, pinned (review wave C6). The produce queues the new-variant textures (plus the capped
 upgrade drip), publishes that queue to a unique S3 key and dispatches ONE GPU texture job bound to it; the job
 (prepare_variant_images.run) pulls the queue, drops the mints already on S3 (keeping upgrades), runs the generator,
-uploads and marks the best-model set only on a clean run. These tests pin exactly that, for the path every deployed
-environment takes (the lean :core has no torch), with every outside call faked: no FAL, no GPU, no S3, no Batch.
-Only the two accessors below (where the produce's entry and the generator runner live) change when the texture
-code moves; every assertion stays the same."""
+uploads and marks the best-model set only on a clean run. These tests pin exactly that, with every outside call
+faked: no FAL, no GPU, no S3, no Batch. The texture code lives in prepare_variant_images, and nothing it imports
+reaches back into catalog (the import-graph test below)."""
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import types
@@ -16,19 +16,14 @@ import pytest
 
 import stone_pipeline.prepare_variant_images as pvi
 from deploy import texture_trigger
-from stone_pipeline import catalog, refresh_images
+from stone_pipeline import refresh_images
 from stone_pipeline.config import settings
 from stone_pipeline.stages import image_prompts
 
 
 def _queue_textures():
-    """The produce's texture entry."""
-    return catalog._auto_queue_images()
-
-
-def _runner_owner():
-    """The module that owns the generator runner (_generate_queued_images)."""
-    return catalog
+    """The produce's texture entry (catalog.run calls it)."""
+    return pvi.queue_new_textures()
 
 
 class _Settings:
@@ -51,9 +46,10 @@ def _nothing_outside(monkeypatch):
     monkeypatch.setattr(boto3, "Session", lambda *a, **k: pytest.fail("a real boto3 session was made"))
 
 
-@pytest.fixture
-def produce(tmp_path, monkeypatch):
-    """The deployed produce's world: FAL_KEY set, no torch (the lean :core), a two-item queue, and fakes that
+@pytest.fixture(params=["lean", "generator_stack"])
+def produce(request, tmp_path, monkeypatch):
+    """The produce's world, on the lean :core (no torch, every deployed env) and on a box with the whole
+    generator stack (the same path: the produce never generates): FAL_KEY set, a two-item queue, and fakes that
     record the queue publish and the GPU dispatch."""
     queue = tmp_path / "prompts_to_generate.json"
     queue.write_text(json.dumps([{"output_name": "slab_a"}, {"output_name": "slab_b"}]), encoding="utf-8")
@@ -61,7 +57,9 @@ def produce(tmp_path, monkeypatch):
     monkeypatch.setenv("FAL_KEY", "present")
     import importlib.util
     real_find = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda m: None if m == "torch" else real_find(m))
+    lean = request.param == "lean"
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda m: (None if lean else object()) if m in pvi.GEN_DEPS else real_find(m))
     seen = {"published": [], "dispatched": [], "generated": []}
 
     def publish(path, key=None, client=None):
@@ -73,11 +71,10 @@ def produce(tmp_path, monkeypatch):
         return seen.get("job_id", "job-1")
     monkeypatch.setattr(pvi, "publish_prompts", publish)
     monkeypatch.setattr(texture_trigger, "submit_texture_job", dispatch)
-    monkeypatch.setattr(_runner_owner(), "_generate_queued_images", lambda: seen["generated"].append(1) or [])
+    monkeypatch.setattr(pvi, "_generate_queued_images", lambda: seen["generated"].append(1) or [])
 
     def configure(auto_texture=True, upgrade_batch=0):
-        for module in (catalog, pvi):
-            monkeypatch.setattr(module, "SETTINGS", _Settings(auto_texture, upgrade_batch))
+        monkeypatch.setattr(pvi, "SETTINGS", _Settings(auto_texture, upgrade_batch))
     seen["configure"] = configure
     configure()
     return seen
@@ -98,10 +95,11 @@ def test_each_produce_publishes_its_own_queue_key(produce):
     assert len(set(keys)) == 2                                        # never one clobberable queue
 
 
-def test_without_auto_texture_the_produce_only_queues(produce):
+def test_without_auto_texture_the_produce_only_queues_and_says_nothing_generates(produce, caplog):
     produce["configure"](auto_texture=False)
     assert _queue_textures() == 2
-    assert produce["published"] == [] and produce["dispatched"] == []
+    assert produce["published"] == [] and produce["dispatched"] == [] and produce["generated"] == []
+    assert "AUTO_TEXTURE is off" in caplog.text and "stay HELD" in caplog.text
 
 
 def test_a_queue_that_cannot_be_published_is_never_dispatched(produce, caplog):
@@ -162,7 +160,7 @@ def job(tmp_path, monkeypatch):
     monkeypatch.setattr(emit_catalog, "_s3_variation_keys", lambda: {"slab_exists", "slab_old"})
     monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
     seen = {"failed": [], "missing": [], "marked": []}
-    monkeypatch.setattr(_runner_owner(), "_generate_queued_images", lambda: list(seen["failed"]))
+    monkeypatch.setattr(pvi, "_generate_queued_images", lambda: list(seen["failed"]))
     monkeypatch.setattr(pvi, "upload_variant_images",
                         lambda keys, client=None: (seen.update(uploaded=keys), (len(keys), list(seen["missing"])))[1])
     monkeypatch.setattr(refresh_images, "mark_best_model", lambda keys, client=None: seen["marked"].append(list(keys)))
@@ -181,3 +179,24 @@ def test_a_gpu_job_that_did_not_finish_cleanly_marks_nothing(job, failure):
     job[failure] = ["genetate_images.py"] if failure == "failed" else ["slab_new"]
     pvi.run()
     assert job["marked"] == []                                       # the Keys stay eligible for the next run
+
+
+# --- one way: the texture code never imports the produce back ----------------------------------------------
+def _imports(module) -> set[str]:
+    """Every stone_pipeline module a module imports, at top level or inside a function."""
+    tree = ast.parse(open(module.__file__, encoding="utf-8").read())
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names |= {node.module} | {f"{node.module}.{a.name}" for a in node.names}
+    return {n for n in names if n.startswith("stone_pipeline")}
+
+
+def test_the_texture_modules_never_import_the_produce_back():
+    from stone_pipeline import catalog
+    assert "stone_pipeline.prepare_variant_images" in _imports(catalog)        # the one direction
+    assert not any(n.startswith("stone_pipeline.catalog") for n in _imports(pvi))
+    assert not any(n.startswith(("stone_pipeline.catalog", "stone_pipeline.prepare_variant_images"))
+                   for n in _imports(refresh_images))
