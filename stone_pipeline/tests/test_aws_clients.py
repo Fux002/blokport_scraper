@@ -118,7 +118,11 @@ def test_the_photo_job_entry_points_clients(built, monkeypatch, module, env):
 
 
 def test_the_edit_test_job_s_client(built, monkeypatch):
+    # a GPU-only dev job: CI's lean image has neither torch nor diffusers, so both are stood in (the site stays pinned
+    # in CI; skipping it would drop it silently), and the module is imported afresh under them
+    monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
     monkeypatch.setitem(sys.modules, "diffusers", types.SimpleNamespace(Flux2KleinPipeline=object))
+    monkeypatch.delitem(sys.modules, "deploy.standardise_edit_test", raising=False)
     from deploy import standardise_edit_test
     _drive(standardise_edit_test.main)
     assert built == [_s3(DEFAULTS)]
