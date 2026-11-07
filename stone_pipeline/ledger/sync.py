@@ -456,6 +456,16 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         return _ack_removed(ledger, external_id, failed, reason)
     if type_ == "inventory":
         return _ack_inventory(ledger, external_id, failed, reason, quantity, made_to_order)
+    return _ack_entity(ledger, type_, external_id, medusa_id, failed, reason, payload_hash)
+
+
+def _ack_entity(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None,
+                failed: bool, reason: str | None, payload_hash: str | None) -> int:
+    """One variation/product ack (the lanes in _ENTITY). A failure counts an attempt and re-serves (dirty),
+    dead-lettering to gap_held at SETTINGS.sync.max_attempts; a success records the medusa_id and marks the
+    row synced. The eligibility, retire and lost-update guards below keep an out-of-order or stale ack from
+    loading a product ahead of its variation, resurrecting a retiring row, or recording a version Medusa no
+    longer holds. `failed`/`reason` are decided once in ack()."""
     table, pk = _ENTITY[type_]
     now = now_iso()
     if failed:
