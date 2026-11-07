@@ -53,9 +53,13 @@ def publish_base_to_s3(base_path: Path) -> bool:
     scratch file. fetch_inputs pulls it every run, so any container -- fresh or long-lived -- reads the SAME
     base each run, eliminating the scratch-disk drift that shipped varieties in one category only. Best
     effort: a failed publish logs LOUD and leaves the local base (the run still succeeded); the next run
-    republishes it. The corruption guard in sync() already refuses to write/publish a thin base."""
-    from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+    republishes it. The corruption guard in sync() already refuses to write/publish a thin base. Under the S3 dry run
+    (SCRAPER_S3_DRY_RUN) nothing is uploaded and it returns False."""
+    from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS
     key = f"{ENV_SEGMENT}/scraper/from_medusa/{Path(base_path).name}"
+    if SETTINGS.s3.dry_run:
+        log.info("s3 dry run: base seed NOT published", extra={"extra_fields": {"key": key}})
+        return False
     try:
         import boto3
         boto3.client("s3", region_name=S3_REGION).upload_file(str(base_path), S3_BUCKET, key)

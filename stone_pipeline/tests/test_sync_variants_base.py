@@ -5,8 +5,10 @@ run does not read/write it under the dev folder. Pins the path to the env-derive
 from __future__ import annotations
 
 import csv
+import dataclasses
 
-from stone_pipeline.config.settings import ENV_NAME, SETTINGS
+from stone_pipeline.config import settings
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
 from stone_pipeline.reference import sync_variants_base
 
 
@@ -55,6 +57,7 @@ def test_sync_publishes_base_to_s3_as_single_source_of_truth(tmp_path, monkeypat
     # can never silently drift from S3 (the divergence that shipped varieties in one category only).
     base, full = tmp_path / "base.csv", tmp_path / "full.csv"
     _write_variants(full, 50)
+    _s3_dry_run(monkeypatch, False)   # the deployed produce: SCRAPER_S3_DRY_RUN=false (dev and prod task defs)
     calls = []
     class FakeS3:
         def upload_file(self, src, bucket, key):
@@ -75,9 +78,42 @@ def test_sync_publish_false_never_touches_s3(tmp_path, monkeypatch):
     assert sync_variants_base._row_count(base) == 50
 
 
+def _s3_dry_run(monkeypatch, value: bool) -> None:
+    monkeypatch.setattr(settings, "SETTINGS",
+                        dataclasses.replace(settings.SETTINGS, s3=dataclasses.replace(settings.SETTINGS.s3, dry_run=value)))
+
+
+class _RecordingS3:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def upload_file(self, *args):
+        self.calls.append(args)
+
+
+def test_a_dry_run_never_uploads_the_base(tmp_path, monkeypatch):
+    # SCRAPER_S3_DRY_RUN means no upload: the base is never published, and the call says so (False)
+    base = tmp_path / "base.csv"; _write_variants(base, 10)
+    _s3_dry_run(monkeypatch, True)
+    calls = []
+    monkeypatch.setattr("boto3.client", lambda *a, **k: _RecordingS3(calls))
+    assert sync_variants_base.publish_base_to_s3(base) is False
+    assert calls == []
+
+
+def test_a_live_run_publishes_the_base(tmp_path, monkeypatch):
+    base = tmp_path / "base.csv"; _write_variants(base, 10)
+    _s3_dry_run(monkeypatch, False)
+    calls = []
+    monkeypatch.setattr("boto3.client", lambda *a, **k: _RecordingS3(calls))
+    assert sync_variants_base.publish_base_to_s3(base) is True
+    assert calls == [(str(base), S3_BUCKET, f"{ENV_SEGMENT}/scraper/from_medusa/base.csv")]
+
+
 def test_publish_base_is_best_effort_on_failure(tmp_path, monkeypatch):
     # a failed publish must NOT crash the run (the local base is already written); it returns False + logs.
     base = tmp_path / "base.csv"; _write_variants(base, 10)
+    _s3_dry_run(monkeypatch, False)
     monkeypatch.setattr("boto3.client",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no creds")))
     assert sync_variants_base.publish_base_to_s3(base) is False

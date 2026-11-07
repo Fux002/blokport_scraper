@@ -6,6 +6,7 @@ factory reset publishes the seed base through the same publisher under a manifes
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import types
@@ -16,6 +17,7 @@ from botocore.exceptions import ClientError
 
 from deploy import upload_artifacts as ua
 from stone_pipeline import catalog, produce
+from stone_pipeline.config import settings
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_BASE_FILE
 from stone_pipeline.reference import sync_variants_base as svb
 
@@ -208,6 +210,9 @@ def _reset_world(tmp_path, monkeypatch, s3: _S3) -> tuple[Path, Path, Path]:
     seed.write_bytes(_BASE)
     base.write_bytes(b"Key,Name\nslab_marble_minted_7,Minted\n")                # the grown base before the reset
     monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
+    # the deployed reset writes the bucket: SCRAPER_S3_DRY_RUN=false on the dev and prod task defs
+    monkeypatch.setattr(settings, "SETTINGS",
+                        dataclasses.replace(settings.SETTINGS, s3=dataclasses.replace(settings.SETTINGS.s3, dry_run=False)))
     monkeypatch.setattr(svb, "DELIVERABLE", to_upload / VARIANTS_BASE_FILE)
     monkeypatch.setattr(ua, "SETTINGS", types.SimpleNamespace(paths=types.SimpleNamespace(to_upload_dir=to_upload)))
     return seed, base, to_upload
