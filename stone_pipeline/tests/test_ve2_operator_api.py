@@ -13,6 +13,7 @@ import pytest
 from stone_pipeline.config import decisions_store, resolved, server, store, varieties
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import _norm
+from stone_pipeline.reference.loaders.backbone import Backbone, BackboneVariety
 
 EXISTING = {("golden lightning", "granite"), ("azul white", "onyx"), ("brown granite", "granite")}
 
@@ -22,6 +23,13 @@ COLORS = {"white": "White", "green": "Green", "smoke": "Smoke", "blue": "Blue"}
 
 def _exists(n, t):
     return (_norm(n), _norm(t)) in EXISTING
+
+
+def _backbone(*varieties_):
+    bb = Backbone()
+    for v in varieties_:
+        bb.by_norm_name.setdefault(_norm(v.variant), []).append(v)
+    return bb
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +42,7 @@ def _db(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_color_vocab", lambda: dict(COLORS))
     monkeypatch.setattr(loaders, "restricted_values", lambda *a, **k: {})  # dormant; a test opts a value in
     monkeypatch.setattr(loaders, "restricted_ids", lambda *a, **k: set())
+    monkeypatch.setattr(loaders, "load_backbone", lambda *a, **k: Backbone())  # the real seed never leaks in
     monkeypatch.setattr(resolved, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(outputs_dir=tmp_path / "no-outputs")))
     yield
 
@@ -108,7 +117,7 @@ def test_bind_onto_an_archived_variety_is_refused(monkeypatch):
     assert code == 400 and body["archived"] and "Golden Lightning" in body["error"]
 
 
-def test_an_identical_reconfirm_of_a_stored_bind_is_allowed(monkeypatch):
+def test_an_identical_reconfirm_of_a_stored_vendor_bind_is_allowed(monkeypatch):
     # the bind was stored while the variety was still active; archiving it must not break re-confirming it
     decisions_store.decide("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite", exists_as=_exists)
     monkeypatch.setattr(varieties, "is_archived", lambda n, t: (_norm(n), _norm(t)) == ("golden lightning", "granite"))
@@ -116,6 +125,27 @@ def test_an_identical_reconfirm_of_a_stored_bind_is_allowed(monkeypatch):
     assert code == 200 and body["result"] == "bound"
     # a statement that is NOT identical (a different origin) is still refused
     code, body = _decide(scraped="Amazon Green Granite", name="Golden Lightning", type="Granite", origin="Iran")
+    assert code == 400 and body["archived"]
+
+
+def test_reconfirm_of_a_global_mint_is_allowed(monkeypatch):
+    # the first mint on a spelling is stored GLOBALLY at ('', spelling); after the variety is archived,
+    # re-saving the same statement must re-confirm off that global row, not false-400 for want of a vendor row
+    decisions_store.decide("marenostone", "New Quartz", "New Quartz", "Quartzite", exists_as=_exists)
+    monkeypatch.setattr(varieties, "exists_as",
+                        lambda n, t: _exists(n, t) or (_norm(n), _norm(t)) == ("new quartz", "quartzite"))
+    monkeypatch.setattr(varieties, "is_archived", lambda n, t: (_norm(n), _norm(t)) == ("new quartz", "quartzite"))
+    code, _ = _decide(source="marenostone", scraped="New Quartz", name="New Quartz", type="Quartzite")
+    assert code == 200
+
+
+def test_reconfirm_with_a_changed_colour_is_refused(monkeypatch):
+    # a stored bind carries White; re-saving it with a different colour onto the now-archived variety is NOT a
+    # re-confirm (the old bug accepted it and rewrote the variety's colour) -> refused
+    decisions_store.decide("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite",
+                           color="White", exists_as=_exists)
+    monkeypatch.setattr(varieties, "is_archived", lambda n, t: (_norm(n), _norm(t)) == ("golden lightning", "granite"))
+    code, body = _decide(scraped="Amazon Green Granite", name="Golden Lightning", type="Granite", color="Green")
     assert code == 400 and body["archived"]
 
 
@@ -139,10 +169,21 @@ def test_amending_an_existing_variety_to_a_restricted_colour_is_refused(monkeypa
     assert code == 400 and body["restricted"] and "colour" in body["error"]
 
 
-def test_restating_a_varietys_own_restricted_colour_is_allowed(monkeypatch):
+def test_restating_a_varietys_own_restricted_stated_colour_is_allowed(monkeypatch):
     monkeypatch.setattr(loaders, "restricted_values", lambda *a, **k: {"color": {"smoke"}})
-    # Golden Lightning already documents Smoke (now restricted); carrying it on a bind is not an assignment
+    # Golden Lightning already documents Smoke via an operator statement (now restricted); carrying it is no amend
     decisions_store.decide("marenostone", "Golden Lightning", "Golden Lightning", "Granite", color="Smoke", exists_as=_exists)
+    code, body = _decide(source="zucchi", scraped="GL", name="Golden Lightning", type="Granite", color="Smoke")
+    assert code == 200 and body["result"] == "bound"
+
+
+def test_restating_a_varietys_backbone_colour_is_allowed(monkeypatch):
+    # the variety's current colour lives in the BACKBONE seed (+ leaf overlay), not an operator statement;
+    # restating that colour, even once it is restricted, is not an assignment
+    monkeypatch.setattr(loaders, "restricted_values", lambda *a, **k: {"color": {"smoke"}})
+    seed = BackboneVariety(variant="Golden Lightning", category="slab", stone_type="Granite",
+                           colors=["Smoke"], finishes=[], qualities=[], aliases=[])
+    monkeypatch.setattr(loaders, "load_backbone", lambda *a, **k: _backbone(seed))
     code, body = _decide(source="zucchi", scraped="GL", name="Golden Lightning", type="Granite", color="Smoke")
     assert code == 200 and body["result"] == "bound"
 
