@@ -92,11 +92,12 @@ def products(wood) -> dict[str, dict]:
     return {r["Variant Sku"]: r for r in _csv(wood / "to_upload" / "development" / "3_products_woodfeed.csv")}
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: reconcile validates every category against the DEFAULT form's "
-                   "backbone only (reference/loaders/reference_data.py:162 load_backbone() -> paths.backbone_json, read "
-                   "at stages/reconcile_tree.py:127), so a beam's 'Raw' finish is checked against the plank tree and every "
-                   "bulk-form product is held as missing_leaf_child (stone passes only because its slab backbone lists "
-                   "the block finish 'Raw' on 12,141 of 12,156 varieties)")
+@pytest.mark.xfail(strict=True, reason="fix owner: the Phase 1 data model (blokport_research/2026-11-03-attribute-"
+                   "logistics-audit/PHASE-1-SPEC.md:110 one variety backbone checked against the default form, and :74 D9 "
+                   "`finishes_from`): reconcile validates every category against the DEFAULT form's backbone only "
+                   "(reference/loaders/reference_data.py:162, read at stages/reconcile_tree.py:127), so a beam's 'Raw' "
+                   "finish is checked against the plank tree and every bulk-form product is held as missing_leaf_child. "
+                   "Stone keeps that rule on purpose: per-category backbones would newly hold 42 varsha 'Polished' blocks")
 def test_every_feed_row_is_emitted_nothing_wrongly_held(wood, products):
     rejects = [r for f in (wood / "stone_pipeline" / "outputs" / "development").glob("*/review/products_rejects.csv")
                for r in _csv(f)]
@@ -172,9 +173,10 @@ def test_the_per_material_data_stays_in_the_packs_own_folders(wood):
     assert not (wood / "catalog_source" / "backbone_additions").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up fix: the ledger's variation.branch column only admits the stone "
-                   "categories (ledger/schema.sql:61 CHECK (branch IN ('slab', 'block', 'tile'))), so seeding a wood "
-                   "variety fails and write-through cannot record a wood product")
+@pytest.mark.xfail(strict=True, reason="fix owner: the Phase 1 ledger schema bump (blokport_research/2026-11-03-"
+                   "attribute-logistics-audit/PHASE-1-SPEC.md:249 drops `branch` and its CHECK): today the ledger's "
+                   "variation.branch only admits the stone categories (ledger/schema.sql:61), so seeding a wood variety "
+                   "fails and write-through cannot record a wood product")
 def test_the_ledger_records_the_wood_products(tmp_path):
     root = build_workspace(tmp_path)
     _completed(run_wood(root, writethrough=True))
