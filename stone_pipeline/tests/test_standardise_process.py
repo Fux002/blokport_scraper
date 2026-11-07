@@ -348,7 +348,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_stays_exactly_as_published
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D), _listing("partner", D)])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
-    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
+    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False: (
         [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}))
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None,
                  close_only=close_only)
@@ -365,7 +365,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     worked = []
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         worked.extend(l["key"] for l in sel.listings)
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
@@ -392,7 +392,7 @@ def test_a_listing_whose_own_choice_record_cannot_be_read_is_left_as_published_a
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     worked = []
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         worked.extend(l["key"] for l in sel.listings)
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
@@ -630,7 +630,7 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
     cleared, worked = [], []
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         worked.extend(l["key"] for l in sel.listings)
         return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
@@ -655,7 +655,7 @@ def _reviewed_process(monkeypatch, close_only=False):
     monkeypatch.setattr(proc, "close_round", lambda *a: ([], {"close_only": True}, {}))
     row = {"listing": "new", "source": "sentas", "format": "slab", "reason": "pending", "why": None, "click": None,
            "photos": []}
-    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
+    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False: (
         [], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": [], "review": {"SEN-NEW": row}}))
     seen = []
     monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: seen.append(
@@ -679,6 +679,44 @@ def test_a_close_only_run_leaves_the_review_list_as_it_is(monkeypatch):
     assert f"{ROOT}{C.REVIEW_FILE}" not in s3.objects
 
 
+def test_a_clicks_only_run_works_only_the_clicked_listings_and_merges_them_into_the_review_list(monkeypatch):
+    # manager ruling C1 (2026-11-07): never rewrite the review list from a narrowed selection
+    old_new = {"listing": "new", "source": "sentas", "format": "slab", "reason": "awaiting_click", "why": None,
+               "click": None, "photos": []}
+    other = {**old_new, "listing": "other", "reason": "not_fixable"}
+    tile = {**old_new, "listing": "tile-1", "format": "tile", "reason": "tile_no_stone", "why": "no tile fits"}
+    stored = {"SEN-NEW": old_new, "SEN-OTHER": other, "SEN-CHOSEN": {**old_new, "listing": "chosen"}, "SEN-TILE-1": tile}
+    click = lambda sku, key, sha: json.dumps(pub.click_record(sku, key, "sentas", sha, "2026-11-07T10:00:00Z")).encode()
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png(),
+              imagestore.conflicts_key("sentas"): b"{}", f"{ROOT}{C.REVIEW_FILE}": json.dumps(stored, sort_keys=True).encode(),
+              f"{ROOT}summary.json": b"the last full run's", f"{ROOT}clicks/SEN-NEW.json": click("SEN-NEW", "new", D),
+              f"{ROOT}clicks/SEN-CHOSEN.json": click("SEN-CHOSEN", "chosen", E)})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("done", A), _listing("new", D),
+                                                                       _listing("chosen", E), _listing("other", B)])
+    monkeypatch.setattr(proc, "tile_listings", lambda sheet, photos: [_listing("tile-1", fmt="tile")])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    new_row = {**old_new, "reason": "clean_failed"}
+    worked = {}
+
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
+        worked.update(listings=[l["key"] for l in sel.listings], clicks_only=clicks_only)
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {"SEN-NEW": new_row}}
+    monkeypatch.setattr(proc, "run", run)
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held:
+                        {"changed": False, "tiles_hidden": {"tile-1": "no tile fits now"}})
+    import time
+    summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None,
+                           clicks_only=True)
+    assert worked == {"listings": ["new", "chosen"], "clicks_only": True} and summary["listings"] == 2
+    body = s3.objects[f"{ROOT}{C.REVIEW_FILE}"]["Body"]
+    assert json.loads(body) == {"SEN-NEW": new_row, "SEN-OTHER": other, "SEN-TILE-1": tile}   # chosen: its row goes
+    for row in (other, tile):                                           # the others' rows byte-identical
+        assert json.dumps(row, sort_keys=True).encode() in body
+    assert s3.objects[f"{ROOT}summary.json"]["Body"] == b"the last full run's"
+    assert json.loads(s3.objects[f"{ROOT}clicks-summary.json"]["Body"])["run_id"] == "R1"
+
+
 def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_is_rechecked(monkeypatch):
     s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png(),
               f"{ROOT}chosen/gone.json": _record("gone", B), f"{RUN}{B}.main.jpg": b"m", f"{RUN}{B}.slab.png": _slab_png(),
@@ -688,7 +726,7 @@ def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen = {}
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         seen.update(listings=sel.listings, todo=sel.gpu_todo())
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
@@ -707,7 +745,7 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen, handed = {}, {}
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         seen.update(owner=sel.owner, conflicts=sel.conflicts)
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": [], "review": {}}
     monkeypatch.setattr(proc, "run", run)
@@ -728,7 +766,7 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen = []
 
-    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print, clicks_only=False):
         time.sleep(0.2)                                                     # the window (0.05 s) ends while working
         with pytest.raises(select.Halted, match="work window"):
             spend.reserve(0.01)
@@ -1214,11 +1252,32 @@ def test_a_close_only_run_holds_the_same_lock_named_by_its_run_id(monkeypatch):
     real = proc.exclusive
     monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
     _main(monkeypatch)
-    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print, close_only=False:
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print, close_only=False, clicks_only=False:
                         seen.update(close_only=close_only) or
                         {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
     proc.main()
     assert seen["owner"]["close_only"] and seen["owner"]["run_id"] == "20261102120000123" and seen["close_only"]
+
+
+def test_a_clicks_only_run_holds_the_same_lock_and_tells_the_process(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("SCRAPER_RUN_ID", "20261107120000123")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLICKS_ONLY", "true")
+    monkeypatch.delenv("SCRAPER_STANDARDISE_CLOSE_ONLY", raising=False)
+    real = proc.exclusive
+    monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
+    _main(monkeypatch)
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, clean, run_id, deadline, say=print, close_only=False,
+                        clicks_only=False: seen.update(clicks_only=clicks_only, close_only=close_only) or
+                        {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
+    proc.main()
+    assert seen["owner"]["clicks_only"] and not seen["owner"]["close_only"] and seen["clicks_only"] and not seen["close_only"]
+
+
+def test_a_run_told_to_be_both_close_only_and_clicks_only_is_not_configured(monkeypatch, capsys):
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLICKS_ONLY", "true")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLOSE_ONLY", "true")
+    assert _main(monkeypatch)[0] == 2 and "both" in capsys.readouterr().out
 
 
 class _Clients:
@@ -1247,7 +1306,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     relinks = []
     monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or steps.append("relink") or relink_rc)
 
-    def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False):
+    def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False, clicks_only=False):
         spend.capped = capped
         return {"problems": problems, "pending": 0, "budget_reached": capped, "published": {"changed": changed}}
     if not keep_process:
@@ -1301,7 +1360,7 @@ def test_the_process_is_named_by_the_runner_s_run_id_in_its_lock_and_its_jobs(mo
     real = proc.exclusive
     monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
     _main(monkeypatch)
-    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, clean, run_id, deadline, say=print, close_only=False: seen.update(run_id=run_id) or
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, clean, run_id, deadline, say=print, close_only=False, clicks_only=False: seen.update(run_id=run_id) or
                         {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
     proc.main()
     assert seen["owner"]["run_id"] == "20261102120000123" and seen["run_id"] == "20261102120000123"
@@ -1389,6 +1448,38 @@ def test_a_close_only_run_is_a_photos_run_the_operator_starts_through_the_runner
     assert code == 202 and rec["close_only"] is False
 
 
+def test_a_clicks_only_run_is_a_photos_run_the_page_starts_through_the_runner(monkeypatch):
+    from stone_pipeline.config import server
+    monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
+    launched = []
+    monkeypatch.setattr(runner, "_launch_local", lambda r: launched.append(r) or r.update(status="succeeded"))
+    code, rec = server.dispatch("POST", ["run"], {"stage": "photos", "clicks_only": True})
+    assert code == 202 and rec["clicks_only"] is True and rec["close_only"] is False and launched[0]["clicks_only"] is True
+    code, rec = server.dispatch("POST", ["run"], {"stage": "photos"})
+    assert code == 202 and rec["clicks_only"] is False
+
+
+def test_clicks_only_on_another_stage_not_a_boolean_or_beside_close_only_is_refused(monkeypatch):
+    from stone_pipeline.config import server
+    monkeypatch.setattr(runner, "_launch_local", lambda r: pytest.fail("launched"))
+    for body in ({"stage": "all", "clicks_only": True}, {"clicks_only": True}, {"stage": "photos", "clicks_only": "true"},
+                 {"stage": "photos", "clicks_only": True, "close_only": True}):
+        code, rec = server.dispatch("POST", ["run"], body)
+        assert code == 400 and "clicks_only" in rec["error"], body
+
+
+def test_only_a_clicks_only_run_gets_the_clicks_only_switch(monkeypatch):
+    seen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, env=None, **kw: seen.append(env) or type("P", (), {})())
+    monkeypatch.setattr(runner.threading, "Thread", lambda target, args, daemon: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(runner, "_child", None)
+    monkeypatch.setattr(runner, "_watcher", None)
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLICKS_ONLY", "true")             # set on the service by mistake
+    runner._launch_local({"run_id": "r", "stage": "photos", "status": "queued", "close_only": False, "clicks_only": False})
+    runner._launch_local({"run_id": "r2", "stage": "photos", "status": "queued", "close_only": False, "clicks_only": True})
+    assert [e["SCRAPER_STANDARDISE_CLICKS_ONLY"] for e in seen] == ["false", "true"]
+
+
 def test_close_only_on_any_other_stage_or_not_a_boolean_is_refused(monkeypatch):
     from stone_pipeline.config import server
     monkeypatch.setattr(runner, "_launch_local", lambda r: pytest.fail("launched"))
@@ -1453,12 +1544,12 @@ def test_the_photo_process_s_stdout_is_its_report_and_its_summary_comes_back_in_
     monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(runner, "_child", None)          # no watcher runs here to clear the launched child
     monkeypatch.setattr(runner, "_watcher", None)
-    rec = {"run_id": "r", "stage": "photos", "status": "queued", "close_only": False}
+    rec = {"run_id": "r", "stage": "photos", "status": "queued", "close_only": False, "clicks_only": False}
     runner._launch_local(rec)
     assert seen["stdout"] == subprocess.PIPE and seen["stderr"] == subprocess.STDOUT
     assert seen["env"]["SCRAPER_RUN_SUMMARY"] == str(runner._summary_path(rec))
     assert seen["env"]["SCRAPER_STANDARDISE_CLOSE_ONLY"] == "false"
-    runner._launch_local({"run_id": "r2", "stage": "all", "status": "queued", "close_only": False})
+    runner._launch_local({"run_id": "r2", "stage": "all", "status": "queued", "close_only": False, "clicks_only": False})
     assert seen["stdout"] == subprocess.DEVNULL and seen["stderr"] == subprocess.PIPE
     assert "SCRAPER_RUN_SUMMARY" not in seen["env"]
 
@@ -1471,8 +1562,8 @@ def test_only_a_close_only_run_gets_the_close_only_switch_whatever_the_service_s
     monkeypatch.setattr(runner, "_watcher", None)
     monkeypatch.setenv("SCRAPER_STANDARDISE_CLOSE_ONLY", "true")              # set on the service by mistake
     monkeypatch.setenv("BLOKPORT_STANDARDISE_CLOSE_ONLY", "true")
-    runner._launch_local({"run_id": "r", "stage": "photos", "status": "queued", "close_only": False})
-    runner._launch_local({"run_id": "r2", "stage": "photos", "status": "queued", "close_only": True})
+    runner._launch_local({"run_id": "r", "stage": "photos", "status": "queued", "close_only": False, "clicks_only": False})
+    runner._launch_local({"run_id": "r2", "stage": "photos", "status": "queued", "close_only": True, "clicks_only": False})
     assert [e["SCRAPER_STANDARDISE_CLOSE_ONLY"] for e in seen] == ["false", "true"]   # SCRAPER_ wins over BLOKPORT_
 
 

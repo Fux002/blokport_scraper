@@ -70,6 +70,8 @@ def _listing(key, *photos, fmt="slab"):
 
 
 ONE, TWO, TILE = _listing("one", A, B), _listing("two", D), _listing("tile-1", fmt="tile")
+GONE, CHOSEN, UNSEEN = _listing("gone"), _listing("chosen"), _listing("unseen")
+PHOTO_LISTINGS = [ONE, TWO, GONE, CHOSEN, UNSEEN]
 
 
 def _bucket(**extra):
@@ -81,9 +83,9 @@ def _bucket(**extra):
 
 @pytest.fixture(autouse=True)
 def _sheet(monkeypatch):
-    """The product sheet's listings (tiles too) and the decisions applier's own reading of them; no lock held."""
-    monkeypatch.setattr(rv, "sheet_listings", lambda s3: [ONE, TWO, TILE])
-    monkeypatch.setattr(dec, "photo_listings", lambda s3: [ONE, TWO])
+    """The product sheet's photo and tile listings, and the decisions applier's own reading of them; no lock held."""
+    monkeypatch.setattr(rv, "sheet", lambda s3: (PHOTO_LISTINGS, [TILE]))
+    monkeypatch.setattr(dec, "photo_listings", lambda s3: PHOTO_LISTINGS)
     monkeypatch.setattr(dec, "image_pipeline_off", lambda: set())
 
     @contextmanager
@@ -109,8 +111,7 @@ def _row(listing, reason="awaiting_click", photos=None, click=None):
 
 # --- GET /photos/hidden -----------------------------------------------------------------------------------------------
 def test_each_listing_the_ledger_hides_has_one_row_with_its_reason_from_the_join(monkeypatch):
-    gone, chosen, unseen = _listing("gone"), _listing("chosen"), _listing("unseen")
-    _hidden_in_ledger(monkeypatch, ONE, gone, chosen, unseen, TILE)
+    _hidden_in_ledger(monkeypatch, ONE, GONE, CHOSEN, UNSEEN, TILE)
     tile_row = {**_row(TILE, "tile_no_stone", photos=[]), "why": "no tile of this size fits"}
     s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": _row(ONE), "SEN-TWO": _row(TWO), "SEN-TILE-1": tile_row}).encode(),
                     imagestore.owner_removed_key("SEN-GONE"): json.dumps({"sku": "SEN-GONE", "listing": "gone",
@@ -120,9 +121,11 @@ def test_each_listing_the_ledger_hides_has_one_row_with_its_reason_from_the_join
     assert {sku: r["reason"] for sku, r in rows.items()} == {
         "SEN-ONE": "awaiting_click", "SEN-GONE": "owner_removed", "SEN-CHOSEN": "chosen_not_linked",
         "SEN-UNSEEN": "not_worked_yet", "SEN-TILE-1": "tile_no_stone"}             # two: not hidden, not listed
-    assert rows["SEN-UNSEEN"] == {"sku": "SEN-UNSEEN", "listing": "unseen", "source": "sentas", "format": None,
-                                  "reason": "not_worked_yet", "why": None, "click": None, "photos": [], "actions": []}
+    assert rows["SEN-UNSEEN"] == {"sku": "SEN-UNSEEN", "listing": "unseen", "source": "sentas", "format": "slab",
+                                  "reason": "not_worked_yet", "why": None, "click": None, "photos": [],
+                                  "actions": ["remove"]}
     assert rows["SEN-TILE-1"]["why"] == "no tile of this size fits" and rows["SEN-TILE-1"]["actions"] == []
+    assert rows["SEN-GONE"]["actions"] == [] and rows["SEN-CHOSEN"]["actions"] == ["remove"]
     assert [r["sku"] for r in rv.hidden(s3)["rows"]] == sorted(rows, key=lambda sku: (rows[sku]["source"],
                                                                                      rows[sku]["listing"]))
 
@@ -150,8 +153,10 @@ def test_a_row_offers_clean_for_a_photo_a_click_can_still_fix_and_withdraw_for_a
     s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": one, "SEN-TWO": two}).encode(),
                     f"{pub.clicks_prefix(ROOT)}{imagestore.sku_file('SEN-TWO')}": json.dumps(click).encode()})
     rows = {r["sku"]: r for r in rv.hidden(s3)["rows"]}
-    assert rows["SEN-ONE"]["actions"] == ["clean"] and [p["clickable"] for p in rows["SEN-ONE"]["photos"]] == [False, True]
-    assert rows["SEN-TWO"]["actions"] == ["withdraw"] and rows["SEN-TWO"]["photos"][0]["clickable"] is False
+    assert rows["SEN-ONE"]["actions"] == ["use", "clean", "remove"]
+    assert [p["clickable"] for p in rows["SEN-ONE"]["photos"]] == [False, True]
+    assert [p["usable"] for p in rows["SEN-ONE"]["photos"]] == [[C.RUN_TAG], [C.RUN_TAG]]
+    assert rows["SEN-TWO"]["actions"] == ["use", "withdraw", "remove"] and rows["SEN-TWO"]["photos"][0]["clickable"] is False
 
 
 def test_a_row_shows_the_live_click_the_run_s_state_while_it_is_the_same_and_queued_once_changed(monkeypatch):
@@ -164,10 +169,43 @@ def test_a_row_shows_the_live_click_the_run_s_state_while_it_is_the_same_and_que
     s3.objects[clicks] = json.dumps(pub.click_record("SEN-ONE", "one", "sentas", A, LATER)).encode()
     assert rv.hidden(s3)["rows"][0]["click"] == {"sha": A, "at": LATER, "state": "queued", "why": None}
     s3.objects[clicks] = b"not json"
-    click = rv.hidden(s3)["rows"][0]["click"]
-    assert click["state"] == "blocked" and click["why"].startswith("its file cannot be read")
+    row = rv.hidden(s3)["rows"][0]
+    assert row["click"]["state"] == "blocked" and row["click"]["why"].startswith("its file cannot be read")
+    assert row["actions"] == [] and not any(p["clickable"] or p["usable"] for p in row["photos"])   # all refused
     del s3.objects[clicks]
     assert rv.hidden(s3)["rows"][0]["click"] is None                            # withdrawn since the run
+
+
+def _offered(row):
+    """The decision documents each action the row offers stands for (what the page sends for it)."""
+    at = "2026-11-07T23:00:00.000Z"
+    base = {"id": row["listing"], "source": row["source"], "at": at}
+    for action in row["actions"]:
+        if action == "use":
+            yield from ({**base, "action": "use", "sha": p["sha"], "tag": tag} for p in row["photos"] for tag in p["usable"])
+        elif action == "clean":
+            yield from ({**base, "action": "clean", "sha": p["sha"]} for p in row["photos"] if p["clickable"])
+        else:
+            yield {**base, "action": action}
+
+
+def test_no_action_a_row_offers_is_refused_by_the_applier(monkeypatch):
+    # manager 2026-11-07: an action must never lead to a 422 for its row; the applier's own rules decide what is offered
+    _hidden_in_ledger(monkeypatch, ONE, TWO, GONE, CHOSEN, UNSEEN, TILE)
+    one = _row(ONE, photos=[_photo(A, fixable=False, left=()), _photo(B)])
+    two = _row(TWO, photos=[_photo(D, state="pass", copy="fail")])
+    s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": one, "SEN-TWO": two}).encode(),
+                    f"{CLN}cleaned/{D}.jpg": b"c", f"{CLN}{D}.main.jpg": b"m",
+                    imagestore.owner_removed_key("SEN-GONE"): json.dumps({"sku": "SEN-GONE", "listing": "gone",
+                                                                          "source": "sentas", "at": AT}).encode(),
+                    f"{pub.clicks_prefix(ROOT)}{imagestore.sku_file('SEN-ONE')}": json.dumps(
+                        pub.click_record("SEN-ONE", "one", "sentas", B, AT)).encode()})
+    rows = rv.hidden(s3)["rows"]
+    docs = [doc for row in rows for doc in _offered(row)]
+    assert {d["action"] for d in docs} == {"use", "clean", "remove", "withdraw"}
+    assert [p["usable"] for p in next(r for r in rows if r["sku"] == "SEN-TWO")["photos"]] == [[C.RUN_TAG, C.CLEAN_TAG]]
+    for doc in docs:
+        dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=set())                      # never InvalidDecisions
 
 
 def test_a_review_list_that_cannot_be_read_is_said_never_served_empty(monkeypatch):
@@ -391,3 +429,56 @@ def test_a_store_that_cannot_be_read_is_503_naming_it(monkeypatch):
     monkeypatch.setattr(rv, "client", lambda: "s3")
     monkeypatch.setattr(rv, "hidden", lambda s3: (_ for _ in ()).throw(rv.Unavailable("the ledger cannot be read")))
     assert server.dispatch("GET", ["photos", "hidden"], None) == (503, {"error": "the ledger cannot be read"})
+
+
+# --- POST /photos/decisions?dry_run= (the page's export, through the one writer) ------------------------------------
+def test_a_dry_run_of_the_export_returns_its_plan_and_writes_nothing():
+    s3 = _bucket()
+    docs = [{"id": "one", "action": "use", "source": "sentas", "sha": A, "tag": C.RUN_TAG, "at": AT},
+            {"id": "two", "action": "remove", "source": "sentas", "at": AT}]
+    code, body = rv.apply_decisions(s3, docs, dry_run=True)
+    assert code == 200 and s3.written == []
+    assert {k: body[k] for k in ("dry_run", "applied", "owner_choices", "removals", "cleans", "replaced")} == {
+        "dry_run": True, "applied": False, "owner_choices": 1, "removals": 1, "cleans": 0, "replaced": 0}
+    assert any("SEN-TWO" in line for line in body["lines"]) and body["lines"][-1].startswith("==> 1 owner choices")
+
+
+def test_the_export_applied_is_written_through_the_one_writer():
+    s3 = _bucket()
+    code, body = rv.apply_decisions(s3, [{"id": "one", "action": "clean", "source": "sentas", "sha": B, "at": AT}],
+                                    dry_run=False)
+    assert (code, body["applied"], body["cleans"]) == (200, True, 1)
+    assert _clicks(s3) == {"SEN-ONE": pub.click_record("SEN-ONE", "one", "sentas", B, AT)}
+
+
+def test_an_export_with_a_bad_decision_is_422_and_writes_nothing():
+    s3 = _bucket()
+    code, body = rv.apply_decisions(s3, [{"id": "nowhere", "action": "remove", "source": "sentas", "at": AT}],
+                                    dry_run=False)
+    assert code == 422 and "nowhere" in body["error"] and s3.written == []
+
+
+def test_an_export_applied_while_a_photos_run_holds_the_lock_is_409_naming_the_run(monkeypatch):
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "R9"}).encode()})
+    code, body = rv.apply_decisions(s3, [{"id": "two", "action": "remove", "source": "sentas", "at": AT}], dry_run=False)
+    assert (code, body["reason"], body["run_id"]) == (409, "run_active", "R9") and s3.written == []
+
+
+def test_the_decisions_route_takes_the_export_and_an_explicit_dry_run(monkeypatch):
+    seen = []
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "apply_decisions", lambda s3, docs, dry_run: seen.append((docs, dry_run)) or (200, {}))
+    docs = [{"id": "two", "action": "remove", "source": "sentas", "at": AT}]
+    assert server.dispatch("POST", ["photos", "decisions"], docs, "dry_run=true")[0] == 200
+    assert server.dispatch("POST", ["photos", "decisions"], docs, "dry_run=false")[0] == 200
+    assert seen == [(docs, True), (docs, False)]
+    for query in ("", "dry_run=yes", "dry_run=1"):
+        assert server.dispatch("POST", ["photos", "decisions"], docs, query)[0] == 400
+    for body in (None, {}, [1], "x"):
+        assert server.dispatch("POST", ["photos", "decisions"], body, "dry_run=true")[0] == 400
+    assert len(seen) == 2
