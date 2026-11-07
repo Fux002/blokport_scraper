@@ -13,7 +13,7 @@ import pytest
 from stone_pipeline import adapters as adapter_registry
 from stone_pipeline import gates
 from stone_pipeline import run as run_mod
-from stone_pipeline.run import run_source
+from stone_pipeline.run import OutputMode, run_source
 from stone_pipeline.stages import derive, health, magnitude_drift
 
 SOURCE = "polonine"
@@ -112,7 +112,7 @@ CASES = {
 def _run(out, data_dir, stock):
     if stock:
         return run_source(SOURCE, outputs_dir=out, state_dir=out, data_dir=data_dir,
-                          known_products_path=out / "absent_products_export.csv", inventory_only=True)
+                          known_products_path=out / "absent_products_export.csv", mode=OutputMode.STOCK)
     return run_source(SOURCE, outputs_dir=out, state_dir=out, data_dir=data_dir)
 
 

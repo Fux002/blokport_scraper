@@ -12,16 +12,19 @@ later milestones.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from collections import Counter
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS, STANDARDISE
-from stone_pipeline.config.sources import load_source
+from stone_pipeline.config.sources import SourceConfig, load_source
 from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod
 from stone_pipeline.core import logfmt
@@ -32,6 +35,7 @@ from stone_pipeline import gates
 from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
+from stone_pipeline.reference.loaders import ReferenceData
 from stone_pipeline.reference.fingerprint import check_fingerprint
 from stone_pipeline.state.writeback import WriteBack
 from stone_pipeline.stages import (
@@ -243,48 +247,138 @@ def _write_diagnostics(manifest, layout) -> None:
         json.dumps(stages_doc, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
 
-def run_source(
-    source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
-    state_dir: Optional[Path] = None, inventory_only: bool = False,
-    known_products_path: Optional[Path] = None, data_dir: Optional[Path] = None,
-) -> Manifest:
-    # inventory_only: a lightweight stock refresh for EXISTING products. Runs the same scrape ->
-    # match -> classify path, then emits ONLY inventory_update.csv (Variant Sku + Inventory
-    # Quantity). Skips the image stage and the product-import/canonical writes entirely, and records
-    # only stock in the ledger, so it never re-imports products or regenerates images. See
-    # stone_pipeline.inventory.
-    adapter: AdapterBase = adapter_registry.REGISTRY.get(source)
-    if adapter is None:
-        raise SystemExit(
-            f"source '{source}' has no adapter. Add stone_pipeline/adapters/{source}.py ending "
-            f"in `ADAPTER = ...` (auto-registered). Adapters available: {sorted(adapter_registry.REGISTRY)}"
-        )
-    outputs_dir = Path(outputs_dir or SETTINGS.paths.outputs_dir)
-    # write-back persists to state (production); tests pass a temp state_dir so a
-    # run never pollutes the repo's learned aliases
-    state_dir = Path(state_dir or SETTINGS.paths.state_dir)
-    writeback_path = state_dir / "alias_writeback.csv"
+class OutputMode(Enum):
+    """What a run writes. FULL: the product import (images, product CSVs, canonical, the full ledger record). STOCK: the
+    stock-only refresh of EXISTING products (stone_pipeline.inventory): the same scrape -> match -> classify path, then
+    ONLY inventory_update.csv (Variant Sku + Inventory Quantity) and only stock in the ledger, so it never re-imports
+    products or regenerates images. Each property is one question a step asks of the mode."""
+    FULL = "full"
+    STOCK = "stock"
 
-    # ACQUIRE layer: a data source hands back its raw frame however it acquires it. A scraper source reads
-    # the CSV its fetcher wrote; a load_frame source (API/DB/feed) overrides adapter.load_frame; everything
-    # below is identical regardless. A load_frame source that yields NO data this run is a CLEAN skip (not
-    # a CSV fallback, not a failure); only a scraper source with no file is the missing-scrape error.
+    @property
+    def runs_images(self) -> bool:
+        return self is OutputMode.FULL
+
+    @property
+    def checks_magnitude(self) -> bool:
+        return self is OutputMode.FULL
+
+    @property
+    def writes_products(self) -> bool:
+        return self is OutputMode.FULL
+
+    @property
+    def needs_known_export(self) -> bool:
+        return self is OutputMode.STOCK
+
+    @property
+    def require_images(self) -> bool:
+        return SETTINGS.images.require_images if self is OutputMode.FULL else False
+
+    @property
+    def stock_only(self) -> bool:
+        return self is OutputMode.STOCK
+
+
+class RunAborted(Exception):
+    """A guard stopped the run before emit; the guard logs its own line where it fires. run_source's one handler
+    (_abort) then writes the diagnostics, stamps the run FAILED when `stamp_failed` (the run-level signal admission
+    reads), writes UPLOAD_STEPS.md when `write_steps`, and exits 2."""
+
+    def __init__(self, *, stamp_failed: bool, write_steps: bool = True):
+        super().__init__("run aborted")
+        self.stamp_failed = stamp_failed
+        self.write_steps = write_steps
+
+
+@dataclass(frozen=True)
+class Acquired:
+    """The raw frame a source handed back, with its timestamp token, its origin label and the scrape file behind it
+    (None for a load_frame source called without one)."""
+    frame: Any
+    ts_token: str
+    origin: str
+    scrape_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """What every step of one run reads. Frozen, but `manifest` is a mutable object the steps fill in place (each step
+    that does so says where); never copy it."""
+    source: str
+    adapter: AdapterBase
+    source_cfg: SourceConfig
+    ref: ReferenceData
+    mode: OutputMode
+    run_id: str
+    layout: RunLayout
+    run_log: logging.LoggerAdapter
+    manifest: Manifest
+    state_dir: Path
+    writeback_path: Path
+    scrape_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class Preflight:
+    """The adapted, lot-loaded rows that passed every pre-stage guard, with the Medusa product export, the lot cards
+    and the health status."""
+    rows: list[CanonicalRow]
+    known: product_state.KnownProducts
+    lot_cards: list[dict]
+    health: str
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """The rows after dedup, format, free size, normalize, variation, reconcile and derive, with the reconcile stats and
+    the alias write-back collected on the way."""
+    rows: list[CanonicalRow]
+    reconcile_stats: reconcile_tree.ReconcileStats
+    writeback: WriteBack
+
+
+@dataclass(frozen=True)
+class Delist:
+    """The stock decisions: existing products, the ones whose supplier stock moved, the products the scrape dropped
+    (after both delist guards) and the dropped bundles their lot replaced ({sku: (lot_code, pieces)})."""
+    existing_rows: list[CanonicalRow]
+    changed: list[CanonicalRow]
+    discontinued: list[tuple[str, str]]
+    replaced: dict[str, tuple[str, int]]
+
+    @property
+    def replaced_codes(self) -> dict[str, str]:
+        return {sku: code for sku, (code, _) in self.replaced.items()}
+
+
+def acquire(source: str, adapter: AdapterBase, scrape_path: Optional[Path],
+            data_dir: Optional[Path]) -> Optional[Acquired]:
+    """ACQUIRE layer: a data source hands back its raw frame however it acquires it. A scraper source reads the CSV its
+    fetcher wrote; a load_frame source (API/DB/feed) overrides adapter.load_frame; everything below is identical
+    regardless. A load_frame source that yields NO data this run is a CLEAN skip (None: not a CSV fallback, not a
+    failure); only a scraper source with no file is the missing-scrape error."""
     custom = adapter.load_frame(scrape_path)
     if custom is not None:
         frame, ts_token, origin = custom
-    elif adapter.acquires_via() == ACQ_LOAD_FRAME:
+        return Acquired(frame, ts_token, origin, scrape_path)
+    if adapter.acquires_via() == ACQ_LOAD_FRAME:
         logfmt.bind(log, source=source).info("load_frame source produced no data this run; skipping (not a failure)")
-        return _skipped_manifest(source, "no data from load_frame this run")
-    else:
-        scrape_path = scrape_path or find_scrape_file(source, data_dir)
-        if scrape_path is None:
-            raise FileNotFoundError(f"no scrape file found for source {source}")
-        frame = read_scrape_csv(scrape_path)
-        ts_token, origin = _scrape_ts(frame), scrape_path.name
-    run_id = make_run_id(source, ts_token)
+        return None
+    scrape_path = scrape_path or find_scrape_file(source, data_dir)
+    if scrape_path is None:
+        raise FileNotFoundError(f"no scrape file found for source {source}")
+    frame = read_scrape_csv(scrape_path)
+    return Acquired(frame, _scrape_ts(frame), scrape_path.name, scrape_path)
+
+
+def _start(source: str, adapter: AdapterBase, acquired: Acquired, mode: OutputMode, outputs_dir: Path,
+           state_dir: Path) -> RunContext:
+    """The run's id, folders, log, reference data, manifest and source config."""
+    run_id = make_run_id(source, acquired.ts_token)
     layout = RunLayout.for_run(outputs_dir, run_id).ensure()
     run_log = logfmt.bind(log, run_id=run_id, source=source)
-    run_log.info(f"run start on {origin} ({frame.height} rows)")
+    run_log.info(f"run start on {acquired.origin} ({acquired.frame.height} rows)")
 
     ref = loaders.load_all()
     check_fingerprint(ref)                          # warns/raises on a reference drift; return unused
@@ -294,18 +388,28 @@ def run_source(
         source=source,
         code_version=SETTINGS.code_version,
         environment=SETTINGS.environment,
-        input_path=origin,
-        input_hash=content_hash(scrape_path) if scrape_path else "",
+        input_path=acquired.origin,
+        input_hash=content_hash(acquired.scrape_path) if acquired.scrape_path else "",
         reference_versions=ref.versions,
     )
     manifest.totals["backend_fingerprint_ok"] = 1
+    source_cfg = load_source(source)   # once: the floor, the vendor origin at Stage 4, the write-through
+    # write-back persists to state (production); tests pass a temp state_dir so a run never pollutes the repo's
+    # learned aliases
+    return RunContext(source=source, adapter=adapter, source_cfg=source_cfg, ref=ref, mode=mode, run_id=run_id,
+                      layout=layout, run_log=run_log, manifest=manifest, state_dir=state_dir,
+                      writeback_path=state_dir / "alias_writeback.csv", scrape_path=acquired.scrape_path)
 
+
+def preflight(ctx: RunContext, frame, known_products_path: Optional[Path]) -> Preflight:
+    """Every guard before the stages, plus ingest, the Medusa product export and the lots step. Fills the manifest's
+    health status and the ingest / lots stage metrics and ingest gate. Raises RunAborted."""
+    run_log, manifest, source_cfg = ctx.run_log, ctx.manifest, ctx.source_cfg
     # SCRAPE-HEALTH GUARD (before any stage): an empty or catastrophically-short scrape -- auth/
     # endpoint changed, or a truncated fetch that slipped past the completion marker -- must abort
     # HERE. Proceeding would feed the discontinuation lane and stock-0 every product the scrape
     # failed to fetch. The per-source floor is >=1 (so 0 rows always fails) and is the catastrophic
     # threshold, NOT a tight bound on normal supplier inventory variation.
-    source_cfg = load_source(source)   # once: the floor here, the vendor origin at Stage 4, the write-through
     _floor = max(1, source_cfg.min_expected_rows)
     if frame.height < _floor:
         run_log.error("scrape below floor -- failed/empty scrape; aborting (NO delist)",
@@ -313,43 +417,32 @@ def run_source(
         # this abort precedes Stage 0, so health_status is still "" -- stamp FAILED so the durable manifest
         # records the failure and admission sees it (an empty "" is coerced to OK there and would silently
         # keep an auto source auto-loading on a catastrophic empty scrape).
-        manifest.health_status = "FAILED"
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=True)
 
     # COLLECTION-LOCATION GUARD (before any stage): a mistyped country would otherwise emit null, and the backend clears
     # a product's location on a stated null, so one typo would clear this whole source's locations on its next sync.
     # Held like the floor above: no canonical is written, so the last good run stays in force.
     try:
-        derive.collection_location(ref, source_cfg)
+        derive.collection_location(ctx.ref, source_cfg)
     except ValueError as exc:
         run_log.error(f"source configuration error, holding this source (last good run stays in force): {exc}")
-        manifest.health_status = "FAILED"
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=True) from None
 
     # Stage 0: health
-    contract = contracts.load_contract(source) or adapter.generate_contract(frame)
-    baseline = contracts.load_baselines().get(source)
-    report = health.run_health(frame, contract, baseline, smoke_test=adapter.smoke_count)
-    report.write(layout.diagnostics / "health.json")
+    contract = contracts.load_contract(ctx.source) or ctx.adapter.generate_contract(frame)
+    baseline = contracts.load_baselines().get(ctx.source)
+    report = health.run_health(frame, contract, baseline, smoke_test=ctx.adapter.smoke_count)
+    report.write(ctx.layout.diagnostics / "health.json")
     manifest.health_status = report.status
     if report.status == health.FAILED:
         run_log.error("health FAILED; aborting before emit")
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=False)
     # the row-count baseline is run state like the alias write-back: it lives in state_dir (the
     # production default is the same state/ folder; a test's tmp state_dir keeps it private)
-    health.update_baseline_if_ok(report, contract, health.now_iso(), path=state_dir / "scrape_baselines.json")
+    health.update_baseline_if_ok(report, contract, health.now_iso(), path=ctx.state_dir / "scrape_baselines.json")
 
     # Stage 1: ingest
-    rows = adapter.adapt(frame)
+    rows = ctx.adapter.adapt(frame)
     manifest.add_stage(StageMetric(stage="ingest", rows_in=frame.height, rows_out=len(rows)))
 
     # guard: a new/changed adapter that mis-maps a required field silently drops the rows missing
@@ -362,11 +455,7 @@ def run_source(
         # health passed (else we aborted above), so health_status is OK/DEGRADED here -- a >50% adapt drop is
         # a run failure admission must see, so stamp FAILED on the run-level signal (health.json keeps the
         # stage's own result).
-        manifest.health_status = "FAILED"
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=True)
 
     # The Medusa product export: which products already exist. Tags new vs existing below, and tells the lots
     # step which lots are already in Medusa (held whole rather than turned back into a bundle).
@@ -376,12 +465,11 @@ def run_source(
     # the run exits 0 "0 changed" -- a silent success that masks the missing export and drops real stock
     # moves. Full mode legitimately has no export on a cold start (everything is new), so guard ONLY the
     # inventory-only path: it cannot produce a trustworthy delta without the export, so fail loud.
-    if inventory_only and not known_path.exists():
+    if ctx.mode.needs_known_export and not known_path.exists():
         run_log.error("inventory-only refresh aborted: the Medusa product export is missing, so no stock "
                       "delta can be computed (a '0 changed' result would be a lie)",
                       extra={"extra_fields": {"expected": str(known_path)}})
-        _write_diagnostics(manifest, layout)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=False, write_steps=False)
     known = product_state.load_known_products(known_path)
 
     # Lots: the loader step that decides lot membership (a bundle whose slabs' status is known becomes its
@@ -403,11 +491,15 @@ def run_source(
     if ingest_gate.status == gates.FAILED:
         run_log.error("ingest gate FAILED; aborting before clean -- scrape is missing required fields",
                       extra={"extra_fields": {"violations": ingest_gate.violations}})
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=False)
+    return Preflight(rows=rows, known=known, lot_cards=lot_cards, health=report.status)
 
+
+def resolve(ctx: RunContext, rows: list[CanonicalRow]) -> Resolved:
+    """Stages 2 to 6 (dedup, format, free size, normalize, variation, reconcile, the clean gate, derive) and the two
+    guards on their result (per-row isolation, magnitude drift). Fills those stage metrics, the clean gate and the
+    magnitude status. Raises RunAborted."""
+    run_log, manifest, ref = ctx.run_log, ctx.manifest, ctx.ref
     # Stage 2: keys and dedup
     dd = keys_dedupe.run(rows)
     rows = dd.rows
@@ -432,9 +524,9 @@ def run_source(
     # Stage 4: variation (collects alias write-back for persistence at run end). The source config carries
     # the vendor's declared origin, the matcher's origin evidence when a listing states none.
     writeback = WriteBack()
-    _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=writeback_path,
-                                                   generic_descriptor=adapter.generic_descriptor,
-                                                   source_cfg=source_cfg))
+    _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=ctx.writeback_path,
+                                                   generic_descriptor=ctx.adapter.generic_descriptor,
+                                                   source_cfg=ctx.source_cfg))
     # Stage 5: reconcile tree
     stats = reconcile_tree.run(rows, ref)
     _reconcile_status = _ratio_status(stats.isolated, len(rows), SETTINGS.thresholds.row_isolated_degraded)
@@ -449,7 +541,7 @@ def run_source(
     _apply_gate(rows, gate_defs.clean_contract(ref), manifest, run_log)
 
     # Stage 6: derivation
-    _record(manifest, run_log, derive.run(rows, ref, source_cfg))
+    _record(manifest, run_log, derive.run(rows, ref, ctx.source_cfg))
 
     # Per-row isolation ABORT gate: the four row-loop stages above dead-letter a row that raises an
     # unexpected exception (fail-loud-and-ISOLATED). Isolating a FEW bad-data rows and shipping the rest is
@@ -463,41 +555,41 @@ def run_source(
                       "too many rows to ship this as a success",
                       extra={"extra_fields": {"rows": len(rows), "fraction": round(_iso_frac, 3),
                                               "floor": SETTINGS.thresholds.row_isolated_abort}})
-        manifest.health_status = "FAILED"
-        _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
-                       gates=manifest.gate_status)
-        raise SystemExit(2)
+        raise RunAborted(stamp_failed=True)
 
     # Canonical magnitude-drift gate: after derive populates the physical fields (weight/dims), catch a
     # unit/normalization rescale before it reaches the catalog. Source-agnostic (canonical fields only),
     # self-tuning per-source baseline. Skipped for an inventory-only refresh (no product magnitudes move).
-    if not inventory_only:
-        mag_status, mag_report = magnitude_drift.check(rows, source)
+    if ctx.mode.checks_magnitude:
+        mag_status, mag_report = magnitude_drift.check(rows, ctx.source)
         manifest.magnitude_status = mag_status
-        (layout.diagnostics / "magnitude_drift.json").write_text(
+        (ctx.layout.diagnostics / "magnitude_drift.json").write_text(
             json.dumps(mag_report, indent=2, sort_keys=True), encoding="utf-8")
         if mag_status == magnitude_drift.FAILED:
             run_log.error("magnitude drift FAILED; aborting before emit",
                           extra={"extra_fields": {"drift": mag_report["drift"]}})
-            _write_diagnostics(manifest, layout)
-            write_steps_md(layout, source=source, run_id=run_id, health=manifest.health_status,
-                           counts={}, gates=manifest.gate_status)
-            raise SystemExit(2)
+            raise RunAborted(stamp_failed=False)
+    return Resolved(rows=rows, reconcile_stats=stats, writeback=writeback)
 
+
+def finalize_rows(ctx: RunContext, resolved: Resolved,
+                  known: product_state.KnownProducts) -> validate.ValidationResult:
+    """Stages 7 to 9 (images, constants, the process gate, validate), the standardised-photo conflicts, the row
+    fingerprints and the new/existing classification. Fills those stage metrics, the process gate, the held and lots
+    worklists, the metric distributions and the run totals."""
+    run_log, manifest, mode, rows = ctx.run_log, ctx.manifest, ctx.mode, resolved.rows
     # Stage 7: images  (skipped for an inventory-only refresh -- stock never touches images)
-    img_stats = images.ImageStats() if inventory_only else images.run(rows)
+    img_stats = images.run(rows) if mode.runs_images else images.ImageStats()
     # honest status (was hardcoded OK): a large no_image fraction means most products are held from shipping
     # -- a systemic image-supply/processing problem, surfaced at this layer instead of hiding in the count.
-    _img_status = ("skipped" if inventory_only
-                   else _ratio_status(img_stats.no_image, len(rows),
-                                      SETTINGS.thresholds.images_no_image_degraded))
+    _img_status = (_ratio_status(img_stats.no_image, len(rows), SETTINGS.thresholds.images_no_image_degraded)
+                   if mode.runs_images else "skipped")
     _record(manifest, run_log, StageMetric(
         stage="images", status=_img_status, rows_out=len(rows),
         extra={"staged": img_stats.staged, "no_image": img_stats.no_image,
                "no_image_source": img_stats.no_image_source}))
     # Stage 8: constants
-    _record(manifest, run_log, constants.run(rows, source_cfg))
+    _record(manifest, run_log, constants.run(rows, ctx.source_cfg))
 
     # Process gate: enforce the Medusa-importable output contract (origin country code is required
     # for Medusa's pricing-rule lookup). Runs before validate so any reject it stamps flows through
@@ -505,14 +597,14 @@ def run_source(
     _apply_gate(rows, gate_defs.PROCESS, manifest, run_log)
 
     # Stage 9: validation
-    validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
-                              require_images=False if inventory_only else SETTINGS.images.require_images,
-                              source_code=source_cfg.source_code)
+    validation = validate.run(rows, emit_on_review=ctx.source_cfg.emit_on_review,
+                              require_images=mode.require_images,
+                              source_code=ctx.source_cfg.source_code)
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
-    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit,
-                                                                     image_pipeline=source_cfg.image_pipeline)) is not None:
+    if mode.runs_images and (conflicts := images.link_standard(rows, validation.emit,
+                                                               image_pipeline=ctx.source_cfg.image_pipeline)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks
@@ -539,18 +631,24 @@ def run_source(
     manifest.totals.update(
         rows=len(rows),
         variation_resolved=sum(1 for r in rows if r.variation_id),
-        validated=stats.validated,
+        validated=resolved.reconcile_stats.validated,
         emitted=len(validation.emit),
         rejected=len(validation.rejects),
     )
 
     # Item 4: tag emitted products new vs existing (by SKU) against the Medusa product export (`known`,
     # loaded before the lots step), and flag inventory changes (feeds item 5).
-    pstats = product_state.classify(validation.emit, source_cfg, known)
+    pstats = product_state.classify(validation.emit, ctx.source_cfg, known)
     manifest.totals.update(products_new=pstats.new, products_existing=pstats.existing,
                            inventory_changed=pstats.inventory_changed)
+    return validation
 
-    # Stage 10: emit into the clean per-run layout (outputs/<run_id>/...)
+
+def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult,
+                  known: product_state.KnownProducts) -> Delist:
+    """The stock decisions: the stock delta of existing products, the products the scrape dropped (each delist guard
+    can refuse them all) and the dropped bundles their lot replaced. Fills the discontinued / replaced totals."""
+    run_log, source_cfg = ctx.run_log, ctx.source_cfg
     existing_rows = [r for r in validation.emit if r.product_status == "existing"]
     # item 5: the inventory-only delta -- existing products whose supplier stock moved. Shared by
     # both modes: it is the SOLE output of an inventory refresh and one output of a full run.
@@ -562,7 +660,7 @@ def run_source(
     # scrape reported that too large a fraction of its detail fetches failed, its absences are untrustworthy:
     # suppress the delist entirely. Keyed on the FETCH-FAILURE ratio, not the delisted count, so a genuine
     # catalog shrink (clean absences, no detail failures) still delists. 0.0 for scrapers with no detail fetch.
-    _detail_fail_ratio = _scrape_detail_failure_ratio(scrape_path)
+    _detail_fail_ratio = _scrape_detail_failure_ratio(ctx.scrape_path)
     if discontinued and _detail_fail_ratio >= SETTINGS.thresholds.delist_detail_failure_floor:
         run_log.warning("delist refused: the scrape's detail fetches were too degraded to trust product "
                         "absences (likely rate-limited) -- keeping products listed",
@@ -585,45 +683,62 @@ def run_source(
     # (Blokport deactivates it and redirects its page there). After the guards, so a refused delist refuses both.
     lot_of = lots.replacements(rows, source_cfg)
     replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
-    if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
-        emit.write_inventory_csv(changed, source_cfg, layout.products_import / "inventory_update.csv",
-                                 discontinued=tuple(discontinued))
-        emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv",
-                                    replaced={sku: code for sku, (code, _) in replaced.items()})
-        emit.write_lot_replacements_csv(discontinued, replaced, layout.review / "lot_replacements.csv")
-    emit.write_lot_cards(lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
-    manifest.totals["products_discontinued"] = len(discontinued)
-    manifest.totals["bundles_replaced_by_lots"] = len(replaced)
+    ctx.manifest.totals["products_discontinued"] = len(discontinued)
+    ctx.manifest.totals["bundles_replaced_by_lots"] = len(replaced)
+    return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced)
+
+
+def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
+                  pre: Preflight) -> int:
+    """Stage 10: emit into the clean per-run layout (outputs/<run_id>/...): the stock files when the product export is
+    known, the lot cards, the rejects and, in FULL mode, the product files. Returns the distinct tree-gap count (0 in
+    STOCK mode)."""
+    layout, source_cfg = ctx.layout, ctx.source_cfg
+    if pre.known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
+        emit.write_inventory_csv(delist.changed, source_cfg, layout.products_import / "inventory_update.csv",
+                                 discontinued=tuple(delist.discontinued))
+        emit.write_discontinued_csv(delist.discontinued, layout.review / "products_discontinued.csv",
+                                    replaced=delist.replaced_codes)
+        emit.write_lot_replacements_csv(delist.discontinued, delist.replaced, layout.review / "lot_replacements.csv")
+    emit.write_lot_cards(pre.lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
     gap_count = 0
     # rejects are an audit invariant: write them in BOTH modes so a rejected row never vanishes
-    # without a per-row record (inventory_only still runs validate above).
+    # without a per-row record (STOCK mode still runs validate above).
     emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
-    if inventory_only:
-        run_log.info("inventory-only: wrote stock delta + rejects, skipped products/images/canonical",
-                     extra={"extra_fields": {"existing": len(existing_rows), "changed": len(changed),
-                                             "rejected": len(validation.rejects)}})
-    else:
-        columns = emit.read_template_columns()
-        emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
-        emit.write_photos_json(validation.emit, layout.products_import / STANDARDISE.PHOTOS_FILE)
-        new_rows = [r for r in validation.emit if r.product_status == "new"]
-        if known:  # only split when we know what exists
-            emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
-            emit.write_import_csv(existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv", columns)
-        emit.write_review_csv(validation.review_only + validation.emit, layout.review / "products_review.csv")
-        staging.write_canonical(rows, layout.diagnostics / "canonical.parquet")
-        gap_count = _write_gap_queue(rows, layout.review / "tree_gaps.csv")
+    if not ctx.mode.writes_products:
+        ctx.run_log.info("inventory-only: wrote stock delta + rejects, skipped products/images/canonical",
+                         extra={"extra_fields": {"existing": len(delist.existing_rows), "changed": len(delist.changed),
+                                                 "rejected": len(validation.rejects)}})
+        return gap_count
+    columns = emit.read_template_columns()
+    emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
+    emit.write_photos_json(validation.emit, layout.products_import / STANDARDISE.PHOTOS_FILE)
+    new_rows = [r for r in validation.emit if r.product_status == "new"]
+    if pre.known:  # only split when we know what exists
+        emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
+        emit.write_import_csv(delist.existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv",
+                              columns)
+    emit.write_review_csv(validation.review_only + validation.emit, layout.review / "products_review.csv")
+    staging.write_canonical(rows, layout.diagnostics / "canonical.parquet")
     # NOTE: variants/backbone/tree/images are SHARED across sources and are
     # consolidated by `python -m stone_pipeline.catalog` (reads every run's
     # canonical.parquet), not written per source. This folder is products only.
+    return _write_gap_queue(rows, layout.review / "tree_gaps.csv")
 
-    # Record this source's emitted products + inventory into the ledger (the live sync source Medusa pulls), AFTER
-    # the CSVs are written. Inert unless write-through is enabled; a failed write-through fails the run (below).
+
+def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
+           writeback: WriteBack, health_status: str, gap_count: int) -> Manifest:
+    """Record the run: this source's products and stock into the ledger (the live sync source Medusa pulls), AFTER the
+    CSVs are written; the learned aliases; the diagnostics and the product checklist. Fills the manifest's
+    write-backs. A failed write-through fails the run (exit 2) once everything else is written, so the operator can
+    read why."""
+    run_log, manifest, source_cfg = ctx.run_log, ctx.manifest, ctx.source_cfg
+    # Inert unless write-through is enabled.
     from stone_pipeline.ledger import writethrough
     ledger_failed = False
     if writethrough.enabled():
-        if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg,
-                                          inventory_only=inventory_only, replaced={sku: code for sku, (code, _) in replaced.items()}):
+        if not writethrough.record_source(validation.emit, tuple(delist.discontinued), source_cfg,
+                                          inventory_only=ctx.mode.stock_only, replaced=delist.replaced_codes):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this
@@ -633,12 +748,12 @@ def run_source(
             run_log.error("ledger write-through failed; Medusa will not receive this source until a "
                           "successful re-run", extra={"extra_fields": {"source": source_cfg.source_code}})
 
-    written = writeback.flush(writeback_path)
+    written = writeback.flush(ctx.writeback_path)
     if written:
         manifest.write_backs.append(f"alias_writeback:{written}")
-    _write_diagnostics(manifest, layout)
+    _write_diagnostics(manifest, ctx.layout)
     # the per-source product checklist
-    write_steps_md(layout, source=source, run_id=run_id, health=report.status,
+    write_steps_md(ctx.layout, source=ctx.source, run_id=ctx.run_id, health=health_status,
                    counts=manifest.totals, gates=manifest.gate_status)
 
     run_log.info(
@@ -649,13 +764,55 @@ def run_source(
             "emitted": len(validation.emit),
             "rejected": len(validation.rejects),
             "distinct_gaps": gap_count,
-            "health": report.status,
+            "health": health_status,
             "gates": manifest.gate_status,
         }},
     )
     if ledger_failed:
         raise SystemExit(2)
     return manifest
+
+
+def _abort(ctx: RunContext, aborted: RunAborted) -> None:
+    """The one abort path: every guard leaves the same readable diagnostic (stages that never ran are simply absent),
+    the run stamped FAILED where the guard says so, and the product checklist on every abort but the missing export."""
+    if aborted.stamp_failed:
+        ctx.manifest.health_status = "FAILED"
+    _write_diagnostics(ctx.manifest, ctx.layout)
+    if aborted.write_steps:
+        write_steps_md(ctx.layout, source=ctx.source, run_id=ctx.run_id, health=ctx.manifest.health_status, counts={},
+                       gates=ctx.manifest.gate_status)
+
+
+def run_source(
+    source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
+    state_dir: Optional[Path] = None, mode: OutputMode = OutputMode.FULL,
+    known_products_path: Optional[Path] = None, data_dir: Optional[Path] = None,
+) -> Manifest:
+    """One source end to end: acquire, preflight, resolve, finalize_rows, decide_delist, write_outputs, record. `mode`
+    says what it writes (OutputMode). Exits 2 on any guard (RunAborted) or a failed ledger write-through."""
+    adapter: AdapterBase = adapter_registry.REGISTRY.get(source)
+    if adapter is None:
+        raise SystemExit(
+            f"source '{source}' has no adapter. Add stone_pipeline/adapters/{source}.py ending "
+            f"in `ADAPTER = ...` (auto-registered). Adapters available: {sorted(adapter_registry.REGISTRY)}"
+        )
+    outputs_dir = Path(outputs_dir or SETTINGS.paths.outputs_dir)
+    state_dir = Path(state_dir or SETTINGS.paths.state_dir)
+    acquired = acquire(source, adapter, scrape_path, data_dir)
+    if acquired is None:
+        return _skipped_manifest(source, "no data from load_frame this run")
+    ctx = _start(source, adapter, acquired, mode, outputs_dir, state_dir)
+    try:
+        pre = preflight(ctx, acquired.frame, known_products_path)
+        resolved = resolve(ctx, pre.rows)
+        validation = finalize_rows(ctx, resolved, pre.known)
+        delist = decide_delist(ctx, resolved.rows, validation, pre.known)
+        gap_count = write_outputs(ctx, resolved.rows, validation, delist, pre)
+    except RunAborted as aborted:
+        _abort(ctx, aborted)
+        raise SystemExit(2) from None
+    return record(ctx, resolved.rows, validation, delist, resolved.writeback, pre.health, gap_count)
 
 
 def _format_gate_status(gate_status: dict[str, str]) -> str:
@@ -738,7 +895,7 @@ def expected_sources(sources: Optional[list[str]] = None) -> list[str]:
 
 
 def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = None,
-            state_dir: Optional[Path] = None, inventory_only: bool = False,
+            state_dir: Optional[Path] = None, mode: OutputMode = OutputMode.FULL,
             data_dir: Optional[Path] = None) -> dict[str, Manifest]:
     """Multi-source run with source-level isolation (section 13A.3): one source
     failing does not affect the others."""
@@ -754,7 +911,7 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
     for source in sources:
         try:
             results[source] = run_source(source, outputs_dir=outputs_dir, state_dir=state_dir, data_dir=data_dir,
-                                         inventory_only=inventory_only)
+                                         mode=mode)
         except SystemExit:
             log.error(f"{source} aborted on health gate; continuing other sources")
         except Exception:

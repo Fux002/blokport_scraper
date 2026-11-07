@@ -26,7 +26,7 @@ from pathlib import Path
 from stone_pipeline import catalog
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.run import expected_sources, run_all
+from stone_pipeline.run import OutputMode, expected_sources, run_all
 
 log = logfmt.get_logger("inventory")
 
@@ -39,7 +39,7 @@ def run(sources: list[str] | None = None, outputs_dir: Path | None = None) -> tu
     # to the catalog glob (outputs/*/...), which is one level shallower than outputs/_inventory/<run>/
     out_root = Path(outputs_dir) if outputs_dir else SETTINGS.paths.outputs_dir / "_inventory"
     requested = expected_sources(sources)
-    results = run_all(requested, outputs_dir=out_root, inventory_only=True)
+    results = run_all(requested, outputs_dir=out_root, mode=OutputMode.STOCK)
     failed = [s for s in requested if s not in results]
     inv_csvs = [out_root / m.run_id / "4_products_import" / "inventory_update.csv"
                 for m in results.values()]

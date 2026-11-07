@@ -28,7 +28,7 @@ import polars as pl
 import pytest
 
 from stone_pipeline.config.sources import load_source
-from stone_pipeline.run import run_source
+from stone_pipeline.run import OutputMode, run_source
 from stone_pipeline.stages import magnitude_drift
 from stone_pipeline.tests.test_ledger_writethrough import _seed_ledger_like_the_sync_server
 
@@ -40,7 +40,7 @@ _TIMESTAMP = re.compile(rb"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(\+00:00|Z
 
 def _stock_run(source, out, data_dir, known):
     return run_source(source, outputs_dir=out, state_dir=out, data_dir=data_dir, known_products_path=known,
-                      inventory_only=True)
+                      mode=OutputMode.STOCK)
 
 
 def _sha(data: bytes) -> str:
