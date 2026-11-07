@@ -19,7 +19,7 @@ from stone_pipeline.core import logfmt
 log = logfmt.get_logger("texture_trigger")
 
 
-def submit_texture_job(queued: int, queue_key: str | None = None) -> str | None:
+def submit_texture_job(queued: int, queue_key: str) -> str | None:
     """Submit ONE GPU Batch job (RUN_MODE=generate-textures) to generate + upload the `queued` new-variant
     textures. `queue_key` is the UNIQUE per-dispatch S3 key of the queue this job must pull (passed as
     BLOKPORT_TEXTURE_QUEUE_KEY), so overlapping mints never share one clobberable queue object. Returns the
@@ -57,9 +57,9 @@ def submit_texture_job(queued: int, queue_key: str | None = None) -> str | None:
             # {Key}.png silently never reaches dev/variations/ (the produce container sets this same false).
             containerOverrides={"environment": [
                 {"name": "RUN_MODE", "value": "generate-textures"},
-                {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"}]
+                {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"},
                 # the exact per-dispatch queue this job must pull (unique per submit -> no clobber race).
-                + ([{"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": queue_key}] if queue_key else [])})
+                {"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": queue_key}]})
         job_id = resp["jobId"]
         log.info("auto-texture submitted", extra={"extra_fields": {"queued": queued, "job_id": job_id}})
         return job_id

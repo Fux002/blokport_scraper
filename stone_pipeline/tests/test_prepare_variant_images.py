@@ -12,14 +12,11 @@ import pytest
 
 import stone_pipeline.prepare_variant_images as pvi
 
-_REAL_FETCH = pvi._fetch_published_prompts   # captured before the autouse stub replaces it
-
-
 @pytest.fixture(autouse=True)
-def _no_published_queue(monkeypatch):
-    # default for run() tests: no produce-published queue on S3, so _resolve_queue falls back to the local
-    # build path (which those tests monkeypatch). Tests of the published path override this explicitly.
-    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda client=None: False)
+def _no_dispatched_queue(monkeypatch):
+    # default for run() tests: a dev box (no dispatched queue key), so _resolve_queue builds locally (which
+    # those tests monkeypatch). Tests of the dispatched path set the key explicitly.
+    monkeypatch.delenv(pvi.TEXTURE_QUEUE_KEY_ENV, raising=False)
 
 
 class _FakeS3:
@@ -76,14 +73,17 @@ def test_run_does_nothing_when_queue_is_empty(tmp_path, monkeypatch):
     assert pvi.run() == 0
 
 
-def test_run_guards_and_spends_nothing_when_generator_stack_absent(tmp_path, monkeypatch):
+def test_a_job_that_cannot_run_the_generator_fails_and_spends_nothing(tmp_path, monkeypatch):
+    # a dispatched job without FAL_KEY or the stack must exit non-zero (the failed-job alert), never pass
     q = tmp_path / "prompts.json"
     q.write_text(json.dumps([{"output_name": "slab_marble_a"}]), encoding="utf-8")
     monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
-    monkeypatch.setattr(pvi, "_generator_blockers", lambda: ["fal_client", "torch"])
-    # must not import/run the generator or touch S3 -- a fake that would explode if called
-    monkeypatch.setattr(pvi, "upload_variant_images", lambda *a, **k: (_ for _ in ()).throw(AssertionError("uploaded on a blocked run")))
-    assert pvi.run() == 0
+    monkeypatch.setattr(pvi, "_generator_blockers", lambda: ["torch", "FAL_KEY"])
+    # must not import/run the generator or touch S3 -- fakes that would explode if called
+    monkeypatch.setattr(pvi, "_generate_queued_images", lambda: pytest.fail("generated on a blocked run"))
+    monkeypatch.setattr(pvi, "upload_variant_images", lambda *a, **k: pytest.fail("uploaded on a blocked run"))
+    with pytest.raises(pvi.TextureJobFailed, match="FAL_KEY"):
+        pvi.run()
 
 
 def test_run_generates_then_uploads_when_ready(tmp_path, monkeypatch):
@@ -96,37 +96,49 @@ def test_run_generates_then_uploads_when_ready(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(pvi, "upload_variant_images",
                         lambda keys, client=None: seen.update(keys=keys) or (len(keys), []))
+    monkeypatch.setattr(pvi.refresh_images, "mark_best_model",
+                        lambda keys, client=None: seen.update(marked=sorted(keys)) or True)
     assert pvi.run() == 2
-    assert seen["keys"] == ["slab_marble_a", "slab_marble_b"]
+    assert seen["keys"] == seen["marked"] == ["slab_marble_a", "slab_marble_b"]
 
 
 # -- queue passing: produce publishes the queue to S3; the bare GPU task pulls it -----------------------
 
-def test_publish_prompts_uploads_to_the_env_scoped_key(tmp_path, monkeypatch):
-    q = tmp_path / "prompts_to_generate.json"
-    q.write_text("[]", encoding="utf-8")
-    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
-    client = _FakeS3()
-    assert pvi.publish_prompts(q, client=client) is True
-    assert client.calls == [(str(q), "test-bucket", pvi.PROMPTS_S3_KEY)]
-
-
 def test_publish_prompts_noop_when_file_missing_or_dry_run(tmp_path, monkeypatch):
+    key = "dev/scraper/texture_queues/abc123.json"
     monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
     client = _FakeS3()
-    assert pvi.publish_prompts(tmp_path / "absent.json", client=client) is False   # no file
+    assert pvi.publish_prompts(tmp_path / "absent.json", key, client=client) is False   # no file
     assert client.calls == []
     q = tmp_path / "p.json"; q.write_text("[]", encoding="utf-8")
     monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=True))
-    assert pvi.publish_prompts(q, client=_FakeS3()) is False                        # dry-run
+    assert pvi.publish_prompts(q, key, client=_FakeS3()) is False                        # dry-run
 
 
-def test_resolve_queue_prefers_the_published_queue_over_a_local_build(monkeypatch):
-    # when the produce's queue is on S3, use it (do NOT rebuild locally -- the bare GPU task cannot)
-    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda client=None: True)
-    monkeypatch.setattr(pvi.image_prompts, "build",
-                        lambda: (_ for _ in ()).throw(AssertionError("rebuilt instead of using published")))
+def test_a_dispatched_job_uses_its_queue_and_never_rebuilds(monkeypatch):
+    # the bare GPU task cannot rebuild the queue (no local export/products): it uses exactly its dispatched key
+    monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/xyz.json")
+    asked = []
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda key, client=None: asked.append(key) or True)
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: pytest.fail("rebuilt instead of using the dispatched queue"))
     assert pvi._resolve_queue() == pvi.PROMPTS_LOCAL
+    assert asked == ["dev/scraper/texture_queues/xyz.json"]
+
+
+def test_a_dispatched_job_whose_queue_cannot_be_read_fails(monkeypatch):
+    # an unreadable dispatched queue is a failed job (alert), never a quiet local rebuild that finds nothing
+    monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/gone.json")
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda key, client=None: False)
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: pytest.fail("rebuilt instead of failing"))
+    with pytest.raises(pvi.TextureJobFailed, match="gone.json"):
+        pvi.run()
+
+
+def test_a_dev_box_builds_its_queue_locally_and_reads_nothing_from_s3(tmp_path, monkeypatch):
+    q = tmp_path / "prompts.json"; q.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda key, client=None: pytest.fail("read S3 on a dev box"))
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
+    assert pvi._resolve_queue() == q
 
 
 def test_publish_prompts_uses_the_per_dispatch_key(tmp_path, monkeypatch):
@@ -135,24 +147,16 @@ def test_publish_prompts_uses_the_per_dispatch_key(tmp_path, monkeypatch):
     monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
     client = _FakeS3()
     key = "dev/scraper/texture_queues/abc123.json"
-    assert pvi.publish_prompts(q, key=key, client=client) is True
+    assert pvi.publish_prompts(q, key, client=client) is True
     assert client.calls == [(str(q), "test-bucket", key)]
 
 
-def test_fetch_published_prompts_reads_the_key_from_env(tmp_path, monkeypatch):
-    # the GPU task must pull EXACTLY the key the produce passed via BLOKPORT_TEXTURE_QUEUE_KEY
-    monkeypatch.setattr(pvi, "_fetch_published_prompts", _REAL_FETCH)   # undo the autouse stub for this test
+def test_fetch_published_prompts_downloads_exactly_the_given_key(tmp_path, monkeypatch):
     monkeypatch.setattr(pvi, "PROMPTS_LOCAL", tmp_path / "q.json")
     monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
     client = _FakeS3()
-    monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/xyz.json")
-    assert pvi._fetch_published_prompts(client=client) is True
+    assert pvi._fetch_published_prompts("dev/scraper/texture_queues/xyz.json", client=client) is True
     assert client.downloads == [("test-bucket", "dev/scraper/texture_queues/xyz.json", str(tmp_path / "q.json"))]
-    # absent env -> legacy shared key
-    monkeypatch.delenv(pvi.TEXTURE_QUEUE_KEY_ENV, raising=False)
-    client2 = _FakeS3()
-    assert pvi._fetch_published_prompts(client=client2) is True
-    assert client2.downloads[0][1] == pvi.PROMPTS_S3_KEY
 
 
 def test_prune_already_on_s3_drops_existing_and_rewrites_queue(tmp_path, monkeypatch):
@@ -213,3 +217,88 @@ def test_prune_stale_queue_keys_is_best_effort(monkeypatch):
         def get_paginator(self, _n):
             raise RuntimeError("s3 down")
     assert pvi._prune_stale_queue_keys(_Boom()) == 0
+
+
+# -- what landed: only BEN2's output is a finished texture; an upload error is that key's miss ---------------
+class _Job:
+    """A GPU job's world on disk: the queue, image_pipeline/{images,to_upload}, a fake S3 and a recording
+    marker. Nothing on S3 yet, the generator stack present."""
+
+    def __init__(self, tmp_path, monkeypatch, keys, failing_upload=()):
+        from botocore.exceptions import ClientError
+        ip = tmp_path / "image_pipeline"
+        (ip / "images").mkdir(parents=True)
+        (ip / "to_upload").mkdir()
+        q = tmp_path / "prompts.json"
+        q.write_text(json.dumps([{"output_name": k} for k in keys]), encoding="utf-8")
+        self.ip, self.uploads, self.marked, self.mark_ok = ip, [], [], True
+        settings = _fake_settings(dry_run=False)
+        settings.paths = types.SimpleNamespace(workspace_root=tmp_path)
+        monkeypatch.setattr(pvi, "SETTINGS", settings)
+        monkeypatch.setattr(pvi, "DEBG_OUTPUT_DIR", ip / "to_upload")
+        monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
+        monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
+        monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: set())
+        job = self
+
+        class _S3:
+            def upload_file(self, local, bucket, key):
+                if any(key.endswith(f"/{k}.png") for k in failing_upload):
+                    raise ClientError({"Error": {"Code": "500", "Message": "S3 down"}}, "PutObject")
+                job.uploads.append(key.rsplit("/", 1)[1])
+        monkeypatch.setattr(pvi, "_s3_client", lambda: _S3())
+        monkeypatch.setattr(pvi.refresh_images, "mark_best_model",
+                            lambda keys, client=None: job.marked.append(sorted(keys)) or job.mark_ok)
+
+    def generated(self, raw=(), debackgrounded=(), failed=()):
+        """FLUX wrote images/{Key}.png for `raw`; BEN2 wrote to_upload/{Key}.png for `debackgrounded`."""
+        for k in raw:
+            (self.ip / "images" / f"{k}.png").write_bytes(b"with background")
+        for k in debackgrounded:
+            (self.ip / "to_upload" / f"{k}.png").write_bytes(b"clean")
+        return lambda: list(failed)
+
+
+def test_a_texture_ben2_did_not_finish_is_never_uploaded_or_marked(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a", "slab_b"])
+    monkeypatch.setattr(pvi, "_generate_queued_images",
+                        job.generated(raw=["slab_a", "slab_b"], debackgrounded=["slab_a"], failed=["rb_images.py"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="1 of 2"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png"]                  # slab_b's background copy in images/ never ships
+    assert job.marked == [["slab_a"]]                     # and is never marked final: the next produce re-mints it
+
+
+def test_an_upload_error_is_that_keys_miss_and_the_rest_still_land(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a", "slab_b", "slab_c"], failing_upload=["slab_b"])
+    monkeypatch.setattr(pvi, "_generate_queued_images",
+                        job.generated(debackgrounded=["slab_a", "slab_b", "slab_c"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="1 of 3"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png", "slab_c.png"]
+    assert job.marked == [["slab_a", "slab_c"]]           # what landed is marked, so nothing is paid twice
+
+
+def test_a_marker_that_was_not_written_is_a_partial_job(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a"])
+    job.mark_ok = False
+    monkeypatch.setattr(pvi, "_generate_queued_images", job.generated(debackgrounded=["slab_a"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="marker NOT written"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png"]
+
+
+def test_an_unreadable_marker_makes_the_produce_queue_mints_only(tmp_path, monkeypatch, caplog):
+    q = tmp_path / "mints.json"
+    q.write_text(json.dumps([{"output_name": "slab_new"}]), encoding="utf-8")
+    monkeypatch.setattr(pvi, "SETTINGS", types.SimpleNamespace(
+        images=types.SimpleNamespace(upgrade_batch=5), auto_texture=types.SimpleNamespace(enabled=False)))
+
+    def unreadable(client=None):
+        raise pvi.refresh_images.MarkerUnreadable("AccessDenied")
+    monkeypatch.setattr(pvi.refresh_images, "load_refreshed", unreadable)
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
+    monkeypatch.setattr(pvi.image_prompts, "build_with_upgrades",
+                        lambda refreshed, cap: pytest.fail("upgrades queued against an unreadable marker"))
+    assert pvi.queue_new_textures() == 1
+    assert any(r.levelname == "ERROR" and "marker" in r.getMessage() for r in caplog.records)

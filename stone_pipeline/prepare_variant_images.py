@@ -8,9 +8,9 @@ capped upgrade drip), publishes it to a unique S3 key and dispatches ONE on-dema
 
 A variant with no product, or one whose {Key}.png is already on S3, is never generated, so a re-run never
 regenerates (or re-charges) an image that exists: the S3 object is its own marker. Generating needs the stack
-(fal_client + torch + FAL_KEY); without it the run reports what is missing and spends nothing. The sync's product
-gate never ships an imageless PRODUCT (a product lists only once its {Key}.png is on S3), so a partial run just
-leaves those products held; the variant RECORDS stay in Medusa.
+(fal_client + torch + FAL_KEY); without it the run spends nothing and fails (TextureJobFailed, a non-zero exit, so
+the failed-job alert fires). The sync's product gate never ships an imageless PRODUCT (a product lists only once its
+{Key}.png is on S3), so a partial run just leaves those products held; the variant RECORDS stay in Medusa.
 """
 
 from __future__ import annotations
@@ -30,19 +30,16 @@ from stone_pipeline.stages import image_prompts
 
 log = logfmt.get_logger("prepare_variant_images")
 
+
 # --- config (single block; no argparse, no inline magic numbers) --------------
 VARIATIONS_PREFIX = f"{ENV_SEGMENT}/variations/"   # where a variant's {Key}.png must land (its Image URL home)
 # rb_images.py writes the background-removed {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
 DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
 # The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
 PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
-# The produce PUBLISHES its queue here so an on-demand GPU task (which has no local export/products/
-# backbone_additions to rebuild it) can pull the exact queue the produce built. Env-scoped. This is the
-# LEGACY/fallback key; each dispatch now publishes to a UNIQUE key (below) to avoid the clobber race where a
-# second produce overwrites the queue a still-starting GPU job is about to pull.
-PROMPTS_S3_KEY = f"{ENV_SEGMENT}/scraper/prompts_to_generate.json"
-# A per-dispatch queue lives here; the produce mints a unique key under this prefix and passes it to the GPU
-# job via TEXTURE_QUEUE_KEY_ENV, so overlapping mints never share (and clobber) one queue object.
+# The produce PUBLISHES its queue under a UNIQUE key here and passes that key to the GPU job via
+# TEXTURE_QUEUE_KEY_ENV: the on-demand GPU task has no local export/products/backbone_additions to rebuild the
+# queue, and overlapping mints never share (and clobber) one queue object. Env-scoped.
 TEXTURE_QUEUE_PREFIX = f"{ENV_SEGMENT}/scraper/texture_queues/"
 TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its exact queue key from here
 # Per-dispatch queue objects are ephemeral coordination, consumed by their GPU job within minutes. Delete
@@ -56,6 +53,27 @@ GEN_DEPS = ("fal_client", "torch")                 # the generator stack the act
 # HELD instead of pinning the whole Batch task.
 IMAGE_SCRIPT_TIMEOUT_S = 3600
 GENERATOR_SCRIPTS = ("genetate_images.py", "rb_images.py")   # FLUX.2 -> BEN2, run in this order
+# The job's own exit codes, apart from a crash (1) and run_pipeline.sh's bad mode (2). Both fail the Batch job (the
+# failed-job alert fires once); the job definition never retries them (evaluateOnExit), so FAL is never paid twice.
+EXIT_CANNOT_RUN = 3   # the job could not do its queue: no generator here, or its dispatched queue is unreadable
+EXIT_PARTIAL = 4      # it ran, but some textures did not land (they stay unmarked, so the next produce re-queues them)
+
+
+class TextureJobError(RuntimeError):
+    """The texture job did not finish its queue; main() turns it into the job's exit code, so the failed-job
+    alert fires instead of a quiet exit 0 with products HELD. Raised only as one of its two kinds below."""
+    exit_code: int
+
+
+class TextureJobFailed(TextureJobError):
+    """The job could not do its queue: no generator here, or its dispatched queue is unreadable."""
+    exit_code = EXIT_CANNOT_RUN
+
+
+class TexturesIncomplete(TextureJobError):
+    """The job ran, but some textures did not land (a script failed, a PNG is missing or its upload failed), or
+    the best-model marker was not written."""
+    exit_code = EXIT_PARTIAL
 
 
 def _s3_client():
@@ -81,7 +99,7 @@ def _target_keys(prompts_path: Path) -> list[str]:
     return [i["output_name"] for i in items if i.get("output_name")]
 
 
-def publish_prompts(prompts_path: Path, key: str | None = None, client=None) -> bool:
+def publish_prompts(prompts_path: Path, key: str, client=None) -> bool:
     """Upload the produce's just-built queue to S3 so an on-demand GPU texture job can pull the EXACT set
     the produce built (a fresh :gpu task has no local export/products/backbone_additions to rebuild it).
     Called by the produce when it dispatches the GPU job, with a UNIQUE per-dispatch key so a concurrent
@@ -91,7 +109,7 @@ def publish_prompts(prompts_path: Path, key: str | None = None, client=None) -> 
     if client is None or SETTINGS.s3.dry_run or not prompts_path.is_file():
         return False
     try:
-        client.upload_file(str(prompts_path), SETTINGS.s3.bucket, key or PROMPTS_S3_KEY)
+        client.upload_file(str(prompts_path), SETTINGS.s3.bucket, key)
     except Exception as exc:
         log.error("could not publish the texture queue to S3", extra={"extra_fields": {"error": str(exc)}})
         return False
@@ -125,22 +143,21 @@ def _prune_stale_queue_keys(client) -> int:
     return deleted
 
 
-def _fetch_published_prompts(client=None) -> bool:
-    """Download the produce's published queue from S3 into PROMPTS_LOCAL. Returns True if it landed. Used
-    by the GPU task, which cannot rebuild the queue locally. Reads its EXACT queue key from
-    TEXTURE_QUEUE_KEY_ENV (the per-dispatch key the produce passed), falling back to the legacy shared key
-    for a manual/legacy run. Absent object / unreachable S3 -> False (the caller then falls back to building
-    locally, the dev-box path)."""
+def _fetch_published_prompts(key: str, client=None) -> bool:
+    """Download the dispatched queue `key` from S3 into PROMPTS_LOCAL. True if it landed; False when S3 is
+    unreachable or the object cannot be read (the caller fails the job loud)."""
     client = client or _s3_client()
     if client is None:
         return False
-    key = os.environ.get(TEXTURE_QUEUE_KEY_ENV) or PROMPTS_S3_KEY
+    from botocore.exceptions import BotoCoreError, ClientError
     try:
         PROMPTS_LOCAL.parent.mkdir(parents=True, exist_ok=True)
         client.download_file(SETTINGS.s3.bucket, key, str(PROMPTS_LOCAL))
-        return True
-    except Exception:
-        return False   # no published queue (e.g. running on a box that rebuilds it locally)
+    except (BotoCoreError, ClientError) as exc:
+        log.error("could not read the dispatched texture queue",
+                  extra={"extra_fields": {"key": key, "error": str(exc)}})
+        return False
+    return True
 
 
 def _prune_already_on_s3(prompts_path: Path, targets: list[str]) -> list[str]:
@@ -170,14 +187,16 @@ def _prune_already_on_s3(prompts_path: Path, targets: list[str]) -> list[str]:
 
 
 def _resolve_queue() -> Path:
-    """The queue to generate from. Prefer the produce's PUBLISHED queue (the on-demand GPU task can't
-    rebuild it -- no local export/products); fall back to building locally (dev box / an image-capable
-    produce that has the inputs). Either way returns the path genetate_images.py reads."""
-    if _fetch_published_prompts():
-        log.info("using the produce's published texture queue from S3", extra={"extra_fields": {
-            "key": PROMPTS_S3_KEY}})
-        return PROMPTS_LOCAL
-    return image_prompts.build()
+    """The queue to generate from. A dispatched job (TEXTURE_QUEUE_KEY_ENV set) uses exactly the queue its
+    produce published: it cannot rebuild one (no local export/products), so an unreadable queue fails the job.
+    A dev box (no key) builds the queue locally. Either way returns the path genetate_images.py reads."""
+    key = os.environ.get(TEXTURE_QUEUE_KEY_ENV)
+    if not key:
+        return image_prompts.build()
+    if not _fetch_published_prompts(key):
+        raise TextureJobFailed(f"the dispatched texture queue {key} could not be read from S3")
+    log.info("using the produce's published texture queue from S3", extra={"extra_fields": {"key": key}})
+    return PROMPTS_LOCAL
 
 
 def _generator_blockers() -> list[str]:
@@ -189,32 +208,36 @@ def _generator_blockers() -> list[str]:
 
 
 def _find_png(key: str) -> Path | None:
-    """Locate the generated {key}.png. Primary: DEBG_OUTPUT_DIR (rb_images' output). Fallback: search the
-    whole image_pipeline/ tree -- robust to any cwd/output-dir divergence on a runner (the generator scripts
-    resolve "./to_upload" relative to THEIR cwd, which must equal DEBG_OUTPUT_DIR but is where the one live
-    run diverged: the direct path came up empty though rb_images reported 19 written)."""
-    direct = DEBG_OUTPUT_DIR / f"{key}.png"
-    if direct.is_file():
-        return direct
-    ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
-    return next(ip_root.rglob(f"{key}.png"), None)
+    """The finished {key}.png: BEN2's output in DEBG_OUTPUT_DIR only (the scripts run with cwd=image_pipeline,
+    so that location is fixed). Never anywhere else: FLUX's images/{key}.png still has its background, and
+    uploading it would mark a wrong texture final. Absent -> None (the key is missing, and loud)."""
+    png = DEBG_OUTPUT_DIR / f"{key}.png"
+    return png if png.is_file() else None
 
 
 def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]:
     """Upload each generated {Key}.png (found under image_pipeline/) to <env>/variations/{Key}.png -- the
     CORRECT prefix the variant's Image URL resolves to. Returns (uploaded, missing_keys). A key whose png the
-    generator did not produce is REPORTED (missing), never silently skipped: its product stays HELD and the
-    caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
+    generator did not produce, or whose upload failed, is REPORTED (missing), never silently skipped: its product
+    stays HELD and the caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
     client = client or _s3_client()
     if client is None or SETTINGS.s3.dry_run:
         return 0, list(keys)
+    from boto3.exceptions import S3UploadFailedError
+    from botocore.exceptions import BotoCoreError, ClientError
     uploaded, missing = 0, []
     for key in keys:
         png = _find_png(key)
         if png is None:
             missing.append(key)
             continue
-        client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
+        try:
+            client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
+        except (S3UploadFailedError, ClientError, BotoCoreError) as exc:
+            # this key's miss, not the job's crash: the rest still land and are marked (never paid twice)
+            log.error("variant texture upload failed", extra={"extra_fields": {"key": key, "error": str(exc)}})
+            missing.append(key)
+            continue
         uploaded += 1
     return uploaded, missing
 
@@ -228,20 +251,24 @@ def queue_new_textures() -> int:
     # The upgrade drip: once-only via the durable best-model marker, capped so a produce's FAL spend stays
     # predictable. A legacy texture is never held back, just replaced within a few produces. cap 0 == mints only.
     cap = SETTINGS.images.upgrade_batch
-    refreshed = refresh_images.load_refreshed() if cap > 0 else set()
+    try:
+        refreshed = refresh_images.load_refreshed() if cap > 0 else set()
+    except refresh_images.MarkerUnreadable:
+        # read as empty, every texture already made by the best model would be queued (and paid) again
+        log.exception("best-model marker unreadable: this produce queues mints only, no upgrades")
+        cap, refreshed = 0, set()
     try:
         prompts_path = image_prompts.build_with_upgrades(refreshed, cap) if cap > 0 else image_prompts.build()
     except Exception:
         log.exception("image prompt queue build failed")
         return 0
-    items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
-    items = items if isinstance(items, list) else items.get("items", [])
+    items = json.loads(prompts_path.read_text(encoding="utf-8"))   # the build always writes a list
     if not items:
         return 0
     # The produce's own FAL_KEY and torch do not matter here: the GPU job carries its own (_generator_blockers).
     # Loud when nothing will generate them: at cold-start scale an unserved product lane must not read as clean.
     if SETTINGS.auto_texture.enabled:
-        _dispatch(len(items))
+        _dispatch(prompts_path, len(items))
     else:
         log.warning("%d new variant texture(s) queued but AUTO_TEXTURE is off, so no GPU job generates them; "
                     "their products stay HELD until `python -m stone_pipeline.prepare_variant_images` runs",
@@ -249,7 +276,7 @@ def queue_new_textures() -> int:
     return len(items)
 
 
-def _dispatch(queued: int) -> None:
+def _dispatch(prompts_path: Path, queued: int) -> None:
     """Publish this produce's queue to a unique key and submit the GPU texture job against it; only after a
     successful publish (a no-op publish, S3 dry-run or unreachable, would leave the job a stale or absent queue).
     Never fails the produce: the textures stay queued for the next run, and the failure is loud."""
@@ -257,7 +284,7 @@ def _dispatch(queued: int) -> None:
     dispatched = False
     try:
         queue_key = f"{TEXTURE_QUEUE_PREFIX}{uuid.uuid4().hex}.json"
-        if publish_prompts(PROMPTS_LOCAL, key=queue_key):
+        if publish_prompts(prompts_path, queue_key):
             dispatched = bool(submit_texture_job(queued, queue_key=queue_key))
             if dispatched:
                 log.info("%d new variant texture(s) queued for the GPU texture job; their products stay HELD "
@@ -299,9 +326,10 @@ def _generate_queued_images() -> list[str]:
 
 
 def run() -> int:
-    """Resolve the queue (produce's published one on S3, else build locally), generate + de-background,
-    upload each {Key}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued or
-    the generator stack is absent)."""
+    """Resolve the queue (the dispatched one on S3, else build locally), generate + de-background, upload
+    each {Key}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued). Raises
+    TextureJobFailed when the queue cannot be read or the generator cannot run here, and TexturesIncomplete
+    when some textures did not land."""
     prompts_path = _resolve_queue()
     targets = _target_keys(prompts_path)
     if not targets:
@@ -319,22 +347,22 @@ def run() -> int:
 
     blockers = _generator_blockers()
     if blockers:
-        # the lean :core omits the generator stack on purpose; the queue is written, so run this where the
-        # stack is present (fal_client + torch + FAL_KEY). Nothing generated or uploaded, nothing spent.
-        log.warning("generator stack absent; queue written but not generated", extra={"extra_fields": {
-            "queued": len(targets), "missing": blockers}})
-        print(f"{len(targets)} new variant image(s) queued, but the generator can't run here "
-              f"(missing {blockers}). Run where the stack is present; nothing was spent.")
-        return 0
+        # nothing generated or uploaded, nothing spent; the products stay HELD, so the job must fail loud
+        raise TextureJobFailed(f"{len(targets)} variant texture(s) queued, but the generator cannot run here: "
+                               f"missing {blockers} (fal_client + torch + FAL_KEY)")
 
     failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}.png
     uploaded, missing = upload_variant_images(targets)
-    if not failed and not missing:
-        # A mint is generated by the CURRENT best model, so record it as such. Without this the upgrade
-        # drip would later treat every freshly minted texture as legacy and regenerate it once, paying
-        # twice for an image that was already best. Only on a clean run: a partial one stays eligible.
-        refresh_images.mark_best_model(targets)
-    if failed or missing:
+    not_landed = set(missing)
+    landed = [k for k in targets if k not in not_landed]
+    marked = True
+    if landed:
+        # Every texture that landed was made by the CURRENT best model, so record it as such, partial run or not:
+        # otherwise the upgrade drip would later regenerate it (a mint looks legacy, an upgrade looks undone),
+        # paying twice for an image that is already best. What did not land stays unmarked: the next produce
+        # queues it again (a mint is still imageless; an upgrade is still outside the marker).
+        marked = refresh_images.mark_best_model(landed)
+    if failed or missing or not marked:
         # loud: some images did not generate/upload, so their products stay HELD until a clean re-run.
         # Safe (the sync product gate never lists an imageless product) but surfaced, never silent. Include where we
         # looked, so a path/output-dir mismatch on a runner is diagnosable from the log rather than guessed.
@@ -345,14 +373,29 @@ def run() -> int:
                 return f"<{exc}>"
         ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
         log.error("some variant images were not produced", extra={"extra_fields": {
-            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed,
+            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed, "marker_written": marked,
             "missing_pngs": missing[:8], "debg_dir": str(DEBG_OUTPUT_DIR), "debg_files": _peek(DEBG_OUTPUT_DIR),
             "ip_to_upload": _peek(ip_root / "to_upload"), "ip_images": _peek(ip_root / "images"),
             "cwd": os.getcwd(), "workspace_root": str(SETTINGS.paths.workspace_root)}})
+        raise TexturesIncomplete(f"{len(missing)} of {len(targets)} variant texture(s) did not land "
+                                 f"(failed scripts {failed}); uploaded {uploaded}; best-model marker "
+                                 f"{'written' if marked else 'NOT written'}")
     log.info("variant images prepared", extra={"extra_fields": {"queued": len(targets), "uploaded": uploaded}})
     print(f"Prepared + uploaded {uploaded}/{len(targets)} new variant image(s) to {VARIATIONS_PREFIX}")
     return uploaded
 
 
+def main() -> int:
+    """The job's entry: 0 when the queue is done, else the error's own exit code (EXIT_CANNOT_RUN /
+    EXIT_PARTIAL), so the Batch job fails loud and its definition knows not to retry it."""
+    try:
+        run()
+    except TextureJobError as exc:
+        log.error("the texture job did not finish its queue",
+                  extra={"extra_fields": {"error": str(exc), "exit_code": exc.exit_code}})
+        return exc.exit_code
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(0 if run() >= 0 else 1)
+    raise SystemExit(main())
