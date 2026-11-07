@@ -221,9 +221,10 @@ COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id", req
 
 
 # Per-material data (the catalog_source/ backbones, origin map, supplier overrides and new-variety deltas; the
-# reference synonyms) is MATERIAL-specific. The stone pack (historical) keeps it flat at <base>; any OTHER pack MUST
-# ship its own <base>/<pack>/ and NEVER falls back to stone's -- so a wood/lime run reads its own data or
-# gaps/fails loudly, never silently loads stone varieties/origins/synonyms (audit A2 / #213 M1).
+# reference/ synonyms, type densities and standard slab areas) is MATERIAL-specific. The stone pack (historical) keeps
+# it flat at <base>; any OTHER pack MUST ship its own <base>/<pack>/ (catalog_source/<pack>/, reference/<pack>/) and
+# NEVER falls back to stone's -- so a wood/lime run reads its own data or gaps/fails loudly, never silently loads stone
+# varieties/origins/synonyms/densities (audit A2 / #213 M1).
 _STONE_PACK = "stone"
 
 
@@ -235,6 +236,10 @@ def _pack_namespaced(base: Path) -> Path:
 
 def _catalog_source_file(filename: str) -> Path:
     return _pack_namespaced(WORKSPACE_ROOT / "catalog_source") / filename
+
+
+def _reference_file(filename: str) -> Path:
+    return _pack_namespaced(REPO_ROOT / "reference") / filename
 
 # Last-resort attribute defaults are DOMAIN VALUES, so they live in the active pack, not here:
 # config/domains/<pack>.yaml -> last_resort_finishes / last_resort_quality / block_finish (read via
@@ -306,21 +311,21 @@ class Paths:
 
     @property
     def type_density_csv(self) -> Path:
-        # per-material density, PACK-NAMESPACED (reference/type_density.<pack>.csv) so each material's
-        # densities are separate. A pack with no such file uses its own default_density (domain pack), never
-        # the stone file -- so wood never inherits stone's 2700. Seeded from that env's Medusa type table.
-        return REPO_ROOT / "reference" / f"type_density.{active_pack().name}.csv"
+        # per-material density, PACK-NAMESPACED (stone stays flat) so each material's densities are separate. A pack
+        # with no such file uses its own default_density (domain pack), never the stone file -- so wood never inherits
+        # stone's 2700. Seeded from that env's Medusa type table.
+        return _reference_file("type_density.csv")
 
     @property
     def standard_slab_area_csv(self) -> Path:
         # PACK-NAMESPACED like type_density; absent for a pack with no standard-area concept (the bundle-area
         # ladder then simply falls through), so it never reads stone's slab-area table under another pack.
-        return REPO_ROOT / "reference" / f"standard_slab_area.{active_pack().name}.csv"
+        return _reference_file("standard_slab_area.csv")
 
     @property
     def synonyms_dir(self) -> Path:
         # spelling -> canonical value per vocab, PACK-NAMESPACED (stone stays flat): wood never reads stone's synonyms
-        return _pack_namespaced(REPO_ROOT / "reference" / "synonyms")
+        return _reference_file("synonyms")
 
     @property
     def backbone_additions_dir(self) -> Path:
