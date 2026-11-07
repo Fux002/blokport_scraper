@@ -5,7 +5,7 @@
 
 Categories live in ONE place — `CATEGORIES` in `stone_pipeline/config/settings.py`.
 Everything (matching engines, tree build, image generation, inbox folders, fan-out,
-validation, fingerprint) derives from that list, so adding a category is mostly a
+validation) derives from that list, so adding a category is mostly a
 registry entry plus its data. A misspelled/unwired category fails loudly rather
 than silently becoming a slab.
 

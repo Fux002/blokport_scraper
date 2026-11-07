@@ -1,0 +1,68 @@
+{
+ "posts": [
+  {
+   "variant": "Rustic Oak",
+   "category": "Beams",
+   "stone_type": "Oak",
+   "color": [
+    "Natural"
+   ],
+   "finishes": [
+    "Raw"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "beam_oak_rustic_oak_d8d24618-0ef5-510e-a8e4-fed4269c93ec"
+  },
+  {
+   "variant": "Black Walnut",
+   "category": "Beams",
+   "stone_type": "Walnut",
+   "color": [
+    "Brown"
+   ],
+   "finishes": [
+    "Raw"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "beam_walnut_black_walnut_137704a9-6f9e-5297-8ebc-81c99435a5eb"
+  },
+  {
+   "variant": "White Ash",
+   "category": "Beams",
+   "stone_type": "Ash",
+   "color": [
+    "Light"
+   ],
+   "finishes": [
+    "Raw"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "beam_ash_white_ash_e95f1c87-66d7-5fc5-bf4f-5256eb6cf80c"
+  },
+  {
+   "variant": "Siberian Larch",
+   "category": "Beams",
+   "stone_type": "Larch",
+   "color": [
+    "Natural"
+   ],
+   "finishes": [
+    "Raw"
+   ],
+   "qualities": [
+    "A"
+   ],
+   "aliases": [],
+   "key": "beam_larch_siberian_larch_8174e215-11a4-5cc2-bd17-2c887f16b4ee"
+  }
+ ]
+}

@@ -26,7 +26,7 @@ from stone_pipeline.core.schema import ORIGIN_HOLD_MULTI_HOME, CanonicalRow, Fla
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import slugify, title_case
-from stone_pipeline.reference.loaders import ReferenceData, resolve_iso
+from stone_pipeline.reference.loaders import ReferenceData
 
 log = logfmt.get_logger("derive")
 
@@ -555,11 +555,6 @@ def _pos_int(raw) -> int | None:
 
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
-def _to_iso(value: str, ref: ReferenceData) -> str | None:
-    """The reference's ONE country resolver (loaders.resolve_iso), kept under its local name here."""
-    return resolve_iso(value, ref.country_codes, ref.valid_iso_codes)
-
-
 def _select_origin(candidates: list[str], home_iso: str) -> str | None:
     """Pick ONE origin from a variety's candidate countries, given the supplier's home country:
       * one candidate               -> it (the variety has a single known origin).                  [rule c]
@@ -590,7 +585,7 @@ def _hold_for_origin_confirmation(row: CanonicalRow, map_countries: list[str], v
 def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
     # 1. scraped country: an ISO code OR a country name (the real data when present)
     if row.raw_origin:
-        iso = _to_iso(row.raw_origin, ref)
+        iso = ref.to_iso(row.raw_origin)
         if iso:
             row.origin_country_code = iso
             row.origin_source = "scrape_field"
@@ -631,7 +626,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #     confirmed answer returns above as a supplier_override. Opt-in: an unset primary_origin falls to the
     #     classic ladder (3b), every other vendor untouched.
     if source_cfg.primary_origin and type_authoritative:
-        vendor_iso = _to_iso(source_cfg.primary_origin, ref)
+        vendor_iso = ref.to_iso(source_cfg.primary_origin)
         gate_rule = rule if vendor_iso else None   # an unresolvable primary_origin corroborates nothing
         if gate_rule and vendor_iso in gate_rule.countries:
             row.origin_country_code = vendor_iso
@@ -649,7 +644,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #     for origin confirmation, like the vendor gate above (owner: never guess). Never a country guessed
     #     from another type.
     if rule and rule.countries:
-        home = _to_iso(source_cfg.origin_default, ref) or ""
+        home = ref.to_iso(source_cfg.origin_default) or ""
         iso = _select_origin(rule.countries, home)
         if iso is None:
             _hold_for_origin_confirmation(row, rule.countries, home or None, ORIGIN_HOLD_MULTI_HOME)
@@ -666,7 +661,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #    its pricing-rule lookup, so a blank breaks the import. We stamp the supplier's default country
     #    as a LOW-confidence fallback and flag it for review, which both lets the product import and
     #    queues it so origin_map gets expanded with the real per-variety origin.
-    iso = _to_iso(source_cfg.origin_default, ref)
+    iso = ref.to_iso(source_cfg.origin_default)
     if iso:
         row.origin_country_code = iso
         row.origin_source = "supplier_default"
@@ -710,7 +705,7 @@ def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[s
         return None, None
     if not country:
         raise ValueError(f"collection_city_default {city!r} is set without a collection_country_default")
-    iso = _to_iso(country, ref)
+    iso = ref.to_iso(country)
     if not iso:
         raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
     return iso, city or None
@@ -831,7 +826,7 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
     if (n := _pos_int(get("bundle_size"))) is not None:
         row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = n, "override", "high"
     if v := get("origin_country_code"):
-        iso = _to_iso(v, ref)   # validate the override to ISO-2 like a scraped value; don't stamp 'BRASIL'
+        iso = ref.to_iso(v)   # validate the override to ISO-2 like a scraped value; don't stamp 'BRASIL'
         if iso:
             row.origin_country_code, row.origin_source, row.origin_confidence = iso, "override", "high"
             # the derived city/county belonged to the OLD country -- drop them so an override can't leave

@@ -9,8 +9,7 @@ order are read from the live template at emit time, never hardcoded here. This
 file only points at where that template lives.
 
 All backend ids below belong to one backend environment (section 3.2). The
-defaults are the dev-staging values observed in the real upload example; a real
-run must confirm them against the live backend fingerprint.
+defaults are the dev-staging values observed in the real upload example.
 """
 
 from __future__ import annotations
@@ -833,9 +832,6 @@ class SyncConfig:
 @dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
-    # A hash of the live id set (section 3.2). Computed from reference data at
-    # M1; a mismatch against the live backend aborts. Empty means "not pinned yet".
-    backend_id_fingerprint: str = ""
     code_version: str = "0.1.0"
 
     paths: Paths = field(default_factory=Paths)
@@ -1408,8 +1404,6 @@ Your whole answer is one JSON object and nothing else:
                                        # (measured 2026-11-01 on 320 slabs: normal <= 0.0064, a stand cut out 0.108-0.153)
     EDGE_INSET = 2                     # the outline is taken this many px inside the photo's mixed edge pixels
     EDGE_SOFT = 0.6                    # the slab's edge softness (px): crisp
-    FACE_WIDTH = 11                    # the stone's thickness on the canvas: about 2 cm of a 3 m slab (px)
-    FACE_SHADE = (0.62, 0.34)          # its edge face in the side light: this bright beside the slab, this at its far edge
     EDGE = 0.45                        # the slab's bottom edge face (its thickness): this bright, relative to the stone ...
     EDGE_HEIGHT = 0.004                # ... this high, share of the canvas height
     FOOT_FADE = (0.10, 0.03)           # the stone's lowest part, near the floor, gets less light: by this much, over this share of the height
@@ -1419,7 +1413,6 @@ Your whole answer is one JSON object and nothing else:
     JOINT_TRIM = 0.006                 # each slab's edge face at the seam (catches the light) trimmed, share of its width
     DETAIL_SCALE = 0.8                 # ESRGAN contributes detail finer than this many source pixels
     ESRGAN_TILE = 512                  # ESRGAN input tile (bounds GPU memory on large slabs)
-    CACHE_TAG = "v13-reflections-by-model"      # squared-slab cache, per pipeline version
     # --- layout ---
     DEFAULT_SLAB = (3.04, 1.87)        # median prod slab L x W (m): proportions for test photos with no product
     CLOSEUP_BORDER = 0.70              # stone along at least this share of EACH photo border: a close-up ...
