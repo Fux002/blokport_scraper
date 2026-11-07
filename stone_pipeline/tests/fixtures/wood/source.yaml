@@ -1,0 +1,9 @@
+# The wood feed's source entry, appended to the tmp workspace's config/sources.yaml (never the repo's).
+woodfeed:
+  source_code: wdf
+  vendor: Wood Feed
+  ports_default: [Hamburg, Rotterdam]
+  emit_on_review: true
+  origin_default: DE
+  default_bundle_size: 1
+  min_expected_rows: 5
