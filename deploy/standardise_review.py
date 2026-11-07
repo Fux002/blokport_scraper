@@ -43,8 +43,7 @@ ACTIONS = ("use", "clean", "withdraw", "remove")      # the page's contract, in 
 CLICKABLE = ("awaiting_click", "awaiting_auto", "owner_removed")   # the reasons a click may still change
 RESULT_STATES = ("unchecked", "not_judged", "unparsed", "outdated", "pass", "fail")   # a result image exists
 QUEUED = "queued"                                    # a click stored since the last full run: no run has read it yet
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_MONTH = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")     # matched whole (fullmatch)
 
 
 class Unavailable(RuntimeError):
@@ -290,7 +289,7 @@ def hidden(s3, reason=None, offset=0, limit=C.REVIEW_PAGE_DEFAULT):
 
 # --- GET /photos/spend --------------------------------------------------------------------------------------------------
 def valid_month(month):
-    return isinstance(month, str) and bool(_MONTH.match(month))
+    return isinstance(month, str) and bool(_MONTH.fullmatch(month))
 
 
 def _month(s3, directory, month):
@@ -327,7 +326,7 @@ def check_body(body, fields):
     ValueError names what is wrong."""
     if not isinstance(body, dict) or set(body) != set(fields):
         raise ValueError(f"the body is exactly {{{', '.join(fields)}}}")
-    if "sha" in fields and not (isinstance(body["sha"], str) and _SHA.match(body["sha"])):
+    if "sha" in fields and not (isinstance(body["sha"], str) and decisions.SHA.fullmatch(body["sha"])):
         raise ValueError(f"sha {body['sha']!r} is not a photo's sha256")
     if decisions.moment(body["at"]) is None:
         raise ValueError(f"at {body['at']!r} is not an ISO UTC timestamp (2026-11-07T10:00:00.000Z)")

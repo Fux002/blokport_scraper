@@ -15,6 +15,7 @@ from __future__ import annotations
 import functools
 import hmac
 import json
+import re
 from stone_pipeline.core import env
 import signal
 import sqlite3
@@ -895,13 +896,23 @@ def _photo_body(rv, body, fields):
         raise _BadRequest(str(exc)) from exc
 
 
-def _page_param(qs, name, default, low, high=None):
-    """A whole-number query parameter of at least low (and at most high, when given), default when absent; a 400 naming
-    it otherwise."""
-    if name not in qs:
+def _query(query, names):
+    """{name: its value, or None when absent} of these query parameters (an empty value is a value: ""); one given more
+    than once is a 400 naming it, never its last value."""
+    qs = parse_qs(query, keep_blank_values=True)
+    if repeated := sorted(name for name in names if len(qs.get(name, ())) > 1):
+        raise _BadRequest(f"{', '.join(repeated)} given more than once")
+    return {name: qs[name][0] if name in qs else None for name in names}
+
+
+def _page_param(value, name, default, low, high=None):
+    """A whole-number query parameter (plain ASCII digits, at most REVIEW_PAGE_DIGITS of them) of at least low (and at
+    most high, when given), default when absent; a 400 naming it otherwise."""
+    from stone_pipeline.config.settings import STANDARDISE as C
+    if value is None:
         return default
-    value = qs[name][0]
-    if not value.isdigit() or int(value) < low or (high is not None and int(value) > high):
+    digits = re.fullmatch(f"[0-9]{{1,{C.REVIEW_PAGE_DIGITS}}}", value)
+    if digits is None or int(value) < low or (high is not None and int(value) > high):
         raise _BadRequest(f"{name} must be a whole number from {low}{f' to {high}' if high is not None else ''}, "
                           f"got {value!r}")
     return int(value)
@@ -912,24 +923,23 @@ def _get_photos_hidden(params, body, query):
     from stone_pipeline.config.settings import STANDARDISE as C
 
     def answer(rv):
-        qs = parse_qs(query, keep_blank_values=True)
-        if repeated := sorted(name for name in ("reason", "offset", "limit") if len(qs.get(name, ())) > 1):
-            raise _BadRequest(f"{', '.join(repeated)} given more than once")
-        reason = qs["reason"][0] if "reason" in qs else None
+        q = _query(query, ("reason", "offset", "limit"))
+        reason = q["reason"]
         if reason is not None and reason not in rv.select.REVIEW_REASONS:
             raise _BadRequest(f"reason must be one of {', '.join(rv.select.REVIEW_REASONS)}, got {reason!r}")
-        offset = _page_param(qs, "offset", 0, 0)
-        limit = _page_param(qs, "limit", C.REVIEW_PAGE_DEFAULT, 1, C.REVIEW_PAGE_MAX)
+        offset = _page_param(q["offset"], "offset", 0, 0)
+        limit = _page_param(q["limit"], "limit", C.REVIEW_PAGE_DEFAULT, 1, C.REVIEW_PAGE_MAX)
         return 200, rv.hidden(rv.client(), reason, offset, limit)
     return _photos(answer)
 
 
 def _get_photos_spend(params, body, query):
-    # ?month=YYYY-MM, this month (UTC) when omitted
+    # ?month=YYYY-MM, this month (UTC) when omitted (an empty or repeated month is a 400)
     from datetime import datetime, timezone
 
     def answer(rv):
-        month = parse_qs(query).get("month", [datetime.now(timezone.utc).strftime("%Y-%m")])[-1]
+        month = _query(query, ("month",))["month"]
+        month = datetime.now(timezone.utc).strftime("%Y-%m") if month is None else month
         if not rv.valid_month(month):
             raise _BadRequest(f"month must be YYYY-MM, got {month!r}")
         return 200, rv.spend(rv.client(), month)
@@ -955,7 +965,7 @@ def _delete_photo_click(params, body, query):
 def _post_photo_decisions(params, body, query):
     # Body: the decision page's export (a JSON array of decision objects); ?dry_run=true plans only, false applies
     def answer(rv):
-        flag = parse_qs(query).get("dry_run", [""])[-1]
+        flag = _query(query, ("dry_run",))["dry_run"]
         if flag not in ("true", "false"):
             raise _BadRequest(f"dry_run must be true (plan only) or false (apply), got {flag!r}")
         try:

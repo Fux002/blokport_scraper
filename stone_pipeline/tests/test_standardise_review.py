@@ -663,3 +663,36 @@ def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories
     s3.etags["sheet"] = '"s2"'
     rv.sheet(s3)
     assert len(raw) == 4
+
+
+# --- the query and body edges (review of #555 and #556) ------------------------------------------------------------------
+@pytest.mark.parametrize("query", ["limit=²", "limit=١", "offset=١", f"offset={'9' * 5000}", "limit= 5",
+                                   "offset=+1"])
+def test_a_page_number_that_is_not_plain_ascii_digits_is_400_never_a_crash(monkeypatch, query):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "hidden", lambda *a: pytest.fail("reached"))
+    code, body = server.dispatch("GET", ["photos", "hidden"], None, query)
+    assert code == 400 and query.split("=")[0] in body["error"]
+
+
+@pytest.mark.parametrize("query", ["month=", "month=2026-11%0A", "month=٢٠٢٦-11",
+                                   "month=2026-10&month=2026-11"])
+def test_a_month_that_is_empty_not_ascii_or_repeated_is_400(monkeypatch, query):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "spend", lambda *a: pytest.fail("reached"))
+    assert server.dispatch("GET", ["photos", "spend"], None, query)[0] == 400
+
+
+def test_a_repeated_dry_run_is_400_never_the_last_value(monkeypatch):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "apply_decisions", lambda *a: pytest.fail("reached"))
+    code, body = server.dispatch("POST", ["photos", "decisions"], [], "dry_run=true&dry_run=false")
+    assert code == 400 and "dry_run" in body["error"]
+
+
+@pytest.mark.parametrize("body", [{"sha": B + "\n", "at": AT}, {"sha": B, "at": AT + "\n"},
+                                  {"sha": B, "at": "٢026-11-07T10:00:00.000Z"}])
+def test_a_sha_or_time_with_a_trailing_newline_or_a_non_ascii_digit_is_400(monkeypatch, body):
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "click", lambda *a: pytest.fail("reached"))
+    assert server.dispatch("PUT", ["photos", "clicks", "SEN-ONE"], body)[0] == 400

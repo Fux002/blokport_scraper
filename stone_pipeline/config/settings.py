@@ -1043,6 +1043,7 @@ class STANDARDISE:
     # (the per-row work, its reads and its signed images, is done for one page only).
     REVIEW_PAGE_DEFAULT = 50
     REVIEW_PAGE_MAX = 100
+    REVIEW_PAGE_DIGITS = 9             # an offset or limit is at most this many ASCII digits (a longer one is a 400)
     # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
     # the review list gives for it.
     CONFLICT_REASON = "photo_conflict"

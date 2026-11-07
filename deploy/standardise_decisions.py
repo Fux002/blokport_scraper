@@ -69,8 +69,8 @@ from stone_pipeline.standardise import index
 FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"},
           "clean": {"id", "action", "source", "sha", "at"}, "withdraw": {"id", "action", "source", "at"}}
 TAGS = (C.RUN_TAG, C.CLEAN_TAG)                        # the process's tags, the only results a choice can name
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")   # what the page writes: toISOString(), UTC
+SHA = re.compile(r"[0-9a-f]{64}")                    # a photo's sha256, matched whole (fullmatch)
+_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")   # toISOString(), UTC, whole
 _FLAG = {"true": True, "false": False}
 ROOT = f"{proc.ROOT}{C.CLEAN_TAG}/"
 
@@ -114,7 +114,7 @@ def check_docs(docs):
 
 def moment(at):
     """A decision's time (an ISO UTC timestamp, ending Z) as a datetime; None when it is not one."""
-    if not isinstance(at, str) or not _AT.match(at):
+    if not isinstance(at, str) or not _AT.fullmatch(at):
         return None
     try:
         return datetime.fromisoformat(at.replace("Z", "+00:00"))
@@ -140,7 +140,7 @@ def _shape(doc, listings):
         return [f"source {doc['source']!r} is not the listing's ({listing['source']!r})"]
     if action in ("remove", "withdraw"):
         return []
-    if not _SHA.match(doc["sha"]):
+    if not SHA.fullmatch(doc["sha"]):
         return [f"sha {doc['sha']!r} is not a photo's sha256"]
     if action == "use" and doc["tag"] not in TAGS:
         return [f"tag {doc['tag']!r} is not the process's ({' or '.join(TAGS)})"]
