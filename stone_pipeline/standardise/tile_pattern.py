@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 _SLACK = 1e-9                      # metres: a point on a shared edge may round to just outside both slots
 

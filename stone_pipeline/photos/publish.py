@@ -29,7 +29,8 @@ from pathlib import Path
 import cv2
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 

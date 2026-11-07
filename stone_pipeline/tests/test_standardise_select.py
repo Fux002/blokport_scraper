@@ -10,7 +10,7 @@ import boto3
 import pytest
 
 from stone_pipeline.photos import select as sel
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import clean, judge
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64

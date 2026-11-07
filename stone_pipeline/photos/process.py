@@ -64,7 +64,8 @@ from stone_pipeline.photos import close as close
 from stone_pipeline.photos import publish as publish
 from stone_pipeline.photos import select as select
 from stone_pipeline.photos.source import sheet_and_photos
-from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.core import env
 from stone_pipeline.io import imagestore

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 
 def _repaint(img, band, pipe, seed):

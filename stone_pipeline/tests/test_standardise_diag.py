@@ -11,7 +11,7 @@ import pytest
 
 from stone_pipeline.photos import diag as diag
 from stone_pipeline.photos import source as source
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, models, outline, photo
 
 

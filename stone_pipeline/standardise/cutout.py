@@ -6,7 +6,7 @@ import json
 import cv2
 import numpy as np
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 
 def make(slab_png: bytes) -> tuple[bytes, bytes]:

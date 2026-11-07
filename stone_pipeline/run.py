@@ -23,7 +23,8 @@ from typing import Any, Optional
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
-from stone_pipeline.config.settings import SETTINGS, STANDARDISE
+from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.config.sources import SourceConfig, load_source
 from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod

@@ -36,7 +36,8 @@ from stone_pipeline.photos.publish import _objects, chosen_prefix, read_choices
 from stone_pipeline.photos.source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
                                        passing_storage_error, read_slab, sheet_photos, slab_record_key, start,
                                        start_edits)
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import models, photo

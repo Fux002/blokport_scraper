@@ -1,6 +1,6 @@
 """Standard look: every cleaned, squared slab (or open-book pair) in ONE showroom, each slab on the SAME stand.
 Every image is the same canvas: the slab(s) as large as fit, on the same floor line."""
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 import functools
 import hashlib
 from dataclasses import dataclass

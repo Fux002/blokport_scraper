@@ -20,7 +20,8 @@ from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import process as proc
 from stone_pipeline.photos import select as select
 from stone_pipeline.config import runner
-from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import writethrough
 
@@ -1410,8 +1411,8 @@ def test_the_relink_is_the_produce_s_republish_in_this_process_with_its_progress
 
 # --- the trigger: the runner's photos stage ---------------------------------------------------------------------------
 def test_the_photos_run_follows_only_a_full_produce_never_the_publish_button_s_republish(monkeypatch):
-    from stone_pipeline.config import settings
-    monkeypatch.setattr(settings.STANDARDISE, "AUTO", True)   # the class the runner reads at call time (a test reloads settings)
+    from stone_pipeline.config.standardise_settings import STANDARDISE
+    monkeypatch.setattr(STANDARDISE, "AUTO", True)   # the one class the runner reads at call time
     started = []
     monkeypatch.setattr(runner, "start_run", lambda sources=None, stage="all", launch=None: started.append(stage) or ({}, 202))
     for stage, status in (("all", "succeeded"), ("republish", "succeeded"), ("catalog", "succeeded"), ("all", "failed"),
@@ -1421,8 +1422,8 @@ def test_the_photos_run_follows_only_a_full_produce_never_the_publish_button_s_r
 
 
 def test_no_photos_run_follows_while_the_process_is_off(monkeypatch):
-    from stone_pipeline.config import settings
-    monkeypatch.setattr(settings.STANDARDISE, "AUTO", False)
+    from stone_pipeline.config.standardise_settings import STANDARDISE
+    monkeypatch.setattr(STANDARDISE, "AUTO", False)
     monkeypatch.setattr(runner, "start_run", lambda **kw: pytest.fail("photos started while off"))
     runner._follow_up({"run_id": "r", "stage": "all", "status": "succeeded"})
 
@@ -1705,8 +1706,8 @@ def test_a_photos_run_that_ended_on_its_own_keeps_its_status_though_marked_to_gi
 
 
 def test_a_stopping_server_starts_no_follow_up_run(monkeypatch):
-    from stone_pipeline.config import settings
-    monkeypatch.setattr(settings.STANDARDISE, "AUTO", True)
+    from stone_pipeline.config.standardise_settings import STANDARDISE
+    monkeypatch.setattr(STANDARDISE, "AUTO", True)
     monkeypatch.setattr(runner, "_stopping", True)
     monkeypatch.setattr(runner, "start_run", lambda **kw: pytest.fail("a run started while the server stops"))
     runner._follow_up({"run_id": "r", "stage": "all", "status": "succeeded"})

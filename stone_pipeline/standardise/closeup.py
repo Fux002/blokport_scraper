@@ -3,7 +3,7 @@ edges of the photo (a whole-slab photo always shows background along a side). Sa
 cropped to the slab product's proportions; skipped when blurred. Laid out by compose.compose, like every slab.
 Straps stay as shot (the user's choice, 2026-10-30): never erased.
 """
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 import cv2
 import numpy as np
 

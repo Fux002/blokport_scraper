@@ -399,8 +399,9 @@ orphaned:
 | dev  | `v2` | `v2-clean` |
 | prod | `v2` | `v2-clean2` |
 
-They are fixed in `settings.STANDARDISE` (not env, so they cannot be mistyped per deployment). Moving to new tags is a
-deliberate code change and a migration, never a setting: copy the choice records and the owner's choice records
+They are fixed in `STANDARDISE` (`config/standardise_settings.py`; not env, so they cannot be mistyped per
+deployment). Moving to new tags is a deliberate code change and a migration, never a setting: copy the choice records
+and the owner's choice records
 (`<CLEAN_TAG>/owner/`) to the new clean tag, and keep (or copy) the results they name, since each names a tag and a
 photo; an owner record naming a tag the process no longer runs is not read (the listing is worked again). The removal
 records are outside the tags and need nothing. Under `<env>/standardise-test/`:
@@ -425,8 +426,9 @@ removed/<SKU>.json                  a listing the owner removed (SKU percent-enc
 
 ## Settings
 
-All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RUN_TIMEOUT_SECONDS` and
-`RUN_STOP_GRACE_SECONDS`), set per environment by Terraform on the svc config container:
+`STANDARDISE` in `stone_pipeline/config/standardise_settings.py`, plus the runner's `RUN_TIMEOUT_SECONDS` and
+`RUN_STOP_GRACE_SECONDS` in `stone_pipeline/config/settings.py`, set per environment by Terraform on the svc config
+container:
 
 | setting | env | dev / prod |
 |---|---|---|

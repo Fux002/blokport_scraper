@@ -3,7 +3,7 @@ kitchen) are skipped, so every image on the platform has the same feel (the user
 import numpy as np
 from PIL import Image
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
 
 def classify(clip, rgb):

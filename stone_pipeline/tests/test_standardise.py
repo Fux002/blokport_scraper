@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from stone_pipeline.config import categories
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise import blend, index, kinds, layout, marks, outline, retouch, studio, views
 
 

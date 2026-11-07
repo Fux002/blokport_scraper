@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.standardise.judge import data_uri, fal_key
 
 MODELS = {name: (endpoint, extra) for name, endpoint, extra in C.CLEAN_MODELS}

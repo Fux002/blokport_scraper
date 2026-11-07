@@ -18,7 +18,8 @@ import cv2
 import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import index, kinds, models, outline, photo

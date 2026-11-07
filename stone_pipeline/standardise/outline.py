@@ -13,7 +13,7 @@ reaching past our outline.
 
 from __future__ import annotations
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 import cv2
 import numpy as np
 from PIL import Image

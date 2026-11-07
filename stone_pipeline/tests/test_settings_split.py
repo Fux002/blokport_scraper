@@ -1,12 +1,15 @@
 """Names split out of config/settings.py live in ONE home and are read only from there (Wave C9): no module imports, reads
 or patches a moved name on settings, settings keeps no copy (an alias would go stale: the registry's helpers read module
-globals that refresh_category_pcats rebinds, and a test patching settings' copy would test nothing), and the new module
-depends on settings one way, so importing settings never builds it."""
+globals that refresh_category_pcats rebinds, and a test patching settings' copy would test nothing), and each new home
+depends on settings one way, so importing settings never builds it. The homes: the category registry
+(config/categories.py), the photo standardiser's tunables (config/standardise_settings.py), and the list of to_upload
+side files (io/deliverables.py, its one reader)."""
 
 from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,11 +21,16 @@ from stone_pipeline.config import settings
 REPO = Path(__file__).resolve().parents[2]
 SETTINGS_MODULE = "stone_pipeline.config.settings"
 SKIP_DIRS = {".venv", ".git", ".claude", "__pycache__", "node_modules"}
+# code held in a string (a subprocess `-c` snippet, a patch target): an import from settings, or a dotted name on it
+CODE_IMPORT = re.compile(r"from stone_pipeline\.config\.settings import ([^;\n]+)")
+CODE_DOTTED = re.compile(r"stone_pipeline\.config\.settings\.(\w+)")
 MOVED = {
     "stone_pipeline.config.categories": (
         "Category", "CATEGORIES", "_BY_NAME", "_BY_LABEL_CF", "category", "category_for_key", "default_form_name",
         "bulk_form_name", "active_categories", "refresh_category_pcats", "_ENV_PCATS", "_pcat", "_env_category_pcats",
         "_build_categories"),
+    "stone_pipeline.config.standardise_settings": ("STANDARDISE",),
+    "stone_pipeline.io.deliverables": ("UPLOAD_SIDE_FILES",),
 }
 ALL_MOVED = {name for names in MOVED.values() for name in names}
 
@@ -62,6 +70,11 @@ def _old_home_reads(path: Path) -> list[str]:
             if target in aliases and name in ALL_MOVED or name.rpartition(".")[::2] in {
                     (SETTINGS_MODULE, moved) for moved in ALL_MOVED}:
                 found.append(f"{node.lineno} patches {target} {name}")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and SETTINGS_MODULE in node.value:
+            imported = {part.split(" as ")[0].strip(" ()") for m in CODE_IMPORT.finditer(node.value)
+                        for part in m.group(1).split(",")}
+            dotted = {m.group(1) for m in CODE_DOTTED.finditer(node.value)}
+            found += [f"{node.lineno} code string reads {name}" for name in sorted((imported | dotted) & ALL_MOVED)]
     return found
 
 

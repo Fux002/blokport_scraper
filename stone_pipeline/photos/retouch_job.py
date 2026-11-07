@@ -20,7 +20,8 @@ import numpy as np
 from PIL import Image
 
 from stone_pipeline.photos.source import _encode, _exists, _get, _photo_keys, made, photo_source, run_prefix, sheet_photos
-from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import marks, outline, photo, retouch

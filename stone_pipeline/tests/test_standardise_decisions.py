@@ -18,7 +18,8 @@ from botocore.exceptions import ClientError
 from stone_pipeline.photos import decisions as dec
 from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import select as select
-from stone_pipeline.config.settings import ENV_SEGMENT, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT
+from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
 
 A, B, D, E, F = "a" * 64, "b" * 64, "d" * 64, "e" * 64, "f" * 64
