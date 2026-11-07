@@ -268,7 +268,53 @@ def test_a_gapped_scrape_aliasing_to_an_archived_variety_is_held(ref, monkeypatc
             imp.by_name[proj.norm(e["Name"])] = e
     monkeypatch.setattr(curate, "load_all_existing", lambda: real)
     held = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
-    assert any(p.get("kind") == "archived_variety" for p in held.pending_confirm)   # owner archived -> held
+    card = next((p for p in held.pending_confirm if p.get("kind") == "archived_variety"), None)
+    assert card is not None                                  # owner archived -> held
+    assert card["stone_type"]                                # carries the owner's type (its own name|type ref)
+
+
+def test_an_archived_block_key_does_not_flag_a_slab_listing(ref, monkeypatch):
+    # fix 2: the archived check is the ROW'S OWN branch. An archived BLOCK Key must not flag a SLAB listing
+    # (whose "mint as new" would create a duplicate) -- only the slab variety's own archived state matters.
+    name = ntype = None
+    real = cur_existing.load_all_existing()
+    for e in real["slab"].varieties:                        # a variety present in both slab and block
+        if (proj.norm(e["Name"]), e["type"]) in real["block"].by_name_type:
+            name, ntype = e["Name"], e["type"]
+            break
+    if name is None:
+        import pytest as _pytest
+        _pytest.skip("no variety present in both slab and block")
+    for e in real["block"].varieties:                       # flip ONLY the block Key archived
+        if e["Name"] == name and e["type"] == ntype:
+            e["archived"] = True
+    real["block"].by_name_type[(proj.norm(name), ntype)]["archived"] = True
+    monkeypatch.setattr(curate, "load_all_existing", lambda: real)
+    res = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)   # a SLAB listing (default branch)
+    assert not any(p.get("kind") == "archived_variety" for p in res.pending_confirm)
+
+
+def test_a_global_mint_is_held_by_any_vendors_ve2_card():
+    # fix 1: a GLOBAL mint statement ('' source) is held by that spelling's VE2 card from ANY vendor.
+    from stone_pipeline.stages import decision_audit
+    st = SimpleNamespace(is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone",
+                         stone_type="Granite", source="", origin_iso="")
+    decisions = SimpleNamespace(statements={("", "novum frozen stone"): st}, bindings={}, vendor_origins={})
+    held = decision_audit.audit([], set(), set(), decisions, set(),
+                                held_ve2={("varsha", "novum frozen stone")})
+    assert not any(g["decision"] == "mint" for g in held)   # global held by varsha's card -> no duplicate gap
+
+
+def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards():
+    # fix 3: the archived_variety card's stone_type gives it a (name, type) ref, so write_confirm_file keeps it
+    # separate from a type-less listing of the same name (which would otherwise swallow it into one card).
+    from stone_pipeline.stages import decisions
+    cards = [
+        {"variant": "Novum X", "stone_type": "Marble", "kind": "archived_variety", "src": "varsha",
+         "scraped": "novum x"},
+        {"variant": "Novum X", "stone_type": "", "kind": "collision", "src": "zucchi", "scraped": "novum x"},
+    ]
+    assert decisions.write_confirm_file(cards) == 2   # name|marble vs name -> two distinct cards
 
 
 def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monkeypatch):

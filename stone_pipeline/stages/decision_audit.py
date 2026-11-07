@@ -47,6 +47,7 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
     its gap is suppressed -- keyed by (source, spelling) and only for those kinds, so no other vendor's gap
     and no non-VE2 hold is affected."""
     gaps: list[dict] = []
+    ve2_spellings = {sp for _, sp in held_ve2}   # a GLOBAL mint ('' source) is held by ANY vendor's VE2 card
     by_listing: dict[tuple[str, str], list[CanonicalRow]] = {}
     for r in rows:
         by_listing.setdefault((_norm(r.src_site), _norm(r.variety_match_key or r.raw_name)), []).append(r)
@@ -57,10 +58,13 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
             target = (_norm(name), _norm(st.stone_type))
             # A mint held THIS produce by a VE2 freeze (restricted type, empty-after-drop value, archived
             # variety) already surfaces its own card, so do NOT also raise a "not applied" gap (one hold, one
-            # entry). Keyed by (source, spelling) and only the VE2 kinds, so another vendor's gap and the
-            # retired/no_type holds are untouched. The gap still fires for a mint silently ignored with NO card.
-            if (target not in existing and target not in created
-                    and (_norm(st.source), spelling) not in held_ve2):
+            # entry). A VENDOR-scoped statement matches only its own (source, spelling) hold; a GLOBAL statement
+            # ('' source) applies to every vendor, so it is held by that spelling's VE2 card from ANY vendor.
+            # Only the VE2 kinds, so another vendor's gap and the retired/no_type holds are untouched. The gap
+            # still fires for a mint silently ignored with NO card.
+            held = ((_norm(st.source), spelling) in held_ve2
+                    or (not _norm(st.source) and spelling in ve2_spellings))
+            if target not in existing and target not in created and not held:
                 gaps.append(_gap("mint", st.source, spelling, name, st.stone_type or "", st.origin_iso or "",
                                  f"Mint not applied: no variety '{name}' ({st.stone_type}) exists after this produce."))
         elif spelling in pending_spellings:

@@ -116,14 +116,16 @@ def _reject_or_decide(c: Curation, row, gap, name: str, stone_type: str, clean: 
     return False
 
 
-def _archived_owner_name(c: Curation, owner: tuple[str, str]) -> str | None:
+def _archived_owner_name(c: Curation, owner: tuple[str, str], row) -> str | None:
     """The display name of an alias OWNER (norm name, norm type) that is archived in Medusa, else None. VE2:
-    a NEW alias onto an archived variety never serves, so classify surfaces a card instead of a silent gap."""
-    for imp in c.imports.values():
-        e = imp.by_name_type.get(owner)
-        if e and e.get("archived"):
-            return e["Name"]
-    return None
+    a NEW alias onto an archived variety never serves, so classify surfaces a card instead of a silent gap.
+    Checked in the ROW'S OWN branch only: an archived block Key must not flag a slab listing (whose 'mint as
+    new' would create a duplicate) -- the listing binds to the variety in its own category."""
+    imp = c.imports.get(branch_of(row))
+    if imp is None:
+        return None
+    e = imp.by_name_type.get(owner)
+    return e["Name"] if (e and e.get("archived")) else None
 
 
 def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: str) -> bool:
@@ -154,8 +156,8 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
         if named or len({o[0] for o in same_type}) == 1:
             owner = named or same_type[0]
             alias_and_backfill(c, owner, name, clean, stone_type, row, gap)
-            if (vname := _archived_owner_name(c, owner)):   # VE2: the alias is still recorded; surface the hold
-                hold_archived_variety(c, clean, vname, row)
+            if (vname := _archived_owner_name(c, owner, row)):   # VE2: alias still recorded; surface the hold
+                hold_archived_variety(c, clean, vname, owner[1], row)
         else:
             hold_collision(c, clean, stone_type, sorted({o[0] for o in same_type}), row)
         return True
@@ -198,8 +200,8 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
         # tier happened to rank first, so it is held for the operator to state the variety instead.
         if d.verdict == "alias" and nt and (stone_type or len(_canonical_types(c, nn)) == 1):
             c.alias_new.setdefault((nn, nt), set()).add(name)
-            if (vname := _archived_owner_name(c, (nn, nt))):   # VE2: fuzzy-confirmed alias onto an archived variety
-                hold_archived_variety(c, clean, vname, row)
+            if (vname := _archived_owner_name(c, (nn, nt), row)):   # VE2: fuzzy-confirmed alias onto archived
+                hold_archived_variety(c, clean, vname, nt, row)
             return True
         if d.verdict in ("alias", "review"):
             hold_similar(c, clean, stone_type, nearest, row, gap, d.prob)
