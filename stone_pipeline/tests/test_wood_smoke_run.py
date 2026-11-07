@@ -28,7 +28,7 @@ import pytest
 FIXTURE = Path(__file__).parent / "fixtures" / "wood"
 REPO = Path(__file__).resolve().parents[2]
 FEED = json.loads((FIXTURE / "workspace" / "wood_feed.json").read_text(encoding="utf-8"))
-DENSITY = {"Oak": 750}                 # type_density.wood.csv; every other species takes the pack's default_density
+DENSITY = {"Oak": 750}                 # reference/wood/type_density.csv; every other species takes the pack's default_density
 PACK_DENSITY = 700
 STONE_WORDS = re.compile(r"\b(slabs?|blocks?|tiles?|stones?|marble|granite|quartzite|onyx|travertine|limestone|"
                          r"dolomite|polished|honed|leathered|flamed|sandblasted)\b", re.IGNORECASE)
@@ -163,11 +163,12 @@ def test_no_stone_vocabulary_in_any_emitted_value(wood):
 
 def test_the_per_material_data_stays_in_the_packs_own_folders(wood):
     # the package ships stone's synonyms (flat), untouched, and the wood run (the fixture) never read them: wood reads
-    # only reference/synonyms/wood/, which wood does not have (no synonyms)
-    synonyms = wood / "stone_pipeline" / "reference" / "synonyms"
+    # only its own reference/wood/ (here its densities; it has no synonyms)
+    reference = wood / "stone_pipeline" / "reference"
+    synonyms = reference / "synonyms"
     assert (synonyms / "finish.csv").read_bytes() == (REPO / "stone_pipeline" / "reference" / "synonyms" /
                                                       "finish.csv").read_bytes()
-    assert not (synonyms / "wood").exists()
+    assert not (reference / "wood" / "synonyms").exists()
     # the catalog's new-variety deltas land in wood's own catalog_source folder, never the stone flat one
     assert any((wood / "catalog_source" / "wood" / "backbone_additions").glob("*.json"))
     assert not (wood / "catalog_source" / "backbone_additions").exists()

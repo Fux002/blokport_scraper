@@ -23,7 +23,7 @@ The software no longer assumes stone or Blokport. Chosen at deploy time by env v
 - **`SCRAPER_BRAND`** names the store and is cross-checked against the bucket in prod (a bucket mis-set to
   another brand's store fails loud). Required in prod.
 - **`SCRAPER_SALES_CHANNEL_ID`** is the brand's storefront (one per deployment).
-- Per-material **density** is pack-namespaced (`reference/type_density.<pack>.csv`); a pack with no file uses
+- Per-material **density** is pack-namespaced (`reference/<pack>/type_density.csv`; stone's is flat); a pack with no file uses
   its `default_density`, so wood never inherits stone's 2700.
 
 The Terraform `scraper` + `sync_service` modules take `brand` / `domain_pack` / `sales_channel_id` inputs
@@ -34,7 +34,7 @@ The Terraform `scraper` + `sync_service` modules take `brand` / `domain_pack` / 
 1. **Author the pack** — fill `config/domains/wood.yaml` (or `lime.yaml`) with the brand's real categories,
    finishes, density, and fallback dimensions. The skeleton loads and validates; the VALUES are yours.
 2. **Reference data** — the brand's `attributes.csv` (from its Medusa: type=species, color, finish, quality),
-   `backbone_<category>.json` per category in `catalog_source/`, and `reference/type_density.<pack>.csv` for
+   `backbone_<category>.json` per category in `catalog_source/<pack>/`, and `reference/<pack>/type_density.csv` for
    per-type densities. Novel varieties absent from the backbone legitimately gap to review.
 3. **Smoke run (the gate)** — a ~10-row `SCRAPER_DOMAIN_PACK=<pack>` scrape→derive→emit in a **separate dev
    data plane** (own bucket/config.db/ledger), eyeballed for right categories, un-mangled names, right
@@ -71,7 +71,7 @@ For each brand X (wood→Wudport, lime→Calcport):
 
 **A. Author (code + data)**
 1. `config/domains/<pack>.yaml` — real categories/finishes/density/dimensions.
-2. `catalog_source/backbone_<category>.json` per category; `reference/type_density.<pack>.csv`.
+2. `catalog_source/<pack>/backbone_<category>.json` per category; `reference/<pack>/type_density.csv`.
 3. `config/sources.yaml` — the brand's source(s) (fetcher/adapter per source, auto-discovered).
 
 **B. Prove**

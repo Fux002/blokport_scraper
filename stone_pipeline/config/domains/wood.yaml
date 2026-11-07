@@ -59,7 +59,7 @@ single_piece_categories: [beam]
 block_finish: Raw
 
 # Material density kg/m3 -- REAL wood value (NOT stone's 2700). Hardwood ~700; set Wudport's actual figure,
-# and supply reference/type_density.csv with per-species rows for accuracy. Used to derive weight when a
+# and supply reference/wood/type_density.csv with per-species rows for accuracy. Used to derive weight when a
 # source omits it.
 default_density: 700
 

@@ -70,9 +70,10 @@ class DomainPack:
     dimension_defaults: dict[str, dict[str, float]]
     finish_phrases: dict[str, str]
     finish_phrase_default: str
-    # material density in kg/m3, used to derive weight when a source omits it. This is the fallback when
-    # reference/type_density.csv is absent or lacks the row's type (that CSV's 'default' row overrides it when
-    # present). Required per pack so a non-stone material never silently inherits stone's ~2700 (stone: 2700
+    # material density in kg/m3, used to derive weight when a source omits it. This is the fallback when the
+    # pack's type_density.csv (reference/<pack>/, stone's flat) is absent or lacks the row's type (that CSV's
+    # 'default' row overrides it when present). Required per pack so a non-stone material never silently inherits
+    # stone's ~2700 (stone: 2700
     # marble; wood ~700; lime ~2500). Wrong density = wrong derived weight + freight, silently.
     default_density: float
     # Name-cleaning corpus rules (core/text.py), optional. name_code_pattern: a regex for codey-LOOKING tokens
