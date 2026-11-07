@@ -129,7 +129,7 @@ def test_an_offline_lot_is_still_sent_so_its_pieces_really_go_offline():
     pieces = [_emittable(p) for p in lots.load([_bundle([1, 2], available=1, sold_known=1)], CFG, known_skus=known)]
     for p in pieces:
         derive.derive_inventory(p)
-    validate.run(pieces, emit_on_review=True)
+    validate.run(pieces, emit_on_review=True, source_code="test")
     assert all(p.inventory_quantity == 0 and not any(r.rule == "lot_inconsistent" for r in p.reject_reasons)
                for p in pieces)
     assert lots.summary(pieces)[0]["awaiting_answer"] is True

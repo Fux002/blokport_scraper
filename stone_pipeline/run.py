@@ -506,7 +506,8 @@ def run_source(
 
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
-                              require_images=False if inventory_only else SETTINGS.images.require_images)
+                              require_images=False if inventory_only else SETTINGS.images.require_images,
+                              source_code=source_cfg.source_code)
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)

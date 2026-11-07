@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,22 @@ class Attributes:
     def all_ids(self) -> list[str]:
         return list(self.category_pcat.values()) + [
             i for table in self.by_category.values() for _, i in table.values()]
+
+
+def restricted_values(path: Path | None = None) -> dict[str, set[str]]:
+    """{category: {norm(value), ...}} for every RESTRICTED value in attributes.csv: archived OR internal
+    (`not AttributeValue.assignable`). Read through medusa_files.read_attributes, the single authority on
+    what is restricted (VE2 ruling: no ledger copy). Empty while attributes.csv carries no status/internal
+    columns (the expand phase, so nothing is restricted yet) or the file is absent. Values are keyed by
+    `norm` so a caller matches a resolved value name regardless of separator/case/accent."""
+    path = Path(path) if path is not None else env().SETTINGS.paths.attributes_csv
+    if not Path(path).exists():
+        return {}
+    out: dict[str, set[str]] = defaultdict(set)
+    for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if not a.assignable:
+            out[a.category].add(norm(a.value))
+    return dict(out)
 
 
 def attributes_status_required(path: Path) -> bool:

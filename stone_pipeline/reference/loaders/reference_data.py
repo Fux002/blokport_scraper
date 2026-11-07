@@ -86,6 +86,13 @@ def assert_pack_defaults_resolve(ref: ReferenceData) -> None:
         + [("finish", f) for f in pack.last_resort_finishes.values()]
         + [("finish", pack.block_finish), ("quality", pack.last_resort_quality),
            ("color", pack.fallback_color)])
+    # VE2: a pack DEFAULT (a last-resort value, the block default, the mint fallback colour) is a value the
+    # pipeline WRITES onto a product on its own, so it must be ASSIGNABLE: if it is archived or internal, every
+    # product that falls back to it would be value_frozen and held. Catch it LOUD here at load, naming the
+    # default, not silently downstream. Captured BEFORE the classify palette: a palette colour is NOT a pack
+    # default (PR5 drops a restricted colour from a mint), so one archived palette colour must not abort every
+    # load. Synonym targets (added below) are matcher inputs, so they too are only required to resolve.
+    pack_defaults = list(checks)
     # the classify() palette only needs to resolve in Medusa if the domain actually classifies texture colour
     if pack.classify_texture_color:
         checks += [("color", c) for c in CLASSIFIABLE_COLORS]
@@ -100,6 +107,14 @@ def assert_pack_defaults_resolve(ref: ReferenceData) -> None:
     if missing:
         raise ValueError("pack default OR synonym-target values absent from attributes.csv (a value Medusa "
                          "does not have): " + ", ".join(f"{v}={val!r}" for v, val in missing))
+    from stone_pipeline.reference.loaders import attributes as _attr_reader
+    restricted = _attr_reader.restricted_values()
+    frozen = sorted({(v, val) for v, val in pack_defaults
+                     if val and norm(val) in restricted.get(v, set())})
+    if frozen:
+        raise ValueError("pack default value(s) are archived or internal in attributes.csv (not assignable, so "
+                         "every product falling back to one would be held): "
+                         + ", ".join(f"{v}={val!r}" for v, val in frozen))
 
 
 def existing_varieties_file() -> Path:

@@ -44,7 +44,8 @@ def _bool(value) -> str:
 
 
 def _sku(row: CanonicalRow, cfg: SourceConfig) -> str:
-    return f"{cfg.source_code}-{row.surrogate_key}".upper()
+    from stone_pipeline.stages.product_state import sku_from
+    return sku_from(cfg.source_code, row.surrogate_key)
 
 
 # single source of truth so the imported stock and the change-feed (product_state) agree

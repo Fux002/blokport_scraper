@@ -499,7 +499,7 @@ def test_missing_dimensions_filled_from_pack_default(ref, cfg):
     assert (row.length, row.width, row.height) == (3.3, 2.0, 0.02)
     assert {f.field for f in row.review_flags if f.code == FlagCode.dimension_defaulted} \
         == {"length", "height", "width"}
-    validate.validate_row(row)
+    validate.validate_row(row, source_code="test")
     assert not any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # filled, not rejected
 
 
@@ -511,7 +511,7 @@ def test_parsed_zero_dimension_is_kept_and_rejected(ref, cfg):
     derive.derive_dimensions(row, ref)
     assert row.length == 0.0
     assert not any(f.code == FlagCode.dimension_defaulted and f.field == "length" for f in row.review_flags)
-    validate.validate_row(row)
+    validate.validate_row(row, source_code="test")
     assert any(r.rule == "dimension_invalid" for r in row.reject_reasons)
 
 
@@ -527,7 +527,7 @@ def test_fetch_failed_dimensions_held_not_defaulted(ref, cfg):
     codes = {f.code for f in row.review_flags}
     assert FlagCode.dimension_unavailable in codes and FlagCode.dimension_defaulted not in codes
     assert "length:unavailable" in row.dimension_method
-    validate.validate_row(row)
+    validate.validate_row(row, source_code="test")
     assert any(r.rule == "dimension_unavailable" for r in row.reject_reasons)   # held for retry
     assert not any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # not "bad data"
     assert not row.is_emittable
@@ -553,7 +553,7 @@ def test_fetch_failed_dim_retries_and_emits_when_present_next_scrape(ref, cfg):
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
     assert (row.length, row.width, row.height) == (2.8, 1.97, 0.02)
-    validate.validate_row(row)
+    validate.validate_row(row, source_code="test")
     assert not any(r.rule in ("dimension_unavailable", "dimension_invalid") for r in row.reject_reasons)
 
 
