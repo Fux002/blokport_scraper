@@ -488,3 +488,56 @@ def test_a_store_that_cannot_be_read_is_503_naming_it(monkeypatch):
     monkeypatch.setattr(rv, "client", lambda: "s3")
     monkeypatch.setattr(rv, "hidden", lambda s3: (_ for _ in ()).throw(rv.Unavailable("the ledger cannot be read")))
     assert server.dispatch("GET", ["photos", "hidden"], None) == (503, {"error": "the ledger cannot be read"})
+
+
+# --- POST /photos/decisions?dry_run= (the page's export, through the one writer) ------------------------------------
+def test_a_dry_run_of_the_export_returns_its_plan_and_writes_nothing():
+    s3 = _bucket()
+    docs = [{"id": "one", "action": "use", "source": "sentas", "sha": A, "tag": C.RUN_TAG, "at": AT},
+            {"id": "two", "action": "remove", "source": "sentas", "at": AT}]
+    code, body = rv.apply_decisions(s3, docs, dry_run=True)
+    assert code == 200 and s3.written == []
+    assert {k: body[k] for k in ("dry_run", "applied", "owner_choices", "removals", "cleans", "replaced")} == {
+        "dry_run": True, "applied": False, "owner_choices": 1, "removals": 1, "cleans": 0, "replaced": 0}
+    assert any("SEN-TWO" in line for line in body["lines"]) and body["lines"][-1].startswith("==> 1 owner choices")
+
+
+def test_the_export_applied_is_written_through_the_one_writer():
+    s3 = _bucket()
+    code, body = rv.apply_decisions(s3, [{"id": "one", "action": "clean", "source": "sentas", "sha": B, "at": AT}],
+                                    dry_run=False)
+    assert (code, body["applied"], body["cleans"]) == (200, True, 1)
+    assert _clicks(s3) == {"SEN-ONE": pub.click_record("SEN-ONE", "one", "sentas", B, AT)}
+
+
+def test_an_export_with_a_bad_decision_is_422_and_writes_nothing():
+    s3 = _bucket()
+    code, body = rv.apply_decisions(s3, [{"id": "nowhere", "action": "remove", "source": "sentas", "at": AT}],
+                                    dry_run=False)
+    assert code == 422 and "nowhere" in body["error"] and s3.written == []
+
+
+def test_an_export_applied_while_a_photos_run_holds_the_lock_is_409_naming_the_run(monkeypatch):
+    @contextmanager
+    def held(client, owner, on_lost=None):
+        raise dec.proc.RunActive("held")
+        yield
+    monkeypatch.setattr(dec.proc, "exclusive", held)
+    s3 = _bucket(**{dec.proc.LOCK: json.dumps({"run_id": "R9"}).encode()})
+    code, body = rv.apply_decisions(s3, [{"id": "two", "action": "remove", "source": "sentas", "at": AT}], dry_run=False)
+    assert (code, body["reason"], body["run_id"]) == (409, "run_active", "R9") and s3.written == []
+
+
+def test_the_decisions_route_takes_the_export_and_an_explicit_dry_run(monkeypatch):
+    seen = []
+    monkeypatch.setattr(rv, "client", lambda: "s3")
+    monkeypatch.setattr(rv, "apply_decisions", lambda s3, docs, dry_run: seen.append((docs, dry_run)) or (200, {}))
+    docs = [{"id": "two", "action": "remove", "source": "sentas", "at": AT}]
+    assert server.dispatch("POST", ["photos", "decisions"], docs, "dry_run=true")[0] == 200
+    assert server.dispatch("POST", ["photos", "decisions"], docs, "dry_run=false")[0] == 200
+    assert seen == [(docs, True), (docs, False)]
+    for query in ("", "dry_run=yes", "dry_run=1"):
+        assert server.dispatch("POST", ["photos", "decisions"], docs, query)[0] == 400
+    for body in (None, {}, [1], "x"):
+        assert server.dispatch("POST", ["photos", "decisions"], body, "dry_run=true")[0] == 400
+    assert len(seen) == 2

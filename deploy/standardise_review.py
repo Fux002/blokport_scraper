@@ -261,11 +261,12 @@ def run_active(s3, exc):
                  "error": f"{who} holds the lock ({holder or exc}): try again after it"}
 
 
-def _decide(s3, doc, photo_listings, dry_run=False):
-    """(Plan, None) of the one decision planned, and unless dry_run applied, on the sheet already read and the narrow
-    read (decisions.plan), or (None, the refusal): 422 when invalid, 409 while the lock is held."""
+def _decide(s3, docs, dry_run=False, say=_say, sheet=None, narrow=False):
+    """(Plan, None) of the decisions planned, and unless dry_run applied (decisions.decide: on `sheet` when the caller
+    read it, narrow for a click's one decision), or (None, the refusal): 422 when one is invalid, 409 while the lock is
+    held (run_active)."""
     try:
-        return decisions.decide(s3, [doc], dry_run=dry_run, say=_say, sheet=photo_listings, narrow=True), None
+        return decisions.decide(s3, docs, dry_run=dry_run, say=say, sheet=sheet, narrow=narrow), None
     except decisions.InvalidDecisions as exc:
         return None, (422, {"reason": "refused", "error": str(exc)})
     except proc.RunActive as exc:
@@ -302,7 +303,7 @@ def click(s3, sku, sha, at):
         return _unknown(sku)
     doc = {"id": listing["key"], "action": "clean", "source": listing["source"], "sha": sha, "at": at}
     if sku not in hidden_products():
-        _, refused = _decide(s3, doc, photo_listings, dry_run=True)
+        _, refused = _decide(s3, [doc], dry_run=True, sheet=photo_listings, narrow=True)
         if refused is not None and refused[0] == 422:
             return refused
         return 409, {"reason": "not_hidden", "error": f"{sku} is not hidden for want of a photo"}
@@ -324,7 +325,7 @@ def click(s3, sku, sha, at):
         return 200, {"sku": sku, "status": "already_cleaned"}
     if found == ("blocked", select.NO_MODEL_LEFT):
         return 200, {"sku": sku, "status": "nothing_left_to_try"}
-    _, refused = _decide(s3, doc, photo_listings)
+    _, refused = _decide(s3, [doc], sheet=photo_listings, narrow=True)
     return refused or (200, {"sku": sku, "status": QUEUED})
 
 
@@ -334,6 +335,20 @@ def withdraw(s3, sku, at):
     listing, photo_listings = _listing(s3, sku)
     if listing is None:
         return _unknown(sku)
-    plan, refused = _decide(s3, {"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at},
-                            photo_listings)
+    plan, refused = _decide(s3, [{"id": listing["key"], "action": "withdraw", "source": listing["source"], "at": at}],
+                            sheet=photo_listings, narrow=True)
     return refused or (200, {"sku": sku, "status": "withdrawn" if plan.deletions else "no_click"})
+
+
+# --- POST /photos/decisions --------------------------------------------------------------------------------------------
+def apply_decisions(s3, docs, dry_run):
+    """The page's export (decision documents) planned, and unless dry_run applied, by the decisions applier: (status,
+    body). 200 {dry_run, applied, owner_choices, removals, cleans, replaced (records a later decision replaces), lines
+    (the plan as the CLI prints it)}; 422 with the applier's reasons (nothing written); 409 run_active."""
+    lines = []
+    plan, refused = _decide(s3, docs, dry_run=dry_run, say=lines.append)
+    if refused:
+        return refused
+    return 200, {"dry_run": dry_run, "applied": not dry_run, "owner_choices": len(plan.owner),
+                 "removals": len(plan.removals), "cleans": len(plan.clicks), "replaced": len(plan.deletions),
+                 "lines": lines}

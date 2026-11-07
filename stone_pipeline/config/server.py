@@ -926,6 +926,20 @@ def _delete_photo_click(params, body, query):
     return _photos(answer)
 
 
+def _post_photo_decisions(params, body, query):
+    # Body: the decision page's export (a JSON array of decision objects); ?dry_run=true plans only, false applies
+    def answer(rv):
+        flag = parse_qs(query).get("dry_run", [""])[-1]
+        if flag not in ("true", "false"):
+            raise _BadRequest(f"dry_run must be true (plan only) or false (apply), got {flag!r}")
+        try:
+            docs = rv.decisions.check_docs(body)
+        except rv.decisions.InvalidDecisions as exc:
+            raise _BadRequest(str(exc)) from exc
+        return rv.apply_decisions(rv.client(), docs, flag == "true")
+    return _photos(answer)
+
+
 # _durable: the route records an operator decision in config.db, snapshotted as soon as it succeeds. The lifecycle verbs
 # (reset, delist, pause, resume, remove a source) snapshot it themselves.
 _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
@@ -973,6 +987,7 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("GET", ("photos", "spend"), _get_photos_spend),
     ("PUT", ("photos", "clicks", "{sku}"), _put_photo_click),
     ("DELETE", ("photos", "clicks", "{sku}"), _delete_photo_click),
+    ("POST", ("photos", "decisions"), _post_photo_decisions),
 )
 
 # derived from the table, so the answer to an unknown path can never drift from what is served
