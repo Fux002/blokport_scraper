@@ -238,13 +238,11 @@ def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, 
         # be non-empty even when no attribute value is restricted. Folded through norm, matching validate_row.
         frozen = {**frozen, "variation_key": {norm(k) for k in archived_keys}}
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.ledger.existing import acked_products
     path = writethrough.ledger_path()
     if not path.exists():
         return frozen, {}, category_labels
-    with Ledger.open(path, env=writethrough.ENV_NAME,
-                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+    with writethrough.connect(path, bind=True) as lg:
         return frozen, acked_products(lg), category_labels
 
 

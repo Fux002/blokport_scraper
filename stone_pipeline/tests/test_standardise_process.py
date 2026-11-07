@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 
+import boto3
 import pytest
 from botocore.exceptions import ClientError
 
@@ -454,7 +455,7 @@ def test_without_the_gpu_pool_s_idle_ceiling_the_process_refuses_to_start(monkey
     monkeypatch.setattr(C, "IDLE_GPU_VCPUS", None)
     assert proc.unconfigured() == ["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"]
     assert proc.unconfigured(close_only=True) == ["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"]
-    monkeypatch.setattr(proc.boto3, "client", lambda *a, **k: pytest.fail("preflight must stop before any AWS client"))
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: pytest.fail("preflight must stop before any AWS client"))
     assert proc.main() == 2
 
 
@@ -1296,7 +1297,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     monkeypatch.setattr(proc.gpu, "set_idle", lambda batch: steps.append("idle"))
     monkeypatch.setattr(proc, "unconfigured", lambda close_only=False: [])
     monkeypatch.setattr(proc, "stop_on_signal", lambda *spends: None)
-    monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
+    monkeypatch.setattr(boto3, "client", _Clients(_S3()))
     monkeypatch.setattr(C, "BUDGET_USD", 10.0)
     monkeypatch.setattr(writethrough, "enabled", lambda: writethrough_on)
     if tmp_path is not None:
@@ -1373,7 +1374,7 @@ def test_a_second_process_refuses_to_start_while_one_runs(monkeypatch):
 
 def _reaping(monkeypatch, lock_body):
     s3 = _S3({proc.LOCK: lock_body})
-    monkeypatch.setattr(proc.boto3, "client", _Clients(s3))
+    monkeypatch.setattr(boto3, "client", _Clients(s3))
     done = []
     monkeypatch.setattr(proc.gpu, "stop_run", lambda batch, run_id: done.append(("stopped", run_id)) or ["job1"])
     monkeypatch.setattr(proc.gpu, "set_idle", lambda batch: done.append("idle"))

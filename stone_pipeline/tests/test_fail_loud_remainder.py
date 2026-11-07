@@ -29,22 +29,30 @@ def test_s3_access_denied_detects_permission_errors_only():
 
 def test_variation_keys_raises_on_access_denied(monkeypatch):
     # a real IAM misconfig must fail loud, not return None (which makes products advertise 404 image links)
-    class _Boto:
+    def denied(*a, **k):
+        raise _FakeClientError("AccessDenied")
+
+    class _Boto:                                  # boto3's two ways to a client (io/storage.aws_client takes either)
+        client = staticmethod(denied)
+
         class Session:
             def __init__(self, **k): ...
-            def client(self, *a, **k):
-                raise _FakeClientError("AccessDenied")
+            client = staticmethod(denied)
     monkeypatch.setitem(__import__("sys").modules, "boto3", _Boto)
     with pytest.raises(_FakeClientError):
         emit_catalog._s3_variation_keys()
 
 
 def test_variation_keys_degrades_to_none_on_transient(monkeypatch):
+    def slow(*a, **k):
+        raise _FakeClientError("SlowDown")             # transient -> fall back, no crash
+
     class _Boto:
+        client = staticmethod(slow)
+
         class Session:
             def __init__(self, **k): ...
-            def client(self, *a, **k):
-                raise _FakeClientError("SlowDown")     # transient -> fall back, no crash
+            client = staticmethod(slow)
     monkeypatch.setitem(__import__("sys").modules, "boto3", _Boto)
     assert emit_catalog._s3_variation_keys() is None
 

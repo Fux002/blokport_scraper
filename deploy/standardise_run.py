@@ -57,7 +57,6 @@ from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from deploy import standardise_batch as gpu
@@ -65,10 +64,11 @@ from deploy import standardise_close as close
 from deploy import standardise_publish as publish
 from deploy import standardise_select as select
 from deploy.standardise_source import sheet_and_photos
-from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import PROCESS_RETRIES, aws_client
 from stone_pipeline.ledger import writethrough
 from stone_pipeline.standardise import index, judge
 
@@ -773,9 +773,7 @@ def reap(run_id):
     never ran): stop that run's GPU jobs and, only while the run lock is still that run's (its body names the run), set
     the pool's ceiling back and remove the lock. Nothing of another process is touched: a rolling deploy's other task or
     a process started by hand keeps its jobs, its lock and its ceiling."""
-    retries = publish.aws_config()
-    s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
-    batch = boto3.client("batch", region_name=S3_REGION, config=retries)
+    s3, batch = aws_client("s3", config=PROCESS_RETRIES), aws_client("batch", config=PROCESS_RETRIES)
     stopped = gpu.stop_run(batch, run_id)
     try:
         held = s3.get_object(Bucket=S3_BUCKET, Key=LOCK)
@@ -851,9 +849,7 @@ def main() -> int:
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
-    retries = publish.aws_config()
-    s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
-    batch = boto3.client("batch", region_name=S3_REGION, config=retries)
+    s3, batch = aws_client("s3", config=PROCESS_RETRIES), aws_client("batch", config=PROCESS_RETRIES)
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it
     # has to kill it; a process started by hand names itself.
     run_id = env.getenv("RUN_ID") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

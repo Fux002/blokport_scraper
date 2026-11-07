@@ -6,6 +6,7 @@ import json
 
 import cv2
 import numpy as np
+import boto3
 import pytest
 
 from deploy import standardise_diag as diag
@@ -86,7 +87,7 @@ def test_a_run_writes_only_the_diag_files_of_the_listed_photos_and_fails_loud_on
     s3 = _S3()
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("ONLY_KEY", "list.json")
-    monkeypatch.setattr(diag.boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(source, "listed_shas", lambda client: [a, gone])
     monkeypatch.setattr(source, "scraped_keys", lambda client, src: [f"p/scraped/sentas/{a}.jpg", f"p/scraped/sentas/{b}.jpg"])
     monkeypatch.setattr(source, "sheet_photos", lambda client: {a: {"size": [3.0, 1.8]}})

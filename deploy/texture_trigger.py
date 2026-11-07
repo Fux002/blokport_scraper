@@ -13,8 +13,9 @@ The :gpu image must carry `ben2` (rb_images imports it).
 
 from __future__ import annotations
 
-from stone_pipeline.config.settings import S3_REGION, SETTINGS
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 log = logfmt.get_logger("texture_trigger")
 
@@ -38,9 +39,7 @@ def submit_texture_job(queued: int, queue_key: str) -> str | None:
                     extra={"extra_fields": {"queue": cfg.queue, "job_definition": cfg.job_definition}})
         return None
     try:
-        import boto3
-
-        batch = boto3.client("batch", region_name=S3_REGION)
+        batch = aws_client("batch", config=BOTOCORE_DEFAULTS)
     except Exception as exc:  # no boto3/creds -> loud, but produce continues
         log.warning("auto-texture: boto3/clients unavailable; skipping",
                     extra={"extra_fields": {"error": str(exc)}})

@@ -16,7 +16,6 @@ import json
 import sys
 
 from stone_pipeline.ledger import sync, writethrough
-from stone_pipeline.ledger.db import Ledger
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        with Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
+        with writethrough.connect(path, bind=True) as ledger:
             before = sync.status(ledger)
             if "--yes" not in argv:
                 print(f"DRY RUN (no changes). Ledger: {path}")

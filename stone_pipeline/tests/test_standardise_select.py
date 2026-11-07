@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 
+import boto3
 import pytest
 
 from deploy import standardise_select as sel
@@ -1582,7 +1583,7 @@ def _completing(monkeypatch, s3, standardise):
     from deploy import standardise_source as src
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("RUN_TAG", "v9")
-    monkeypatch.setattr(src.boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(src, "sheet_photos", lambda client: {A: {"source": "sentas", "key": "k", "format": "slab", "size": None}})
     monkeypatch.setattr(src, "_photo_keys", lambda client, s, photos: [f"dev/products/scraped/sentas/{A}.jpg"])
     monkeypatch.setattr(src.models, "load", lambda need: None)

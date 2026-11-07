@@ -29,6 +29,7 @@ from stone_pipeline.core.text import (
     split_bracket_alias,
     title_case,
 )
+from stone_pipeline.io import storage
 from stone_pipeline.reference.loaders import variants_status_required
 from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -60,16 +61,9 @@ def _s3_variation_keys():
     from stone_pipeline.config.settings import ENV_SEGMENT
     s3 = SETTINGS.s3
     try:
-        import boto3
-        from botocore.config import Config
-    except ImportError:
-        return None
-    try:
         # bounded timeouts + capped retries so a network stall can't hang the build (boto3's default
         # has no connect-timeout cap); standard retry mode for transient throttling.
-        cfg = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 3, "mode": "standard"})
-        client = boto3.Session(profile_name=s3.credentials_profile or None,
-                               region_name=s3.region).client("s3", config=cfg)
+        client = storage.aws_client("s3", config=storage.BOUNDED, profile=s3.credentials_profile)
         prefix = f"{ENV_SEGMENT}/variations/"
         keys: dict[str, str] = {}
         for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):

@@ -1096,11 +1096,10 @@ def _ledger_products(source_code: str) -> int:
     with no ledger file has produced nothing under any code; a ledger that cannot be read raises (a guard never
     passes on an unread ledger)."""
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     path = writethrough.ledger_path()
     if not path.exists():
         return 0
-    with Ledger.open(path, env=writethrough.ENV_NAME) as lg:
+    with writethrough.connect(path, bind=False) as lg:
         return lg.execute("SELECT COUNT(*) AS n FROM product WHERE source = ?", (source_code,)).fetchone()["n"]
 
 

@@ -21,6 +21,7 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.text import match_key
+from stone_pipeline.io import storage
 
 log = logfmt.get_logger("variety_color")
 
@@ -138,10 +139,8 @@ def _fetch_product_image(url: str) -> bytes | None:
         return None
     key = url.split(".amazonaws.com/", 1)[1].split("?", 1)[0]
     try:
-        import boto3
         s3 = SETTINGS.s3
-        client = boto3.Session(profile_name=s3.credentials_profile or None,
-                               region_name=s3.region).client("s3")
+        client = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS, profile=s3.credentials_profile)
         return client.get_object(Bucket=s3.bucket, Key=key)["Body"].read()
     except Exception as exc:
         # An AccessDenied is an IAM misconfig that would silently default every variety's colour to Natural;

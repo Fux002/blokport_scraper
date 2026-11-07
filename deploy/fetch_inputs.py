@@ -16,13 +16,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-import boto3
 from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS,
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, SETTINGS,
                                             THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key)
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("deploy.fetch_inputs")
@@ -141,7 +141,7 @@ def fetch_attributes(client=None, target=None) -> bool:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = _incoming(target)
     try:
-        client = client or boto3.client("s3", region_name=S3_REGION)
+        client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
         client.download_file(S3_BUCKET, key, str(tmp))
         # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
         if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
@@ -164,7 +164,7 @@ def main() -> int:
     prefix = f"{ENV_SEGMENT}/scraper/from_medusa/"
     dest = Path(SETTINGS.paths.from_medusa_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     print(f"==> fetching inputs from s3://{S3_BUCKET}/{prefix} -> {dest}")
     n = 0
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):

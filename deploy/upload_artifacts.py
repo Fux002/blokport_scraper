@@ -41,10 +41,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import boto3
 from botocore.exceptions import ClientError
 
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, UPLOAD_SIDE_FILES
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS, UPLOAD_SIDE_FILES
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 MANIFEST_CONTRACT = "v1"
 MANIFEST_NAME = "manifest.json"
@@ -175,7 +175,7 @@ def publish_to_upload(client, run_id: str | None, only: set[str] | None = None) 
 
 def main(run_id: str | None = None) -> int:
     base = f"{ENV_SEGMENT}/scraper"
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     print(f"==> publishing deliverables to s3://{S3_BUCKET}/{base}/to_upload/")
     if not SETTINGS.paths.to_upload_dir.is_dir():
         print("   nothing to publish (no to_upload dir)")

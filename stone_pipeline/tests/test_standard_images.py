@@ -3,6 +3,7 @@
 standardised photo keeps the images it had. Only each listing's chosen photo is published."""
 from __future__ import annotations
 
+import boto3
 import pytest
 
 from stone_pipeline.config.settings import ENV_SEGMENT
@@ -100,7 +101,7 @@ def _retouch_job(monkeypatch, keys, sheet):
     out = rt.run_prefix("sentas")
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.delenv("MARKS_SURVEY", raising=False)
-    monkeypatch.setattr(rt.boto3, "client", lambda *a, **k: _Bucket([f"{out}{k}" for k in keys]))
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _Bucket([f"{out}{k}" for k in keys]))
     monkeypatch.setattr(rt, "sheet_photos", lambda client: {})
     monkeypatch.setattr(rt, "_photo_keys", lambda client, src, photos: [f"dev/products/scraped/sentas/{s}.jpg" for s in sheet])
     searched = []

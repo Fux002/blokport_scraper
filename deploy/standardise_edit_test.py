@@ -12,12 +12,12 @@ import json
 import sys
 import time
 
-import boto3
 import torch
 from PIL import Image
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 
 def _size(img):
@@ -28,7 +28,7 @@ def _size(img):
 
 def main() -> int:
     from diffusers import Flux2KleinPipeline
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     prefix = f"{ENV_SEGMENT}/{C.TEST_PREFIX}"
     items = json.loads(client.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/edit-test.json")["Body"].read())
     # The machine has 16 GB of memory, and the text encoder and the image model do not fit in it together: the few fixed

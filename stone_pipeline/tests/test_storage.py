@@ -28,7 +28,7 @@ class _FakeClient:
 
 
 def _backend(code: str) -> S3StorageBackend:
-    b = S3StorageBackend(bucket="b", region="r", key_prefix="p", public_base="https://x/", dry_run=False)
+    b = S3StorageBackend(bucket="b", key_prefix="p", public_base="https://x/", dry_run=False)
     b._client = _FakeClient(code)   # inject; _get_client() returns it since it is already set
     return b
 

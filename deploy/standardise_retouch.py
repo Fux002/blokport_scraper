@@ -15,14 +15,14 @@ import os
 import sys
 import time
 
-import boto3
 import cv2
 import numpy as np
 from PIL import Image
 
 from deploy.standardise_source import _encode, _exists, _get, _photo_keys, made, photo_source, run_prefix, sheet_photos
-from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import marks, outline, photo, retouch
 
 
@@ -168,7 +168,7 @@ def main() -> int:
     if not src:
         print("ERROR: SRC is required; aborting")
         return 2
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     out = run_prefix(src)
     if _surveying():
         return _survey(client, src, out)

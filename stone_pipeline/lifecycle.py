@@ -21,6 +21,7 @@ import threading
 from contextlib import contextmanager
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.io import storage
 
 log = logfmt.get_logger("lifecycle")
 
@@ -140,12 +141,12 @@ def _publish_base_deliverable(base=None) -> bool:
     next produce publishes a full set. Best-effort + loud like the rest of the reseed: False (logged) when the
     copy or the publish fails."""
     try:
-        import boto3
         from deploy import upload_artifacts
-        from stone_pipeline.config.settings import S3_REGION, SETTINGS, VARIANTS_BASE_FILE
+        from stone_pipeline.config.settings import SETTINGS, VARIANTS_BASE_FILE
         from stone_pipeline.reference.sync_variants_base import write_deliverable
         write_deliverable(base or SETTINGS.paths.variants_export_base_csv)
-        upload_artifacts.publish_to_upload(boto3.client("s3", region_name=S3_REGION), None, only={VARIANTS_BASE_FILE})
+        upload_artifacts.publish_to_upload(storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS), None,
+                                           only={VARIANTS_BASE_FILE})
         return True
     except Exception:
         log.exception("reset: base deliverable NOT published: Blokport's restore reads the previous base "
@@ -239,10 +240,9 @@ def _ledger_op(name: str, work):
     pull (ServeInFlight) -> 409, anything else -> 500. Every lifecycle verb that changes the ledger runs here, so
     this is the one place its change is snapshotted: once the ledger is committed and closed, before the answer."""
     from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
     try:
         with _exclusive(name):
-            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
+            with writethrough.connect(bind=True) as ledger:
                 result = work(ledger, sync)
         _snapshot_ledger()
         return result, 200
@@ -334,9 +334,8 @@ def _prune_stale_product_exports() -> dict:
         log.exception("reset: local product-export prune failed (best-effort)")
         out["local_error"] = str(exc)
     try:
-        import boto3
-        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
-        s3 = boto3.client("s3", region_name=S3_REGION)
+        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+        s3 = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS)
         prefix = f"{ENV_SEGMENT}/scraper/to_upload/"
         resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
         def stale(name):
@@ -379,9 +378,8 @@ def _prune_stale_medusa_export() -> dict:
             log.exception("reset: local medusa-export prune failed (best-effort)", extra={"extra_fields": {"file": str(f)}})
             out["local_error"] = str(exc)
     try:
-        import boto3
-        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
-        s3 = boto3.client("s3", region_name=S3_REGION)
+        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+        s3 = storage.aws_client("s3", config=storage.BOTOCORE_DEFAULTS)
         keys = [{"Key": f"{ENV_SEGMENT}/scraper/from_medusa/{name}"} for name in files.values()]
         s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": keys, "Quiet": True})
         out["s3"] = len(keys)
@@ -738,12 +736,10 @@ def list_minted_variations() -> tuple[dict, int]:
         return {"error": "base file not present on this task (a produce re-fetches it); "
                          "run a Republish All first, then retry"}, 503
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.matching import projections as proj
     import collections
     try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
-                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        with writethrough.connect(bind=True) as lg:
             rows = lg.execute("SELECT key, name, type FROM variation").fetchall()
     except Exception as exc:                                # noqa: BLE001 -- best-effort read, surfaced as 500
         log.exception("list_minted_variations failed")

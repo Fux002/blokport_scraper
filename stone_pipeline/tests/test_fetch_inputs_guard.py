@@ -3,6 +3,7 @@ thin/empty Medusa export (mid-reset), or nothing resolves. Guards _would_clobber
 
 from __future__ import annotations
 
+import boto3
 import pytest
 from boto3.exceptions import RetriesExceededError
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
@@ -157,7 +158,7 @@ def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, m
 
         def download_file(self, bucket, key, filename):
             open(filename, "w", encoding="utf-8").write(incoming)
-    monkeypatch.setattr(fetch_inputs.boto3, "client", lambda *a, **k: _Client())
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _Client())
     monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
     fetch_inputs.main()
     assert local.read_text(encoding="utf-8").count("slab_x_") == 10          # the full local export stays
@@ -171,7 +172,7 @@ def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
 
         def download_file(self, bucket, key, filename):
             open(filename, "w", encoding="utf-8").write(incoming)
-    monkeypatch.setattr(fetch_inputs.boto3, "client", lambda *a, **k: _Client())
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _Client())
     monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
     fetch_inputs.main()
 

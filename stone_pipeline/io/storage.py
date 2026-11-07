@@ -20,9 +20,41 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from stone_pipeline.config import settings
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("io.storage")
+
+# --- the one way an AWS client is built ---------------------------------------------------------------------------
+# A preset is the botocore Config options a client is built with (plain options, so this module imports without
+# boto3); each site names the one it needs, so a difference between clients is a choice made where it is used.
+BOTOCORE_DEFAULTS = None                     # no Config: botocore's own retries, timeouts and pool
+PROCESS_RETRIES = {"retries": {"mode": "standard", "max_attempts": settings.STANDARDISE.AWS_MAX_ATTEMPTS}}
+BOUNDED = {"connect_timeout": settings.AWS_BOUNDED_CONNECT_SECONDS, "read_timeout": settings.AWS_BOUNDED_READ_SECONDS,
+           "retries": {"max_attempts": settings.AWS_BOUNDED_MAX_ATTEMPTS, "mode": "standard"}}
+FAIL_FAST = {"connect_timeout": settings.AWS_FAIL_FAST_CONNECT_SECONDS,
+             "read_timeout": settings.AWS_FAIL_FAST_READ_SECONDS,
+             "retries": {"max_attempts": settings.AWS_FAIL_FAST_MAX_ATTEMPTS}}
+
+
+def pooled(config: dict, connections: int) -> dict:
+    """A preset with a connection pool of this size (botocore's default is 10: more threads at once queue)."""
+    return {**config, "max_pool_connections": connections}
+
+
+def aws_client(service: str, *, config: Optional[dict], profile: Optional[str] = None):
+    """The AWS client of `service` in this deployment's region (settings.S3_REGION), built with `config` (a preset of
+    this module, BOTOCORE_DEFAULTS for none) and the credentials of `profile`: a named profile through its own session,
+    or the default chain (the task's IAM role on AWS, the environment's locally) when it is None or empty. boto3 is
+    imported here, so a caller without it fails at its first client, not at import."""
+    import copy
+
+    import boto3
+    from botocore.config import Config
+    options = {} if config is None else {"config": Config(**copy.deepcopy(config))}   # no Config: none passed at all
+    if profile:
+        return boto3.Session(profile_name=profile, region_name=settings.S3_REGION).client(service, **options)
+    return boto3.client(service, region_name=settings.S3_REGION, **options)
 
 # The ONLY S3 error codes that mean "the object genuinely does not exist" (head_object returns 404,
 # get_object returns NoSuchKey). Every other error -- AccessDenied, throttling, a 5xx, a connection reset
@@ -90,10 +122,8 @@ class S3StorageBackend:
     """Uploads to a staging bucket. boto3 is imported lazily so the package runs
     without it. dry_run derives keys and URLs but performs no network IO."""
 
-    def __init__(self, bucket: str, region: str, key_prefix: str, public_base: str,
-                 profile: str = "default", dry_run: bool = True):
+    def __init__(self, bucket: str, key_prefix: str, public_base: str, profile: str = "default", dry_run: bool = True):
         self.bucket = bucket
-        self.region = region
         self.key_prefix = key_prefix.strip("/")
         self.public_base = public_base if public_base.endswith("/") else public_base + "/"
         self.profile = profile
@@ -105,17 +135,9 @@ class S3StorageBackend:
 
     def _get_client(self):
         if self._client is None:
-            import boto3  # lazy
-
-            # Empty profile -> default credential chain (the ECS task IAM role on AWS,
-            # or ambient creds locally). A named profile is used only if one is set;
-            # on Fargate there is no profile, so profile_name="default" would raise
-            # ProfileNotFound.
-            if self.profile:
-                session = boto3.Session(profile_name=self.profile, region_name=self.region)
-            else:
-                session = boto3.Session(region_name=self.region)
-            self._client = session.client("s3")
+            # Empty profile -> default credential chain (the ECS task IAM role on AWS, or ambient creds locally); a
+            # named profile only if one is set (on Fargate there is none: profile_name="default" would raise).
+            self._client = aws_client("s3", config=BOTOCORE_DEFAULTS, profile=self.profile)
         return self._client
 
     def exists(self, key: str) -> bool:

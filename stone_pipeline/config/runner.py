@@ -92,9 +92,8 @@ def _capture_counts() -> dict | None:
     """Ledger totals per entity after a run, for the run record's `counts` (what's now in the ledger).
     Best-effort: a failure here must not affect the run."""
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
     try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        with writethrough.connect(bind=False) as lg:
             return {t: lg.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
                     for t in ("variation", "product", "inventory")}
     except Exception:

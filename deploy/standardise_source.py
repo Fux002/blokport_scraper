@@ -14,13 +14,13 @@ import os
 import sys
 import time
 
-import boto3
 import cv2
 import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 from stone_pipeline.standardise import index, kinds, models, outline, photo
 
 
@@ -493,7 +493,7 @@ def main() -> int:
     survey = os.environ.get("SURVEY", "false").lower() in ("1", "true", "yes")
     extra = os.environ.get("EXTRA_VIEWS", "true").lower() in ("1", "true", "yes")
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
-    client = boto3.client("s3", region_name=S3_REGION)
+    client = aws_client("s3", config=BOTOCORE_DEFAULTS)
     out = run_prefix(src)
     photos = sheet_photos(client)
     sliced = _photo_keys(client, src, photos)

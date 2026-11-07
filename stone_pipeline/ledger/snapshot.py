@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET
 from stone_pipeline.core import logfmt
 from stone_pipeline.io.storage import s3_error_is_missing
 
@@ -57,14 +57,12 @@ def _digest(path: Path) -> str:
 
 
 def _s3():
-    import boto3
-    from botocore.config import Config
+    from stone_pipeline.io import storage
     # explicit timeouts + capped retries so a best-effort snapshot FAILS FAST instead of stalling. This
     # matters on the SIGTERM/atexit stop path: a hung S3 call must not burn the whole ECS stopTimeout and
     # get SIGKILLed with no snapshot at all. Without a Config, boto3 can also fall through to a slow IMDS
     # credential probe off-ECS.
-    cfg = Config(connect_timeout=3, read_timeout=10, retries={"max_attempts": 2})
-    return boto3.client("s3", region_name=S3_REGION, config=cfg)
+    return storage.aws_client("s3", config=storage.FAIL_FAST)
 
 
 def snapshot_key(env: str = ENV_NAME) -> str:
