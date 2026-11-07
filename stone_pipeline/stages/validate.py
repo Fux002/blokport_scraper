@@ -21,6 +21,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
 from stone_pipeline.reference.loaders.common import norm
+from stone_pipeline.stages.emit import sku_of
 
 log = logfmt.get_logger("validate")
 
@@ -91,11 +92,21 @@ class ValidationResult:
     rejects: list[CanonicalRow] = field(default_factory=list)
 
 
+def _category_label(row: CanonicalRow) -> str | None:
+    """The row's category value NAME (the attributes.csv 'category' value / Category.label), reverse-mapped
+    from its pcat id. The ledger stores product.category by this same name, so value_frozen holds/exempts a
+    category consistently with colour/finish/quality/type."""
+    if not row.category_pcat_id:
+        return None
+    return next((c.label for c in active_categories() if c.pcat_id == row.category_pcat_id), None)
+
+
 def _frozen_value_pairs(row: CanonicalRow) -> tuple[tuple[str, str | None], ...]:
     """(attribute category, the resolved value name) for each controlled value a product carries. category is
-    resolved by pcat id (gated by category_invalid), not a stored value name, so it is not value-frozen here."""
+    included by its NAME (not its pcat id): category_invalid only checks the pcat is an active one, so an
+    archived-but-still-active category (e.g. Tiles) would otherwise let new products emit into it."""
     return (("color", row.color_name), ("finish", row.finish_name),
-            ("quality", row.quality_name), ("type", row.type_name))
+            ("quality", row.quality_name), ("type", row.type_name), ("category", _category_label(row)))
 
 
 def validate_row(row: CanonicalRow, require_images: bool = False, *,
@@ -168,21 +179,25 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
     # (the expand phase: attributes.csv has no status columns yet, or no ledger, or local/CI) means nothing is
     # restricted, so this is dormant. With a ledger absent, `acked` is empty, so every restricted value is held.
     if frozen:
-        sku = f"{source_code}-{row.surrogate_key}".upper() if source_code else None
-        exempt = acked.get(sku, frozenset()) if (acked and sku) else frozenset()
+        if not source_code:   # fail loud: a missing source_code must not silently exempt no one / hold all
+            raise ValueError("validate value_frozen needs source_code to key the acked-product exemption")
+        sku = sku_of(source_code, row.surrogate_key or "")
+        exempt = (acked or {}).get(sku, frozenset())
         for category, name in _frozen_value_pairs(row):
             if name and norm(name) in frozen.get(category, ()) and (category, norm(name)) not in exempt:
                 row.add_reject(RejectReason(rule="value_frozen", detail=f"{category}={name}"))
 
 
-def _frozen_and_acked(source_code: str | None) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
+def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
     """The VE2 inputs for value_frozen, built ONCE per run. `frozen` comes from attributes.csv (the single
     authority, restricted_values); it is empty in the expand phase, so the acked lookup (which opens the
     ledger) is SKIPPED entirely then -- today's cost is zero. When values are restricted, `acked` is read from
-    the ledger if one exists; with no ledger (local / CI) it stays empty, so every restricted value is held."""
+    the ledger if one exists; with no ledger (local / CI) it stays empty, so every restricted value is held.
+    A corrupt or wrong-env ledger raises out of Ledger.open: the ledger is the live source, so this fails loud
+    rather than silently exempting no one."""
     from stone_pipeline.reference.loaders import restricted_values
     frozen = restricted_values()
-    if not frozen or source_code is None:
+    if not frozen:
         return frozen, {}
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
@@ -196,7 +211,7 @@ def _frozen_and_acked(source_code: str | None) -> tuple[dict[str, set[str]], dic
 
 
 def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False,
-        *, source_code: str | None = None) -> ValidationResult:
+        *, source_code: str) -> ValidationResult:
     result = ValidationResult()
     handles: dict[str, str] = {}
     frozen, acked = _frozen_and_acked(source_code)

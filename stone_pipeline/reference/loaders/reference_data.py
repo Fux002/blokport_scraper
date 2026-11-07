@@ -86,15 +86,16 @@ def assert_pack_defaults_resolve(ref: ReferenceData) -> None:
         + [("finish", f) for f in pack.last_resort_finishes.values()]
         + [("finish", pack.block_finish), ("quality", pack.last_resort_quality),
            ("color", pack.fallback_color)])
+    # VE2: a pack DEFAULT (a last-resort value, the block default, the mint fallback colour) is a value the
+    # pipeline WRITES onto a product on its own, so it must be ASSIGNABLE: if it is archived or internal, every
+    # product that falls back to it would be value_frozen and held. Catch it LOUD here at load, naming the
+    # default, not silently downstream. Captured BEFORE the classify palette: a palette colour is NOT a pack
+    # default (PR5 drops a restricted colour from a mint), so one archived palette colour must not abort every
+    # load. Synonym targets (added below) are matcher inputs, so they too are only required to resolve.
+    pack_defaults = list(checks)
     # the classify() palette only needs to resolve in Medusa if the domain actually classifies texture colour
     if pack.classify_texture_color:
         checks += [("color", c) for c in CLASSIFIABLE_COLORS]
-    # VE2: a pack default (a last-resort value, the block default, the mint fallback colour, a classify colour)
-    # is a value the pipeline WRITES onto a product on its own, so it must be ASSIGNABLE: if it is archived or
-    # internal, every product that falls back to it would be value_frozen and held. Catch it LOUD here at load,
-    # naming the default, not silently downstream. (Synonym targets, added below, are matcher inputs, not values
-    # the pipeline emits by default, so they are only required to resolve, not to be assignable.)
-    pack_defaults = list(checks)
     # every SYNONYM's canonical target must also be a real Medusa value: a synonym 'Grigio'->'Gray' while
     # attributes.csv has only 'Grey' otherwise resolves to a null id PER PRODUCT (a quiet per-row reject
     # for every product routing through it) instead of one loud config error here at load. Skip the 'none'

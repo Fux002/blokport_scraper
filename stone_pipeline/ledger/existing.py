@@ -12,9 +12,9 @@ from __future__ import annotations
 from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.reference.loaders.common import norm
 
-# The product columns that carry a controlled attribute VALUE (by name). category is resolved by its pcat id,
-# not a stored attribute value, so it is not part of the value-freeze exemption.
-_VALUE_COLUMNS = ("color", "finish", "quality", "type")
+# The product columns that carry a controlled attribute VALUE by NAME. `category` is stored as its canonical
+# name too (populate._category_name_for), so a product acked into an archived-but-active category is exempt.
+_VALUE_COLUMNS = ("color", "finish", "quality", "type", "category")
 
 
 def acked_products(ledger: Ledger) -> dict[str, set[tuple[str, str]]]:

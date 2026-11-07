@@ -101,6 +101,75 @@ def test_value_frozen_dormant_without_a_frozen_set():
     assert "value_frozen" not in {r.rule for r in row.reject_reasons}
 
 
+def test_value_frozen_needs_source_code_when_something_is_frozen():
+    # a missing source_code must fail loud, never silently exempt no one / hold all
+    with pytest.raises(ValueError):
+        validate.validate_row(_row("Beige"), frozen={"color": {norm("Beige")}}, acked={}, source_code=None)
+
+
+def test_value_frozen_exemption_is_value_specific():
+    # acked with Beige, but the scrape now resolves to a DIFFERENT restricted colour: held (not exempt)
+    row = _row("Crimson")
+    validate.validate_row(row, frozen={"color": {norm("Crimson")}},
+                          acked={"ZUCCHI-1": {("color", norm("Beige"))}}, source_code="zucchi")
+    assert "value_frozen" in {r.rule for r in row.reject_reasons}
+
+
+def _active_category():
+    from stone_pipeline.config.settings import active_categories
+    cats = active_categories()
+    if not cats:
+        pytest.skip("no active category with a pcat id in this env")
+    return cats[0]
+
+
+def test_value_frozen_holds_a_new_product_in_an_archived_category():
+    cat = _active_category()
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id=cat.pcat_id)
+    validate.validate_row(row, frozen={"category": {norm(cat.label)}}, acked={}, source_code="zucchi")
+    assert "value_frozen" in {r.rule for r in row.reject_reasons}
+
+
+def test_value_frozen_exempts_an_existing_product_in_an_archived_category():
+    cat = _active_category()
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id=cat.pcat_id)
+    validate.validate_row(row, frozen={"category": {norm(cat.label)}},
+                          acked={"ZUCCHI-1": {("category", norm(cat.label))}}, source_code="zucchi")
+    assert "value_frozen" not in {r.rule for r in row.reject_reasons}
+
+
+def test_frozen_and_acked_raises_on_a_corrupt_ledger(tmp_path, monkeypatch):
+    # with something restricted, _frozen_and_acked opens the ledger; a corrupt one must fail loud, not be
+    # swallowed into an empty exemption (which would hold every acked product too).
+    monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
+                        lambda *a, **k: {"color": {norm("Beige")}})
+    bad = tmp_path / "dev.ledger"
+    bad.write_bytes(b"this is not a sqlite database")
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(bad))
+    with pytest.raises(Exception):
+        validate._frozen_and_acked("zucchi")
+
+
+def test_a_restricted_palette_colour_does_not_fail_load(monkeypatch):
+    # the classify palette is PR5's concern (a restricted colour is dropped from a mint), NOT a pack default,
+    # so an archived palette colour must not abort every load_all.
+    from stone_pipeline.config.domain import active_pack
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.reference import loaders
+    from stone_pipeline.stages.variety_color import CLASSIFIABLE_COLORS
+
+    pack = active_pack()
+    if not pack.classify_texture_color or not SETTINGS.paths.attributes_csv.exists():
+        pytest.skip("pack does not classify texture colour, or no attributes.csv")
+    palette_only = next((c for c in CLASSIFIABLE_COLORS if norm(c) != norm(pack.fallback_color)), None)
+    if palette_only is None:
+        pytest.skip("no palette colour distinct from the fallback colour")
+    ref = SimpleNamespace(attributes=loaders.load_attributes())
+    monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.restricted_values",
+                        lambda *a, **k: {"color": {norm(palette_only)}})
+    loaders._assert_pack_defaults_resolve(ref)   # must NOT raise: a palette colour is not a pack default
+
+
 # --- pack defaults must be assignable (fail loud) ----------------------------
 
 def test_a_restricted_pack_default_fails_loud(monkeypatch):

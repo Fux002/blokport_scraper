@@ -176,14 +176,13 @@ class VariationStage:
 
     def _is_archived(self, cid: str | None) -> bool:
         """VE2: is the matched variety archived (frozen)? It stays matchable (recognition keeps the full
-        vocabulary), but a learned-guess alias must not be saved onto it. Tolerates an index entry with no
-        `archived` attribute (older/hand-built indexes) as not archived."""
+        vocabulary), but a learned-guess alias must not be saved onto it."""
         if not cid:
             return False
         for table in self.ref.variants.values():
             v = table.by_id.get(cid)
             if v is not None:
-                return bool(getattr(v, "archived", False))
+                return bool(v.archived)
         return False
 
     def resolve_row(self, row: CanonicalRow) -> None:

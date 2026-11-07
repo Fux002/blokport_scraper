@@ -43,8 +43,15 @@ def _bool(value) -> str:
     return "true" if value else "false"
 
 
+def sku_of(source_code: str, surrogate_key: str) -> str:
+    """The one SKU rule: `{source_code}-{surrogate_key}` upper-cased. The ONE place the shape lives, so a
+    caller that has only the source code and surrogate (e.g. validate's value_frozen exemption) builds the
+    same SKU the emit/ledger path does, without a third inline copy."""
+    return f"{source_code}-{surrogate_key}".upper()
+
+
 def _sku(row: CanonicalRow, cfg: SourceConfig) -> str:
-    return f"{cfg.source_code}-{row.surrogate_key}".upper()
+    return sku_of(cfg.source_code, row.surrogate_key or "")
 
 
 # single source of truth so the imported stock and the change-feed (product_state) agree

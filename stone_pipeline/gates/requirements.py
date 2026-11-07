@@ -136,10 +136,12 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 "restricted_values (attributes.csv status/internal); an existing acked product is exempt "
                 "(ledger/existing.acked_products), a new one is held",
                 title="Attribute value is archived or internal (frozen)", kind="decision",
-                recovery="The colour, finish, quality or type this product resolved to is archived or internal "
-                         "in Medusa, so a new product may not use it. Reactivate the value in Medusa, or re-decide "
-                         "the product onto an active value in Review. An existing listing keeps it. Lists on the "
-                         "next produce.", stage="Match Variation / Reconcile"),
+                recovery="The colour, finish, quality, type or category this product resolved to is archived or "
+                         "internal in Medusa, so a NEW product may not use it (an existing listing keeps it). "
+                         "Reactivate the value in Blokport, or the supplier's listing changes to an active value. "
+                         "A colour filled from the variety can be re-decided in Review (amend the colour); a "
+                         "scraped colour/finish/quality or a Key's type has no Review action. Lists on the next "
+                         "produce once the value is assignable.", stage="Match Variation / Reconcile"),
 )
 
 MEDUSA_RULES: frozenset[str] = frozenset(r.rule for r in MEDUSA_REQUIREMENTS)
