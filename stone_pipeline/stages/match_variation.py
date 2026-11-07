@@ -174,6 +174,18 @@ class VariationStage:
                 return v.key
         return None
 
+    def _is_archived(self, cid: str | None) -> bool:
+        """VE2: is the matched variety archived (frozen)? It stays matchable (recognition keeps the full
+        vocabulary), but a learned-guess alias must not be saved onto it. Tolerates an index entry with no
+        `archived` attribute (older/hand-built indexes) as not archived."""
+        if not cid:
+            return False
+        for table in self.ref.variants.values():
+            v = table.by_id.get(cid)
+            if v is not None:
+                return bool(getattr(v, "archived", False))
+        return False
+
     def resolve_row(self, row: CanonicalRow) -> None:
         # the branch comes from the Format Resolver (run before this stage); this stage never derives it
         from stone_pipeline.stages.format_resolve import branch_of
@@ -302,8 +314,10 @@ class VariationStage:
             # saved pick would outlive a later seed correction. NOT added to the live index mid-run: doing so
             # made a later identical query resolve via 'exact'(high) instead of 'fuzzy'(medium) purely by
             # batch order. Same-run repeats resolve identically; the persisted alias takes effect next run.
-            if is_learned(match.method):
-                # the learning method is recorded as provenance -> auditable and reversible (forget_alias)
+            if is_learned(match.method) and not self._is_archived(match.cid):
+                # the learning method is recorded as provenance -> auditable and reversible (forget_alias).
+                # VE2: never LEARN a new alias onto an archived (frozen) variety -- it still RECOGNIZES the
+                # scrape (the bind above stands), but a guessed spelling must not stick to a frozen variety.
                 self.writeback.add_alias(match.cid, query, method=match.method)
             return
 

@@ -131,6 +131,15 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Stock could not be determined", kind="decision",
                 recovery="The scrape carries no stock signal. Fix the adapter to read it, or set the stock. "
                          "Lists on the next produce.", stage="Derive"),
+    Requirement("value_frozen", "no resolved attribute value is archived or internal, unless Medusa already "
+                                "holds this product with it",
+                "restricted_values (attributes.csv status/internal); an existing acked product is exempt "
+                "(ledger/existing.acked_products), a new one is held",
+                title="Attribute value is archived or internal (frozen)", kind="decision",
+                recovery="The colour, finish, quality or type this product resolved to is archived or internal "
+                         "in Medusa, so a new product may not use it. Reactivate the value in Medusa, or re-decide "
+                         "the product onto an active value in Review. An existing listing keeps it. Lists on the "
+                         "next produce.", stage="Match Variation / Reconcile"),
 )
 
 MEDUSA_RULES: frozenset[str] = frozenset(r.rule for r in MEDUSA_REQUIREMENTS)

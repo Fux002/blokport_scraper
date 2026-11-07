@@ -20,6 +20,7 @@ from stone_pipeline.config.settings import SETTINGS, active_categories
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
+from stone_pipeline.reference.loaders.common import norm
 
 log = logfmt.get_logger("validate")
 
@@ -90,7 +91,17 @@ class ValidationResult:
     rejects: list[CanonicalRow] = field(default_factory=list)
 
 
-def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
+def _frozen_value_pairs(row: CanonicalRow) -> tuple[tuple[str, str | None], ...]:
+    """(attribute category, the resolved value name) for each controlled value a product carries. category is
+    resolved by pcat id (gated by category_invalid), not a stored value name, so it is not value-frozen here."""
+    return (("color", row.color_name), ("finish", row.finish_name),
+            ("quality", row.quality_name), ("type", row.type_name))
+
+
+def validate_row(row: CanonicalRow, require_images: bool = False, *,
+                 frozen: dict[str, set[str]] | None = None,
+                 acked: dict[str, set[tuple[str, str]]] | None = None,
+                 source_code: str | None = None) -> None:
     for id_field in REQUIRED_ID_FIELDS:
         if not getattr(row, id_field, None):
             row.add_reject(RejectReason(rule="required_id_null", detail=id_field))
@@ -151,13 +162,46 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     # has no count by definition (derive decided it), so it is determined.
     if row.inventory_quantity is None and not row.made_to_order:
         row.add_reject(RejectReason(rule="stock_undetermined", detail="inventory"))
+    # VE2 value_frozen: a resolved attribute value that is RESTRICTED (archived or internal in attributes.csv,
+    # per restricted_values) is HELD -- it is NEVER re-resolved to a nearby active value -- UNLESS Medusa already
+    # imported THIS product (same SKU, acked) carrying it (ledger/existing.acked_products). An empty `frozen`
+    # (the expand phase: attributes.csv has no status columns yet, or no ledger, or local/CI) means nothing is
+    # restricted, so this is dormant. With a ledger absent, `acked` is empty, so every restricted value is held.
+    if frozen:
+        sku = f"{source_code}-{row.surrogate_key}".upper() if source_code else None
+        exempt = acked.get(sku, frozenset()) if (acked and sku) else frozenset()
+        for category, name in _frozen_value_pairs(row):
+            if name and norm(name) in frozen.get(category, ()) and (category, norm(name)) not in exempt:
+                row.add_reject(RejectReason(rule="value_frozen", detail=f"{category}={name}"))
 
 
-def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False) -> ValidationResult:
+def _frozen_and_acked(source_code: str | None) -> tuple[dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
+    """The VE2 inputs for value_frozen, built ONCE per run. `frozen` comes from attributes.csv (the single
+    authority, restricted_values); it is empty in the expand phase, so the acked lookup (which opens the
+    ledger) is SKIPPED entirely then -- today's cost is zero. When values are restricted, `acked` is read from
+    the ledger if one exists; with no ledger (local / CI) it stays empty, so every restricted value is held."""
+    from stone_pipeline.reference.loaders import restricted_values
+    frozen = restricted_values()
+    if not frozen or source_code is None:
+        return frozen, {}
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    from stone_pipeline.ledger.existing import acked_products
+    path = writethrough.ledger_path()
+    if not path.exists():
+        return frozen, {}
+    with Ledger.open(path, env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        return frozen, acked_products(lg)
+
+
+def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False,
+        *, source_code: str | None = None) -> ValidationResult:
     result = ValidationResult()
     handles: dict[str, str] = {}
+    frozen, acked = _frozen_and_acked(source_code)
     for row in rows:
-        validate_row(row, require_images=require_images)
+        validate_row(row, require_images=require_images, frozen=frozen, acked=acked, source_code=source_code)
         # global uniqueness of handle/slug after namespacing (system bug if not)
         if row.handle:
             if row.handle in handles and handles[row.handle] != row.surrogate_key:
