@@ -56,7 +56,7 @@ Response:
   "gap":         { ... },
   "removed":     { "<state>": <count>, ... },   // dead-letters are state 'dead' HERE (NOT gap_held)
   "inventory":   { "total": <int>, "delta": <int> },   // NOT a state histogram: NO gap_held key
-  "variation_reconcile": { "orphaned": <int> } }
+  "variation_reconcile": { "orphaned": <int> } }   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
 ```
 
 Three things that make `status.scraper[type].gap_held` read wrong if assumed:
