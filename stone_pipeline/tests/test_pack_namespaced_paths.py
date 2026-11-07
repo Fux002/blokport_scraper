@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 
 import pytest
@@ -33,3 +34,12 @@ def test_another_pack_reads_only_its_own(pack):
     assert SETTINGS.paths.synonyms_dir == SYNONYMS / "wood"
     assert SETTINGS.paths.backbone_additions_dir == CATALOG_SOURCE / "wood" / "backbone_additions"
     assert SETTINGS.paths.origin_map_csv == CATALOG_SOURCE / "wood" / "origin_map.csv"
+
+
+@pytest.mark.parametrize("name, folder", [("stone", ""), ("wood", "wood")])
+def test_the_additions_follow_a_redirected_catalog_source(pack, tmp_path, name, folder):
+    # a Paths pointed at another catalog_source (a test's tmp, a copied workspace) writes its deltas there, never
+    # into the committed catalog_source/
+    pack(name)
+    paths = dataclasses.replace(SETTINGS.paths, catalog_source_dir=tmp_path)
+    assert paths.backbone_additions_dir == tmp_path / folder / "backbone_additions"

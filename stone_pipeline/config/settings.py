@@ -324,8 +324,9 @@ class Paths:
 
     @property
     def backbone_additions_dir(self) -> Path:
-        # the per-run new-variety backbone deltas, PACK-NAMESPACED beside the pack's own backbones (stone stays flat)
-        return _catalog_source_file("backbone_additions")
+        # the per-run new-variety backbone deltas, PACK-NAMESPACED (stone stays flat). Under this instance's
+        # catalog_source_dir, so a Paths pointed at another catalog_source writes its deltas there too
+        return _pack_namespaced(self.catalog_source_dir) / "backbone_additions"
 
     @property
     def origin_map_csv(self) -> Path:

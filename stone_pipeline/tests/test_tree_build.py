@@ -264,7 +264,7 @@ def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
     tree_build.write_combinations({("c", "t", "old", "f", "k", "q")}, to_upload / "2_valid_combinations.csv")
     fake = types.SimpleNamespace(paths=types.SimpleNamespace(
         export_file=export, to_upload_dir=to_upload, review_dir=review, attributes_csv=attrs,
-        catalog_source_dir=tmp_path / "catalog_source"))
+        backbone_additions_dir=tmp_path / "catalog_source" / "backbone_additions"))
     monkeypatch.setattr(tree_build, "SETTINGS", fake)
     monkeypatch.setattr(tree_build, "CATEGORIES", ())
     monkeypatch.setattr(decisions, "load_retired", lambda: set())
