@@ -96,8 +96,10 @@ def test_run_generates_then_uploads_when_ready(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(pvi, "upload_variant_images",
                         lambda keys, client=None: seen.update(keys=keys) or (len(keys), []))
+    monkeypatch.setattr(pvi.refresh_images, "mark_best_model",
+                        lambda keys, client=None: seen.update(marked=sorted(keys)) or True)
     assert pvi.run() == 2
-    assert seen["keys"] == ["slab_marble_a", "slab_marble_b"]
+    assert seen["keys"] == seen["marked"] == ["slab_marble_a", "slab_marble_b"]
 
 
 # -- queue passing: produce publishes the queue to S3; the bare GPU task pulls it -----------------------
@@ -215,3 +217,88 @@ def test_prune_stale_queue_keys_is_best_effort(monkeypatch):
         def get_paginator(self, _n):
             raise RuntimeError("s3 down")
     assert pvi._prune_stale_queue_keys(_Boom()) == 0
+
+
+# -- what landed: only BEN2's output is a finished texture; an upload error is that key's miss ---------------
+class _Job:
+    """A GPU job's world on disk: the queue, image_pipeline/{images,to_upload}, a fake S3 and a recording
+    marker. Nothing on S3 yet, the generator stack present."""
+
+    def __init__(self, tmp_path, monkeypatch, keys, failing_upload=()):
+        from botocore.exceptions import ClientError
+        ip = tmp_path / "image_pipeline"
+        (ip / "images").mkdir(parents=True)
+        (ip / "to_upload").mkdir()
+        q = tmp_path / "prompts.json"
+        q.write_text(json.dumps([{"output_name": k} for k in keys]), encoding="utf-8")
+        self.ip, self.uploads, self.marked, self.mark_ok = ip, [], [], True
+        settings = _fake_settings(dry_run=False)
+        settings.paths = types.SimpleNamespace(workspace_root=tmp_path)
+        monkeypatch.setattr(pvi, "SETTINGS", settings)
+        monkeypatch.setattr(pvi, "DEBG_OUTPUT_DIR", ip / "to_upload")
+        monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
+        monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
+        monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: set())
+        job = self
+
+        class _S3:
+            def upload_file(self, local, bucket, key):
+                if any(key.endswith(f"/{k}.png") for k in failing_upload):
+                    raise ClientError({"Error": {"Code": "500", "Message": "S3 down"}}, "PutObject")
+                job.uploads.append(key.rsplit("/", 1)[1])
+        monkeypatch.setattr(pvi, "_s3_client", lambda: _S3())
+        monkeypatch.setattr(pvi.refresh_images, "mark_best_model",
+                            lambda keys, client=None: job.marked.append(sorted(keys)) or job.mark_ok)
+
+    def generated(self, raw=(), debackgrounded=(), failed=()):
+        """FLUX wrote images/{Key}.png for `raw`; BEN2 wrote to_upload/{Key}.png for `debackgrounded`."""
+        for k in raw:
+            (self.ip / "images" / f"{k}.png").write_bytes(b"with background")
+        for k in debackgrounded:
+            (self.ip / "to_upload" / f"{k}.png").write_bytes(b"clean")
+        return lambda: list(failed)
+
+
+def test_a_texture_ben2_did_not_finish_is_never_uploaded_or_marked(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a", "slab_b"])
+    monkeypatch.setattr(pvi, "_generate_queued_images",
+                        job.generated(raw=["slab_a", "slab_b"], debackgrounded=["slab_a"], failed=["rb_images.py"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="1 of 2"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png"]                  # slab_b's background copy in images/ never ships
+    assert job.marked == [["slab_a"]]                     # and is never marked final: the next produce re-mints it
+
+
+def test_an_upload_error_is_that_keys_miss_and_the_rest_still_land(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a", "slab_b", "slab_c"], failing_upload=["slab_b"])
+    monkeypatch.setattr(pvi, "_generate_queued_images",
+                        job.generated(debackgrounded=["slab_a", "slab_b", "slab_c"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="1 of 3"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png", "slab_c.png"]
+    assert job.marked == [["slab_a", "slab_c"]]           # what landed is marked, so nothing is paid twice
+
+
+def test_a_marker_that_was_not_written_is_a_partial_job(tmp_path, monkeypatch):
+    job = _Job(tmp_path, monkeypatch, ["slab_a"])
+    job.mark_ok = False
+    monkeypatch.setattr(pvi, "_generate_queued_images", job.generated(debackgrounded=["slab_a"]))
+    with pytest.raises(pvi.TexturesIncomplete, match="marker NOT written"):
+        pvi.run()
+    assert job.uploads == ["slab_a.png"]
+
+
+def test_an_unreadable_marker_makes_the_produce_queue_mints_only(tmp_path, monkeypatch, caplog):
+    q = tmp_path / "mints.json"
+    q.write_text(json.dumps([{"output_name": "slab_new"}]), encoding="utf-8")
+    monkeypatch.setattr(pvi, "SETTINGS", types.SimpleNamespace(
+        images=types.SimpleNamespace(upgrade_batch=5), auto_texture=types.SimpleNamespace(enabled=False)))
+
+    def unreadable(client=None):
+        raise pvi.refresh_images.MarkerUnreadable("AccessDenied")
+    monkeypatch.setattr(pvi.refresh_images, "load_refreshed", unreadable)
+    monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
+    monkeypatch.setattr(pvi.image_prompts, "build_with_upgrades",
+                        lambda refreshed, cap: pytest.fail("upgrades queued against an unreadable marker"))
+    assert pvi.queue_new_textures() == 1
+    assert any(r.levelname == "ERROR" and "marker" in r.getMessage() for r in caplog.records)

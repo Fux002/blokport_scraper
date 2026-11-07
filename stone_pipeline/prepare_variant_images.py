@@ -71,7 +71,8 @@ class TextureJobFailed(TextureJobError):
 
 
 class TexturesIncomplete(TextureJobError):
-    """The job ran, but some textures did not land (a generator script failed, or a PNG is missing)."""
+    """The job ran, but some textures did not land (a script failed, a PNG is missing or its upload failed), or
+    the best-model marker was not written."""
     exit_code = EXIT_PARTIAL
 
 
@@ -207,32 +208,36 @@ def _generator_blockers() -> list[str]:
 
 
 def _find_png(key: str) -> Path | None:
-    """Locate the generated {key}.png. Primary: DEBG_OUTPUT_DIR (rb_images' output). Fallback: search the
-    whole image_pipeline/ tree -- robust to any cwd/output-dir divergence on a runner (the generator scripts
-    resolve "./to_upload" relative to THEIR cwd, which must equal DEBG_OUTPUT_DIR but is where the one live
-    run diverged: the direct path came up empty though rb_images reported 19 written)."""
-    direct = DEBG_OUTPUT_DIR / f"{key}.png"
-    if direct.is_file():
-        return direct
-    ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
-    return next(ip_root.rglob(f"{key}.png"), None)
+    """The finished {key}.png: BEN2's output in DEBG_OUTPUT_DIR only (the scripts run with cwd=image_pipeline,
+    so that location is fixed). Never anywhere else: FLUX's images/{key}.png still has its background, and
+    uploading it would mark a wrong texture final. Absent -> None (the key is missing, and loud)."""
+    png = DEBG_OUTPUT_DIR / f"{key}.png"
+    return png if png.is_file() else None
 
 
 def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]:
     """Upload each generated {Key}.png (found under image_pipeline/) to <env>/variations/{Key}.png -- the
     CORRECT prefix the variant's Image URL resolves to. Returns (uploaded, missing_keys). A key whose png the
-    generator did not produce is REPORTED (missing), never silently skipped: its product stays HELD and the
-    caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
+    generator did not produce, or whose upload failed, is REPORTED (missing), never silently skipped: its product
+    stays HELD and the caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
     client = client or _s3_client()
     if client is None or SETTINGS.s3.dry_run:
         return 0, list(keys)
+    from boto3.exceptions import S3UploadFailedError
+    from botocore.exceptions import BotoCoreError, ClientError
     uploaded, missing = 0, []
     for key in keys:
         png = _find_png(key)
         if png is None:
             missing.append(key)
             continue
-        client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
+        try:
+            client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
+        except (S3UploadFailedError, ClientError, BotoCoreError) as exc:
+            # this key's miss, not the job's crash: the rest still land and are marked (never paid twice)
+            log.error("variant texture upload failed", extra={"extra_fields": {"key": key, "error": str(exc)}})
+            missing.append(key)
+            continue
         uploaded += 1
     return uploaded, missing
 
@@ -246,7 +251,12 @@ def queue_new_textures() -> int:
     # The upgrade drip: once-only via the durable best-model marker, capped so a produce's FAL spend stays
     # predictable. A legacy texture is never held back, just replaced within a few produces. cap 0 == mints only.
     cap = SETTINGS.images.upgrade_batch
-    refreshed = refresh_images.load_refreshed() if cap > 0 else set()
+    try:
+        refreshed = refresh_images.load_refreshed() if cap > 0 else set()
+    except refresh_images.MarkerUnreadable:
+        # read as empty, every texture already made by the best model would be queued (and paid) again
+        log.exception("best-model marker unreadable: this produce queues mints only, no upgrades")
+        cap, refreshed = 0, set()
     try:
         prompts_path = image_prompts.build_with_upgrades(refreshed, cap) if cap > 0 else image_prompts.build()
     except Exception:
@@ -345,13 +355,14 @@ def run() -> int:
     uploaded, missing = upload_variant_images(targets)
     not_landed = set(missing)
     landed = [k for k in targets if k not in not_landed]
+    marked = True
     if landed:
         # Every texture that landed was made by the CURRENT best model, so record it as such, partial run or not:
         # otherwise the upgrade drip would later regenerate it (a mint looks legacy, an upgrade looks undone),
         # paying twice for an image that is already best. What did not land stays unmarked: the next produce
         # queues it again (a mint is still imageless; an upgrade is still outside the marker).
-        refresh_images.mark_best_model(landed)
-    if failed or missing:
+        marked = refresh_images.mark_best_model(landed)
+    if failed or missing or not marked:
         # loud: some images did not generate/upload, so their products stay HELD until a clean re-run.
         # Safe (the sync product gate never lists an imageless product) but surfaced, never silent. Include where we
         # looked, so a path/output-dir mismatch on a runner is diagnosable from the log rather than guessed.
@@ -362,12 +373,13 @@ def run() -> int:
                 return f"<{exc}>"
         ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
         log.error("some variant images were not produced", extra={"extra_fields": {
-            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed,
+            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed, "marker_written": marked,
             "missing_pngs": missing[:8], "debg_dir": str(DEBG_OUTPUT_DIR), "debg_files": _peek(DEBG_OUTPUT_DIR),
             "ip_to_upload": _peek(ip_root / "to_upload"), "ip_images": _peek(ip_root / "images"),
             "cwd": os.getcwd(), "workspace_root": str(SETTINGS.paths.workspace_root)}})
         raise TexturesIncomplete(f"{len(missing)} of {len(targets)} variant texture(s) did not land "
-                                 f"(failed scripts {failed}); uploaded {uploaded}")
+                                 f"(failed scripts {failed}); uploaded {uploaded}; best-model marker "
+                                 f"{'written' if marked else 'NOT written'}")
     log.info("variant images prepared", extra={"extra_fields": {"queued": len(targets), "uploaded": uploaded}})
     print(f"Prepared + uploaded {uploaded}/{len(targets)} new variant image(s) to {VARIATIONS_PREFIX}")
     return uploaded

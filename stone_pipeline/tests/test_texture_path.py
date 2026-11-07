@@ -167,7 +167,8 @@ def job(tmp_path, monkeypatch):
     monkeypatch.setattr(pvi, "_generate_queued_images", lambda: list(seen["failed"]))
     monkeypatch.setattr(pvi, "upload_variant_images",
                         lambda keys, client=None: (seen.update(uploaded=keys), (len(keys), list(seen["missing"])))[1])
-    monkeypatch.setattr(refresh_images, "mark_best_model", lambda keys, client=None: seen["marked"].append(list(keys)))
+    monkeypatch.setattr(refresh_images, "mark_best_model",
+                        lambda keys, client=None: seen["marked"].append(list(keys)) or True)
     return seen
 
 
@@ -187,13 +188,6 @@ def test_a_partial_gpu_job_marks_only_what_landed_and_exits_partial(job, monkeyp
     assert job["marked"] == [["slab_old"]]
     monkeypatch.setattr(pvi, "run", lambda: (_ for _ in ()).throw(pvi.TexturesIncomplete("1 of 2")))
     assert pvi.main() == pvi.EXIT_PARTIAL
-
-
-def test_a_failed_script_is_partial_even_when_every_png_landed(job):
-    job["failed"] = ["rb_images.py"]
-    with pytest.raises(pvi.TexturesIncomplete, match="rb_images.py"):
-        pvi.run()
-    assert job["marked"] == [["slab_new", "slab_old"]]                # every texture landed: none paid again
 
 
 def test_the_job_exit_codes_are_distinct(monkeypatch):
