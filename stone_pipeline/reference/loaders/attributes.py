@@ -64,6 +64,18 @@ def restricted_values(path: Path | None = None) -> dict[str, set[str]]:
     return dict(out)
 
 
+def restricted_ids(path: Path | None = None) -> set[str]:
+    """The Medusa ids of every RESTRICTED value (archived OR internal) in attributes.csv, for the operator's
+    attribute-paste gate (a paste of a restricted id is refused). Same source (medusa_files.read_attributes)
+    and same dormancy as restricted_values: empty while the file carries no status/internal columns or is
+    absent, so the gate is a no-op in the expand phase."""
+    path = Path(path) if path is not None else env().SETTINGS.paths.attributes_csv
+    if not Path(path).exists():
+        return set()
+    return {a.sourceid for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED)
+            if a.sourceid and not a.assignable}
+
+
 def attributes_status_required(path: Path) -> bool:
     """Whether reading `path` requires the status/internal columns: only Medusa's live attributes.csv download
     carries them. An internal temp dump of the ledger (ledger.render) is the old shape and is read tolerant,

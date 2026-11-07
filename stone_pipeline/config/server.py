@@ -48,6 +48,17 @@ def _type_vocab() -> dict[str, str]:
     return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
 
 
+def _assignable_values(category: str, vocab: dict[str, str]) -> list[str]:
+    """The sorted canonical values of `vocab` (norm -> canonical) a review PICKER may offer: the full
+    attribute vocab minus the RESTRICTED (archived or internal) values. VE2 keeps a restricted value in the
+    vocab the decide validator checks against (it is still a known attribute), but never offers it as a
+    choice. Dormant until Blokport publishes the status columns: restricted_values is then empty and the
+    picker lists the whole vocab, byte-identical to before."""
+    from stone_pipeline.reference.loaders import restricted_values
+    restricted = restricted_values().get(category, set())
+    return sorted(canon for nv, canon in vocab.items() if nv not in restricted)
+
+
 def _origin_as_card(item: dict) -> dict:
     """An origin confirmation in the variety-card shape: the product bound fine, only its origin could not be
     decided. A vendor-map mismatch says so and prefills the vendor's declared country. A multi-country stone
@@ -440,6 +451,12 @@ def _put_review_attribute(params, body, query):
         return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
     value = unquote(params["value"])   # same decode-before-key rule as the variety PUT
     kind, medusa_id = _str(body, "kind"), _str(body, "medusa_id")
+    # VE2: a restricted (archived or internal) Medusa id must never be pasted onto a pending value -- it would
+    # make products unassignable. Dormant until the status columns exist (restricted_ids is then empty).
+    from stone_pipeline.reference.loaders import restricted_ids
+    if medusa_id and medusa_id in restricted_ids():
+        return 400, {"error": f"attribute id {medusa_id!r} is archived or internal in Medusa; "
+                              "assign an active value", "restricted": True}
     try:
         decisions_store.set_attribute_id(kind, value, medusa_id)
     except decisions_store.InvalidDecision as e:
@@ -511,6 +528,97 @@ def _delete_review_decide(params, body, query):
                  "cleared": [{"statements": n} for n in decisions_store.clear_all(listings)]}   # one transaction
 
 
+def _resolve_target(name: str, stone_type: str) -> str:
+    """The canonical variety a stated name resolves to: itself if it exists as that type, else its alias
+    target, else itself (an as-yet-unknown mint name). Used to compare statements on the resolved variety."""
+    from stone_pipeline.config import varieties
+    if varieties.exists_as(name, stone_type):
+        return name
+    return varieties.alias_target(name, stone_type) or name
+
+
+def _all_reconfirm(listings, canonical: str, stone_type: str, color: str, origin: str, widen: bool) -> bool:
+    """True iff EVERY listing already carries the IDENTICAL operator statement: the vendor row for (source,
+    spelling), else the global ('', spelling) row, resolving to the same variety and matching type, colour,
+    origin and widen. An identical statement stores nothing new, so re-stating it (on an archived variety, or
+    with a restricted colour the record already carries) is a pure no-op the gate allows. Read from the raw
+    statement rows, not the derived Decisions: a bind is folded into bindings there, and its colour is kept
+    only at variety level, so the per-listing comparison needs the row."""
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.matching import projections as proj
+    rows = {(proj.norm(r["source"]), proj.norm(r["spelling_norm"])): r for r in decisions_store._statement_rows()}
+    want = (proj.norm(canonical), proj.norm(stone_type), proj.norm(color), (origin or "").upper(), bool(widen))
+    for source, scraped in listings:
+        sp = proj.norm(scraped)
+        r = rows.get((proj.norm(source), sp)) or rows.get(("", sp))
+        if r is None or r["verdict"] != "is":
+            return False
+        name_eff = r["name"] or r["spelling"]                   # a non-renamed mint stores no name: the variety is the spelling
+        got = (proj.norm(_resolve_target(name_eff, r["stone_type"] or "")), proj.norm(r["stone_type"] or ""),
+               proj.norm(r["color"] or ""), (r["origin_iso"] or "").upper(), bool(r["widen"]))
+        if got != want:
+            return False
+    return True
+
+
+def _variety_carries_colour(canonical: str, stone_type: str, color: str) -> bool:
+    """True iff the variety already documents `color`: its backbone SEED colours grown by the config.db leaf
+    OVERLAY (the same view the tree is built from), plus any operator-STATED colour. Restating a colour the
+    variety already carries is not an assignment, so it passes the colour gate even once that colour is
+    restricted. Existing readers only (load_backbone + backbone_leaf_overlay + load_decisions.colours)."""
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import load_backbone
+    backbone = load_backbone()
+    backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
+    variety = backbone.lookup(canonical, stone_type)
+    carried = {proj.norm(c) for c in (variety.colors if variety else [])}
+    carried |= {proj.norm(c) for c in decisions_store.load_decisions().colours.get(
+        (proj.norm(canonical), proj.norm(stone_type)), [])}
+    return proj.norm(color) in carried
+
+
+def _ve2_decide_gate(listings, name: str, stone_type: str, color: str, origin: str, widen: bool):
+    """The VE2 operator gate for PUT /review/decide: refuse a statement that would ASSIGN a restricted
+    (archived or internal) value, or BIND onto an archived variety. A value is judged ONLY where the statement
+    assigns it, exactly as validate's value_frozen exemption judges a product only on a value it carries:
+      * MINT (the target variety does not yet exist): its type AND colour are assigned now, both must be
+        assignable.
+      * an existing variety: an IDENTICAL re-confirm of the stored statement is a no-op and always allowed;
+        otherwise a BIND onto an ARCHIVED variety is refused, and a COLOUR the variety does not already carry
+        must be assignable (a bind's carried colour, already documented, is not an assignment).
+    Returns an (status, body) error to refuse, or None to allow. Dormant until Blokport publishes the status
+    columns: restricted_values is empty and is_archived is False for every variety, so this returns None."""
+    from stone_pipeline.config import varieties
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import restricted_values
+    restricted = restricted_values()
+    rtypes, rcolors = restricted.get("type", set()), restricted.get("color", set())
+    canonical = name if varieties.exists_as(name, stone_type) else varieties.alias_target(name, stone_type)
+    if not canonical:                                            # MINT: a brand-new variety
+        if proj.norm(stone_type) in rtypes:
+            return 400, {"error": f"type {stone_type!r} is archived or internal in Medusa; assign an active type",
+                         "restricted": True}
+        if color and proj.norm(color) in rcolors:
+            return 400, {"error": f"colour {color!r} is archived or internal in Medusa; pick an active colour",
+                         "restricted": True}
+        return None
+    # an existing variety: a BIND or a COLOUR AMEND
+    archived = varieties.is_archived(canonical, stone_type)
+    colour_restricted = bool(color) and proj.norm(color) in rcolors
+    if not archived and not colour_restricted:
+        return None                                             # nothing to gate (the dormant path)
+    if _all_reconfirm(listings, canonical, stone_type, color, origin, widen):
+        return None                                             # identical to the stored statement: a no-op
+    if archived:
+        return 400, {"error": f"'{canonical}' ({stone_type}) is archived in Medusa; bind to an active "
+                              "variety, mint as new, or reactivate it in Blokport", "archived": True}
+    if colour_restricted and not _variety_carries_colour(canonical, stone_type, color):
+        return 400, {"error": f"colour {color!r} is archived or internal in Medusa; pick an active colour",
+                     "restricted": True}
+    return None
+
+
 def _put_review_decide(params, body, query):
     # ONE statement, whatever list it comes from (pending card or resolved row): "for vendor <source>, the
     # product scraped as <scraped> is <name>, a <type>, <color>, from <origin>". The backend derives the
@@ -550,6 +658,8 @@ def _put_review_decide(params, body, query):
     if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
         return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                      "retired": True}
+    if (refusal := _ve2_decide_gate(listings, name, stone_type, color, origin, widen)) is not None:
+        return refusal
     try:
         # one transaction: a listing the store refuses leaves none of the others stored
         outcomes = decisions_store.decide_all(listings, name, stone_type, color, origin, widen)
@@ -711,13 +821,15 @@ def _get_adapters(params, body, query):
 
 
 def _get_colors(params, body, query):
-    # the colour vocabulary for the mint colour picker (a colourless variety seeded with a real colour)
-    return 200, {"colors": sorted(_color_vocab().values())}
+    # the colour vocabulary for the mint colour picker (a colourless variety seeded with a real colour);
+    # VE2: restricted (archived/internal) colours are never offered
+    return 200, {"colors": _assignable_values("color", _color_vocab())}
 
 
 def _get_types(params, body, query):
-    # the stone-type vocabulary for the mint type picker (a type-less variety is held until it has one)
-    return 200, {"types": sorted(_type_vocab().values())}
+    # the stone-type vocabulary for the mint type picker (a type-less variety is held until it has one);
+    # VE2: restricted (archived/internal) types are never offered
+    return 200, {"types": _assignable_values("type", _type_vocab())}
 
 
 # -- sources: the scraper control plane --------------------------------------------------------------------
