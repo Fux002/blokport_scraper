@@ -2,9 +2,11 @@
 them, and the already-on-S3 prune must NOT drop them (their PNG exists by definition)."""
 
 import json
+import types
 
 from stone_pipeline.stages import image_prompts
 from stone_pipeline import prepare_variant_images as pvi
+from stone_pipeline.tests._marker_s3 import MarkerS3
 
 
 def _stub(monkeypatch, backed, variants):
@@ -89,18 +91,17 @@ def test_a_fresh_mint_is_marked_so_the_drip_never_redoes_it(monkeypatch):
     unmarked, the upgrade drip would later regenerate (and re-charge for) an already-best texture."""
     from stone_pipeline import refresh_images
 
-    marker: set[str] = set()
-    monkeypatch.setattr(refresh_images, "_s3_client", lambda: object())
-    monkeypatch.setattr(refresh_images, "load_refreshed", lambda client=None: set(marker))
-    monkeypatch.setattr(refresh_images, "save_refreshed",
-                        lambda keys, client=None: (marker.update(keys), True)[1])
+    s3 = MarkerS3()                                         # a first run: no marker yet
+    monkeypatch.setattr(refresh_images, "_s3_client", lambda: s3)
+    monkeypatch.setattr(refresh_images, "SETTINGS", types.SimpleNamespace(
+        s3=types.SimpleNamespace(bucket="b", dry_run=False), images=types.SimpleNamespace(marker_write_attempts=3)))
 
     assert refresh_images.mark_best_model(["slab_new"]) is True
-    assert marker == {"slab_new"}
+    assert s3.keys() == {"slab_new"}
     refresh_images.mark_best_model(["slab_other"])          # merges, never truncates
-    assert marker == {"slab_new", "slab_other"}
+    assert s3.keys() == {"slab_new", "slab_other"}
     assert refresh_images.mark_best_model([]) is False      # nothing to do, no write
 
     # a marked mint is no longer an upgrade candidate
     _stub(monkeypatch, {"slab_new"}, {"slab_new": {"Name": "N", "Image": "u"}})
-    assert image_prompts.upgrade_candidates(marker, cap=10) == []
+    assert image_prompts.upgrade_candidates(s3.keys(), cap=10) == []
