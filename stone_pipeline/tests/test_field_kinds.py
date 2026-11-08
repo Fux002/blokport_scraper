@@ -118,6 +118,23 @@ def test_a_produce_stops_when_the_map_cannot_be_fetched(monkeypatch):
     assert stop.value.code == 2
 
 
+def test_a_direct_pipeline_run_without_the_map_fails_loud_up_front(monkeypatch, tmp_path):
+    # A direct run/build/catalog that skips the produce never fetches the map. It must stop BEFORE any row,
+    # NAMING the cause, not clean each name through a missing map and dead-letter every row into a row-isolation
+    # abort (which sends the operator chasing the wrong thing).
+    from stone_pipeline import catalog
+    from stone_pipeline import run as run_mod
+    monkeypatch.setattr(fk, "_path", lambda: tmp_path / "field-kinds.json")   # absent
+    msg = "field-kinds.json missing: run a produce or the fetch first"
+    with pytest.raises(fk.FieldKindsError, match=msg):
+        fk.require_present()
+    # the shared name-writing entries check up front, before any row is read/written
+    with pytest.raises(fk.FieldKindsError, match=msg):
+        catalog.run()
+    with pytest.raises(fk.FieldKindsError, match=msg):
+        run_mod.run_source("any-source")
+
+
 def test_no_module_but_the_loader_and_text_imports_the_cleaners():
     # No second map in code: every writer cleans through field_kinds, which reads the backend's map.
     root = Path(fk.__file__).resolve().parents[2]

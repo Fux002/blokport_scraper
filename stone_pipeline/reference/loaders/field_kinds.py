@@ -94,6 +94,17 @@ def kind(field: str) -> str:
     return kinds()[field]
 
 
+def require_present() -> None:
+    """Fail loud, up front, when the map is not available, NAMING the cause. The name-writing stages (mint, emit,
+    derive, normalize, lots) clean every name through this map; a direct `stone_pipeline.run`/`.build`/`.catalog`
+    that skips the produce never fetches it, so a missing map must stop BEFORE any row rather than surface later
+    as a per-row isolation abort over a config file. Not a fetch: the produce is the one fetch path."""
+    try:
+        kinds()
+    except FieldKindsError as exc:
+        raise FieldKindsError("field-kinds.json missing: run a produce or the fetch first") from exc
+
+
 def clean(field: str, text: str) -> str:
     """`text` cleaned by its field's kind; raises UnfoldableName for a letter with no ASCII form."""
     return clean_name(text) if kind(field) == NAME else clean_identifier(text)

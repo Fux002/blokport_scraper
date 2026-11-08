@@ -30,6 +30,7 @@ from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
 from stone_pipeline.io import storage
 from stone_pipeline.reference import loaders
+from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
 from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
 
@@ -91,6 +92,7 @@ def _record_catalog() -> None:
 
 
 def run(outputs_root: Path | None = None) -> Path:
+    field_kinds.require_present()   # every name is written by the map; fail loud up front, before any row is touched
     outputs_root = Path(outputs_root or SETTINGS.paths.outputs_dir)
     parquets = find_canonical(outputs_root)
     if not parquets:
