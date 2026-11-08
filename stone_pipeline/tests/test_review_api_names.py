@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 from stone_pipeline.reference.loaders import field_kinds
 
 
@@ -51,5 +51,5 @@ def test_an_attribute_id_refuses_a_value_that_is_not_its_clean_form():
 def test_a_source_collection_city_must_be_clean():
     from stone_pipeline import adapters
     name = sorted(adapters.REGISTRY)[0]
-    err = server._validate_source_put(name, {"ports": ["Rotterdam"], "collection_city": "São Francisco"})
+    err = server._validate_source_put(name, {"ports": ["Rotterdam"], "collection_city": "São Francisco"}, None)
     assert err and err[0] == 400 and err[1]["clean"] == "Sao Francisco"

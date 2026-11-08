@@ -129,6 +129,8 @@ def test_fetch_inputs_failure_is_best_effort(monkeypatch):
         raise RuntimeError("no S3 here")
     import stone_pipeline.produce as p
     monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_all", boom, raising=False)
+    # the field-kinds fetch is fatal on every env (test_field_kinds); this test is about the export fetch only
+    monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_field_kinds", lambda: None)
     # call the real _fetch_inputs (not the stub) to prove it swallows the error
     p._fetch_inputs()   # must not raise
 
@@ -221,6 +223,8 @@ def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_developm
     def _boom():
         raise RuntimeError("s3 unreachable")
     monkeypatch.setattr(fetch_inputs, "fetch_all", _boom)
+    # the field-kinds fetch succeeds here, so the only exit is the export fetch's own (its failure: test_field_kinds)
+    monkeypatch.setattr(fetch_inputs, "fetch_field_kinds", lambda: None)
     monkeypatch.setattr(categories, "refresh_category_pcats", lambda: None)
     monkeypatch.setattr(produce, "IS_PRODUCTION", True, raising=False)
     with pytest.raises(SystemExit):
