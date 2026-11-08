@@ -21,6 +21,8 @@ from market_prices.collect import collect_run, stamp_for, write_run
 from market_prices.fetching import Response, TransportError
 from market_prices.publish import publish_run
 from market_prices.register import RegisterError, Register, Site, load_register
+from market_prices.robots import parse_robots
+from stone_pipeline.io.deliverables import file_entry
 
 MOMENT = datetime(2026, 11, 8, 12, 30, 5, tzinfo=timezone.utc)
 ROBOTS_OPEN = Response(200, "User-agent: *\nDisallow:\n")
@@ -30,10 +32,9 @@ ROBOTS = f"{BASE}/robots.txt"
 
 def _site(site_id="shop", base_url=BASE, **overrides) -> dict:
     site = {
-        "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant", "platform": "woocommerce_store",
-        "base_url": base_url,
-        "terms": {"terms_url": f"{base_url}/terms", "robots_url": f"{base_url}/robots.txt", "checked_on": "2026-11-02",
-                  "summary": "No clause on copying."},
+        "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
+        "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
+        "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-02", "summary": "No clause on copying."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
     }
     return {**site, **overrides}
@@ -83,8 +84,12 @@ def _shop(*pages, robots=ROBOTS_OPEN) -> _Sites:
     return _Sites({ROBOTS: robots, **{_page_url(n): page for n, page in enumerate(pages, 1)}})
 
 
+def _no_pause(_seconds: float) -> None:
+    pass
+
+
 def _run(sites, register=None):
-    return collect_run(register or _register(), sites, MOMENT)
+    return collect_run(register or _register(), sites, MOMENT, _no_pause)
 
 
 def _status(result, site_id="shop"):
@@ -101,6 +106,7 @@ def test_a_listing_keeps_the_sellers_words_and_an_exact_price():
                                 "width": "15", "height": "2"}
     assert (row.source_url, row.availability_text) == (f"{BASE}/product/1/", "Ruim op voorraad")
     assert (row.observed_at, row.run_id) == ("2026-11-08T12:30:05Z", "20261108T123005Z")
+    assert (row.seller_country, row.served_market) == ("BE", "NL")
 
 
 def test_what_the_site_does_not_say_stays_unknown():
@@ -164,6 +170,9 @@ def test_an_unusable_currency_code_is_unknown_not_invented():
     _listing(2, id=None),
     _listing(2, permalink="https://elsewhere.example/product/2/"),
     _listing(2, permalink="javascript:alert(1)"),
+    _listing(2, permalink="https://evil.example\\@shop.example/x"),
+    _listing(2, permalink="https://user@shop.example/x"),
+    _listing(2, permalink="https://shop.example/a\nb"),
     _listing(2, prices={"price": "12.50", "currency_code": "EUR", "currency_minor_unit": 2}),
     _listing(2, prices={"price": "100", "currency_code": "EUR", "currency_minor_unit": True}),
     _listing(2, prices=None),
@@ -176,6 +185,51 @@ def test_one_malformed_listing_marks_the_site_partial_and_the_rest_still_count(b
     result = _run(_shop(_page([_listing(1), bad])))
     assert [row.listing_key for row in result.observations] == ["1"]
     assert (_status(result).status.value, _status(result).malformed_listings) == ("partial", 1)
+
+
+_HOSTILE = [None, True, 7, 1.5, float("nan"), float("inf"), "", "   ", "\ud800", "\uff03", "x" * 200_000, "9" * 5000,
+            "https://[bad/", "https://evil.example\\@shop.example/x", "<![if", [], {}, [1], {"a": 1}, [[]], [{"name": 1}]]
+_HOSTILE_PATHS = [("id",), ("name",), ("permalink",), ("sku",), ("short_description",), ("price_html",), ("prices",),
+                  ("prices", "price"), ("prices", "currency_code"), ("prices", "currency_minor_unit"),
+                  ("prices", "price_range"), ("attributes",), ("dimensions",), ("dimensions", "length"), ("weight",),
+                  ("stock_availability",), ("stock_availability", "text"), ("add_to_cart",), ("add_to_cart", "minimum")]
+
+
+@pytest.mark.parametrize("path", _HOSTILE_PATHS, ids=".".join)
+def test_no_listing_value_can_lose_the_run(path, tmp_path):
+    """Any value in any field: the good listing still ships, and the file can be written and read back."""
+    for index, value in enumerate(_HOSTILE):
+        bad = json.loads(json.dumps(_listing(2)))
+        target = bad
+        for step in path[:-1]:
+            target = target[step]
+        target[path[-1]] = value
+        result = _run(_shop(_page([_listing(1), bad])))
+        run_dir = write_run(result, tmp_path / str(index))
+        assert "1" in {row.listing_key for row in result.observations}
+        assert file_entry(run_dir / config.OBSERVATIONS_FILE)["rows"] == len(result.observations)
+
+
+@pytest.mark.parametrize("field", ["sku", "short_description"])
+@pytest.mark.parametrize("value", ["x" * (config.MAX_CELL_CHARS + 1), "\ud800"], ids=["huge", "surrogate"])
+def test_a_huge_or_unencodable_cell_is_the_listings_problem_alone(field, value):
+    result = _run(_shop(_page([_listing(1), _listing(2, **{field: value})])))
+    assert [row.listing_key for row in result.observations] == ["1"]
+    assert (_status(result).status.value, _status(result).malformed_listings) == ("partial", 1)
+
+
+def test_a_repeated_attribute_keeps_both_values():
+    attributes = [{"name": "Dikte", "terms": [{"name": "2"}]}, {"name": "Dikte", "terms": [{"name": "3"}]}]
+    assert _run(_shop(_page([_listing(attributes=attributes)]))).observations[0].stated_specs["Dikte"] == "2 / 3"
+
+
+def test_a_sellers_less_than_sign_stays_text():
+    row = _run(_shop(_page([_listing(name="Slab <3cm and >2cm", short_description="")]))).observations[0]
+    assert row.listing_text == "Slab <3cm and >2cm"
+
+
+def test_a_float_id_is_refused():
+    assert _status(_run(_shop(_page([_listing(1), _listing(2, id=1.0)])))).malformed_listings == 1
 
 
 def test_a_listing_seen_twice_counts_once():
@@ -195,12 +249,14 @@ def test_a_site_without_approval_is_never_requested(decision):
 
 
 @pytest.mark.parametrize("change", [
-    {"terms": {"robots_url": f"{BASE}/robots.txt", "checked_on": "2026-11-02", "summary": "x"}},
-    {"terms": {"terms_url": f"{BASE}/t", "checked_on": "2026-11-02", "summary": "x"}},
-    {"terms": {"terms_url": f"{BASE}/t", "robots_url": f"{BASE}/robots.txt", "summary": "x"}},
-    {"terms": {"terms_url": f"{BASE}/t", "robots_url": f"{BASE}/robots.txt", "checked_on": "2026-11-02"}},
+    {"terms": {"checked_on": "2026-11-02", "summary": "x"}},
+    {"terms": {"terms_url": f"{BASE}/t", "summary": "x"}},
+    {"terms": {"terms_url": f"{BASE}/t", "checked_on": "2026-11-02"}},
     {"decided_by": None},
     {"decided_on": None},
+    {"decided_on": "2026-11-01"},
+    {"seller_country": None},
+    {"served_market": None},
 ])
 def test_approval_is_refused_without_the_full_record(change):
     with pytest.raises(ValueError, match="approved needs"):
@@ -215,8 +271,14 @@ def test_approval_is_refused_without_the_full_record(change):
     {"query": {"page": "9"}},
     {"seller_type": "friend"},
     {"surprise": 1},
-    {"terms": {"terms_url": f"{BASE}/t", "robots_url": "https://other.example/robots.txt", "checked_on": "2026-11-02",
-               "summary": "x"}},
+    {"base_url": "https://shop.example?"},
+    {"base_url": "https://user@shop.example"},
+    {"site_id": "shop\n"},
+    {"seller_country": "Belgium"},
+    {"decided_by": "   "},
+    {"terms": {"terms_url": "n/a", "checked_on": "2026-11-02", "summary": "x"}},
+    {"terms": {"terms_url": f"{BASE}/t", "checked_on": "2026-11-02", "summary": "   "}},
+    {"terms": {"terms_url": f"{BASE}/t", "checked_on": 0, "summary": "x"}},
 ])
 def test_a_bad_site_entry_is_refused(change):
     with pytest.raises(ValueError):
@@ -258,15 +320,79 @@ def test_robots_that_forbid_the_api_stop_the_site_before_any_page():
     assert "robots.txt disallows" in _status(result).detail
 
 
-def test_absent_robots_allow():
-    assert _status(_run(_shop(_page([_listing()]), robots=Response(404, "")))).status.value == "ok"
+def test_absent_robots_allow_even_when_the_404_page_loads_a_captcha_script():
+    robots = Response(404, '<html><script src="recaptcha/api.js"></script></html>', {"Content-Type": "text/html"})
+    assert _status(_run(_shop(_page([_listing()]), robots=robots))).status.value == "ok"
 
 
-def test_unknown_robots_fail_closed():
-    sites = _shop(robots=Response(500, ""))
+@pytest.mark.parametrize("robots", [Response(500, ""), Response(200, "<html>Welcome</html>")])
+def test_unknown_robots_fail_closed(robots):
+    sites = _shop(robots=robots)
     result = _run(sites)
     assert sites.requested == [ROBOTS]
     assert _status(result).status.value == "unavailable_error"
+
+
+def test_a_robots_rule_that_mentions_a_marker_is_not_a_block():
+    robots = Response(200, "User-agent: *\nDisallow: /captcha/\n", {"Content-Type": "text/plain"})
+    assert _status(_run(_shop(_page([_listing()]), robots=robots))).status.value == "ok"
+
+
+_TARGET = "/wp-json/wc/store/v1/products?page=1&per_page=100"
+
+
+@pytest.mark.parametrize("text,allowed", [
+    ("User-agent: *\nDisallow:\n", True),
+    ("User-agent: *\nDisallow: /wp-json/\n", False),
+    ("User-agent: *\nDisallow: /*?\n", False),
+    ("User-agent: *\nDisallow: /*wc/store*\n", False),
+    ("User-agent: *\nDisallow: /*per_page=\n", False),
+    ("User-agent: *\nDisallow: /wp-json/wc/store/v1/products?page=1\n", False),
+    ("User-agent: *\nDisallow: /*100$\n", False),
+    ("User-agent: *\nDisallow: /*99$\n", True),
+    ("User-agent: *\nAllow: /\nDisallow: /wp-json/\n", False),
+    ("User-agent: *\nDisallow: /wp-json/\nAllow: /wp-json/wc/\n", True),
+    ("User-agent: *\nAllow: /wp-json/\nDisallow: /wp-json/\n", True),
+    ("User-agent: *\nAllow: /a\n\nUser-agent: *\nDisallow: /wp-json/\n", False),
+    ("User-agent: other\nDisallow: /\n", True),
+    ("User-agent: other\nUser-agent: *\nDisallow: /\n", False),
+    (f"User-agent: {config.ROBOTS_TOKEN.upper()}\nDisallow: /wp-json/\n\nUser-agent: *\nAllow: /\n", False),
+    (f"User-agent: {config.ROBOTS_TOKEN}\nAllow: /\n\nUser-agent: *\nDisallow: /\n", True),
+    (f"User-agent: {config.ROBOTS_TOKEN}\n\nUser-agent: *\nDisallow: /\n", False),
+    (f"User-agent: {config.ROBOTS_TOKEN}\nAllow:\n\nUser-agent: *\nDisallow: /\n", True),
+    ("User-agent: *\nDisallow: /wp%2Djson/\n", False),
+    ("# only a comment\nnonsense\nUser-agent: * # all\nDisallow: /wp-json/ # no\n", False),
+    ("User-agent: *\nDisallow: wp-json/\n", False),
+])
+def test_robots_rules_follow_the_standard(text, allowed):
+    assert parse_robots(text, config.ROBOTS_TOKEN).allows(_TARGET) is allowed
+
+
+def test_a_robots_file_of_wildcards_stays_fast():
+    pattern = "*a" * 2000
+    rules = parse_robots(f"User-agent: *\nDisallow: /{pattern}b\n", config.ROBOTS_TOKEN)
+    assert rules.allows("/" + "a" * 4000) is True
+
+
+@pytest.mark.parametrize("value,expected", [("7", 7.0), ("nan", 0.0), ("inf", 0.0), ("-3", 0.0), ("soon", 0.0)])
+def test_crawl_delay_is_read_only_when_usable(value, expected):
+    assert parse_robots(f"User-agent: *\nCrawl-delay: {value}\n", config.ROBOTS_TOKEN).crawl_delay == expected
+
+
+def test_requests_are_paced_by_the_site_or_our_floor():
+    for robots, expected in ((ROBOTS_OPEN, config.MIN_REQUEST_INTERVAL_SECONDS),
+                             (Response(200, "User-agent: *\nCrawl-delay: 30\n"), 30.0)):
+        pauses: list[float] = []
+        collect_run(_register(), _shop(_page([_listing(1)], total=2), _page([_listing(2)], total=2), robots=robots),
+                    MOMENT, pauses.append)
+        assert pauses == [expected, expected]
+
+
+def test_a_crawl_delay_over_the_cap_stops_the_site():
+    sites = _shop(robots=Response(200, f"User-agent: *\nCrawl-delay: {config.MAX_CRAWL_DELAY_SECONDS + 1}\n"))
+    result = _run(sites)
+    assert sites.requested == [ROBOTS]
+    assert _status(result).status.value == "disabled_terms"
 
 
 # --- a block is reported, never worked around ----------------------------------------------------------------------------
@@ -274,6 +400,10 @@ def test_unknown_robots_fail_closed():
     Response(403, "denied"),
     Response(401, "login"),
     Response(429, "slow down", {"Retry-After": "1"}),
+    Response(406, "not acceptable"),
+    Response(451, "legal"),
+    Response(503, "<html>Your access to this site has been limited by Wordfence</html>"),
+    Response(200, "<html>Sucuri Website Firewall - Access Denied</html>"),
     Response(503, "", {"cf-mitigated": "challenge"}),
     Response(200, "<html><title>Just a moment...</title></html>", {"Content-Type": "text/html"}),
 ])
@@ -312,6 +442,9 @@ def test_a_blocked_site_leaves_the_others_running():
     Response(200, "[]", {"Content-Type": "application/json"}),
     Response(200, "[]", {"X-WP-TotalPages": "many", "Content-Type": "application/json"}),
     Response(200, "[]", {"X-WP-TotalPages": str(config.WOO_MAX_PAGES + 1), "Content-Type": "application/json"}),
+    Response(200, "[]", {"X-WP-TotalPages": "9" * 5000, "Content-Type": "application/json"}),
+    Response(200, "[" + "1" * 5000 + "]", {"X-WP-TotalPages": "1", "Content-Type": "application/json"}),
+    Response(200, "[" * 200000, {"X-WP-TotalPages": "1", "Content-Type": "application/json"}),
     TransportError("timeout"),
 ])
 def test_an_unusable_first_page_is_an_error_with_no_rows(first):
@@ -327,6 +460,18 @@ def test_an_empty_catalogue_is_an_error_not_a_clean_run():
 def test_a_site_of_only_malformed_listings_is_an_error():
     result = _run(_shop(_page(["x", "y"])))
     assert (_status(result).status.value, _status(result).malformed_listings) == ("unavailable_error", 2)
+
+
+def test_a_json_page_with_no_content_type_that_mentions_a_marker_is_not_a_block():
+    page = Response(200, json.dumps([_listing(name="Captcha bench")]), {"X-WP-TotalPages": "1"})
+    assert _status(_run(_shop(page))).status.value == "ok"
+
+
+def test_a_site_lowering_its_page_count_midway_is_not_a_clean_read():
+    sites = _shop(_page([_listing(1)], total=3), _page([_listing(2)], total=1), Response(400, "out of range"))
+    result = _run(sites)
+    assert len(sites.requested) == 4
+    assert _status(result).status.value == "partial"
 
 
 def test_a_later_page_failing_keeps_what_was_read():
@@ -352,8 +497,8 @@ def _pair_of_sites():
 
 def test_files_are_sorted_and_byte_identical_on_a_re_run(tmp_path):
     answers, register = _pair_of_sites()
-    first = write_run(collect_run(register, _Sites(answers), MOMENT), tmp_path / "a")
-    second = write_run(collect_run(register, _Sites(answers), MOMENT), tmp_path / "b")
+    first = write_run(collect_run(register, _Sites(answers), MOMENT, _no_pause), tmp_path / "a")
+    second = write_run(collect_run(register, _Sites(answers), MOMENT, _no_pause), tmp_path / "b")
     for name in (config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE):
         assert (first / name).read_bytes() == (second / name).read_bytes()
     rows = list(csv.DictReader(io.StringIO((first / config.OBSERVATIONS_FILE).read_text(encoding="utf-8"))))
@@ -410,8 +555,8 @@ class _S3:
 
 
 def _published(tmp_path, s3, moment=MOMENT, sites=None):
-    result = collect_run(_register(), sites or _shop(_page([_listing()])), moment)
-    return publish_run(s3, "bucket", "dev", "blokport", write_run(result, tmp_path))
+    result = collect_run(_register(), sites or _shop(_page([_listing()])), moment, _no_pause)
+    return publish_run(s3, "bucket", "blokport", write_run(result, tmp_path))
 
 
 def test_a_run_is_delivered_files_then_manifest_then_latest(tmp_path):
@@ -447,15 +592,26 @@ def test_a_run_with_no_rows_is_delivered_as_evidence_but_leaves_latest(tmp_path)
 
 def test_a_folder_missing_a_file_is_refused_before_anything_is_written(tmp_path):
     s3 = _S3()
+    run_dir = tmp_path / "blokport" / "20261108T123005Z"
+    run_dir.mkdir(parents=True)
     with pytest.raises(FileNotFoundError):
-        publish_run(s3, "bucket", "dev", "blokport", tmp_path)
+        publish_run(s3, "bucket", "blokport", run_dir)
+    assert s3.order == []
+
+
+@pytest.mark.parametrize("parts", [("blokport", "zzzz"), ("wudport", "20261108T123005Z")])
+def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, parts):
+    s3 = _S3()
+    with pytest.raises(ValueError, match="not a run folder"):
+        publish_run(s3, "bucket", "blokport", tmp_path.joinpath(*parts))
     assert s3.order == []
 
 
 # --- the boundary ------------------------------------------------------------------------------------------------------
 _PACKAGE = Path(market_prices.__file__).parent
-_ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables"}
+_ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings"}
 _THIRD_PARTY = {"pydantic", "yaml"}
+_NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}
 
 
 def _imports(path: Path) -> set[str]:
@@ -465,12 +621,12 @@ def _imports(path: Path) -> set[str]:
             found |= {alias.name for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             found.add(node.module)
+            found |= {f"{node.module}.{alias.name}" for alias in node.names} & _NETWORK
     return found
 
 
 def test_the_package_touches_only_the_shared_delivery_and_holds_no_http_client():
-    outside = set()
-    for path in _PACKAGE.rglob("*.py"):
-        outside |= {name for name in _imports(path) if name.split(".")[0] != "market_prices"
-                    and name.split(".")[0] not in sys.stdlib_module_names}
-    assert outside == _ALLOWED_OUTSIDE | _THIRD_PARTY
+    everything = set().union(*(_imports(path) for path in _PACKAGE.rglob("*.py")))
+    assert not everything & _NETWORK
+    assert {name for name in everything if name.split(".")[0] != "market_prices"
+            and name.split(".")[0] not in sys.stdlib_module_names} == _ALLOWED_OUTSIDE | _THIRD_PARTY

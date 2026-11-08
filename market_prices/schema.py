@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from market_prices import config
+
 
 class MalformedListing(ValueError):
     """One listing cannot be read. It is counted against the site; the other listings still count."""
@@ -63,6 +65,8 @@ class Observation(BaseModel):
     site_id: str
     seller_name: str
     seller_type: SellerType
+    seller_country: str = Field(pattern=r"^[A-Z]{2}$")
+    served_market: str = Field(pattern=r"^[A-Z]{2}$")
     listing_key: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
@@ -87,6 +91,15 @@ class Observation(BaseModel):
     def _amount_matches_status(self) -> "Observation":
         if (self.price_status is PriceStatus.priced) != (self.price_amount is not None):
             raise ValueError("price_amount is set exactly when price_status is priced")
+        return self
+
+    @model_validator(mode="after")
+    def _cells_are_deliverable(self) -> "Observation":
+        """A row that could not be written or read back is this listing's problem, never the whole run's."""
+        for cell in csv_values(self):
+            if len(cell) > config.MAX_CELL_CHARS:
+                raise ValueError(f"a cell of {len(cell)} characters is over the cap of {config.MAX_CELL_CHARS}")
+            cell.encode("utf-8")
         return self
 
 
@@ -122,10 +135,6 @@ class ListingFacts:
     price_amount: Optional[str] = None
     currency: Optional[str] = None
     price_status: PriceStatus = PriceStatus.none
-    vat_basis: Optional[VatBasis] = None
-    unit_text: Optional[str] = None
-    delivery_text: Optional[str] = None
-    delivery_included: Optional[DeliveryIncluded] = None
     min_qty_text: Optional[str] = None
     availability_text: Optional[str] = None
 

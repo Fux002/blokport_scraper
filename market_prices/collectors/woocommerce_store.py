@@ -30,6 +30,11 @@ def _sequence(value: object, what: str) -> list:
     return value
 
 
+def _is_count(value: object) -> bool:
+    return (isinstance(value, str) and value.isascii() and value.isdigit()
+            and len(value) <= config.WOO_MAX_DIGITS)
+
+
 def _amount(prices: Mapping) -> Optional[str]:
     """The price as an exact decimal string, or None when the listing has no single price. The API gives integer
     minor units as text. Zero marks a made-to-measure configurator, and a differing range is a variable product's
@@ -41,8 +46,8 @@ def _amount(prices: Mapping) -> Optional[str]:
     if raw in (None, ""):
         return None
     minor = prices.get("currency_minor_unit")
-    if not isinstance(raw, str) or not raw.isascii() or not raw.isdigit():
-        raise MalformedListing(f"price {raw!r} is not integer minor units")
+    if not _is_count(raw):
+        raise MalformedListing("price is not integer minor units")
     if not isinstance(minor, int) or isinstance(minor, bool) or not 0 <= minor <= config.WOO_MAX_MINOR_UNIT:
         raise MalformedListing(f"currency_minor_unit {minor!r} is not usable")
     value = int(raw)
@@ -50,6 +55,14 @@ def _amount(prices: Mapping) -> Optional[str]:
         return None
     whole, fraction = divmod(value, 10 ** minor)
     return f"{whole}.{fraction:0{minor}d}" if minor else str(whole)
+
+
+def _listing_key(value: object) -> str:
+    """An integer or non-blank text id. A float would not be stable between runs."""
+    key = clean_text(value) if isinstance(value, (int, str)) and not isinstance(value, bool) else None
+    if not key:
+        raise MalformedListing("listing has no usable id")
+    return key
 
 
 def _currency(prices: Mapping) -> Optional[str]:
@@ -67,7 +80,7 @@ def _attributes(listing: Mapping) -> dict[str, str]:
         values = [clean_text(_mapping(term, "term").get("name")) for term in terms]
         kept = " / ".join(value for value in values if value)
         if label and kept:
-            labelled[label] = kept
+            labelled[label] = f"{labelled[label]} / {kept}" if label in labelled else kept
     return labelled
 
 
@@ -104,18 +117,18 @@ class WooCommerceStoreCollector:
         return f"{site.base_url}{config.WOO_STORE_PATH}?{urlencode(sorted(query.items()))}"
 
     def listings(self, site: "Site", fetcher: SiteFetcher) -> Iterator[object]:
-        page, total = 1, 1
-        while page <= total:
+        """The first page's total stands for the run, so a site that lowers it midway cannot end a short read as ok."""
+        first = fetcher.get(self._page_url(site, 1))
+        total = self._total_pages(first.header(config.WOO_TOTAL_PAGES_HEADER), self._page_url(site, 1))
+        yield from self._items(first.text, self._page_url(site, 1))
+        for page in range(2, total + 1):
             url = self._page_url(site, page)
-            response = fetcher.get(url)
-            total = self._total_pages(response.header(config.WOO_TOTAL_PAGES_HEADER), url)
-            yield from self._items(response.text, url)
-            page += 1
+            yield from self._items(fetcher.get(url).text, url)
 
     @staticmethod
     def _total_pages(header: str, url: str) -> int:
-        if not header.isascii() or not header.isdigit():
-            raise UnexpectedResponse(f"no usable {config.WOO_TOTAL_PAGES_HEADER} from {url}: {header!r}")
+        if not _is_count(header):
+            raise UnexpectedResponse(f"no usable {config.WOO_TOTAL_PAGES_HEADER} from {url}")
         total = int(header)
         if total > config.WOO_MAX_PAGES:
             raise UnexpectedResponse(f"{url} advertises {total} pages, over the cap of {config.WOO_MAX_PAGES}")
@@ -125,20 +138,20 @@ class WooCommerceStoreCollector:
     def _items(body: str, url: str) -> list:
         try:
             items = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise UnexpectedResponse(f"not JSON from {url}: {exc}") from exc
+        except (ValueError, RecursionError) as exc:     # JSONDecodeError, an over-long integer, or hostile nesting
+            raise UnexpectedResponse(f"not usable JSON from {url}") from exc
         if not isinstance(items, list):
             raise UnexpectedResponse(f"not a product list from {url}")
         return items
 
     def facts(self, raw: object, site: "Site") -> ListingFacts:
         listing = _mapping(raw, "listing")
-        key, name = clean_text(listing.get("id")), clean_text(listing.get("name"))
+        key, name = _listing_key(listing.get("id")), clean_text(listing.get("name"))
         url = listing.get("permalink")
-        if not key or not name:
-            raise MalformedListing("listing has no id or name")
+        if not name:
+            raise MalformedListing("listing has no name")
         if not isinstance(url, str) or not on_site(url, site.base_url):
-            raise MalformedListing(f"permalink {url!r} is not on {site.base_url}")
+            raise MalformedListing(f"permalink is not on {site.base_url}")
         prices = _mapping(listing.get("prices"), "prices")
         amount = _amount(prices)
         attributes = _attributes(listing)

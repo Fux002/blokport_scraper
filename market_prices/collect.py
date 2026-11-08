@@ -3,25 +3,28 @@
 from __future__ import annotations
 
 import csv
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from pydantic import BaseModel, ValidationError
 
 from market_prices import config
 from market_prices.collectors import COLLECTORS
-from market_prices.fetching import SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse
+from market_prices.fetching import (
+    SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse,
+)
 from market_prices.register import Register, Site
 from market_prices.schema import (
     DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, VatBasis,
     columns, csv_values,
 )
 
-_STATED_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
-                  "delivery_included": DeliveryIncluded.unknown}
-_LISTING_ONLY_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
+_SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
+                          "delivery_included": DeliveryIncluded.unknown}
+_LISTING_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
 
 
 @dataclass(frozen=True)
@@ -53,28 +56,28 @@ def stamp_for(moment: datetime) -> Stamp:
 
 
 def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, version: str) -> Observation:
-    """The one place a listing's facts meet the site's statements: the listing's own word wins over the site's."""
+    """The one place a listing's facts meet the site's identity and statements."""
     stated: dict[str, object] = {}
     provenance: dict[str, Provenance] = {}
-    for name, unknown in _STATED_FIELDS.items():
-        own, general = getattr(facts, name), getattr(site.statements, name)
-        stated[name] = own if own is not None else general if general is not None else unknown
-        provenance[name] = (Provenance.listing if own is not None
-                            else Provenance.site_statement if general is not None else Provenance.unknown)
-    for name in _LISTING_ONLY_FIELDS:
+    for name, unknown in _SITE_STATEMENT_FIELDS.items():
+        general = getattr(site.statements, name)
+        stated[name] = general if general is not None else unknown
+        provenance[name] = Provenance.site_statement if general is not None else Provenance.unknown
+    for name in _LISTING_FIELDS:
         provenance[name] = Provenance.listing if getattr(facts, name) is not None else Provenance.unknown
     return Observation(
         contract_version=config.CONTRACT_VERSION, brand=brand, site_id=site.site_id, seller_name=site.seller_name,
-        seller_type=site.seller_type, listing_key=facts.listing_key, source_url=facts.source_url,
-        listing_text=facts.listing_text, stated_specs=facts.stated_specs, grade_text=facts.grade_text,
-        price_text=facts.price_text, price_amount=facts.price_amount, currency=facts.currency,
-        price_status=facts.price_status, min_qty_text=facts.min_qty_text, availability_text=facts.availability_text,
-        provenance=provenance, observed_at=stamp.observed_at, run_id=stamp.run_id, collector_version=version,
-        **stated,
+        seller_type=site.seller_type, seller_country=site.seller_country, served_market=site.served_market,
+        listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
+        stated_specs=facts.stated_specs, grade_text=facts.grade_text, price_text=facts.price_text,
+        price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
+        min_qty_text=facts.min_qty_text, availability_text=facts.availability_text, provenance=provenance,
+        observed_at=stamp.observed_at, run_id=stamp.run_id, collector_version=version, **stated,
     )
 
 
-def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp) -> SiteResult:
+def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
+                 pause: Callable[[float], None]) -> SiteResult:
     malformed = duplicates = 0
 
     def finish(status: SiteRunStatus, detail: str, kept: Iterable[Observation] = ()) -> SiteResult:
@@ -90,7 +93,7 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp) -> 
     collector = COLLECTORS[site.platform]
     rows: dict[str, Observation] = {}
     try:
-        fetcher = SiteFetcher(site.terms.robots_url, transport)
+        fetcher = SiteFetcher(site.robots_url, transport, pause)
         for raw in collector.listings(site, fetcher):
             try:
                 row = _observation(collector.facts(raw, site), site, brand, stamp, collector.version)
@@ -104,7 +107,7 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp) -> 
     except SiteBlocked as exc:
         return finish(SiteRunStatus.unavailable_blocked, str(exc))
     except SiteDisallowed as exc:
-        return finish(SiteRunStatus.disabled_terms, f"robots.txt disallows {exc}")
+        return finish(SiteRunStatus.disabled_terms, str(exc))
     except (TransportError, UnexpectedResponse) as exc:
         if rows:
             return finish(SiteRunStatus.partial, f"stopped early: {exc}", rows.values())
@@ -116,9 +119,10 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp) -> 
     return finish(SiteRunStatus.ok, "", rows.values())
 
 
-def collect_run(register: Register, transport: Transport, moment: datetime) -> RunResult:
+def collect_run(register: Register, transport: Transport, moment: datetime,
+                pause: Callable[[float], None] = time.sleep) -> RunResult:
     stamp = stamp_for(moment)
-    results = [collect_site(site, register.brand, transport, stamp)
+    results = [collect_site(site, register.brand, transport, stamp, pause)
                for site in sorted(register.sites, key=lambda site: site.site_id)]
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),
