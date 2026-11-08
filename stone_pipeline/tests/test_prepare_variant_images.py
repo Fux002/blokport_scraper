@@ -343,3 +343,22 @@ def test_an_unreadable_marker_makes_the_produce_queue_mints_only(tmp_path, monke
                         lambda refreshed, cap: pytest.fail("upgrades queued against an unreadable marker"))
     assert pvi.queue_new_textures() == 1
     assert any(r.levelname == "ERROR" and "marker" in r.getMessage() for r in caplog.records)
+
+
+def test_the_queue_build_fails_loud_on_a_bug_and_holds_on_an_unreadable_input(monkeypatch, caplog):
+    # #563 review: a broad except around the queue build swallowed a code bug as "queue build failed". Only an input
+    # that cannot be read (a missing or malformed export, products or backbone file) is that; a bug fails the produce.
+    monkeypatch.setattr(pvi, "SETTINGS", types.SimpleNamespace(
+        images=types.SimpleNamespace(upgrade_batch=0), auto_texture=types.SimpleNamespace(enabled=False)))
+
+    def bug():
+        raise TypeError("a bug in the queue build")
+    monkeypatch.setattr(pvi.image_prompts, "build", bug)
+    with pytest.raises(TypeError):
+        pvi.queue_new_textures()
+
+    def unreadable():
+        raise OSError("the products file cannot be read")
+    monkeypatch.setattr(pvi.image_prompts, "build", unreadable)
+    assert pvi.queue_new_textures() == 0
+    assert any("queue build failed" in r.getMessage() for r in caplog.records)

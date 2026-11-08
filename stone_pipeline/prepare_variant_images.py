@@ -15,6 +15,7 @@ the failed-job alert fires). The sync's product gate never ships an imageless PR
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import json
 import os
@@ -256,7 +257,7 @@ def queue_new_textures() -> int:
         cap, refreshed = 0, set()
     try:
         prompts_path = image_prompts.build_with_upgrades(refreshed, cap) if cap > 0 else image_prompts.build()
-    except Exception:
+    except (OSError, ValueError, csv.Error):     # an input that cannot be read; a bug in the build fails the produce
         log.exception("image prompt queue build failed")
         return 0
     items = json.loads(prompts_path.read_text(encoding="utf-8"))   # the build always writes a list

@@ -61,3 +61,12 @@ def test_review_flag_keeps_its_detail():
     f = ReviewFlag(field="inventory", code=FlagCode.stock_undetermined, confidence=Confidence.low,
                    detail="stock could not be determined or derived (no stock signal in the scrape)")
     assert f.detail == "stock could not be determined or derived (no stock signal in the scrape)"   # not dropped
+
+
+def test_variation_keys_without_boto3_says_so(monkeypatch, caplog):
+    # #571 review: a missing boto3 was logged as "S3 unreachable", sending the reader to the network. Same fallback
+    # (no listing, the heuristic decides), named for what failed.
+    monkeypatch.setitem(__import__("sys").modules, "boto3", None)       # `import boto3` raises ModuleNotFoundError
+    assert emit_catalog._s3_variation_keys() is None
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("boto3" in m for m in messages) and not any("unreachable" in m for m in messages)
