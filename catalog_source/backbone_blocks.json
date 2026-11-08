@@ -13529,8 +13529,7 @@
       "image_file": "block_rb_662_dolomite_statuario.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_marble_statuario_267f8f6d-5208-434c-9e4e-b853ed7b2455"
+      "merged_from": []
     },
     {
       "variant_id": 663,
@@ -117438,8 +117437,7 @@
       "image_file": "block_rb_3231_granite_ocean_blue.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_marble_ocean_blue_c2fdc94c-4c40-4ecd-9266-05176dd69253"
+      "merged_from": []
     },
     {
       "variant_id": 3232,
@@ -119017,8 +119015,7 @@
       "image_file": "block_rb_3272_granite_oriental_white.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_marble_oriental_white_5f835044-c0fc-4158-9640-1f92c418bd3d"
+      "merged_from": []
     },
     {
       "variant_id": 3273,
@@ -120713,8 +120710,7 @@
       "image_file": "block_rb_3315_granite_panda_white.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_marble_panda_white_c3109417-90f7-413d-9ce7-633b7f4e448d"
+      "merged_from": []
     },
     {
       "variant_id": 3316,
@@ -123948,8 +123944,7 @@
       "image_file": "block_rb_3396_granite_pietra_dorata.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzitic_sandstone_pietra_dorata_52807081-0a89-491e-9282-8402b9ce7546"
+      "merged_from": []
     },
     {
       "variant_id": 3397,
@@ -223785,7 +223780,8 @@
       "image_file": "block_rb_33_marble_ocean_blue.png",
       "exists": "yes",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_marble_ocean_blue_c2fdc94c-4c40-4ecd-9266-05176dd69253"
     },
     {
       "variant_id": 34,
@@ -224445,7 +224441,8 @@
       "image_file": "block_rb_51_marble_statuario.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_marble_statuario_267f8f6d-5208-434c-9e4e-b853ed7b2455"
     },
     {
       "variant_id": 52,
@@ -224983,7 +224980,8 @@
       "image_file": "block_rb_299_marble_panda_white.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_marble_panda_white_c3109417-90f7-413d-9ce7-633b7f4e448d"
     },
     {
       "variant_id": 300,
@@ -225013,7 +225011,8 @@
       "image_file": "block_rb_300_marble_oriental_white.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_marble_oriental_white_5f835044-c0fc-4158-9640-1f92c418bd3d"
     },
     {
       "variant_id": 302,
@@ -386611,8 +386610,7 @@
       "image_file": "block_rb_9850_marble_verde_serpentino.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_serpentine_verde_serpentino_0425cbf3-553c-4df8-81f9-6c356541741c"
+      "merged_from": []
     },
     {
       "variant_id": 9851,
@@ -419328,7 +419326,8 @@
       "image_file": "block_rb_289_quartzitic_sandstone_pietra_dorata.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_quartzitic_sandstone_pietra_dorata_52807081-0a89-491e-9282-8402b9ce7546"
     },
     {
       "variant_id": 290,
@@ -440731,7 +440730,8 @@
       "image_file": "block_rb_255_serpentine_verde_serpentino.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_serpentine_verde_serpentino_0425cbf3-553c-4df8-81f9-6c356541741c"
     },
     {
       "variant_id": 256,
