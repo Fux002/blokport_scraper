@@ -6,7 +6,8 @@ set -euo pipefail
 
 # RUN_MODE selects what this task does (there is no default: an unset mode is refused, and `pipeline`
 # names the produce, which runs only in the sync service). The GPU modes are submitted to Batch by the
-# photo process (standardise, standardise-retouch) and by the texture trigger (generate-textures).
+# photo process (standardise, standardise-retouch) and by the texture trigger (generate-textures). market-prices runs
+# in the ad-hoc task: the competitor-price collection for this deployment's brand (market_prices/CONTRACT.md).
 RUN_MODE="${RUN_MODE:-}"
 # Explicit dispatch: an UNKNOWN or unset mode must fail loud, never silently fall through to anything.
 case "$RUN_MODE" in
@@ -32,7 +33,10 @@ case "$RUN_MODE" in
   generate-textures)
     echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
+  market-prices)
+    echo "==> collect competitor prices for this deployment's brand (approved sites only) -> <env>/market_prices/<brand>/"
+    exec python -m market_prices.run ;;
   *)
-    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures)" >&2
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures | market-prices)" >&2
     exit 2 ;;
 esac

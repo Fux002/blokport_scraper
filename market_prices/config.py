@@ -5,6 +5,8 @@ from pathlib import Path
 CONTRACT_VERSION = "1"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
+# Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
+RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
 SITE_STATUS_FILE = "site_status.csv"
 LATEST_FILE = "latest.json"
@@ -16,6 +18,10 @@ USER_AGENT = f"{ROBOTS_TOKEN}/1.0"
 ROBOTS_PATH = "/robots.txt"
 MIN_REQUEST_INTERVAL_SECONDS = 2.0
 MAX_CRAWL_DELAY_SECONDS = 60.0
+# The live transport (market_prices/transport.py): one plain GET per request, no retry. A page of WOO_PAGE_SIZE products
+# is a few MB, so a body over the cap is not a catalogue page; it is refused before or while it is read, never kept.
+FETCH_TIMEOUT_SECONDS = 30.0
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 BLOCK_STATUSES = frozenset({401, 403, 406, 429, 451})
 MISSING_ROBOTS_STATUSES = frozenset({404, 410})
@@ -36,3 +42,13 @@ WOO_MAX_PAGES = 200
 WOO_TOTAL_PAGES_HEADER = "x-wp-totalpages"
 WOO_MAX_MINOR_UNIT = 4
 WOO_MAX_DIGITS = 18
+# A "Label: value" item of a description's HTML list is a stated spec (Ceralith states about half its products this
+# way). A longer label or value is a sentence that happens to hold a colon, not a spec.
+DESCRIPTION_SPEC_MAX_LABEL_CHARS = 60
+DESCRIPTION_SPEC_MAX_VALUE_CHARS = 200
+
+# The dev pilot (market_prices/pilot.py): ONE approved site of ONE brand, run against dev's bucket, then a summary with
+# the first rows. It refuses any site the register has not approved, and any environment but development.
+PILOT_BRAND = "blokport"
+PILOT_SITE_ID = "ceralith"
+PILOT_SAMPLE_ROWS = 5

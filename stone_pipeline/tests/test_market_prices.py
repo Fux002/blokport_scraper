@@ -223,6 +223,51 @@ def test_a_repeated_attribute_keeps_both_values():
     assert _run(_shop(_page([_listing(attributes=attributes)]))).observations[0].stated_specs["Dikte"] == "2 / 3"
 
 
+# --- stated_specs completeness: every spec the page states, so matching has thickness, finish, size, format, grade
+# and origin. The attributes and the API's own fields, and the "Key: value" items of the description's list (how
+# Ceralith states about half its products), each as the seller wrote it.
+_DESCRIPTION = ("<p>Een mooie tegel.</p><ul><li><strong>Dikte:</strong> 3 cm</li><li>Afwerking : gezoet</li>"
+                "<li>Formaat: 60x60</li><li>Herkomst: Belgi&euml;</li></ul>")
+
+
+def test_every_stated_spec_is_kept_attributes_api_fields_and_the_description_list():
+    attributes = [{"name": "Kwaliteit", "terms": [{"name": "Eerste keus"}]}]
+    row = _run(_shop(_page([_listing(attributes=attributes, description=_DESCRIPTION)]))).observations[0]
+    assert row.stated_specs == {"Kwaliteit": "Eerste keus", "sku": "SKU-1", "weight": "20", "length": "90",
+                                "width": "15", "height": "2", "Dikte": "3 cm", "Afwerking": "gezoet",
+                                "Formaat": "60x60", "Herkomst": "België"}
+
+
+def test_a_description_item_never_overrides_an_attribute_of_the_same_label():
+    attributes = [{"name": "Dikte", "terms": [{"name": "2 cm"}]}]
+    specs = _run(_shop(_page([_listing(attributes=attributes, description="<ul><li>dikte: 3 cm</li></ul>")])))
+    assert {label: value for label, value in specs.observations[0].stated_specs.items()
+            if label.lower() == "dikte"} == {"Dikte": "2 cm"}
+
+
+def test_the_first_description_item_of_a_label_is_kept():
+    description = "<ul><li>Dikte: 3 cm</li><li>DIKTE: 4 cm</li></ul>"
+    assert _run(_shop(_page([_listing(description=description)]))).observations[0].stated_specs["Dikte"] == "3 cm"
+
+
+@pytest.mark.parametrize("item", [
+    "Geschikt voor binnen en buiten",                       # no label
+    "Dikte:", ": 3 cm",                                     # an empty side
+    "Let op: " + "lang " * 60,                              # a sentence, not a spec value
+    "x" * (config.DESCRIPTION_SPEC_MAX_LABEL_CHARS + 1) + ": 3",
+])
+def test_a_description_item_that_is_not_a_key_and_value_is_not_a_spec(item):
+    row = _run(_shop(_page([_listing(description=f"<ul><li>{item}</li></ul>")]))).observations[0]
+    assert row.stated_specs == {"Materiaal": "Hardsteen", "sku": "SKU-1", "weight": "20", "length": "90",
+                                "width": "15", "height": "2"}
+
+
+@pytest.mark.parametrize("description", [None, 7, ["<li>Dikte: 3</li>"], "<p>Dikte: 3 cm</p>"])
+def test_only_a_text_descriptions_list_items_are_read(description):
+    row = _run(_shop(_page([_listing(description=description)]))).observations[0]
+    assert "Dikte" not in row.stated_specs
+
+
 def test_a_sellers_less_than_sign_stays_text():
     row = _run(_shop(_page([_listing(name="Slab <3cm and >2cm", short_description="")]))).observations[0]
     assert row.listing_text == "Slab <3cm and >2cm"
@@ -643,9 +688,13 @@ def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, brand, parts)
 
 # --- the boundary ------------------------------------------------------------------------------------------------------
 _PACKAGE = Path(market_prices.__file__).parent
-_ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings"}
-_THIRD_PARTY = {"pydantic", "yaml"}
+# the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
+# factory (the run entry)
+_ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
+                    "stone_pipeline.io.storage"}
+_THIRD_PARTY = {"pydantic", "yaml", "httpx"}
 _NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}
+_HTTP_CLIENTS = {"httpx", "requests", "curl_cffi", "aiohttp", "urllib3"}
 
 
 def _imports(path: Path) -> set[str]:
@@ -659,8 +708,14 @@ def _imports(path: Path) -> set[str]:
     return found
 
 
-def test_the_package_touches_only_the_shared_delivery_and_holds_no_http_client():
+def test_the_package_touches_only_the_shared_delivery_and_the_one_redirect_walk():
     everything = set().union(*(_imports(path) for path in _PACKAGE.rglob("*.py")))
     assert not everything & _NETWORK
     assert {name for name in everything if name.split(".")[0] != "market_prices"
             and name.split(".")[0] not in sys.stdlib_module_names} == _ALLOWED_OUTSIDE | _THIRD_PARTY
+
+
+def test_only_the_live_transport_holds_an_http_client():
+    holders = {path.relative_to(_PACKAGE).as_posix() for path in _PACKAGE.rglob("*.py")
+               if {name.split(".")[0] for name in _imports(path)} & _HTTP_CLIENTS}
+    assert holders == {"transport.py"}
