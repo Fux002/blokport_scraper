@@ -24,6 +24,7 @@ from stone_pipeline.config.categories import active_categories, category_for_key
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
+    UnfoldableName,
     clean_alias_list,
     clean_variety_name,
     looks_like_artifact,
@@ -31,10 +32,31 @@ from stone_pipeline.core.text import (
     title_case,
 )
 from stone_pipeline.io import storage
-from stone_pipeline.reference.loaders import variants_status_required
+from stone_pipeline.reference.loaders import field_kinds, variants_status_required
 from stone_pipeline.reference.medusa_files import read_variants_export
 
 log = logfmt.get_logger("emit_catalog")
+
+
+def _alias_display(text: str) -> str:
+    return field_kinds.display(field_kinds.VARIATION_ALIAS_VALUE, text)
+
+
+def _write_names(row: dict) -> list[str]:
+    """Write a row's Name and Aliases by their fields' rule (field-kinds.json); returns the aliases dropped for
+    having no ASCII form. A '(alternative)' moves out of the Name into the alias list ('Black Galaxy (Star
+    Galaxy)' -> Name 'Black Galaxy' + alias 'Star Galaxy'). The Key is unchanged (a Name/alias correction, not a
+    re-key), and matching improves because both the clean name and each alternative spelling resolve."""
+    bare_name, name_bracket_aliases = split_bracket_alias(row["Name"])
+    raw_aliases = [a for a in row["Aliases"].split("|") if a.strip()] + name_bracket_aliases
+    try:
+        row["Name"] = field_kinds.display(field_kinds.VARIATION_NAME, bare_name)
+    except UnfoldableName as exc:
+        # dropping the row would delete the variety (base := full), so a name with no ASCII form stops emit
+        raise UnfoldableName(f"{row['Key']}: variety name {bare_name!r} has no ASCII form") from exc
+    kept, dropped = clean_alias_list(bare_name, raw_aliases, _alias_display)
+    row["Aliases"] = "|".join(kept)
+    return dropped
 
 _COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 
