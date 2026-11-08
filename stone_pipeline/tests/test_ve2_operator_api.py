@@ -196,3 +196,15 @@ def test_decide_is_dormant_without_a_status_column():
     assert _decide(type="Onyx")[1]["result"] == "minted"
     code, body = _decide(scraped="Amazon Green Granite", name="Golden Lightning", type="Granite")
     assert code == 200 and body["result"] == "bound"
+
+
+def test_the_decide_gate_reads_the_statements_once(monkeypatch):
+    # #552 review: the re-confirm check and the colour check each read every statement; the gate reads them once
+    from stone_pipeline.config.decisions_store import statements
+    monkeypatch.setattr(loaders, "restricted_values", lambda *a, **k: {"color": {"smoke"}})
+    decisions_store.decide("marenostone", "Golden Lightning", "Golden Lightning", "Granite", color="White", exists_as=_exists)
+    reads = []
+    real = statements._statement_rows
+    monkeypatch.setattr(statements, "_statement_rows", lambda: reads.append(1) or real())
+    refused = server._ve2_decide_gate([("zucchi", "GL")], "Golden Lightning", "Granite", "Smoke", "", False)
+    assert refused[0] == 400 and len(reads) == 1

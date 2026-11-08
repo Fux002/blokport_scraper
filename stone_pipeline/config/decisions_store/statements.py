@@ -95,14 +95,17 @@ def _lookups(exists_as, alias_target, clean=None) -> tuple:
     return _exists, _alias, clean
 
 
-def load_decisions(exists_as=None, alias_target=None) -> Decisions:
+def load_decisions(exists_as=None, alias_target=None, rows=None) -> Decisions:
     """EVERY operator statement as one object (config.decisions_model.Decisions), read once per produce. Empty
     on a fresh store (never materialises config.db from a read). Mint-vs-bind is derived here from what exists
-    (the ledger, via the injected or default lookups)."""
-    if not store.config_db_path().exists():
-        return Decisions.empty()
+    (the ledger, via the injected or default lookups). `rows`: the statement rows a caller already read
+    (statement_rows), so one request never reads them twice."""
+    if rows is None:
+        if not store.config_db_path().exists():
+            return Decisions.empty()
+        rows = _statement_rows()
     exists_as, alias_target, _ = _lookups(exists_as, alias_target)
-    return Decisions.from_statements(_statement_rows(), exists_as, alias_target)
+    return Decisions.from_statements(rows, exists_as, alias_target)
 
 
 def reject(source: str, spelling: str) -> None:
