@@ -279,6 +279,8 @@ def test_approval_is_refused_without_the_full_record(change):
     {"terms": {"terms_url": "n/a", "checked_on": "2026-11-02", "summary": "x"}},
     {"terms": {"terms_url": f"{BASE}/t", "checked_on": "2026-11-02", "summary": "   "}},
     {"terms": {"terms_url": f"{BASE}/t", "checked_on": 0, "summary": "x"}},
+    {"base_url": "https://:pw@shop.example"},
+    {"terms": {"terms_url": f"{BASE}/t", "checked_on": "2062-01-01", "summary": "x"}, "decided_on": "2062-01-02"},
 ])
 def test_a_bad_site_entry_is_refused(change):
     with pytest.raises(ValueError):
@@ -316,7 +318,7 @@ def test_robots_that_forbid_the_api_stop_the_site_before_any_page():
     sites = _shop(robots=Response(200, "User-agent: *\nDisallow: /wp-json/\n"))
     result = _run(sites)
     assert sites.requested == [ROBOTS]
-    assert _status(result).status.value == "disabled_terms"
+    assert _status(result).status.value == "disallowed_robots"
     assert "robots.txt disallows" in _status(result).detail
 
 
@@ -363,9 +365,27 @@ _TARGET = "/wp-json/wc/store/v1/products?page=1&per_page=100"
     ("User-agent: *\nDisallow: /wp%2Djson/\n", False),
     ("# only a comment\nnonsense\nUser-agent: * # all\nDisallow: /wp-json/ # no\n", False),
     ("User-agent: *\nDisallow: wp-json/\n", False),
+    ("\ufeffUser-agent: *\nDisallow: /\n", False),
+    ("User-agent: *\nDisallow: /\nAllow: /%2A\n", False),
+    ("User-agent: *\nDisallow: /\nAllow: /a%24\n", False),
+    ("User-agent: *\nDisallow: /\nAllow: /wp-json/wc/store/v1/products?page=1&per_page=1%30%30\n", True),
+    (f"User-agent: {config.ROBOTS_TOKEN}/1.0\nDisallow: /\n\nUser-agent: *\nAllow: /\n", False),
 ])
 def test_robots_rules_follow_the_standard(text, allowed):
     assert parse_robots(text, config.ROBOTS_TOKEN).allows(_TARGET) is allowed
+
+
+@pytest.mark.parametrize("rule,target,allowed", [
+    ("Disallow: /a%2Ab", "/a*b", False),
+    ("Disallow: /a%2Ab", "/axxb", True),
+    ("Disallow: /price$", "/price", False),
+    ("Disallow: /price%24", "/price$", False),
+    ("Disallow: /price%24", "/price", True),
+    ("Disallow: /a$b", "/a$b", False),
+    ("Disallow: /a$b", "/ab", True),
+])
+def test_a_literal_star_or_dollar_stays_literal(rule, target, allowed):
+    assert parse_robots(f"User-agent: *\n{rule}\n", config.ROBOTS_TOKEN).allows(target) is allowed
 
 
 def test_a_robots_file_of_wildcards_stays_fast():
@@ -392,7 +412,13 @@ def test_a_crawl_delay_over_the_cap_stops_the_site():
     sites = _shop(robots=Response(200, f"User-agent: *\nCrawl-delay: {config.MAX_CRAWL_DELAY_SECONDS + 1}\n"))
     result = _run(sites)
     assert sites.requested == [ROBOTS]
-    assert _status(result).status.value == "disabled_terms"
+    assert _status(result).status.value == "disallowed_robots"
+
+
+def test_an_oversized_robots_file_fails_closed():
+    sites = _shop(robots=Response(200, "User-agent: *\nAllow: /\n" + "#" * config.MAX_ROBOTS_CHARS))
+    assert _status(_run(sites)).status.value == "unavailable_error"
+    assert sites.requested == [ROBOTS]
 
 
 # --- a block is reported, never worked around ----------------------------------------------------------------------------
@@ -460,6 +486,12 @@ def test_an_empty_catalogue_is_an_error_not_a_clean_run():
 def test_a_site_of_only_malformed_listings_is_an_error():
     result = _run(_shop(_page(["x", "y"])))
     assert (_status(result).status.value, _status(result).malformed_listings) == ("unavailable_error", 2)
+
+
+def test_a_homepage_that_loads_recaptcha_is_an_error_not_a_block():
+    page = Response(200, '<html><head><script src="https://www.google.com/recaptcha/api.js"></script></head></html>',
+                    {"Content-Type": "text/html"})
+    assert _status(_run(_shop(page))).status.value == "unavailable_error"
 
 
 def test_a_json_page_with_no_content_type_that_mentions_a_marker_is_not_a_block():
@@ -599,11 +631,13 @@ def test_a_folder_missing_a_file_is_refused_before_anything_is_written(tmp_path)
     assert s3.order == []
 
 
-@pytest.mark.parametrize("parts", [("blokport", "zzzz"), ("wudport", "20261108T123005Z")])
-def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, parts):
+@pytest.mark.parametrize("brand,parts", [("blokport", ("blokport", "zzzz")),
+                                         ("blokport", ("wudport", "20261108T123005Z")),
+                                         ("..", ("a", "..", "20261108T123005Z"))])
+def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, brand, parts):
     s3 = _S3()
     with pytest.raises(ValueError, match="not a run folder"):
-        publish_run(s3, "bucket", "blokport", tmp_path.joinpath(*parts))
+        publish_run(s3, "bucket", brand, tmp_path.joinpath(*parts))
     assert s3.order == []
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
@@ -18,7 +18,7 @@ from market_prices import config
 from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 
-_SLUG = re.compile(r"[a-z0-9_]+")
+SLUG = re.compile(r"[a-z0-9_]+")
 
 
 def _refuse_number(value: object) -> object:
@@ -95,15 +95,15 @@ class Site(BaseModel):
     @field_validator("site_id")
     @classmethod
     def _site_id_is_a_slug(cls, value: str) -> str:
-        if not _SLUG.fullmatch(value):
-            raise ValueError(f"site_id {value!r} must match {_SLUG.pattern}")
+        if not SLUG.fullmatch(value):
+            raise ValueError(f"site_id {value!r} must match {SLUG.pattern}")
         return value
 
     @field_validator("base_url")
     @classmethod
     def _base_url_is_a_bare_https_origin(cls, value: str) -> str:
         parsed = urlparse(value)
-        if not parsed.hostname or parsed.username or value != f"https://{parsed.netloc}":
+        if not parsed.hostname or "@" in parsed.netloc or value != f"https://{parsed.netloc}":
             raise ValueError(f"base_url {value!r} must be a bare https origin")
         return value
 
@@ -125,6 +125,8 @@ class Site(BaseModel):
             raise ValueError("approved needs decided_by and decided_on")
         if self.decided_on < self.terms.checked_on:
             raise ValueError("approved needs decided_on on or after checked_on")
+        if self.decided_on > datetime.now(timezone.utc).date():
+            raise ValueError("approved needs dates that are not in the future")
         if not self.seller_country or not self.served_market:
             raise ValueError("approved needs seller_country and served_market")
 
@@ -153,8 +155,8 @@ class Register(BaseModel):
 
 def load_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
     """The validated register of one brand. Any problem raises, so no site runs on a half-read register."""
-    if not _SLUG.fullmatch(brand):
-        raise RegisterError(f"brand {brand!r} must match {_SLUG.pattern}")
+    if not SLUG.fullmatch(brand):
+        raise RegisterError(f"brand {brand!r} must match {SLUG.pattern}")
     path = sites_dir / f"{brand}.yaml"
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))

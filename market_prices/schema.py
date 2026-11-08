@@ -53,6 +53,7 @@ class SiteRunStatus(str, Enum):
     unavailable_blocked = "unavailable_blocked"
     unavailable_error = "unavailable_error"
     disabled_terms = "disabled_terms"
+    disallowed_robots = "disallowed_robots"
 
 
 class Observation(BaseModel):

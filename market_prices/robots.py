@@ -4,8 +4,38 @@ wildcards and takes the first matching rule, so a site's "Disallow: /*?" would r
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from urllib.parse import unquote
+
+# RFC 9309: a literal "*" or "$" is written percent-encoded, so those two escapes stay encoded on both sides while
+# every other escape is decoded. Decoding them would turn a literal into a wildcard or an end anchor.
+_LITERAL_ESCAPE = re.compile(r"%(2a|24)", re.IGNORECASE)
+_LITERALS = {"*": "%2A", "$": "%24"}
+# The product token of a User-agent line ends at the first character outside these (as Google's parser reads it).
+_PRODUCT_TOKEN = re.compile(r"[A-Za-z_-]*")
+
+
+def _normalise(text: str, *, operators: bool) -> str:
+    """Percent-decoded except for a literal "*" or "$". In a target every raw "*" or "$" is a literal; in a pattern a
+    raw "*" is the wildcard and a raw "$" the end anchor only as its last character, a literal anywhere else."""
+    pieces = _LITERAL_ESCAPE.split(text)
+    out = []
+    for index, piece in enumerate(pieces):
+        if index % 2:
+            out.append(f"%{piece.upper()}")
+            continue
+        decoded = unquote(piece)
+        if operators:
+            out.append(decoded)
+        else:
+            out.append("".join(_LITERALS.get(char, char) for char in decoded))
+    joined = "".join(out)
+    if not operators:
+        return joined
+    anchored = joined.endswith("$")
+    body = (joined[:-1] if anchored else joined).replace("$", _LITERALS["$"])
+    return f"{body}$" if anchored else body
 
 
 def _matches(pattern: str, target: str) -> bool:
@@ -35,8 +65,8 @@ class Robots:
 
     def allows(self, target: str) -> bool:
         """The longest matching rule decides; on a tie, allow wins. No matching rule allows."""
-        decoded = unquote(target)
-        matching = [(len(pattern), allow) for pattern, allow in self.rules if _matches(pattern, decoded)]
+        normalised = _normalise(target, operators=False)
+        matching = [(len(pattern), allow) for pattern, allow in self.rules if _matches(pattern, normalised)]
         return max(matching, default=(0, True))[1]
 
 
@@ -49,8 +79,12 @@ def _crawl_delay(value: str) -> float:
 
 
 def _pattern(value: str) -> str:
-    decoded = unquote(value)
-    return decoded if decoded.startswith(("/", "*")) else f"/{decoded}"
+    normalised = _normalise(value, operators=True)
+    return normalised if normalised.startswith(("/", "*")) else f"/{normalised}"
+
+
+def _agent(value: str) -> str:
+    return "*" if value == "*" else _PRODUCT_TOKEN.match(value).group(0).lower()
 
 
 def parse_robots(text: str, token: str) -> Robots:
@@ -59,7 +93,7 @@ def parse_robots(text: str, token: str) -> Robots:
     star: list[tuple[str, bool]] = []
     delays = {"own": 0.0, "star": 0.0}
     named, agents, in_rules = False, [], False
-    for line in text.splitlines():
+    for line in text.removeprefix("\ufeff").splitlines():
         key, separator, value = line.split("#", 1)[0].partition(":")
         key, value = key.strip().lower(), value.strip()
         if not separator:
@@ -67,8 +101,8 @@ def parse_robots(text: str, token: str) -> Robots:
         if key == "user-agent":
             if in_rules:
                 agents, in_rules = [], False
-            agents.append(value.lower())
-            named = named or value.lower() == token
+            agents.append(_agent(value))
+            named = named or agents[-1] == token
         elif key in ("allow", "disallow", "crawl-delay"):
             in_rules = True
             for scope, rules, applies in (("own", own, token in agents), ("star", star, "*" in agents)):

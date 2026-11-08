@@ -118,9 +118,10 @@ class WooCommerceStoreCollector:
 
     def listings(self, site: "Site", fetcher: SiteFetcher) -> Iterator[object]:
         """The first page's total stands for the run, so a site that lowers it midway cannot end a short read as ok."""
-        first = fetcher.get(self._page_url(site, 1))
-        total = self._total_pages(first.header(config.WOO_TOTAL_PAGES_HEADER), self._page_url(site, 1))
-        yield from self._items(first.text, self._page_url(site, 1))
+        first_url = self._page_url(site, 1)
+        first = fetcher.get(first_url)
+        total = self._total_pages(first.header(config.WOO_TOTAL_PAGES_HEADER), first_url)
+        yield from self._items(first.text, first_url)
         for page in range(2, total + 1):
             url = self._page_url(site, page)
             yield from self._items(fetcher.get(url).text, url)

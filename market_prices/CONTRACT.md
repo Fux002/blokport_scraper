@@ -56,7 +56,8 @@ One row per site in the register, every run.
 | partial | Some rows delivered: a page failed or listings were malformed. `detail` says why |
 | unavailable_blocked | The site refused this client (401, 403, 406, 429, 451, a challenge page). 0 rows, and collection of that site stopped at once. Never worked around |
 | unavailable_error | No usable answer. 0 rows |
-| disabled_terms | No approved decision, or robots.txt forbids the collection or asks for a slower pace than we can run. 0 rows |
+| disabled_terms | No approved decision. No page fetched, 0 rows |
+| disallowed_robots | robots.txt forbids the collection or asks for a slower pace than we can run. 0 rows |
 
 A listing that cannot be read or delivered (for example a cell over 100,000 characters) is counted in `malformed_listings` and left out.
 

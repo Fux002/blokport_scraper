@@ -107,7 +107,7 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
     except SiteBlocked as exc:
         return finish(SiteRunStatus.unavailable_blocked, str(exc))
     except SiteDisallowed as exc:
-        return finish(SiteRunStatus.disabled_terms, str(exc))
+        return finish(SiteRunStatus.disallowed_robots, str(exc))
     except (TransportError, UnexpectedResponse) as exc:
         if rows:
             return finish(SiteRunStatus.partial, f"stopped early: {exc}", rows.values())

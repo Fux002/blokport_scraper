@@ -10,6 +10,7 @@ from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.io.deliverables import MANIFEST_NAME, published_manifest, publish_deliverables
 
 from market_prices import config
+from market_prices.register import SLUG
 
 _RUN_ID = re.compile(r"\d{8}T\d{6}Z")
 
@@ -31,7 +32,7 @@ def publish_run(client, bucket: str, brand: str, run_dir: Path) -> dict:
     """Both files, then their manifest, then latest, so a reader never sees a run that is not complete. The folder
     must be what write_run made for this brand: its name becomes the run id, and a stray one would freeze latest."""
     run_id = run_dir.name
-    if not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
+    if not SLUG.fullmatch(brand) or not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
         raise ValueError(f"{run_dir} is not a run folder of brand {brand!r}")
     brand_prefix = config.S3_BRAND_PREFIX.format(env_segment=ENV_SEGMENT, brand=brand)
     published = publish_deliverables(client, bucket, run_dir, f"{brand_prefix}/{run_id}", run_id,

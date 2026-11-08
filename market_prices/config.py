@@ -20,9 +20,12 @@ MAX_CRAWL_DELAY_SECONDS = 60.0
 BLOCK_STATUSES = frozenset({401, 403, 406, 429, 451})
 MISSING_ROBOTS_STATUSES = frozenset({404, 410})
 CHALLENGE_HEADER = "cf-mitigated"
-CHALLENGE_MARKERS = ("just a moment", "attention required", "verify you are human", "captcha", "access denied",
-                     "access limited", "wordfence", "sucuri")
+# Phrases of a challenge or firewall page, never single words: an ordinary page can load reCAPTCHA or name a plugin.
+CHALLENGE_MARKERS = ("just a moment", "attention required", "verify you are human", "access denied",
+                     "has been limited", "website firewall")
 CHALLENGE_SCAN_CHARS = 4096
+# RFC 9309 asks a parser to read at least 500 KiB; a larger file is refused rather than read in part.
+MAX_ROBOTS_CHARS = 512 * 1024
 
 # Under the csv module's 131072 field limit, which the manifest's row count reads through.
 MAX_CELL_CHARS = 100_000

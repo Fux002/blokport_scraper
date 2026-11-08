@@ -87,6 +87,8 @@ class SiteFetcher:
             raise UnexpectedResponse(f"HTTP {response.status} from {url}")
         if _is_html(response):
             raise UnexpectedResponse(f"not a robots file at {url}")
+        if len(response.text) > config.MAX_ROBOTS_CHARS:
+            raise UnexpectedResponse(f"robots file at {url} is over {config.MAX_ROBOTS_CHARS} characters")
         return parse_robots(response.text, config.ROBOTS_TOKEN)
 
     def get(self, url: str) -> Response:
