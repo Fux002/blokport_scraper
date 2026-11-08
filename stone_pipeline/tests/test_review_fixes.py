@@ -171,18 +171,38 @@ def test_split_bracket_alias():
 
 
 def test_clean_alias_list():
+    from functools import partial
     from stone_pipeline.core.text import clean_alias_list
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
     # comma-joined blob -> separate aliases
-    assert clean_alias_list("X", ["Rain Forest Marble, Rain Forest"]) == ["Rain Forest Marble", "Rain Forest"]
+    assert clean_alias_list("X", ["Rain Forest Marble, Rain Forest"], clean) == (["Rain Forest Marble", "Rain Forest"], [])
     # 'China market:' context prefix + brackets -> just the local name
-    assert clean_alias_list("X", ["In China Market:(bai Si Hui Wang)"]) == ["Bai Si Hui Wang"]
-    assert clean_alias_list("X", ["In China Stone Market Callled As (Caiyun Zhui Yue"]) == ["Caiyun Zhui Yue"]
+    assert clean_alias_list("X", ["In China Market:(bai Si Hui Wang)"], clean) == (["Bai Si Hui Wang"], [])
+    assert clean_alias_list("X", ["In China Stone Market Callled As (Caiyun Zhui Yue"], clean) == (["Caiyun Zhui Yue"], [])
+    assert clean_alias_list("X", ["In China Local Market Called: Bai Yu"], clean) == (["Bai Yu"], [])
     # empty bracket pair + dangling paren cleaned
-    assert clean_alias_list("X", ["Dzhiltau () Granit"]) == ["Dzhiltau Granit"]
+    assert clean_alias_list("X", ["Dzhiltau () Granit"], clean) == (["Dzhiltau Granit"], [])
     # junk (no alphanumeric), alias == Name, and dupes are dropped
-    assert clean_alias_list("Carrara", [")", "-", "Carrara", "Bianco Carrara", "bianco carrara"]) == ["Bianco Carrara"]
+    assert clean_alias_list("Carrara", [")", "-", "Carrara", "Bianco Carrara", "bianco carrara"], clean) == (
+        ["Bianco Carrara"], [])
     # a plain name that merely contains 'market' is NOT stripped
-    assert clean_alias_list("X", ["Black Market Granite"]) == ["Black Market Granite"]
+    assert clean_alias_list("X", ["Black Market Granite"], clean) == (["Black Market Granite"], [])
+
+
+def test_clean_alias_list_splits_every_comma_form_before_cleaning_and_reports_drops():
+    from functools import partial
+    from stone_pipeline.core.text import clean_alias_list
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
+    # a fullwidth comma joins a Latin alias to a CJK one: the Latin half is kept, the CJK half reported
+    blob = "Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a"
+    assert clean_alias_list("X", [blob], clean) == (["Wratza Limestone"], ["\u7ef4\u7eb3\u591a"])
+    assert clean_alias_list("X", ["Nero\u3001Black"], clean) == (["Nero", "Black"], [])
+    # fullwidth brackets split like ASCII ones
+    assert clean_alias_list("X", ["Nero\uff08Black Marble\uff09"], clean) == (["Nero", "Black Marble"], [])
+    # an accented alias is cleaned; a case or accent twin collapses onto the first
+    assert clean_alias_list("Rosa", ["Ros\u00e9", "rose", "ROS\u00c9"], clean) == (["Rose"], [])
 
 
 # --- consolidate_inventory: cross-source SKU collision, newest wins ----------
