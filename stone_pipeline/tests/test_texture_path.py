@@ -44,6 +44,7 @@ def _nothing_outside(monkeypatch):
     import boto3
     monkeypatch.setattr(boto3, "client", lambda *a, **k: pytest.fail("a real boto3 client was made"))
     monkeypatch.setattr(boto3, "Session", lambda *a, **k: pytest.fail("a real boto3 session was made"))
+    monkeypatch.setattr(boto3, "resource", lambda *a, **k: pytest.fail("a real boto3 resource was made"))
 
 
 @pytest.fixture(params=["lean", "generator_stack"])

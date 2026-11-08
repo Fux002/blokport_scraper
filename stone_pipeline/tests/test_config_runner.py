@@ -279,8 +279,10 @@ def test_current_returns_current_and_last_and_survives_restart(tmp_path, monkeyp
 
 
 def test_capture_counts_shape(tmp_path, monkeypatch):
+    from stone_pipeline.ledger import writethrough
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
-    assert runner._capture_counts() == {"variation": 0, "product": 0, "inventory": 0}   # fresh ledger
+    writethrough.connect(bind=True).close()                                   # a writer made it (a reader never does)
+    assert runner._capture_counts() == {"variation": 0, "product": 0, "inventory": 0}   # an empty ledger
 
 
 def test_public_record_carries_counts_field():

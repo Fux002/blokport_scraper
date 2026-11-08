@@ -26,7 +26,7 @@ from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import ORIGIN_HOLD_MULTI_HOME, CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
-from stone_pipeline.core.text import slugify, title_case
+from stone_pipeline.core.text import indefinite_article, slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData
 
 log = logfmt.get_logger("derive")
@@ -532,7 +532,7 @@ def _type_densities() -> tuple[float, dict[str, float]]:
 
 
 def _type_density(type_name: str | None) -> float:
-    """Material density (kg/m3) for a stone type, defaulting to Marble for an unlisted type."""
+    """Material density (kg/m3) for a type: its row in the pack's type_density.csv, else the pack's default density."""
     default, by_type = _type_densities()
     return by_type.get((type_name or "").casefold(), default)
 
@@ -785,7 +785,7 @@ def derive_description(row: CanonicalRow) -> None:
     finish = (row.finish_name or "").lower()
     _pack = active_pack()
     phrase = _pack.finish_phrases.get(finish, _pack.finish_phrase_default)
-    finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
+    supplied = f"{finish} {fmt}" if finish else fmt
     # real thickness (slabs/tiles): height IS the parsed thickness in metres, never fabricated. Omit for
     # blocks and when missing or outside a sane display band (a mis-scaled parse validate will reject).
     thickness_clause = ""
@@ -794,8 +794,8 @@ def derive_description(row: CanonicalRow) -> None:
         if 3 <= mm <= 80:
             thickness_clause = f" at {mm} mm"
     row.description = (
-        f"{variety} is a {material}{origin_clause}. "
-        f"Supplied as {finish_clause}{thickness_clause}, it offers {phrase}."
+        f"{variety} is {indefinite_article(material)} {material}{origin_clause}. "
+        f"Supplied as {indefinite_article(supplied)} {supplied}{thickness_clause}, it offers {phrase}."
     )
     row.description_method = "template"
 

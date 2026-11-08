@@ -73,6 +73,10 @@ def _s3_variation_keys():
                 if name.endswith(".png"):
                     keys[name[:-4]] = (obj.get("ETag") or "").strip('"')   # content fingerprint, quotes stripped
         return keys
+    except ImportError as exc:                    # boto3 is not installed here (a lean local environment)
+        log.warning("boto3 is not installed, so variation images are not listed; image gate falls back to the heuristic",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return None
     except Exception as exc:
         # AccessDenied is an IAM MISCONFIG, not "S3 unreachable". Swallowing it returned None, so the caller
         # fell back to the has_export_image/backed heuristic and advertised {Key}.png for objects it never

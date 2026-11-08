@@ -10,6 +10,8 @@ These run in CI with no scraped data and no real export:
 
 from __future__ import annotations
 
+from stone_pipeline.core.schema import OutputMode
+
 import pytest
 
 from stone_pipeline.config.settings import ENV_NAME
@@ -80,7 +82,7 @@ def test_record_source_disabled_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setattr(writethrough, "open_ledger",
                         lambda *a, **k: pytest.fail("open_ledger called while disabled"))
-    assert writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False,
+    assert writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL,
                                       path=tmp_path / "dev.ledger") is True
 
 
@@ -90,7 +92,7 @@ def test_record_source_enabled_records_products(tmp_path, monkeypatch):
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()          # pre-seed the linked variation, matching fingerprint
 
-    ok = writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False, path=ledger_path)
+    ok = writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
     assert ok is True
 
     with Ledger.open(ledger_path, env=ENV_NAME,
@@ -112,7 +114,7 @@ def test_record_source_returns_false_on_failure_without_raising(tmp_path, monkey
         raise RuntimeError("simulated ledger failure")
     monkeypatch.setattr(writethrough, "open_ledger", _boom)
 
-    result = writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False,
+    result = writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL,
                                         path=tmp_path / "dev.ledger")
     assert result is False, "a write failure must return False, not raise and not report success"
 
@@ -127,7 +129,7 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
     _open_seeded(ledger_path).close()
     first = [*_rows(), CanonicalRow(src_site="polonine", surrogate_key="DDD", variation_key=_VARIATION_KEY,
                                     handle="h-ddd", title="Carrara Three")]
-    assert writethrough.record_source(first, [], load_source("polonine"), inventory_only=False, path=ledger_path)
+    assert writethrough.record_source(first, [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_b' WHERE sku = 'POL-BBB'")
         ledger.execute("UPDATE product SET state = 'syncing' WHERE sku = 'POL-DDD'")
@@ -137,7 +139,7 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
 
     later = [CanonicalRow(src_site="polonine", surrogate_key="EEE", variation_key=_VARIATION_KEY,
                           handle="h-eee", title="Carrara Four")]
-    assert writethrough.record_source(later, [], load_source("polonine"), inventory_only=False, path=ledger_path)
+    assert writethrough.record_source(later, [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         skus = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"] for r in ledger.execute("SELECT sku FROM inventory")}
@@ -174,7 +176,7 @@ def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, 
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
-    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, inventory_only=False, path=ledger_path)
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_a' WHERE sku = 'POL-AAA'")
         ledger.execute("UPDATE inventory SET last_synced_qty = qty, last_synced_made_to_order = made_to_order "
@@ -182,7 +184,7 @@ def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, 
         ledger.conn.commit()
         before = dict(ledger.get("product", "sku", "POL-AAA"))
 
-    assert writethrough.record_source([_stock_only("AAA", 9)], [], cfg, inventory_only=True, path=ledger_path)
+    assert writethrough.record_source([_stock_only("AAA", 9)], [], cfg, mode=OutputMode.STOCK, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         after = dict(ledger.get("product", "sku", "POL-AAA"))
         stock = dict(ledger.get("inventory", "sku", "POL-AAA"))
@@ -198,10 +200,10 @@ def test_stock_only_record_leaves_a_product_new_to_the_ledger_to_the_full_run(tm
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
-    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, inventory_only=False, path=ledger_path)
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL, path=ledger_path)
 
     assert writethrough.record_source([_stock_only("AAA", 9), _stock_only("NEW", 3)], [], cfg,
-                                      inventory_only=True, path=ledger_path)
+                                      mode=OutputMode.STOCK, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}
@@ -217,13 +219,13 @@ def test_stock_only_record_still_delists_and_withdraws(tmp_path, monkeypatch):
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
     full = [_photographed("AAA", 5), _photographed("BBB", 4), _photographed("CCC", 2)]
-    assert writethrough.record_source(full, [], cfg, inventory_only=False, path=ledger_path)
+    assert writethrough.record_source(full, [], cfg, mode=OutputMode.FULL, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_' || sku WHERE sku != 'POL-CCC'")
         ledger.conn.commit()
 
     assert writethrough.record_source([_stock_only("AAA", 5)], [("POL-BBB", "h-bbb")], cfg,
-                                      inventory_only=True, path=ledger_path)
+                                      mode=OutputMode.STOCK, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}

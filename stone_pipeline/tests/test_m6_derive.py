@@ -595,6 +595,21 @@ def test_description_omits_thickness_for_block(ref, cfg):
     assert "mm" not in row.description
 
 
+@pytest.mark.parametrize("finish, colour, stone_type, supplied, material", [
+    ("Antique", "Black", "Marble", "Supplied as an antique slab", "is a black marble"),
+    ("Acid Washed", "Ivory", "Limestone", "Supplied as an acid washed slab", "is an ivory limestone"),
+    ("Unfilled", "Orange", "Onyx", "Supplied as an unfilled slab", "is an orange onyx"),
+    ("Honed", None, "Onyx", "Supplied as a honed slab", "is an onyx"),
+    ("Polished", "Green", "Granite", "Supplied as a polished slab", "is a green granite"),
+    (None, None, "Granite", "Supplied as a slab", "is a granite"),
+])
+def test_description_articles_follow_the_next_word_sound(ref, cfg, finish, colour, stone_type, supplied, material):
+    row = _slab_row(finish_name=finish, color_name=colour, type_name=stone_type)
+    derive.derive_category(row, ref)
+    derive.derive_description(row)
+    assert supplied in row.description and material in row.description, row.description
+
+
 def test_description_uses_benefit_led_finish_phrase(ref, cfg):
     # the sensory 'sell' lives in the finish phrase, tied to the real finish (honest, not adjective spam)
     row = _slab_row(finish_name="Polished")

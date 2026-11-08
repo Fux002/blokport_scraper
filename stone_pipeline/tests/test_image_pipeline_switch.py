@@ -5,6 +5,8 @@ listed, and the photo process never picks them. A logo is a per-photo judge find
 never a source setting."""
 from __future__ import annotations
 
+from stone_pipeline.core.schema import OutputMode
+
 import dataclasses
 import inspect
 import logging
@@ -183,7 +185,7 @@ def _product(standard_photo):
 
 def _written(path, row, cfg):
     """(stored photo_ready, stock, stock reason) after the full produce's write of `row` (product, then its stock)."""
-    assert writethrough.record_source([row], [], cfg, inventory_only=False, path=path)
+    assert writethrough.record_source([row], [], cfg, mode=OutputMode.FULL, path=path)
     with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         sku = emit._sku(row, cfg)
         product, stock = lg.get("product", "sku", sku), lg.get("inventory", "sku", sku)

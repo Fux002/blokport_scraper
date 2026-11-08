@@ -52,6 +52,9 @@ def built(monkeypatch):
     class Session:
         def __init__(self, profile_name=None, region_name=None, **other):
             assert not other, other
+            # #571 review: pin which session makes the client. A Session is only for a named profile; every other
+            # client comes from boto3.client, so a site that starts making its own sessions (a thread pool) fails here.
+            assert profile_name, "a boto3.Session without a named profile"
             self.profile, self.region = profile_name, region_name
 
         def client(self, service, config=None, **other):
@@ -347,7 +350,9 @@ def test_a_bound_open_stamps_this_deployment_and_refuses_another_s_ledger(tmp_pa
 
 def test_an_unbound_open_stamps_nothing_and_refuses_nothing(tmp_path, monkeypatch):
     from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
     path = tmp_path / "dev.db"
+    Ledger.open(path, env=writethrough.ENV_NAME).close()                       # a ledger no writer has bound yet
     writethrough.connect(path, bind=False).close()
     assert _stamp(path) is None                                                 # a reader writes no stamp
     writethrough.connect(path, bind=True).close()
@@ -358,8 +363,23 @@ def test_an_unbound_open_stamps_nothing_and_refuses_nothing(tmp_path, monkeypatc
 def test_connect_opens_this_environment_s_ledger_by_default_and_binding_is_a_choice(tmp_path, monkeypatch):
     from stone_pipeline.ledger import writethrough
     monkeypatch.setenv("SCRAPER_LEDGER_PATH", str(tmp_path / "env.db"))
+    writethrough.connect(bind=True).close()
     with writethrough.connect(bind=False) as ledger:
         assert ledger.env == writethrough.ENV_NAME
     assert (tmp_path / "env.db").exists()
     with pytest.raises(TypeError):
         writethrough.connect(tmp_path / "x.db")                                 # bind is required, by keyword
+
+
+def test_a_reader_never_creates_a_ledger(tmp_path, monkeypatch, caplog):
+    # C3 map: an unbound open of an absent ledger made an empty, unstamped one, which a writer's later bind would then
+    # adopt. A reader opens an existing ledger or fails loud; the two that read without looking first stay best-effort.
+    from stone_pipeline.config.control import runner, scrape_status
+    from stone_pipeline.ledger import writethrough
+    path = tmp_path / "absent.db"
+    with pytest.raises(FileNotFoundError, match="absent.db"):
+        writethrough.connect(path, bind=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_PATH", str(path))
+    assert runner._capture_counts() is None
+    assert scrape_status.ledger_product_counts() == {}
+    assert not path.exists()

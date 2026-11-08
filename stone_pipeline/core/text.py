@@ -410,3 +410,26 @@ def looks_code_shaped(name: str) -> str:
     if len(toks) == 1 and not _kept_code_match(toks[0]) and looks_codey(toks[0]):
         return "bare_code"
     return ""
+
+
+# The indefinite article goes by the SOUND of the next word, which the letter rule misses in two ways. This is English
+# language data, not a tunable: a vowel letter read as a consonant sound ("a uniform", "a European", "a UV-cured", "a
+# one-off"; "one" as a word only, so "an onerous" keeps the letter rule), and a silent h ("an hour", "an honest"). Each
+# is matched on the first word, case-insensitively, as a prefix ("unique", "hourly", "heirloom").
+_CONSONANT_SOUND_PREFIXES = ("uni", "use", "eu", "uv")
+_CONSONANT_SOUND_WORDS = ("one",)
+_VOWEL_SOUND_H_PREFIXES = ("hour", "honest", "honour", "heir")
+
+
+def indefinite_article(phrase: str) -> str:
+    """'an' when `phrase` starts with a vowel sound, else 'a' ("an antique slab", "a honed slab", "an onyx", "a
+    uniform finish", "an hour"). A phrase with no word has no article: ValueError."""
+    words = phrase.split()
+    if not words:
+        raise ValueError("an article needs a word after it")
+    word = words[0].casefold()
+    if word.startswith(_VOWEL_SOUND_H_PREFIXES):
+        return "an"
+    if word.startswith(_CONSONANT_SOUND_PREFIXES) or word.split("-")[0] in _CONSONANT_SOUND_WORDS:
+        return "a"
+    return "an" if word[0] in "aeiou" else "a"

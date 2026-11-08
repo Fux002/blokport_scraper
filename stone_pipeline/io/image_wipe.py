@@ -15,7 +15,6 @@ Called by the reset lifecycle only, never on a schedule.
 """
 from __future__ import annotations
 
-
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 

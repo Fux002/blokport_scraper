@@ -540,16 +540,15 @@ def _resolve_target(name: str, stone_type: str) -> str:
     return varieties.alias_target(name, stone_type) or name
 
 
-def _all_reconfirm(listings, canonical: str, stone_type: str, color: str, origin: str, widen: bool) -> bool:
+def _all_reconfirm(statements, listings, canonical: str, stone_type: str, color: str, origin: str, widen: bool) -> bool:
     """True iff EVERY listing already carries the IDENTICAL operator statement: the vendor row for (source,
     spelling), else the global ('', spelling) row, resolving to the same variety and matching type, colour,
     origin and widen. An identical statement stores nothing new, so re-stating it (on an archived variety, or
     with a restricted colour the record already carries) is a pure no-op the gate allows. Read from the raw
     statement rows, not the derived Decisions: a bind is folded into bindings there, and its colour is kept
-    only at variety level, so the per-listing comparison needs the row."""
-    from stone_pipeline.config import decisions_store
+    only at variety level, so the per-listing comparison needs the row. `statements`: decisions_store.statement_rows()."""
     from stone_pipeline.matching import projections as proj
-    rows = {(proj.norm(r["source"]), proj.norm(r["spelling_norm"])): r for r in decisions_store.statement_rows()}
+    rows = {(proj.norm(r["source"]), proj.norm(r["spelling_norm"])): r for r in statements}
     want = (proj.norm(canonical), proj.norm(stone_type), proj.norm(color), (origin or "").upper(), bool(widen))
     for source, scraped in listings:
         sp = proj.norm(scraped)
@@ -564,11 +563,12 @@ def _all_reconfirm(listings, canonical: str, stone_type: str, color: str, origin
     return True
 
 
-def _variety_carries_colour(canonical: str, stone_type: str, color: str) -> bool:
+def _variety_carries_colour(canonical: str, stone_type: str, color: str, statements) -> bool:
     """True iff the variety already documents `color`: its backbone SEED colours grown by the config.db leaf
     OVERLAY (the same view the tree is built from), plus any operator-STATED colour. Restating a colour the
     variety already carries is not an assignment, so it passes the colour gate even once that colour is
-    restricted. Existing readers only (load_backbone + backbone_leaf_overlay + load_decisions.colours)."""
+    restricted. Existing readers only (load_backbone + backbone_leaf_overlay + load_decisions.colours, built from the
+    `statements` the gate read)."""
     from stone_pipeline.config import decisions_store
     from stone_pipeline.matching import projections as proj
     from stone_pipeline.reference.loaders import load_backbone
@@ -576,7 +576,7 @@ def _variety_carries_colour(canonical: str, stone_type: str, color: str) -> bool
     backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
     variety = backbone.lookup(canonical, stone_type)
     carried = {proj.norm(c) for c in (variety.colors if variety else [])}
-    carried |= {proj.norm(c) for c in decisions_store.load_decisions().colours.get(
+    carried |= {proj.norm(c) for c in decisions_store.load_decisions(rows=statements).colours.get(
         (proj.norm(canonical), proj.norm(stone_type)), [])}
     return proj.norm(color) in carried
 
@@ -611,12 +611,14 @@ def _ve2_decide_gate(listings, name: str, stone_type: str, color: str, origin: s
     colour_restricted = bool(color) and proj.norm(color) in rcolors
     if not archived and not colour_restricted:
         return None                                             # nothing to gate (the dormant path)
-    if _all_reconfirm(listings, canonical, stone_type, color, origin, widen):
+    from stone_pipeline.config import decisions_store
+    statements = decisions_store.statement_rows()               # read once: the re-confirm and the colour check share it
+    if _all_reconfirm(statements, listings, canonical, stone_type, color, origin, widen):
         return None                                             # identical to the stored statement: a no-op
     if archived:
         return 400, {"error": f"'{canonical}' ({stone_type}) is archived in Medusa; bind to an active "
                               "variety, mint as new, or reactivate it in Blokport", "archived": True}
-    if colour_restricted and not _variety_carries_colour(canonical, stone_type, color):
+    if colour_restricted and not _variety_carries_colour(canonical, stone_type, color, statements):
         return 400, {"error": f"colour {color!r} is archived or internal in Medusa; pick an active colour",
                      "restricted": True}
     return None

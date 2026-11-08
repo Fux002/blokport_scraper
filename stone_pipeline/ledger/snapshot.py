@@ -24,7 +24,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET
 from stone_pipeline.core import logfmt
-from stone_pipeline.io.storage import s3_error_is_missing
+from stone_pipeline.io import storage
 
 log = logfmt.get_logger("ledger.snapshot")
 
@@ -57,7 +57,6 @@ def _digest(path: Path) -> str:
 
 
 def _s3():
-    from stone_pipeline.io import storage
     # explicit timeouts + capped retries so a best-effort snapshot FAILS FAST instead of stalling. This
     # matters on the SIGTERM/atexit stop path: a hung S3 call must not burn the whole ECS stopTimeout and
     # get SIGKILLed with no snapshot at all. Without a Config, boto3 can also fall through to a slow IMDS
@@ -147,7 +146,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
     try:
         _s3().head_object(Bucket=S3_BUCKET, Key=key)   # 404 / NoSuchKey: there is no snapshot yet
     except Exception as exc:
-        if s3_error_is_missing(exc):
+        if storage.s3_error_is_missing(exc):
             log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
             return False                   # genuine absence -> fresh start, never a crash-loop
         # anything else (throttle, permission, endpoint) says nothing about absence: the snapshot may exist,
@@ -173,7 +172,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         return True
     except Exception as exc:
         Path(tmp).unlink(missing_ok=True)
-        if required and not s3_error_is_missing(exc):
+        if required and not storage.s3_error_is_missing(exc):
             log.exception("restore FAILED for a present, required snapshot; failing loud (retry on restart)",
                           extra={"extra_fields": {"key": key}})
             raise

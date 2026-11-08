@@ -15,6 +15,7 @@ the failed-job alert fires). The sync's product gate never ships an imageless PR
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import json
 import os
@@ -36,6 +37,8 @@ log = logfmt.get_logger("prepare_variant_images")
 VARIATIONS_PREFIX = f"{ENV_SEGMENT}/variations/"   # where a variant's {Key}.png must land (its Image URL home)
 # rb_images.py writes the background-removed {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
 DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
+# genetate_images.py writes FLUX's {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./images") and resumes over what is there.
+GEN_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "images"
 # The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
 PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
 # The produce PUBLISHES its queue under a UNIQUE key here and passes that key to the GPU job via
@@ -256,7 +259,7 @@ def queue_new_textures() -> int:
         cap, refreshed = 0, set()
     try:
         prompts_path = image_prompts.build_with_upgrades(refreshed, cap) if cap > 0 else image_prompts.build()
-    except Exception:
+    except (OSError, ValueError, csv.Error):     # an input that cannot be read; a bug in the build fails the produce
         log.exception("image prompt queue build failed")
         return 0
     items = json.loads(prompts_path.read_text(encoding="utf-8"))   # the build always writes a list
@@ -295,6 +298,15 @@ def _dispatch(prompts_path: Path, queued: int) -> None:
         log.error("%d new variant texture(s) queued but NO GPU job was dispatched; their products stay "
                   "HELD until a successful produce publishes + dispatches (check S3 write / "
                   "GPU queue+jobdef config)", queued, extra={"extra_fields": {"queued": queued}})
+
+
+def _clear_local_outputs(keys: list[str]) -> None:
+    """Remove the queued keys' local FLUX and BEN2 outputs before generating. genetate_images resumes over an existing
+    images/{Key}.png and BEN2 de-backgrounds it, so a PNG an earlier run left on a dev box would otherwise be uploaded
+    as this run's texture. A fresh GPU task has none. What is already on S3 was pruned from `keys` before this."""
+    for key in keys:
+        for folder in (GEN_OUTPUT_DIR, DEBG_OUTPUT_DIR):
+            (folder / f"{key}.png").unlink(missing_ok=True)
 
 
 def _generate_queued_images() -> list[str]:
@@ -348,6 +360,7 @@ def run() -> int:
         raise TextureJobFailed(f"{len(targets)} variant texture(s) queued, but the generator cannot run here: "
                                f"missing {blockers} (fal_client + torch + FAL_KEY)")
 
+    _clear_local_outputs(targets)                  # never re-upload a PNG an earlier run left behind
     failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}.png
     uploaded, missing = upload_variant_images(targets)
     not_landed = set(missing)

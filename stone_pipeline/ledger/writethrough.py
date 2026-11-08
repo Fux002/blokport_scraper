@@ -23,7 +23,7 @@ from typing import Sequence
 from stone_pipeline.config.settings import ENV_NAME, SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline.ledger import bootstrap, populate
 from stone_pipeline.ledger.db import Ledger
 
@@ -57,10 +57,14 @@ def backend_fingerprint() -> str:
 def connect(path: str | Path | None = None, *, bind: bool) -> Ledger:
     """The one way the ledger is opened: at `path` (this environment's, ledger_path(), when None), for this environment.
     bind=True (a writer, the sync side): bound to this deployment's backend, its fingerprint checked (a wrong-brand
-    ledger refused) and stamped on a first bind. bind=False (a reader): neither, so an unbound open stamps nothing and
-    refuses nothing. Ledger.open creates the file when it is absent: a reader that must not create one looks first."""
-    return Ledger.open(path or ledger_path(), env=ENV_NAME,
-                       backend_id_fingerprint=backend_fingerprint() if bind else None)
+    ledger refused) and stamped on a first bind; it creates the ledger when there is none. bind=False (a reader):
+    neither, so an unbound open stamps nothing and refuses nothing, and it opens an EXISTING ledger only: an absent one
+    is FileNotFoundError, never an empty unstamped file a later writer would adopt (on AWS the ledger is restored
+    before anything reads it, so only an off-AWS reader can meet this)."""
+    path = Path(path or ledger_path())
+    if not bind and not path.exists():
+        raise FileNotFoundError(f"no sync ledger at {path}: a reader opens an existing ledger, never creates one")
+    return Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=backend_fingerprint() if bind else None)
 
 
 def open_ledger(path: str | Path | None = None) -> Ledger:
@@ -110,14 +114,14 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
 
 
 def record_source(emit_rows: Sequence[CanonicalRow],
-                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, inventory_only: bool,
+                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, mode: OutputMode,
                   replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
     a catalog/stock change. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
 
-    `inventory_only` (the stock-only refresh) records stock only. That run skips the image stage, so its
+    A stock-only run (OutputMode.STOCK, the stock refresh) records stock only. That run skips the image stage, so its
     rows carry no photos, gallery or 3D: written as products they would strip every product's images and
     re-serve it without them. So it never writes a product row; it moves the stock of the products the
     ledger already holds, and leaves a product new to the ledger (and its stock) to the full run that
@@ -133,7 +137,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         return True
     try:
         with open_ledger(path) as ledger:
-            if inventory_only:
+            if mode.stock_only:
                 n_products = 0
                 stock_rows = populate.ledger_products(ledger, emit_rows, cfg)
             else:
@@ -143,7 +147,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
             n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
-            "source": cfg.source_code, "inventory_only": inventory_only, "products": n_products,
+            "source": cfg.source_code, "inventory_only": mode.stock_only, "products": n_products,
             "inventory": n_stock, "left_to_full_run": len(emit_rows) - len(stock_rows),
             "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
         return True
