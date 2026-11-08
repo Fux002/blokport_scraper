@@ -64,6 +64,16 @@ SNAPSHOT_STORES = {
     "backbone_additions": ("backbone_additions/slab.json", "backbone_additions/block.json",
                            "backbone_additions/tile.json"),
 }
+# Every REQUIRED store must be present in the snapshot, or build_stores ABORTS and names the absent ones: a
+# silently skipped store would shrink the "every store" proof. A multi-file store is required to have at least
+# one file. The ONE optional store is the S3 base copies: they are a live-base cross-check beside the
+# committed base_csv, which is itself the authoritative base here, so their absence never drops a base Key.
+REQUIRED_STORES = ("ledger_db", "config_db", "base_csv", "attributes_csv", "backbone_files", "backbone_additions")
+OPTIONAL_STORES = ("base_copies",)
+
+
+class MissingStore(Exception):
+    """A required store is absent from the snapshot. Raised by build_stores so the run fails loud and named."""
 
 
 @dataclass(frozen=True)
@@ -357,22 +367,29 @@ def write_map(result: KeyMapResult, out_csv: Path) -> str:
 
 
 def build_stores(snapshot_root: Path, envs: tuple[str, ...] = ENVS) -> list[StorePaths]:
-    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). A store the
-    snapshot does not contain is left unset, so the run reads what is present and lists it."""
+    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). Every
+    REQUIRED store must be present, or this ABORTS (MissingStore) naming each absent (env, store): the proof is
+    "every store", so a missing one is never skipped silently. Only OPTIONAL_STORES may be absent."""
     root = Path(snapshot_root)
 
     def present(rels: tuple[str, ...], env: str) -> tuple[Path, ...]:
         return tuple(p for p in (root / env / r for r in rels) if p.exists())
 
-    stores = []
+    stores, missing = [], []
     for env in envs:
-        single = {k: (present(v, env)[:1] or (None,))[0]
-                  for k, v in SNAPSHOT_STORES.items() if k in ("ledger_db", "config_db", "base_csv", "attributes_csv")}
+        got = {k: present(v, env) for k, v in SNAPSHOT_STORES.items()}
+        missing += [f"{env}/{k}" for k in REQUIRED_STORES if not got[k]]
         stores.append(StorePaths(
-            env=env, **single,
-            base_copies=present(SNAPSHOT_STORES["base_copies"], env),
-            backbone_files=present(SNAPSHOT_STORES["backbone_files"], env),
-            backbone_additions=present(SNAPSHOT_STORES["backbone_additions"], env)))
+            env=env,
+            ledger_db=got["ledger_db"][0] if got["ledger_db"] else None,
+            config_db=got["config_db"][0] if got["config_db"] else None,
+            base_csv=got["base_csv"][0] if got["base_csv"] else None,
+            attributes_csv=got["attributes_csv"][0] if got["attributes_csv"] else None,
+            base_copies=got["base_copies"],
+            backbone_files=got["backbone_files"],
+            backbone_additions=got["backbone_additions"]))
+    if missing:
+        raise MissingStore("required store(s) absent from the snapshot: " + ", ".join(sorted(missing)))
     return stores
 
 
