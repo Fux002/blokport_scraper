@@ -125,16 +125,15 @@ jobs:
 
       # :<sha> is the tag prod is pinned to, so it is pushed once. A merge deploy of a head whose :<sha> is already in
       # ECR (an older commit's CI finished after the head's, or a CI re-run) reuses that image: no build, no push.
-      # BatchGetImage reports a missing tag as a failure entry, not an error, so an absent tag reads empty; a failed
-      # lookup (no access, no network) fails the deploy instead of reading as absent.
+      # deploy/ecr_image_digest.sh is the one tag lookup: only BatchGetImage's ImageNotFound reads as absent, and any
+      # other answer (another failure code, a denied call) fails the deploy instead.
       - name: Look up the head's :<sha> in ECR
         id: existing
         if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
         env:
           SHA: ${{ steps.target.outputs.sha }}
         run: |
-          DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag="$SHA" \
-            --query 'images[].imageId.imageDigest' --output text)
+          DIGEST=$(bash deploy/ecr_image_digest.sh "$SHA")
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           if [ -n "$DIGEST" ]; then echo ":$SHA is already $DIGEST: reused, not rebuilt"; else echo ":$SHA is new"; fi
 
@@ -155,8 +154,9 @@ jobs:
       # Only the merge deploy of main's head builds the core image, so :<sha> (the tag prod is pinned to) and :core
       # (dev's image) are pushed together, from the one build dev then runs. When :<sha> already exists, :core is
       # pointed at that image by copying its manifest (BatchGetImage + PutImage): nothing is rebuilt or re-pushed. The
-      # manifest is read in whatever media type it was stored as, and a :core already on it is left alone (ECR refuses
-      # a PutImage that changes nothing).
+      # manifest is read in whatever media type it was stored as and written to a file byte for byte, and PutImage is
+      # given the existing digest, so ECR refuses a manifest that does not hash to it: :core lands on that image or
+      # does not move. A :core already on it is left alone (ECR refuses a PutImage that changes nothing).
       - name: Push image
         if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
         env:
@@ -171,27 +171,21 @@ jobs:
             echo "Pushed $REPO:core and :$SHA"
             exit 0
           fi
-          CORE_DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag=core \
-            --query 'images[].imageId.imageDigest' --output text)
+          CORE_DIGEST=$(bash deploy/ecr_image_digest.sh core)   # an assignment, so a failed lookup stops the step
           if [ "$CORE_DIGEST" = "$EXISTING" ]; then
             echo "$REPO:core already names :$SHA ($EXISTING)"
             exit 0
           fi
-          # the manifest byte for byte (jq -j adds no newline), or PutImage would mint a new digest
           IMAGE=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageDigest="$EXISTING" \
             --accepted-media-types application/vnd.docker.distribution.manifest.v2+json \
               application/vnd.oci.image.manifest.v1+json application/vnd.docker.distribution.manifest.list.v2+json \
               application/vnd.oci.image.index.v1+json --output json)
-          MANIFEST=$(jq -j '.images[0].imageManifest' <<< "$IMAGE")
-          MEDIA=$(jq -j '.images[0].imageManifestMediaType' <<< "$IMAGE")
-          aws ecr put-image --repository-name blokport-scraper --image-tag core --image-manifest "$MANIFEST" \
-            --image-manifest-media-type "$MEDIA" > /dev/null
-          CORE_DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag=core \
-            --query 'images[].imageId.imageDigest' --output text)
-          if [ "$CORE_DIGEST" != "$EXISTING" ]; then
-            echo "::error::$REPO:core is $CORE_DIGEST after the retag, not the existing :$SHA ($EXISTING)"
-            exit 1
-          fi
+          ONE_IMAGE='if (.images | length) == 1 then .images[0] else error("no single image for the digest") end'
+          MANIFEST_FILE="$RUNNER_TEMP/core-manifest.json"
+          jq -e -j "$ONE_IMAGE | .imageManifest" <<< "$IMAGE" > "$MANIFEST_FILE"
+          MEDIA=$(jq -e -r "$ONE_IMAGE | .imageManifestMediaType" <<< "$IMAGE")
+          aws ecr put-image --repository-name blokport-scraper --image-tag core --image-digest "$EXISTING" \
+            --image-manifest "file://$MANIFEST_FILE" --image-manifest-media-type "$MEDIA" > /dev/null
           echo "Pointed $REPO:core at the existing :$SHA ($EXISTING); nothing rebuilt or re-pushed"
 
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
@@ -221,7 +215,7 @@ jobs:
           df -h /
 
       # Heavy CPU-torch variant (~10 GB with baked models); only on manual dispatch with the flag set. Smoke-imported
-      # like core before its push: the texture job's entrypoint and the generator stack it needs (GEN_DEPS).
+      # like core before its push: the texture job's entrypoint, the generator stack it needs (GEN_DEPS) and ben2.
       - name: Build and push imageproc image
         if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
         env:
@@ -229,7 +223,7 @@ jobs:
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target imageproc -t "$REPO:imageproc" .
-          docker run --rm --entrypoint python "$REPO:imageproc" -c "import stone_pipeline.prepare_variant_images, fal_client, torch"
+          docker run --rm --entrypoint python "$REPO:imageproc" -c "import stone_pipeline.prepare_variant_images, fal_client, torch, ben2"
           docker push "$REPO:imageproc"
           echo "Pushed $REPO:imageproc"
 
@@ -245,8 +239,8 @@ jobs:
 
       # GPU image for the AWS Batch texture job; :gpu = dev (mutable), :gpu-<sha> = promote to prod. :gpu-<sha> is
       # pushed once: a second dispatch of the same commit fails before building instead of moving the tag prod may be
-      # pinned to (BatchGetImage reports a missing tag as a failure entry, not an error, so an absent tag reads empty).
-      # Smoke-imported before its push: the job's entrypoint (RUN_MODE=generate-textures) and GEN_DEPS.
+      # pinned to (deploy/ecr_image_digest.sh, the one tag lookup). Smoke-imported before its push: the job's
+      # entrypoint (RUN_MODE=generate-textures), GEN_DEPS and ben2 (rb_images, the background-removal step).
       - name: Build and push gpu image
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
         env:
@@ -254,14 +248,13 @@ jobs:
           SHA: ${{ steps.target.outputs.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
-          EXISTING=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag="gpu-$SHA" \
-            --query 'images[].imageId.imageDigest' --output text)
+          EXISTING=$(bash deploy/ecr_image_digest.sh "gpu-$SHA")
           if [ -n "$EXISTING" ]; then
             echo "::error::$REPO:gpu-$SHA already exists ($EXISTING): an immutable tag is never re-pushed"
             exit 1
           fi
           docker build --target gpu -t "$REPO:gpu" -t "$REPO:gpu-$SHA" .
-          docker run --rm --entrypoint python "$REPO:gpu" -c "import stone_pipeline.prepare_variant_images, fal_client, torch"
+          docker run --rm --entrypoint python "$REPO:gpu" -c "import stone_pipeline.prepare_variant_images, fal_client, torch, ben2"
           docker push "$REPO:gpu"
           docker push "$REPO:gpu-$SHA"
           echo "Pushed $REPO:gpu and :gpu-$SHA"
