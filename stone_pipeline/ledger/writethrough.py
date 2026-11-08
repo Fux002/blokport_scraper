@@ -57,10 +57,14 @@ def backend_fingerprint() -> str:
 def connect(path: str | Path | None = None, *, bind: bool) -> Ledger:
     """The one way the ledger is opened: at `path` (this environment's, ledger_path(), when None), for this environment.
     bind=True (a writer, the sync side): bound to this deployment's backend, its fingerprint checked (a wrong-brand
-    ledger refused) and stamped on a first bind. bind=False (a reader): neither, so an unbound open stamps nothing and
-    refuses nothing. Ledger.open creates the file when it is absent: a reader that must not create one looks first."""
-    return Ledger.open(path or ledger_path(), env=ENV_NAME,
-                       backend_id_fingerprint=backend_fingerprint() if bind else None)
+    ledger refused) and stamped on a first bind; it creates the ledger when there is none. bind=False (a reader):
+    neither, so an unbound open stamps nothing and refuses nothing, and it opens an EXISTING ledger only: an absent one
+    is FileNotFoundError, never an empty unstamped file a later writer would adopt (on AWS the ledger is restored
+    before anything reads it, so only an off-AWS reader can meet this)."""
+    path = Path(path or ledger_path())
+    if not bind and not path.exists():
+        raise FileNotFoundError(f"no sync ledger at {path}: a reader opens an existing ledger, never creates one")
+    return Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=backend_fingerprint() if bind else None)
 
 
 def open_ledger(path: str | Path | None = None) -> Ledger:
