@@ -19,7 +19,9 @@ Every record is keyed by the listing's SKU, which a variety re-bind never moves 
           attempts are read back, never paid again). Only for the listing decided on: a cleaned copy is the photo's, so
           a listing of the same stone showing it finds it itself.
   withdraw the owner's click withdrawn (the hidden-listings page's DELETE /photos/clicks): its click file goes, nothing
-          else; a listing without a click is left as it is.
+          else; a listing without a click is left as it is. A withdraw leaves no record, so an older export's clean
+          for that listing would store the click again: not a real path, since the page sends one decision per request
+          and Blokport stamps its `at` (#555 review, ruled no action).
 The judge's verdicts are never touched. The owner's latest decision on a listing wins, and each replaces the other two:
 a "use" lifts its removal and its click; a "remove" drops its choice and its click; a "clean" lifts its removal and its
 owner choice with the choice record made from it (else that photo stays the listing's valid choice and the run never

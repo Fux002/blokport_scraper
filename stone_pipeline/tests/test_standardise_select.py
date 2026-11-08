@@ -1734,3 +1734,15 @@ def test_a_listing_the_owner_decided_is_never_cleaned(monkeypatch):
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned a listing the owner decided"))
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A))
+
+
+def test_a_review_photo_reads_its_judged_answer_once(monkeypatch):
+    # #555 review: review_photo read a photo's judged answer up to three times (its state, its kinds, whether a cleaned
+    # copy could fix it); it reads it once
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    reads = []
+    real = sel._get_json
+    monkeypatch.setattr(sel, "_get_json", lambda client, key: reads.append(key) or real(client, key))
+    photo = sel.review_photo(s3, rounds, _listing(A, B), A, set(), set())
+    assert photo["state"] == "fail" and photo["kinds"] == ["light_reflection"] and photo["fixable"]
+    assert [key for key in reads if "/judged/" in key] == [f"{GPU}judged/{A}.json"]
