@@ -26,7 +26,8 @@ from pathlib import Path
 from stone_pipeline import catalog
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.run import OutputMode, expected_sources, run_all
+from stone_pipeline.core.schema import OutputMode
+from stone_pipeline.run import expected_sources, run_all
 
 log = logfmt.get_logger("inventory")
 

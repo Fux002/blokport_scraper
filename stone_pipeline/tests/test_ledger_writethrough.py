@@ -9,6 +9,8 @@ via env so the live pipeline is only touched when explicitly enabled.
 
 from __future__ import annotations
 
+from stone_pipeline.core.schema import OutputMode
+
 import csv
 import glob
 
@@ -76,10 +78,10 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_d
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
-                        lambda *a, **k: (modes.append(k.get("inventory_only")), True)[1])
+                        lambda *a, **k: (modes.append(k.get("mode")), True)[1])
 
     run_source("marenostone", outputs_dir=tmp_path / "on", state_dir=tmp_path / "on", data_dir=scrape_data_dir)
-    assert modes == [False], "write-through enabled: a full run calls record_source exactly once, as a full run"
+    assert modes == [OutputMode.FULL], "write-through enabled: a full run calls record_source exactly once, as a full run"
 
 
 def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch, scrape_data_dir):

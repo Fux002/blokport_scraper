@@ -6,6 +6,8 @@ payload hash, so a change of it never re-serves an existing product, while a pro
 current value. A stock-only refresh, which cannot tell whether a product has a photo, changes neither."""
 from __future__ import annotations
 
+from stone_pipeline.core.schema import OutputMode
+
 import dataclasses
 import json
 import sqlite3
@@ -53,9 +55,9 @@ def _row(standard_photo, qty="5"):
                         product_image_keys=["products/AAA/1.webp"], standard_photo=standard_photo)
 
 
-def _record(path, rows, *, inventory_only=False, discontinued=(), replaced=None):
+def _record(path, rows, *, mode=OutputMode.FULL, discontinued=(), replaced=None):
     assert writethrough.record_source(rows, list(discontinued), load_source("polonine"),
-                                      inventory_only=inventory_only, replaced=replaced, path=path)
+                                      mode=mode, replaced=replaced, path=path)
 
 
 def _acked(path):
@@ -158,7 +160,7 @@ def test_a_stock_only_refresh_never_changes_the_photo_fact_or_the_reason(ledger_
         before = dict(ledger.get("product", "sku", SKU))
     for on in (True, False):                        # even a rule switched off waits for the full run
         _rule(monkeypatch, on)
-        _record(ledger_path, [_row(None, qty="9")], inventory_only=True)
+        _record(ledger_path, [_row(None, qty="9")], mode=OutputMode.STOCK)
         with _open(ledger_path) as ledger:
             assert dict(ledger.get("product", "sku", SKU)) == before
             stock = ledger.get("inventory", "sku", SKU)

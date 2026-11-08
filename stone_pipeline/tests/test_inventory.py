@@ -82,10 +82,10 @@ def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scra
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
-                        lambda *a, **k: (modes.append(k.get("inventory_only")), True)[1])
+                        lambda *a, **k: (modes.append(k.get("mode")), True)[1])
     run_source("marenostone", mode=OutputMode.STOCK, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                known_products_path=_known_products_export(tmp_path))
-    assert modes == [True]
+    assert modes == [OutputMode.STOCK]
 
 
 def _stub_stock_refresh(monkeypatch, produced):

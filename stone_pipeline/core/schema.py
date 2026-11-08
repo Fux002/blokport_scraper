@@ -19,6 +19,23 @@ from stone_pipeline.config.settings import Confidence
 
 
 # --- Review flag codes: a closed enum (section 9.1) ---------------------------
+class OutputMode(Enum):
+    """What a run writes. FULL imports products: the image stage, the magnitude check, the product CSVs, canonical and
+    the ledger's product rows. STOCK is the stock-only refresh of EXISTING products (stone_pipeline.inventory): the
+    same scrape -> match -> classify path, then ONLY inventory_update.csv and the ledger's stock, so it never re-imports
+    products or regenerates images, and it needs the Medusa product export (its delta is against it)."""
+    FULL = "full"
+    STOCK = "stock"
+
+    @property
+    def imports_products(self) -> bool:
+        return self is OutputMode.FULL
+
+    @property
+    def stock_only(self) -> bool:
+        return self is OutputMode.STOCK
+
+
 class FlagCode(str, Enum):
     attr_unresolved = "attr_unresolved"
     # the listing's title and the site's type tag name two stones that BOTH exist: the type is left open for

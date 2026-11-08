@@ -16,9 +16,10 @@ import logging
 import sys
 from collections import Counter
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
+
+import polars as pl
 
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
@@ -31,7 +32,7 @@ from stone_pipeline.core import ids as ids_mod
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import RunLayout, write_steps_md
 from stone_pipeline.core.manifest import Manifest, StageMetric, content_hash
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline import gates
 from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
@@ -247,39 +248,6 @@ def _write_diagnostics(manifest, layout) -> None:
         json.dumps(stages_doc, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
 
-class OutputMode(Enum):
-    """What a run writes. FULL: the product import (images, product CSVs, canonical, the full ledger record). STOCK: the
-    stock-only refresh of EXISTING products (stone_pipeline.inventory): the same scrape -> match -> classify path, then
-    ONLY inventory_update.csv (Variant Sku + Inventory Quantity) and only stock in the ledger, so it never re-imports
-    products or regenerates images. Each property is one question a step asks of the mode."""
-    FULL = "full"
-    STOCK = "stock"
-
-    @property
-    def runs_images(self) -> bool:
-        return self is OutputMode.FULL
-
-    @property
-    def checks_magnitude(self) -> bool:
-        return self is OutputMode.FULL
-
-    @property
-    def writes_products(self) -> bool:
-        return self is OutputMode.FULL
-
-    @property
-    def needs_known_export(self) -> bool:
-        return self is OutputMode.STOCK
-
-    @property
-    def require_images(self) -> bool:
-        return SETTINGS.images.require_images if self is OutputMode.FULL else False
-
-    @property
-    def stock_only(self) -> bool:
-        return self is OutputMode.STOCK
-
-
 class RunAborted(Exception):
     """A guard stopped the run before emit; the guard logs its own line where it fires. run_source's one handler
     (_abort) then writes the diagnostics, stamps the run FAILED when `stamp_failed` (the run-level signal admission
@@ -295,7 +263,7 @@ class RunAborted(Exception):
 class Acquired:
     """The raw frame a source handed back, with its timestamp token, its origin label and the scrape file behind it
     (None for a load_frame source called without one)."""
-    frame: Any
+    frame: pl.DataFrame
     ts_token: str
     origin: str
     scrape_path: Optional[Path]
@@ -321,12 +289,11 @@ class RunContext:
 
 @dataclass(frozen=True)
 class Preflight:
-    """The adapted, lot-loaded rows that passed every pre-stage guard, with the Medusa product export, the lot cards
-    and the health status."""
+    """The adapted, lot-loaded rows that passed every pre-stage guard, with the Medusa product export and the lot cards
+    (the health status is on the manifest)."""
     rows: list[CanonicalRow]
     known: product_state.KnownProducts
     lot_cards: list[dict]
-    health: str
 
 
 @dataclass(frozen=True)
@@ -400,7 +367,7 @@ def _start(source: str, adapter: AdapterBase, acquired: Acquired, mode: OutputMo
                       writeback_path=state_dir / "alias_writeback.csv", scrape_path=acquired.scrape_path)
 
 
-def preflight(ctx: RunContext, frame, known_products_path: Optional[Path]) -> Preflight:
+def preflight(ctx: RunContext, frame: pl.DataFrame, known_products_path: Optional[Path]) -> Preflight:
     """Every guard before the stages, plus ingest, the Medusa product export and the lots step. Fills the manifest's
     health status and the ingest / lots stage metrics and ingest gate. Raises RunAborted."""
     run_log, manifest, source_cfg = ctx.run_log, ctx.manifest, ctx.source_cfg
@@ -464,7 +431,7 @@ def preflight(ctx: RunContext, frame, known_products_path: Optional[Path]) -> Pr
     # the run exits 0 "0 changed" -- a silent success that masks the missing export and drops real stock
     # moves. Full mode legitimately has no export on a cold start (everything is new), so guard ONLY the
     # inventory-only path: it cannot produce a trustworthy delta without the export, so fail loud.
-    if ctx.mode.needs_known_export and not known_path.exists():
+    if ctx.mode.stock_only and not known_path.exists():
         run_log.error("inventory-only refresh aborted: the Medusa product export is missing, so no stock "
                       "delta can be computed (a '0 changed' result would be a lie)",
                       extra={"extra_fields": {"expected": str(known_path)}})
@@ -491,7 +458,7 @@ def preflight(ctx: RunContext, frame, known_products_path: Optional[Path]) -> Pr
         run_log.error("ingest gate FAILED; aborting before clean -- scrape is missing required fields",
                       extra={"extra_fields": {"violations": ingest_gate.violations}})
         raise RunAborted(stamp_failed=False)
-    return Preflight(rows=rows, known=known, lot_cards=lot_cards, health=report.status)
+    return Preflight(rows=rows, known=known, lot_cards=lot_cards)
 
 
 def resolve(ctx: RunContext, rows: list[CanonicalRow]) -> Resolved:
@@ -559,7 +526,7 @@ def resolve(ctx: RunContext, rows: list[CanonicalRow]) -> Resolved:
     # Canonical magnitude-drift gate: after derive populates the physical fields (weight/dims), catch a
     # unit/normalization rescale before it reaches the catalog. Source-agnostic (canonical fields only),
     # self-tuning per-source baseline. Skipped for an inventory-only refresh (no product magnitudes move).
-    if ctx.mode.checks_magnitude:
+    if ctx.mode.imports_products:
         mag_status, mag_report = magnitude_drift.check(rows, ctx.source)
         manifest.magnitude_status = mag_status
         (ctx.layout.diagnostics / "magnitude_drift.json").write_text(
@@ -578,11 +545,11 @@ def finalize_rows(ctx: RunContext, resolved: Resolved,
     worklists, the metric distributions and the run totals."""
     run_log, manifest, mode, rows = ctx.run_log, ctx.manifest, ctx.mode, resolved.rows
     # Stage 7: images  (skipped for an inventory-only refresh -- stock never touches images)
-    img_stats = images.run(rows) if mode.runs_images else images.ImageStats()
+    img_stats = images.run(rows) if mode.imports_products else images.ImageStats()
     # honest status (was hardcoded OK): a large no_image fraction means most products are held from shipping
     # -- a systemic image-supply/processing problem, surfaced at this layer instead of hiding in the count.
     _img_status = (_ratio_status(img_stats.no_image, len(rows), SETTINGS.thresholds.images_no_image_degraded)
-                   if mode.runs_images else "skipped")
+                   if mode.imports_products else "skipped")
     _record(manifest, run_log, StageMetric(
         stage="images", status=_img_status, rows_out=len(rows),
         extra={"staged": img_stats.staged, "no_image": img_stats.no_image,
@@ -597,12 +564,12 @@ def finalize_rows(ctx: RunContext, resolved: Resolved,
 
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=ctx.source_cfg.emit_on_review,
-                              require_images=mode.require_images,
+                              require_images=mode.imports_products and SETTINGS.images.require_images,
                               source_code=ctx.source_cfg.source_code)
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
-    if mode.runs_images and (conflicts := images.link_standard(rows, validation.emit,
+    if mode.imports_products and (conflicts := images.link_standard(rows, validation.emit,
                                                                image_pipeline=ctx.source_cfg.image_pipeline)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
@@ -688,22 +655,22 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
 
 
 def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
-                  pre: Preflight) -> int:
+                  known: product_state.KnownProducts, lot_cards: list[dict]) -> int:
     """Stage 10: emit into the clean per-run layout (outputs/<run_id>/...): the stock files when the product export is
     known, the lot cards, the rejects and, in FULL mode, the product files. Returns the distinct tree-gap count (0 in
     STOCK mode)."""
     layout, source_cfg = ctx.layout, ctx.source_cfg
-    if pre.known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
+    if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
         emit.write_inventory_csv(delist.changed, source_cfg, layout.products_import / "inventory_update.csv",
                                  discontinued=tuple(delist.discontinued))
         emit.write_discontinued_csv(delist.discontinued, layout.review / "products_discontinued.csv",
                                     replaced=delist.replaced_codes)
         emit.write_lot_replacements_csv(delist.discontinued, delist.replaced, layout.review / "lot_replacements.csv")
-    emit.write_lot_cards(pre.lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
+    emit.write_lot_cards(lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
     # rejects are an audit invariant: write them in BOTH modes so a rejected row never vanishes
     # without a per-row record.
     emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
-    if not ctx.mode.writes_products:
+    if not ctx.mode.imports_products:
         ctx.run_log.info("inventory-only: wrote stock delta + rejects, skipped products/images/canonical",
                          extra={"extra_fields": {"existing": len(delist.existing_rows), "changed": len(delist.changed),
                                                  "rejected": len(validation.rejects)}})
@@ -712,7 +679,7 @@ def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
     emit.write_photos_json(validation.emit, layout.products_import / STANDARDISE.PHOTOS_FILE)
     new_rows = [r for r in validation.emit if r.product_status == "new"]
-    if pre.known:  # only split when we know what exists
+    if known:  # only split when we know what exists
         emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
         emit.write_import_csv(delist.existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv",
                               columns)
@@ -725,7 +692,7 @@ def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validat
 
 
 def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
-           writeback: WriteBack, health_status: str, gap_count: int) -> Manifest:
+           writeback: WriteBack, gap_count: int) -> Manifest:
     """Record the run: this source's products and stock into the ledger (the live sync source Medusa pulls), AFTER the
     CSVs are written; the learned aliases; the diagnostics and the product checklist. Fills the manifest's
     write-backs. A failed write-through fails the run (exit 2) once everything else is written, so the operator can
@@ -736,7 +703,7 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
     ledger_failed = False
     if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(delist.discontinued), source_cfg,
-                                          inventory_only=ctx.mode.stock_only, replaced=delist.replaced_codes):
+                                          mode=ctx.mode, replaced=delist.replaced_codes):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this
@@ -751,7 +718,7 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
         manifest.write_backs.append(f"alias_writeback:{written}")
     _write_diagnostics(manifest, ctx.layout)
     # the per-source product checklist
-    write_steps_md(ctx.layout, source=ctx.source, run_id=ctx.run_id, health=health_status,
+    write_steps_md(ctx.layout, source=ctx.source, run_id=ctx.run_id, health=ctx.manifest.health_status,
                    counts=manifest.totals, gates=manifest.gate_status)
 
     run_log.info(
@@ -762,7 +729,7 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
             "emitted": len(validation.emit),
             "rejected": len(validation.rejects),
             "distinct_gaps": gap_count,
-            "health": health_status,
+            "health": ctx.manifest.health_status,
             "gates": manifest.gate_status,
         }},
     )
@@ -806,11 +773,11 @@ def run_source(
         resolved = resolve(ctx, pre.rows)
         validation = finalize_rows(ctx, resolved, pre.known)
         delist = decide_delist(ctx, resolved.rows, validation, pre.known)
-        gap_count = write_outputs(ctx, resolved.rows, validation, delist, pre)
+        gap_count = write_outputs(ctx, resolved.rows, validation, delist, pre.known, pre.lot_cards)
     except RunAborted as aborted:
         _abort(ctx, aborted)
         raise SystemExit(2) from None
-    return record(ctx, resolved.rows, validation, delist, resolved.writeback, pre.health, gap_count)
+    return record(ctx, resolved.rows, validation, delist, resolved.writeback, gap_count)
 
 
 def _format_gate_status(gate_status: dict[str, str]) -> str:

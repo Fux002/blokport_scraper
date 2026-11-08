@@ -23,7 +23,7 @@ from typing import Sequence
 from stone_pipeline.config.settings import ENV_NAME, SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline.ledger import bootstrap, populate
 from stone_pipeline.ledger.db import Ledger
 
@@ -110,14 +110,14 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
 
 
 def record_source(emit_rows: Sequence[CanonicalRow],
-                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, inventory_only: bool,
+                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, mode: OutputMode,
                   replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
     a catalog/stock change. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
 
-    `inventory_only` (the stock-only refresh) records stock only. That run skips the image stage, so its
+    A stock-only run (OutputMode.STOCK, the stock refresh) records stock only. That run skips the image stage, so its
     rows carry no photos, gallery or 3D: written as products they would strip every product's images and
     re-serve it without them. So it never writes a product row; it moves the stock of the products the
     ledger already holds, and leaves a product new to the ledger (and its stock) to the full run that
@@ -133,7 +133,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         return True
     try:
         with open_ledger(path) as ledger:
-            if inventory_only:
+            if mode.stock_only:
                 n_products = 0
                 stock_rows = populate.ledger_products(ledger, emit_rows, cfg)
             else:
@@ -143,7 +143,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
             n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
-            "source": cfg.source_code, "inventory_only": inventory_only, "products": n_products,
+            "source": cfg.source_code, "inventory_only": mode.stock_only, "products": n_products,
             "inventory": n_stock, "left_to_full_run": len(emit_rows) - len(stock_rows),
             "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
         return True
