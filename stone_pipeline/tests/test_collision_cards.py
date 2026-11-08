@@ -93,7 +93,8 @@ def test_a_single_same_type_owner_still_aliases(monkeypatch):
 
 
 def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypatch):
-    from stone_pipeline.config import server, varieties
+    from stone_pipeline.config import varieties
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: (n, t) == ("Golden Lightning", "Granite"))
     monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)

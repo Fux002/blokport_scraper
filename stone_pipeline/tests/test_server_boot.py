@@ -9,7 +9,8 @@ import threading
 
 import pytest
 
-from stone_pipeline.config import server, store
+from stone_pipeline.config import store
+from stone_pipeline.config.control import server
 
 
 def _record_all(monkeypatch, calls, restore_config_raises=False):
@@ -53,7 +54,7 @@ def test_shutdown_stops_the_periodic_snapshot_before_the_final_save(monkeypatch,
     order: list[str] = []
     stop = threading.Event()
     monkeypatch.setattr(snapshot, "save_config", lambda *a, **k: order.append(("save", stop.is_set())))
-    from stone_pipeline.config import runner
+    from stone_pipeline.config.control import runner
     monkeypatch.setattr(runner, "_stopping", False)        # shutdown marks the runner stopping; restored after
     with pytest.raises(SystemExit):
         server.shutdown(tmp_path / "config.db", stop)

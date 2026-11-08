@@ -36,7 +36,7 @@ Read side, per produce:
 | `curate/context.py` | `confirm_map`, `rejected_names`, `variety_seed_colors`, `variety_seed_types`, `variety_seed_names`, `variety_seed_scopes` (six maps), each looked up through `decided()`, which tries four keys per row |
 | `match_variation` | `ref.scoped_aliases`, `ref.variety_seed_types` |
 | `loaders/reference_data.load_all` | `variety_seed_country_rules`, `variety_origins`, `origin_widen`, `origin_decisions`, `scoped_aliases`, `variety_seed_types`, `backbone_leaf_overlay` |
-| `config/resolved.py`, `stages/decision_audit.py` | `variety_actions`, `scoped_aliases`, `origin_decisions`, `origin_widen` |
+| `config/control/resolved.py`, `stages/decision_audit.py` | `variety_actions`, `scoped_aliases`, `origin_decisions`, `origin_widen` |
 
 Compensations that exist only because of the above: `_drop_global_reject` (a statement must out-rank a
 reject stored under a different key), `_foreign_scope` in curate (a vendor decision must not decide another
@@ -138,8 +138,8 @@ One line in their client. The old route stays until they switch.
 | `stages/match_variation.py` | `ref.scoped_aliases` -> `ref.decisions.scoped_bindings()`, `ref.variety_seed_types` -> `ref.decisions.mint_seed_types()` |
 | `reference/loaders/reference_data.py` | `load_all` builds `ref.decisions = decisions_store.load_decisions()` (guarded on the store existing, as today); the origin overlays take `mint_origin_rules()`, `vendor_origins()`, `widened()` from it; `variety_origin` overlay unchanged |
 | `stages/derive*` (origin tiers) | supplier-override tier reads `ref.decisions.vendor_origins()` (today via `origin_overrides.apply_overlay(origin_decisions())`) |
-| `config/resolved.py`, `stages/decision_audit.py` | take a `Decisions` instead of three maps |
-| `config/server.py` | `decide` route unchanged; reject route delegates to `reject()`; `backfill_levels` boot hook replaced by the one-time migration below |
+| `config/control/resolved.py`, `stages/decision_audit.py` | take a `Decisions` instead of three maps |
+| `config/control/server.py` | `decide` route unchanged; reject route delegates to `reject()`; `backfill_levels` boot hook replaced by the one-time migration below |
 | `lifecycle.py` | unmint -> `clear_for_variety(name, type)`; pristine reset -> `clear_all()` |
 | `stages/decisions.py` (the façade over the store) | `load_confirm_decisions`, `load_rejected`, `load_variety_seed_*` removed; one `load_decisions()` |
 

@@ -129,7 +129,7 @@ def test_every_entry_point_a_script_names_is_a_module_that_exists(script):
 
 
 def test_the_runner_starts_the_photos_run_by_its_module():
-    from stone_pipeline.config import runner
+    from stone_pipeline.config.control import runner
     command = runner._build_command({"stage": "photos"})
     assert command[-2:] == ["-m", "stone_pipeline.photos.process"]
     assert importlib.util.find_spec(command[-1]) is not None

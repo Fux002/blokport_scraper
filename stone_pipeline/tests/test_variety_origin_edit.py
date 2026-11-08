@@ -11,7 +11,7 @@ import dataclasses
 import pytest
 
 from stone_pipeline.config import decisions_store as ds
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference import loaders

@@ -19,8 +19,9 @@ from types import SimpleNamespace
 
 import polars as pl
 
-from stone_pipeline.config import decisions_store, resolved, server, store
-from stone_pipeline.config.server import ConfigHandler
+from stone_pipeline.config import decisions_store, store
+from stone_pipeline.config.control import resolved, server
+from stone_pipeline.config.control.server import ConfigHandler
 
 _PAST = "2000-01-01T00:00:00+00:00"
 _FUTURE = "2999-01-01T00:00:00+00:00"

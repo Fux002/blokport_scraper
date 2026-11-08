@@ -9,7 +9,7 @@ import os
 
 import polars as pl
 
-from stone_pipeline.config import resolved
+from stone_pipeline.config.control import resolved
 
 COLS = list(resolved._COLUMNS)
 

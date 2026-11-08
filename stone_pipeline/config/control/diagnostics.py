@@ -83,7 +83,8 @@ def read_source(source: str, path: str | Path | None = None,
     """One source's diagnostic for the API: the durable config.db row, falling back to the latest on-disk
     run when the store has none yet (a CLI produce that never went through the control-plane persist),
     enriched with the source's admission state (review | eligible | auto | demoted) + consistency streak."""
-    from stone_pipeline.config import admission, store
+    from stone_pipeline.config import store
+    from stone_pipeline.config.control import admission
     summary = store.get_source_diagnostic(source, path=path) or latest_for_source(source, outputs_dir)
     if summary is None:
         return None

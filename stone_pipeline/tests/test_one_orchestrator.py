@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 from stone_pipeline import produce
-from stone_pipeline.config import runner
+from stone_pipeline.config.control import runner
 from stone_pipeline.ledger import snapshot, writethrough
 from stone_pipeline.io import deliverables as upload_artifacts
 

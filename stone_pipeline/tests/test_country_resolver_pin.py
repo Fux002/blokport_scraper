@@ -11,7 +11,7 @@ import csv
 
 import pytest
 
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import resolve_iso

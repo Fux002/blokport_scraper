@@ -5,8 +5,9 @@ review. The decision core is a pure function; the reaction is wired through the 
 
 from __future__ import annotations
 
-from stone_pipeline.config import admission, store
-from stone_pipeline.config.admission import AUTO, DEMOTED, ELIGIBLE, REVIEW
+from stone_pipeline.config import store
+from stone_pipeline.config.control import admission
+from stone_pipeline.config.control.admission import AUTO, DEMOTED, ELIGIBLE, REVIEW
 from stone_pipeline.config.settings import Admission
 from stone_pipeline.config.sources import SourceConfig, load_source
 
@@ -108,7 +109,7 @@ def test_status_for_becomes_eligible_after_consistent_runs(tmp_path, monkeypatch
 
 # --- the diagnostics surface carries admission --------------------------------
 def test_diagnostics_payload_includes_admission(tmp_path, monkeypatch):
-    from stone_pipeline.config import diagnostics
+    from stone_pipeline.config.control import diagnostics
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="review"))
     store.record_source_diagnostic("polonine", "polonine_x", {"source": "polonine", "health": "OK", "stages": []})

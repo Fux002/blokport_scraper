@@ -16,7 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stone_pipeline.config import decisions_store, server, varieties
+from stone_pipeline.config import decisions_store, varieties
+from stone_pipeline.config.control import server
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.tests import _decision_views as views
 from stone_pipeline.core.schema import CanonicalRow

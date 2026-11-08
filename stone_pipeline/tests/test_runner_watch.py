@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from stone_pipeline.config import runner
+from stone_pipeline.config.control import runner
 
 
 class _FakeProc:

@@ -231,7 +231,7 @@ def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
 
 
 def test_config_api_dispatch(tmp_path, monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
 
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
@@ -260,7 +260,7 @@ def test_config_api_dispatch(tmp_path, monkeypatch):
 def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
     # the 'produce' button: POST /config/v1/run scrapes the ENABLED sources, async, single-run
     # guarded; GET /run = current, GET /run/<id> = by id. Contract the :4200 admin consumes.
-    from stone_pipeline.config import runner, server
+    from stone_pipeline.config.control import runner, server
 
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
@@ -288,7 +288,7 @@ def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
 def test_put_rejects_a_source_with_no_coded_adapter(tmp_path, monkeypatch):
     # ISS-3: an admin-added source whose name has no coded adapter can neither run nor be SKU-scoped, so
     # it must be refused up front instead of becoming a dead, live-looking config row.
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))
     code, body = server.dispatch("PUT", ["sources", "ghost_vendor"],
@@ -300,7 +300,7 @@ def test_put_rejects_a_source_with_no_coded_adapter(tmp_path, monkeypatch):
 def test_put_rejects_a_duplicate_source_code(tmp_path, monkeypatch):
     # ISS-1: two sources sharing a source_code collide SKU provenance (clear/remove scope by code), so a
     # duplicate is refused. 'varsha' is a real coded adapter; giving it polonine's code 'pol' must 400.
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))              # polonine=pol, varsha=var
     code, body = server.dispatch("PUT", ["sources", "varsha"],
@@ -318,7 +318,7 @@ def test_put_rejects_a_duplicate_source_code(tmp_path, monkeypatch):
 def test_put_rejects_a_source_with_no_ports(tmp_path, monkeypatch):
     # ports are a hard requirement set by the admin (Medusa derives a product's ports from the supplier's
     # ports; without them it falls back to a whole-country port list). A save with no ports is refused.
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))
     for bad in ({"source_code": "var", "vendor": "V"},          # ports absent
@@ -381,7 +381,7 @@ def test_clear_source_diagnostics_global_and_scoped(tmp_path, monkeypatch):
 
 
 def test_diagnostics_endpoint_serves_persisted(tmp_path, monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.record_source_diagnostic("polonine", "polonine_x",
                                    {"source": "polonine", "health": "OK", "stages": []})
@@ -395,7 +395,7 @@ def test_diagnostics_endpoint_serves_persisted(tmp_path, monkeypatch):
 def test_diagnostics_disk_fallback_surfaces_drift(tmp_path, monkeypatch):
     # a source produced from the CLI (no control-plane persist) is still visible when the server shares
     # the run disk: the endpoint falls back to the latest on-disk run and folds in the health DRIFT.
-    from stone_pipeline.config import diagnostics
+    from stone_pipeline.config.control import diagnostics
     outputs = tmp_path / "outputs"
     _fake_run(outputs, "polonine", drift=[{"kind": "fill_drop", "field": "color"}], stage_status="DEGRADED")
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))    # nothing persisted
@@ -405,7 +405,7 @@ def test_diagnostics_disk_fallback_surfaces_drift(tmp_path, monkeypatch):
 
 
 def test_persist_from_outputs_folds_disk_into_config_db(tmp_path, monkeypatch):
-    from stone_pipeline.config import diagnostics
+    from stone_pipeline.config.control import diagnostics
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     outputs = tmp_path / "outputs"
     _fake_run(outputs, "polonine")                                          # polonine is a known adapter
@@ -418,7 +418,7 @@ def test_evaluate_from_outputs_records_once_and_skips_replays(tmp_path, monkeypa
     # the admission half of what produce._finalize_control_plane now calls on EVERY produce path. Records a
     # run event from disk, and a REPLAY (the config-server _watch_local also runs it) is skipped -- so the
     # produce-path call and the local-watcher call safely coexist without double-counting the streak.
-    from stone_pipeline.config import admission
+    from stone_pipeline.config.control import admission
     from stone_pipeline.config.sources import SourceConfig
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(admission, "_certified", lambda *a, **k: True)      # skip live certify in the unit

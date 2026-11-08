@@ -10,8 +10,8 @@ import sys
 import pytest
 
 from stone_pipeline import lifecycle
-from stone_pipeline.config import runner
-from stone_pipeline.config.server import dispatch
+from stone_pipeline.config.control import runner
+from stone_pipeline.config.control.server import dispatch
 
 
 @pytest.fixture(autouse=True)
@@ -243,7 +243,7 @@ def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
 
 
 def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
-    from stone_pipeline.config.server import dispatch
+    from stone_pipeline.config.control.server import dispatch
     seen = {}
     monkeypatch.setattr(lifecycle, "reset",
                         lambda sources=None, hard=False, pristine=False, keep_images=False, keep_scrape=False:
@@ -328,7 +328,7 @@ def test_purge_refused_while_a_run_is_active():
 
 
 def test_dispatch_routes_purge(monkeypatch):
-    from stone_pipeline.config.server import dispatch
+    from stone_pipeline.config.control.server import dispatch
     seen = {}
     monkeypatch.setattr(lifecycle, "purge",
                         lambda sources=None: seen.update(sources=sources) or ({"external_ids": []}, 200))
@@ -337,7 +337,7 @@ def test_dispatch_routes_purge(monkeypatch):
 
 
 def test_dispatch_routes_clean(monkeypatch):
-    from stone_pipeline.config.server import dispatch
+    from stone_pipeline.config.control.server import dispatch
     seen = {}
     monkeypatch.setattr(lifecycle, "clean", lambda sources=None: seen.update(sources=sources) or ({"ok": 1}, 200))
     code, body = dispatch("POST", ["clean"], {"sources": ["zucchi"]})
@@ -401,7 +401,7 @@ def test_clean_refused_on_a_paused_source(tmp_path, monkeypatch):
 
 
 def test_dispatch_routes_pause_and_resume(monkeypatch):
-    from stone_pipeline.config.server import dispatch
+    from stone_pipeline.config.control.server import dispatch
     seen = {}
     monkeypatch.setattr(lifecycle, "pause",
                         lambda sources=None: seen.update(pause=sources) or ({"paused": sources}, 200))

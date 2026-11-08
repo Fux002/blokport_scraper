@@ -275,7 +275,8 @@ def test_a_bootstrap_the_seed_failed_still_opens_its_ledger_bound(opened, monkey
 
 def test_the_readers_open_it_unbound(opened):
     from stone_pipeline.photos import review
-    from stone_pipeline.config import diagnostics, runner, scrape_status, server, varieties
+    from stone_pipeline.config import varieties
+    from stone_pipeline.config.control import diagnostics, runner, scrape_status, server
     from stone_pipeline.ledger import simulate
     path, seen = opened
     for call in (review.hidden_products, diagnostics.ledger_image_counts, lambda: simulate.main([]),

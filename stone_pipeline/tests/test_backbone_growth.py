@@ -17,7 +17,7 @@ import sqlite3
 
 from stone_pipeline import build, produce
 from stone_pipeline.config import decisions_store as ds
-from stone_pipeline.config import runner, server
+from stone_pipeline.config.control import runner, server
 from stone_pipeline.config import store
 from stone_pipeline.reference.loaders import Backbone, BackboneVariety, _norm, load_backbone
 from stone_pipeline.stages import decisions

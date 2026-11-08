@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError
 from stone_pipeline.photos import decisions as dec
 from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import review as rv
-from stone_pipeline.config import server
+from stone_pipeline.config.control import server
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore

@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from stone_pipeline.config import decisions_store, resolved, server, store, varieties
+from stone_pipeline.config import decisions_store, store, varieties
+from stone_pipeline.config.control import resolved, server
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import _norm
 from stone_pipeline.reference.loaders.backbone import Backbone, BackboneVariety

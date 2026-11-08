@@ -19,7 +19,7 @@ from stone_pipeline.photos import close as close
 from stone_pipeline.photos import publish as pub
 from stone_pipeline.photos import process as proc
 from stone_pipeline.photos import select as select
-from stone_pipeline.config import runner
+from stone_pipeline.config.control import runner
 from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -1440,7 +1440,7 @@ def test_the_photos_stage_is_one_run_over_the_whole_environment(monkeypatch):
 
 
 def test_a_close_only_run_is_a_photos_run_the_operator_starts_through_the_runner(monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
     launched = []
     monkeypatch.setattr(runner, "_launch_local", lambda r: launched.append(r) or r.update(status="succeeded"))
@@ -1451,7 +1451,7 @@ def test_a_close_only_run_is_a_photos_run_the_operator_starts_through_the_runner
 
 
 def test_a_clicks_only_run_is_a_photos_run_the_page_starts_through_the_runner(monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
     launched = []
     monkeypatch.setattr(runner, "_launch_local", lambda r: launched.append(r) or r.update(status="succeeded"))
@@ -1462,7 +1462,7 @@ def test_a_clicks_only_run_is_a_photos_run_the_page_starts_through_the_runner(mo
 
 
 def test_clicks_only_on_another_stage_not_a_boolean_or_beside_close_only_is_refused(monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setattr(runner, "_launch_local", lambda r: pytest.fail("launched"))
     for body in ({"stage": "all", "clicks_only": True}, {"clicks_only": True}, {"stage": "photos", "clicks_only": "true"},
                  {"stage": "photos", "clicks_only": True, "close_only": True}):
@@ -1483,7 +1483,7 @@ def test_only_a_clicks_only_run_gets_the_clicks_only_switch(monkeypatch):
 
 
 def test_close_only_on_any_other_stage_or_not_a_boolean_is_refused(monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     monkeypatch.setattr(runner, "_launch_local", lambda r: pytest.fail("launched"))
     for body in ({"stage": "all", "close_only": True}, {"close_only": True}, {"stage": "republish", "close_only": True},
                  {"stage": "photos", "close_only": "true"}, {"stage": "photos", "close_only": 1}):
@@ -1791,7 +1791,7 @@ def test_a_second_photos_run_or_a_produce_over_a_produce_is_still_refused(monkey
 
 
 def test_the_server_s_sigterm_stops_the_run_before_its_last_config_save(monkeypatch):
-    from stone_pipeline.config import server
+    from stone_pipeline.config.control import server
     from stone_pipeline.ledger import snapshot
     order = []
     monkeypatch.setattr(runner, "stop_current", lambda: order.append("stop run"))

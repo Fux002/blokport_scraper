@@ -3,7 +3,8 @@ honour is a `decision_gap` card. Two-pass is not a gap; a decision with no listi
 
 from __future__ import annotations
 
-from stone_pipeline.config import server, store
+from stone_pipeline.config import store
+from stone_pipeline.config.control import server
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.stages import decision_audit, decisions

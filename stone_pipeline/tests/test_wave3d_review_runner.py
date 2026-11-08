@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import decisions_store, server
+from stone_pipeline.config import decisions_store
+from stone_pipeline.config.control import server
 from stone_pipeline.tests import _decision_views as views
 
 
