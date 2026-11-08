@@ -31,8 +31,8 @@ def new_key(type_name: str, name: str) -> str:
 
     The uuid5 is in the repo's key namespace over the two SLUGS (`uuid5(_KEY_NS, "slug_type:slug_name")`), not
     the raw strings. That is the only basis a row-less Key can yield (a config.db retired/protected Key with no
-    store row carries slugs and nothing else), and it makes every copy of one identity -- its slab/block/tile
-    Keys and any retired-only Key -- collapse onto the SAME new Key. `_slug_us` is idempotent on a slug, so
+    store row carries slugs and nothing else), and it makes every copy of one identity (its slab/block/tile
+    Keys, and any retired-only Key) collapse onto the SAME new Key. `_slug_us` is idempotent on a slug, so
     passing a type name or an already-parsed slug gives the same result."""
     slug_type, slug_name = _slug_us(type_name), _slug_us(name)
     token = uuid.uuid5(_KEY_NS, f"{slug_type}:{slug_name}")

@@ -34,7 +34,9 @@ _MINT = [
     ("Dolomite Marble", "Perla"),                 # same name, the longer type: a DIFFERENT new Key
     ("Granite", "Rosa Porrino"),                  # ascii control for the accented pair below
     ("Granite", "Rosa Porriño"),             # accented name folds to the ascii slug (same Key as above)
-    ("Granite", "G562 (Maple Red)"),              # bracketed name: brackets fold to a separator
+    # RAW input, NOT a canonical identity: new_key does not strip brackets; the migration applies
+    # split_bracket_alias upstream, so the real identity is "G562" with "Maple Red" as an alias (see header).
+    ("Granite", "G562 (Maple Red)"),
     ("Onyx", "Black & Gold"),                     # '&' is NOT read as 'and' by the slug (unlike match_key)
     ("Quartzite", "Taj Mahal"),                   # two words
     ("Limestone", "Crème Brûlée"), # multiple accents
@@ -100,7 +102,11 @@ def main():
             "(a second `__`). varietyKeyType (field `parsed_type`): the part before the first `__`, for a Key "
             "that passes; null for a refused one. The `mint` cases are real Keys from _slug_us; `parse` and "
             "`refuse` are literal Keys. A prefixed Key (slab_/block_/tile_) has no `__`, so it is "
-            "`no_type_separator` by the same single rule, which is what the DoD grep asks for."),
+            "`no_type_separator` by the same single rule, which is what the DoD grep asks for. NOTE: new_key "
+            "does NOT apply split_bracket_alias; a mint case's `name` is the RAW string, so a bracketed name "
+            "(for example `G562 (Maple Red)`) slugs to the bracketed form here. The migration cleans the Name "
+            "first, so a real identity's canonical name is the clean one; do not read a bracketed mint case as "
+            "a canonical identity."),
         "generator": {"separator": "__", "namespace": "6f9619ff-8b86-d011-b42d-00cf4fc964ff"},
         "cases": build(),
     }

@@ -50,6 +50,21 @@ BRANCH_ORDER = BRANCHES                         # the pack's category order -> c
 OUTPUT_CSV = "variety_key_map.csv"              # written in the output dir; its sha256 is printed
 CSV_COLUMNS = ("old_key", "new_key", "category_rank", "type_name")
 
+# The real run reads a PRIVATE frozen-snapshot copy, never a live store. The snapshot root holds one folder
+# per env (<root>/<env>/...), each with the stores named below; this is the repeatable "every store" proof
+# (one config block, not a scattered list of paths). A store missing from the snapshot is skipped and the run
+# prints what it read. The S3 base copies sit beside the committed base (the spec's source row names both).
+SNAPSHOT_STORES = {
+    "ledger_db": ("ledger.db",),
+    "config_db": ("config.db",),
+    "base_csv": ("variants_export_base.csv",),
+    "base_copies": ("s3_base/variants_export_base.csv",),
+    "attributes_csv": ("attributes.csv",),
+    "backbone_files": ("backbone_slabs.json", "backbone_blocks.json", "backbone_tiles.json"),
+    "backbone_additions": ("backbone_additions/slab.json", "backbone_additions/block.json",
+                           "backbone_additions/tile.json"),
+}
+
 
 @dataclass(frozen=True)
 class StorePaths:
@@ -58,6 +73,7 @@ class StorePaths:
     ledger_db: Path | None = None
     config_db: Path | None = None
     base_csv: Path | None = None
+    base_copies: tuple[Path, ...] = ()           # the S3 base copies the spec's source row names
     backbone_files: tuple[Path, ...] = ()
     backbone_additions: tuple[Path, ...] = ()
     attributes_csv: Path | None = None
@@ -87,17 +103,27 @@ class MapRow:
 @dataclass
 class KeyMapResult:
     rows: list[MapRow] = field(default_factory=list)
-    untyped: list[str] = field(default_factory=list)              # old Keys held (no new Key)
-    aborts: dict[str, list[str]] = field(default_factory=dict)    # kind -> old Keys
+    untyped: list[str] = field(default_factory=list)              # old Keys held (stone_type ''): no new Key
+    ghosts: list[str] = field(default_factory=list)               # backbone-only Keys: mapped, no store row
+    merged: list[str] = field(default_factory=list)               # new Keys fed by two middles (N1 review)
+    aborts: dict[str, list[str]] = field(default_factory=dict)    # kind -> listed detail lines
 
     @property
     def ok(self) -> bool:
         return not self.aborts
 
 
+# which stores' Name is authoritative. config.db Keys carry no Name; a backbone `variant` spelling is a last
+# resort only, and never feeds the tie rule (C1: 162 identities tied on backbone case/accent drift alone).
+_STORE_NAME_STORES = ("ledger", "base_csv")
+_BACKBONE_STORES = ("backbone", "backbone_additions")
+
+
 # --- readers (thin; each yields Records) ----------------------------------------------------------------
 def _rows(db: Path, sql: str):
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    # immutable=1 (not mode=ro): a frozen private copy is never written, and this also stops SQLite creating
+    # the -wal / -shm sidecars beside it, so the read leaves the snapshot byte-for-byte unchanged.
+    con = sqlite3.connect(f"file:{db}?immutable=1", uri=True)
     try:
         con.row_factory = sqlite3.Row
         yield from con.execute(sql)
@@ -197,50 +223,76 @@ def parse_type_slug(old_key: str, known_type_slugs) -> tuple[str, str] | None:
 
 
 # --- engine ---------------------------------------------------------------------------------------------
+def _type_for_slug(slug: str | None, types: set[str]) -> str | None:
+    """The type in `types` whose slug is `slug`: a conflicting old Key's OWN type (the one its slug encodes)."""
+    return next((t for t in types if _slug_us(t) == slug), None)
+
+
 def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> KeyMapResult:
     """Pure union engine. Deterministic: every grouping and output is sorted, nothing leans on dict/set order,
-    so two runs under different PYTHONHASHSEED give byte-identical output."""
+    so two runs under different PYTHONHASHSEED give byte-identical output.
+
+    An identity is keyed by the old-Key MIDDLE (branch and uuid stripped): every copy and any row-less copy
+    shares it. The canonical Name comes from STORE rows (ledger, base copies) only; a backbone `variant`
+    spelling is a last-resort Name and never feeds the tie rule (C1). The type comes from the ledger or a
+    backbone post."""
     res = KeyMapResult()
     by_key: dict[str, list[Record]] = {}
     for rec in records:
         by_key.setdefault(rec.old_key, []).append(rec)
 
-    # indexes over the IDENTITY (the old-Key middle), so a copy or a row-less Key reads the one canonical Name
-    # and type (D1, rev 8): the name slug of the new Key is never the old Key's own (possibly bracketed) slug.
-    names_of: dict[str, set[str]] = {}
+    store_names_of: dict[str, set[str]] = {}       # middle -> canonical Names from STORE rows (tie + new Key)
+    backbone_names_of: dict[str, set[str]] = {}    # middle -> canonical Names from backbone posts (fallback)
     types_of: dict[str, set[str]] = {}
     untyped_mids: set[str] = set()
+    store_backed: set[str] = set()                 # old Keys a store carries (not backbone-only)
     known_type_slugs = set(type_vocab)
     for rec in records:
+        if _branch_of(rec.old_key) not in BRANCH_ORDER:   # L1: a malformed Key never pools with real identities
+            continue
         mid = _middle(rec.old_key)
         canon = _canonical(rec.name)
         if canon:
-            names_of.setdefault(mid, set()).add(canon)
+            target = store_names_of if rec.store in _STORE_NAME_STORES else backbone_names_of
+            target.setdefault(mid, set()).add(canon)
         if rec.type_name:
             types_of.setdefault(mid, set()).add(rec.type_name)
             known_type_slugs.add(_slug_us(rec.type_name))
         if rec.untyped:
             untyped_mids.add(mid)
+        if rec.store not in _BACKBONE_STORES:
+            store_backed.add(rec.old_key)
 
     protected_to_new: dict[str, set[str]] = {}
+    new_to_entries: dict[str, list[tuple[int, str, bool]]] = {}   # new Key -> (rank, old Key, store-backed?)
+    new_to_mids: dict[str, set[str]] = {}
 
     for old_key in sorted(by_key):
         recs = by_key[old_key]
+        branch = _branch_of(old_key)
+        if branch not in BRANCH_ORDER:                 # L1
+            res.aborts.setdefault("unresolved_branch", []).append(old_key)
+            continue
         mid = _middle(old_key)
-        canon_names = names_of.get(mid, set())
-        if len(canon_names) > 1:                    # D1 tie: one identity, different canonical names
+
+        store_names = store_names_of.get(mid, set())
+        if len(store_names) > 1:                        # D1 tie: STORE Names only (C1)
             res.aborts.setdefault("name_tie", []).append(old_key)
             continue
-        canonical_name = next(iter(canon_names)) if canon_names else None
+        canonical_name = (next(iter(store_names)) if store_names
+                          else (sorted(backbone_names_of[mid])[0] if backbone_names_of.get(mid) else None))
 
         types = types_of.get(mid, set())
-        if len(types) > 1:                          # one identity, two types across stores
-            res.aborts.setdefault("type_conflict", []).append(old_key)
-            continue
         parsed = parse_type_slug(old_key, known_type_slugs)
+        if len(types) > 1:                              # M1: keep the abort, name both sides
+            key_type = _type_for_slug(parsed[0], types) if parsed else None
+            posts = ",".join(sorted(t for t in types if t != key_type))
+            res.aborts.setdefault("type_conflict", []).append(
+                f"{old_key} (key={key_type or '?'}, post={posts})")
+            continue
         slug_type = _slug_us(next(iter(types))) if types else (parsed[0] if parsed else None)
 
-        if slug_type is None:                       # names no type: held if the store said '', else unresolved
+        if slug_type is None:                           # names no type: held if the store said '', else abort
             target = res.untyped if (mid in untyped_mids) else res.aborts.setdefault("unresolved_type", [])
             target.append(old_key)
             continue
@@ -249,32 +301,46 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         if not vocab_names or len(vocab_names) != 1:
             res.aborts.setdefault("unresolved_type", []).append(old_key)
             continue
-        type_name = next(iter(vocab_names))         # the one live Medusa type name
+        type_name = next(iter(vocab_names))             # the one live Medusa type name
 
         name_for_key = canonical_name if canonical_name is not None else (parsed[1] if parsed else None)
-        if name_for_key is None:                    # a row-less Key that joins no named row and cannot parse
+        if name_for_key is None:                        # a row-less Key that joins no named row and cannot parse
             res.aborts.setdefault("unresolved_type", []).append(old_key)
             continue
 
-        branch = _branch_of(old_key)
-        if branch not in BRANCH_ORDER:
-            res.aborts.setdefault("unresolved_branch", []).append(old_key)
-            continue
-
-        nk = new_key(type_name, name_for_key)       # _slug_us is idempotent on an already-slugged fallback
-        res.rows.append(MapRow(old_key, nk, BRANCH_ORDER.index(branch), type_name))
+        nk = new_key(type_name, name_for_key)           # _slug_us is idempotent on an already-slugged fallback
+        rank = BRANCH_ORDER.index(branch)
+        res.rows.append(MapRow(old_key, nk, rank, type_name))
+        new_to_entries.setdefault(nk, []).append((rank, old_key, old_key in store_backed))
+        new_to_mids.setdefault(nk, set()).add(mid)
+        if old_key not in store_backed:
+            res.ghosts.append(old_key)                  # M2: backbone-only Key, mapped and listed
         if any(r.protected for r in recs):
             protected_to_new.setdefault(nk, set()).add(old_key)
+
+    # M2: abort only when two STORE-backed old Keys of ONE category land on one new Key (that breaks D2's
+    # per-env, per-category survivor pick); backbone-only ghosts colliding are listed, not aborted.
+    for nk, entries in sorted(new_to_entries.items()):
+        by_rank: dict[int, list[str]] = {}
+        for rank, old_key, backed in entries:
+            if backed:
+                by_rank.setdefault(rank, []).append(old_key)
+        for rank in sorted(by_rank):
+            if len(by_rank[rank]) > 1:
+                res.aborts.setdefault("category_collision", []).extend(sorted(by_rank[rank]))
+
+    # M3: a new Key fed by more than one middle merges two Medusa records; a non-abort list for N1 review.
+    res.merged = sorted(nk for nk, mids in new_to_mids.items() if len(mids) > 1)
 
     for nk, keys in sorted(protected_to_new.items()):
         if len(keys) > 1:
             res.aborts.setdefault("protected_collision", []).extend(sorted(keys))
 
     res.rows.sort(key=lambda m: (m.new_key, m.category_rank, m.old_key))
-    res.untyped.sort()
+    for lst in (res.untyped, res.ghosts):
+        lst.sort()
     for kind in res.aborts:
         res.aborts[kind] = sorted(set(res.aborts[kind]))
-    # a Key caught by protected_collision stays a valid row too; the abort just stops the run for review.
     return res
 
 
@@ -290,6 +356,26 @@ def write_map(result: KeyMapResult, out_csv: Path) -> str:
     return hashlib.sha256(out_csv.read_bytes()).hexdigest()
 
 
+def build_stores(snapshot_root: Path, envs: tuple[str, ...] = ENVS) -> list[StorePaths]:
+    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). A store the
+    snapshot does not contain is left unset, so the run reads what is present and lists it."""
+    root = Path(snapshot_root)
+
+    def present(rels: tuple[str, ...], env: str) -> tuple[Path, ...]:
+        return tuple(p for p in (root / env / r for r in rels) if p.exists())
+
+    stores = []
+    for env in envs:
+        single = {k: (present(v, env)[:1] or (None,))[0]
+                  for k, v in SNAPSHOT_STORES.items() if k in ("ledger_db", "config_db", "base_csv", "attributes_csv")}
+        stores.append(StorePaths(
+            env=env, **single,
+            base_copies=present(SNAPSHOT_STORES["base_copies"], env),
+            backbone_files=present(SNAPSHOT_STORES["backbone_files"], env),
+            backbone_additions=present(SNAPSHOT_STORES["backbone_additions"], env)))
+    return stores
+
+
 def collect_records(stores: list[StorePaths]) -> list[Record]:
     records: list[Record] = []
     for s in stores:
@@ -297,13 +383,26 @@ def collect_records(stores: list[StorePaths]) -> list[Record]:
             records += list(ledger_records(s.ledger_db, s.env))
         if s.config_db:
             records += list(config_db_records(s.config_db, s.env))
-        if s.base_csv:
-            records += list(base_csv_records(s.base_csv, s.env))
+        for base in ((s.base_csv,) if s.base_csv else ()) + s.base_copies:
+            records += list(base_csv_records(base, s.env))
         if s.backbone_files:
             records += list(backbone_records(s.backbone_files, s.env))
         if s.backbone_additions:
             records += list(backbone_records(s.backbone_additions, s.env, store="backbone_additions"))
     return records
+
+
+def stores_read(stores: list[StorePaths]) -> list[str]:
+    """The stores actually present, for the 'every store' proof line."""
+    read = []
+    for s in stores:
+        here = [name for name, val in (("ledger", s.ledger_db), ("config.db", s.config_db),
+                                       ("base", s.base_csv), ("attributes", s.attributes_csv)) if val]
+        here += [f"{len(s.base_copies)} base_copies"] if s.base_copies else []
+        here += [f"{len(s.backbone_files)} backbone"] if s.backbone_files else []
+        here += [f"{len(s.backbone_additions)} additions"] if s.backbone_additions else []
+        read.append(f"{s.env}: {', '.join(here) or '(none)'}")
+    return read
 
 
 def generate(stores: list[StorePaths], out_csv: Path) -> tuple[KeyMapResult, str | None]:
@@ -316,10 +415,14 @@ def generate(stores: list[StorePaths], out_csv: Path) -> tuple[KeyMapResult, str
 
 
 def main(stores: list[StorePaths], out_dir: Path) -> int:
+    for line in stores_read(stores):
+        print("store", line)
     result, digest = generate(stores, out_dir / OUTPUT_CSV)
-    print(f"mapped {len(result.rows)} old Keys; {len(result.untyped)} untyped (held, no new Key)")
-    if result.untyped:
-        print("  untyped:", ", ".join(result.untyped))
+    print(f"mapped {len(result.rows)} old Keys; {len(result.untyped)} untyped held, "
+          f"{len(result.ghosts)} backbone-only ghosts, {len(result.merged)} merged (N1 review)")
+    for label, items in (("untyped", result.untyped), ("ghost", result.ghosts), ("merged", result.merged)):
+        if items:
+            print(f"  {label} ({len(items)}): {', '.join(items)}")
     if not result.ok:
         for kind, keys in sorted(result.aborts.items()):
             print(f"ABORT {kind} ({len(keys)}): {', '.join(keys)}")

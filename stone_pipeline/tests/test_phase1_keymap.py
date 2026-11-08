@@ -21,20 +21,30 @@ def _led(env, key, type_name, name):
     return Record(env, "ledger", key, name=name, type_name=type_name)
 
 
-# --- the collapse pin (manager's required test) ---------------------------------------------------------
-def test_identity_copies_and_retired_only_key_collapse_to_one_new_key():
+# --- the collapse pins (manager's required tests) -------------------------------------------------------
+def test_live_copies_and_a_retired_copy_collapse_to_one_new_key():
+    # slab/block/tile live in the ledger; the block copy is also marked retired (same Key string) -> one Key.
     recs = [
         _led("development", "slab_marble_absolute_black_u1", "Marble", "Absolute Black"),
         _led("development", "block_marble_absolute_black_u2", "Marble", "Absolute Black"),
         _led("development", "tile_marble_absolute_black_u3", "Marble", "Absolute Black"),
-        Record("production", "config.retired", "block_marble_absolute_black_u4"),  # no row: resolved by parse
+        Record("development", "config.retired", "block_marble_absolute_black_u2"),  # same Key, now retired
     ]
     res = build_key_map(recs, VOCAB)
     assert res.ok, res.aborts
-    assert len(res.rows) == 4
-    assert {m.new_key for m in res.rows} == {new_key("Marble", "Absolute Black")}
-    assert sorted(m.category_rank for m in res.rows) == [0, 1, 1, 2]   # slab, block, block(retired), tile
-    assert {m.type_name for m in res.rows} == {"Marble"}
+    assert len(res.rows) == 3 and {m.new_key for m in res.rows} == {new_key("Marble", "Absolute Black")}
+    assert sorted(m.category_rank for m in res.rows) == [0, 1, 2]
+
+
+def test_three_retired_only_keys_collapse_to_one_new_key():
+    # the Marble Revolution case: one whole identity retired, gone from the ledger, only config.db carries its
+    # three Keys. They have no store row, so type and name come from the parse, and collapse to one new Key.
+    recs = [Record("production", "config.retired", f"{b}_marble_revolution_u{i}")
+            for i, b in enumerate(("slab", "block", "tile"))]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok, res.aborts
+    assert {m.new_key for m in res.rows} == {new_key("Marble", "Revolution")}
+    assert sorted(m.category_rank for m in res.rows) == [0, 1, 2]
 
 
 # --- aborts ---------------------------------------------------------------------------------------------
@@ -75,11 +85,15 @@ def test_two_protected_keys_to_one_new_key_abort():
     assert res.aborts["protected_collision"] == ["block_marble_statuario_u2", "slab_marble_statuario_u1"]
 
 
-def test_type_conflict_on_one_key_aborts():
-    recs = [_led("development", "slab_marble_x_u1", "Marble", "X"),
-            _led("production", "slab_marble_x_u1", "Granite", "X")]
+def test_type_conflict_names_both_sides():
+    # the block post states another type than the Key (spec section 3). Keep the abort; list Key, Key's type,
+    # the post's stated type.
+    recs = [_led("development", "block_marble_panda_white_u1", "Marble", "Panda White"),   # the Key's type
+            Record("production", "backbone", "block_marble_panda_white_u1", name="Panda White",
+                   type_name="Granite")]                                                    # the post's type
     res = build_key_map(recs, VOCAB)
-    assert not res.ok and res.aborts["type_conflict"] == ["slab_marble_x_u1"]
+    assert not res.ok
+    assert res.aborts["type_conflict"] == ["block_marble_panda_white_u1 (key=Marble, post=Granite)"]
 
 
 def test_unresolvable_rowless_type_aborts():
@@ -122,6 +136,81 @@ def test_prefix_type_longest_match():
     res = build_key_map(recs, VOCAB)
     assert res.ok
     assert {m.new_key for m in res.rows} == {new_key("Dolomite Marble", "Perla"), new_key("Dolomite", "Perla")}
+
+
+# --- C1: backbone spellings never tie or name --------------------------------------------------------
+def test_backbone_spelling_does_not_tie_or_name_the_key():
+    # the store Name is authoritative; a backbone `variant` that differs only in case/accent must not tie, and
+    # the new Key takes the STORE Name (C1: 162 identities tied on backbone drift alone).
+    recs = [_led("development", "slab_andesite_nghe_an_volcanic_u1", "Andesite", "Nghe An Volcanic"),
+            Record("development", "backbone", "slab_andesite_nghe_an_volcanic_u1", name="Nghe an Volcanic",
+                   type_name="Andesite")]
+    res = build_key_map(recs, {"andesite": {"Andesite"}})
+    assert res.ok, res.aborts
+    assert {m.new_key for m in res.rows} == {new_key("Andesite", "Nghe An Volcanic")}
+
+
+def test_backbone_name_used_only_when_no_store_names_it():
+    recs = [Record("development", "backbone", "slab_onyx_black_gold_u1", name="Black Gold", type_name="Onyx")]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok and res.rows[0].new_key == new_key("Onyx", "Black Gold")
+    assert res.ghosts == ["slab_onyx_black_gold_u1"]       # backbone-only -> mapped and listed as a ghost
+
+
+# --- M2: ghosts vs store collisions ------------------------------------------------------------------
+def test_backbone_only_collision_lists_ghosts_not_abort():
+    # two keyed backbone posts no store carries, both slab, same identity -> ghosts, not an abort.
+    recs = [Record("development", "backbone", "slab_granite_rosa_porrino_u1", name="Rosa Porrino",
+                   type_name="Granite"),
+            Record("development", "backbone", "slab_granite_rosa_porrino_u2", name="Rosa Porrino",
+                   type_name="Granite")]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok, res.aborts
+    assert res.ghosts == ["slab_granite_rosa_porrino_u1", "slab_granite_rosa_porrino_u2"]
+
+
+def test_two_store_keys_one_category_abort():
+    # two STORE-backed Keys of one category on one new Key breaks D2's survivor pick -> abort.
+    recs = [_led("development", "slab_granite_x_u1", "Granite", "X"),
+            _led("development", "slab_granite_x_u2", "Granite", "X")]
+    res = build_key_map(recs, VOCAB)
+    assert not res.ok
+    assert res.aborts["category_collision"] == ["slab_granite_x_u1", "slab_granite_x_u2"]
+
+
+# --- M3: a new Key from two middles is a merge -------------------------------------------------------
+def test_two_middles_one_new_key_listed_as_merged():
+    # a suffixed copy joins its sibling by (type, Name): right, but two Medusa records become one.
+    recs = [_led("development", "slab_granite_madam_red_b_u1", "Granite", "Madam Red"),
+            _led("development", "tile_granite_madam_red_b_u2", "Granite", "Madam Red"),
+            _led("development", "block_granite_madam_red_u3", "Granite", "Madam Red")]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok, res.aborts
+    assert res.merged == [new_key("Granite", "Madam Red")] and len(res.rows) == 3
+
+
+# --- L1: malformed branch refused before indexing ----------------------------------------------------
+def test_malformed_branch_refused_and_isolated():
+    recs = [Record("development", "config.retired", "nounderscorekey"),
+            Record("development", "config.retired", "widget_marble_x_u1"),   # 'widget' is not a pack category
+            _led("development", "slab_marble_x_u2", "Marble", "X")]
+    res = build_key_map(recs, VOCAB)
+    assert res.aborts["unresolved_branch"] == ["nounderscorekey", "widget_marble_x_u1"]
+    # the good slab Key is unaffected (the malformed ones did not pool into its identity)
+    assert any(m.old_key == "slab_marble_x_u2" for m in res.rows)
+
+
+def test_build_stores_reads_present_snapshot_files(tmp_path):
+    from stone_pipeline.phase1.keymap import build_stores
+    d = tmp_path / "development"
+    (d).mkdir(parents=True)
+    (d / "ledger.db").write_bytes(b"x")
+    (d / "attributes.csv").write_text("category,value,sourceid\n", encoding="utf-8")
+    (d / "backbone_slabs.json").write_text("{}", encoding="utf-8")
+    stores = build_stores(tmp_path, envs=("development",))
+    s = stores[0]
+    assert s.ledger_db and s.attributes_csv and s.backbone_files == (d / "backbone_slabs.json",)
+    assert s.config_db is None and s.base_csv is None   # absent in the snapshot
 
 
 # --- determinism ----------------------------------------------------------------------------------------
@@ -178,6 +267,7 @@ def test_generate_end_to_end(tmp_path):
     result, digest = generate(stores, out)
     assert result.ok, result.aborts
     assert result.untyped == ["block_avocatus_u7"]           # keyless backbone post ignored; untyped held
+    assert result.ghosts == ["slab_onyx_black_gold_u8"]      # backbone-only Key: mapped and listed
     assert digest and out.exists()
     got = list(csv.DictReader(out.open(encoding="utf-8")))
     # three Marble copies (ledger slab+block, config retired tile) collapse to one new Key
