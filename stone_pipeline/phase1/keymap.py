@@ -359,8 +359,10 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
 def write_map(result: KeyMapResult, out_csv: Path) -> str:
     """Write the map CSV deterministically and return its sha256 hex digest."""
     out_csv.parent.mkdir(parents=True, exist_ok=True)
+    # UTF-8 with no BOM and `\n` line ends (not the csv default `\r\n`), to match the repo's other writers and
+    # fd's P1-8 parser; QUOTE_MINIMAL, so a type name with a comma is quoted.
     with out_csv.open("w", encoding="utf-8", newline="") as fh:
-        w = csv.writer(fh)
+        w = csv.writer(fh, lineterminator="\n")
         w.writerow(CSV_COLUMNS)
         for m in result.rows:
             w.writerow((m.old_key, m.new_key, m.category_rank, m.type_name))
@@ -368,18 +370,20 @@ def write_map(result: KeyMapResult, out_csv: Path) -> str:
 
 
 def build_stores(snapshot_root: Path, envs: tuple[str, ...] = ENVS) -> list[StorePaths]:
-    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). Every store
-    must be present, or this ABORTS (MissingStore) naming each absent (env, store): the proof is "every store",
-    so a missing one is never skipped silently. No store is optional."""
+    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). EVERY listed
+    file of every store must be present, or this ABORTS (MissingStore) naming each absent one: the proof is
+    "every store", so a missing file is never skipped silently (a multi-file store with one file gone would drop
+    that file's Keys). No store is optional."""
     root = Path(snapshot_root)
 
     def present(rels: tuple[str, ...], env: str) -> tuple[Path, ...]:
-        return tuple(p for p in (root / env / r for r in rels) if p.exists())
+        return tuple(root / env / r for r in rels if (root / env / r).exists())
 
     stores, missing = [], []
     for env in envs:
         got = {k: present(v, env) for k, v in SNAPSHOT_STORES.items()}
-        missing += [f"{env}/{k}" for k in REQUIRED_STORES if not got[k]]
+        for k in REQUIRED_STORES:                    # present == listed: name every absent file, not just a store
+            missing += [f"{env}/{r}" for r in SNAPSHOT_STORES[k] if not (root / env / r).exists()]
         stores.append(StorePaths(
             env=env,
             ledger_db=got["ledger_db"][0] if got["ledger_db"] else None,
@@ -390,7 +394,7 @@ def build_stores(snapshot_root: Path, envs: tuple[str, ...] = ENVS) -> list[Stor
             backbone_files=got["backbone_files"],
             backbone_additions=got["backbone_additions"]))
     if missing:
-        raise MissingStore("required store(s) absent from the snapshot: " + ", ".join(sorted(missing)))
+        raise MissingStore("required store file(s) absent from the snapshot: " + ", ".join(sorted(missing)))
     return stores
 
 

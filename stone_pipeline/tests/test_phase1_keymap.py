@@ -203,34 +203,57 @@ def test_malformed_branch_refused_and_isolated():
 
 
 def _full_snapshot_env(root: Path, env: str) -> Path:
+    # create every file SNAPSHOT_STORES lists, so a complete snapshot builds; build_stores only checks presence.
     d = root / env
-    (d / "backbone_additions").mkdir(parents=True)
-    (d / "s3_base").mkdir(parents=True)
-    (d / "ledger.db").write_bytes(b"x")
-    (d / "config.db").write_bytes(b"x")
-    (d / "variants_export_base.csv").write_text("Key,Name\n", encoding="utf-8")
-    (d / "s3_base" / "variants_export_base.csv").write_text("Key,Name\n", encoding="utf-8")
-    (d / "attributes.csv").write_text("category,value,sourceid\n", encoding="utf-8")
-    (d / "backbone_slabs.json").write_text("{}", encoding="utf-8")
-    (d / "backbone_additions" / "slab.json").write_text("[]", encoding="utf-8")
+    for rels in keymap.SNAPSHOT_STORES.values():
+        for rel in rels:
+            p = d / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("", encoding="utf-8")
     return d
 
 
-def test_build_stores_requires_every_store_and_names_what_is_missing(tmp_path):
+def test_build_stores_requires_every_listed_file_and_names_what_is_missing(tmp_path):
     from stone_pipeline.phase1.keymap import MissingStore, build_stores
     d = _full_snapshot_env(tmp_path, "development")
-    # a complete snapshot builds; the S3 base copies are a required store too
-    stores = build_stores(tmp_path, envs=("development",))
-    assert stores[0].ledger_db and stores[0].config_db and stores[0].base_csv and stores[0].base_copies != ()
-    # remove each required store in turn; a missing one aborts and is named (no store is optional)
-    for rel, token in (("ledger.db", "ledger_db"), ("config.db", "config_db"),
-                       ("variants_export_base.csv", "base_csv"), ("attributes.csv", "attributes_csv"),
-                       ("s3_base/variants_export_base.csv", "base_copies")):
-        (d / rel).rename(d / (str(rel).replace("/", "_") + ".bak"))
+    stores = build_stores(tmp_path, envs=("development",))   # the complete snapshot builds
+    assert stores[0].ledger_db and stores[0].base_copies != () and len(stores[0].backbone_files) == 3
+    # remove each required file in turn, including a SINGLE file of a multi-file store; a missing file aborts
+    # and is named (present == listed, no store is optional).
+    for rel in ("ledger.db", "config.db", "variants_export_base.csv", "attributes.csv",
+                "s3_base/variants_export_base.csv", "backbone_tiles.json",
+                "backbone_additions/tile.json"):
+        bak = d / (rel.replace("/", "_") + ".bak")
+        (d / rel).rename(bak)
         with pytest.raises(MissingStore) as exc:
             build_stores(tmp_path, envs=("development",))
-        assert token in str(exc.value)
-        (d / (str(rel).replace("/", "_") + ".bak")).rename(d / rel)
+        assert rel in str(exc.value), f"{rel} not named: {exc.value}"
+        bak.rename(d / rel)
+
+
+def test_write_map_exact_bytes(tmp_path):
+    from stone_pipeline.phase1.keymap import BRANCH_ORDER, KeyMapResult, MapRow, write_map
+    assert [BRANCH_ORDER.index(b) for b in ("slab", "block", "tile")] == [0, 1, 2]   # 0-based pack order
+    res = KeyMapResult(rows=[      # already in write order (new_key, category_rank, old_key)
+        MapRow("slab_granite_y_u4", "granite__y_uuid", 0, "Granite, Special"),       # comma -> quoted
+        MapRow("slab_marble_x_u1", "marble__x_uuid", 0, "Marble"),
+        MapRow("block_marble_x_u2", "marble__x_uuid", 1, "Marble"),
+        MapRow("tile_marble_x_u3", "marble__x_uuid", 2, "Marble"),
+    ])
+    out = tmp_path / "m.csv"
+    digest = write_map(res, out)
+    expected = (
+        b"old_key,new_key,category_rank,type_name\n"
+        b'slab_granite_y_u4,granite__y_uuid,0,"Granite, Special"\n'
+        b"slab_marble_x_u1,marble__x_uuid,0,Marble\n"
+        b"block_marble_x_u2,marble__x_uuid,1,Marble\n"
+        b"tile_marble_x_u3,marble__x_uuid,2,Marble\n"
+    )
+    raw = out.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")                 # no BOM
+    assert raw == expected                                     # \n ends, minimal quoting, exact header
+    import hashlib
+    assert digest == hashlib.sha256(expected).hexdigest()
 
 
 # --- determinism ----------------------------------------------------------------------------------------
