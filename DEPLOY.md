@@ -168,8 +168,12 @@ aws ecr describe-images --repository-name blokport-scraper \
 Prod is its own stack in the prod cluster, stood up 2026-09-02. It runs only immutable, dev-proven tags, set in
 `infra/brands/blokport.tfvars` (`variables.tf` refuses a mutable or empty tag while prod is enabled):
 
-- `prod_image_tag = "<sha>"`: the sync service image, the 40-hex git-sha tag the Deploy workflow pushed.
-- `prod_gpu_image_tag = "gpu-<sha>"`: the texture job's GPU image (a Deploy dispatch with `build_gpu`).
+- `prod_image_tag = "<sha>"`: the sync service image, the 40-hex git-sha tag the Deploy workflow pushed. Only the
+  merge deploy of main's head builds it, together with `:core`, so it is the very image dev ran; a manual dispatch
+  never builds or re-pushes it. It is pushed once: a merge deploy that finds its head's `:<sha>` already in ECR (an
+  older commit's CI finishing after the head's, or a CI re-run) points `:core` at that image instead of rebuilding.
+- `prod_gpu_image_tag = "gpu-<sha>"`: the texture job's GPU image (a Deploy dispatch with `build_gpu`). It is pushed
+  once per commit: a second `build_gpu` dispatch of the same commit fails before it builds, so the tag never moves.
 - `prod_standardise_image_tag = "standardise-pin-<sha12>"`: the photo process's GPU image
   (`deploy/build_standardise_image.sh` pushes it under that pin tag; see STANDARDISE_PROCESS.md).
 
