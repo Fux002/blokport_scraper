@@ -52,6 +52,9 @@ def built(monkeypatch):
     class Session:
         def __init__(self, profile_name=None, region_name=None, **other):
             assert not other, other
+            # #571 review: pin which session makes the client. A Session is only for a named profile; every other
+            # client comes from boto3.client, so a site that starts making its own sessions (a thread pool) fails here.
+            assert profile_name, "a boto3.Session without a named profile"
             self.profile, self.region = profile_name, region_name
 
         def client(self, service, config=None, **other):
