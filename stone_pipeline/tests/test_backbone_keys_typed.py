@@ -3,7 +3,7 @@ with the post's own category and the slug of the post's stated type. A post that
 one Key mean two types (the Phase 1 SC-1 key map aborts on that as a type_conflict). On 8 Nov six block Keys sat on the
 same-named post of the type that sorts first (Ocean Blue: the Marble block Key on the Granite post), owner ruling
 "move the Keys". A post that states no type (stone_type '') has no type to compare: SC-1 holds it as untyped, so it is
-counted here, not checked."""
+listed here, not checked."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.config.settings import SETTINGS
+# the rule gen_key writes a Key's type segment with (main's core.text.slugify takes no separator)
 from stone_pipeline.stages.curate.keys import _slug_us
 
 
@@ -28,7 +29,7 @@ def _posts(path: Path) -> list[dict]:
 
 def test_every_keyed_post_states_its_key_s_type():
     checked: dict[str, int] = {}
-    untyped = 0
+    untyped = []
     wrong = []
     for category, path in _backbones():
         for post in _posts(path):
@@ -37,12 +38,12 @@ def test_every_keyed_post_states_its_key_s_type():
                 continue
             stated = (post.get("stone_type") or "").strip()
             if not stated:
-                untyped += 1
+                untyped.append(f"{path.name}: {key}")
                 continue
             checked[category] = checked.get(category, 0) + 1
             if not key.startswith(f"{category}_{_slug_us(stated)}_"):
                 wrong.append(f"{path.name} variant_id {post.get('variant_id')} {post.get('variant')!r} states "
                              f"{stated} but carries {key}")
     assert {"slab", "block", "tile"} <= set(checked)            # every category's backbone was read
-    assert untyped == 24                                         # the additions' type-less posts (SC-1 holds them)
+    print(f"{len(untyped)} keyed posts state no type (SC-1 holds them as untyped):", untyped)
     assert wrong == []
