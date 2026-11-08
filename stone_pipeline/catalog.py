@@ -20,6 +20,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from stone_pipeline import prepare_variant_images
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.adapters.tokens import explicit_type_word
@@ -30,7 +31,6 @@ from stone_pipeline.io import staging
 from stone_pipeline.io import storage
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
-from stone_pipeline import prepare_variant_images
 from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
 
 log = logfmt.get_logger("catalog")

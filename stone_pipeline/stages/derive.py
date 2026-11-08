@@ -532,7 +532,7 @@ def _type_densities() -> tuple[float, dict[str, float]]:
 
 
 def _type_density(type_name: str | None) -> float:
-    """Material density (kg/m3) for a stone type, defaulting to Marble for an unlisted type."""
+    """Material density (kg/m3) for a type: its row in the pack's type_density.csv, else the pack's default density."""
     default, by_type = _type_densities()
     return by_type.get((type_name or "").casefold(), default)
 

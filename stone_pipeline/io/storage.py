@@ -17,6 +17,7 @@ shape; syncing the local staging dir to the bucket later makes the URLs resolve.
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
@@ -47,9 +48,8 @@ def aws_client(service: str, *, config: Optional[dict], profile: Optional[str] =
     """The AWS client of `service` in this deployment's region (settings.S3_REGION), built with `config` (a preset of
     this module, BOTOCORE_DEFAULTS for none) and the credentials of `profile`: a named profile through its own session,
     or the default chain (the task's IAM role on AWS, the environment's locally) when it is None or empty. boto3 is
-    imported here, so a caller without it fails at its first client, not at import."""
-    import copy
-
+    imported here, so a caller without it fails at its first client, not at import. The two credential paths differ
+    only off AWS: a deployed task names no profile (Fargate has none), so every client there uses the task's role."""
     import boto3
     from botocore.config import Config
     options = {} if config is None else {"config": Config(**copy.deepcopy(config))}   # no Config: none passed at all
