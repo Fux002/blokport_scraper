@@ -1,0 +1,29 @@
+# Competitor sites for BlokPort (stone). A site is collected only with decision: approved, which the loader refuses
+# without complete terms and who decided. The checks below come from the 2026-11-02 research and are not a decision.
+brand: blokport
+sites:
+  - site_id: ceralith
+    seller_name: Ceralith
+    seller_type: merchant
+    platform: woocommerce_store
+    base_url: https://www.ceralith.be
+    query: {type: variation}
+    terms:
+      terms_url: https://www.ceralith.be/verkoopsvoorwaarden/
+      robots_url: https://www.ceralith.be/robots.txt
+      checked_on: 2026-11-02
+      summary: robots.txt allows everything; the terms have no clause on intellectual property, copying or scraping.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: renier
+    seller_name: Renier
+    seller_type: merchant
+    platform: woocommerce_store
+    base_url: https://renier.be
+    terms:
+      terms_url: https://renier.be/algemene-voorwaarden/
+      robots_url: https://renier.be/robots.txt
+      checked_on: 2026-11-02
+      summary: robots.txt blocks nothing relevant; no clause on copying, scraping or image rights was found.
+    decision: pending
+    statements: {vat_basis: incl}
