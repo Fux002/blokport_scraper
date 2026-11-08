@@ -104,7 +104,7 @@ def run(outputs_root: Path | None = None) -> Path:
         sources.update(r.src_site for r in src_rows)   # union ALL src_sites, not just the first row's
 
     ref = loaders.load_all()
-    result = curate.run(rows, ref)                # -> to_upload/1_variants_update.csv, review/, backbone_additions/
+    result = curate.run(rows, ref)                # -> outputs/<env>/curate_delta.csv (emit publishes the update file), review/, backbone_additions/
     # HEAL base<->backbone drift: a variety minted in a prior run dropped out of the per-run additions file
     # (which must stay per-run for the texture queue), so its products flag no_backbone_record and skip on
     # color_id with nothing reviewable. Persist those varieties' membership durably (config.db overlay,
