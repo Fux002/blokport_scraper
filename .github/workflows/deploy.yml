@@ -15,7 +15,9 @@ name: Deploy
 # finished: merges in quick succession finish CI in any order, and a deploy of the commit that finished last used
 # to put dev back on older code (2026-11-04). The head is built only once its own CI is green (else its CI's
 # completion brings the deploy that builds it), so whichever deploy runs last builds the head. A manual dispatch
-# builds the dispatched ref, for the heavy images and an immutable :<sha>, and never moves :core.
+# builds ONLY the heavy images it asks for (imageproc, gpu) from the dispatched ref: never the core image, so it never
+# re-pushes a :<sha> a merge deploy already pushed (a rebuild is a new digest, and the tag would move off the image dev
+# ran: 2026-11-08, :89b3b34 re-pushed by the gpu dispatch) and never moves :core. Its :gpu-<sha> is pushed only once.
 on:
   workflow_run:
     workflows: [CI]
@@ -59,7 +61,8 @@ jobs:
       run:
         shell: bash   # -eo pipefail: a failed lookup fails the deploy, never a silent green
     steps:
-      # What this run builds: the dispatched ref (never :core), or main's head when its CI is green (:core).
+      # What this run builds: on a dispatch, only the heavy images it asks for from the dispatched ref (core=false);
+      # else main's head when its CI is green (core=true: the core image, :<sha> and :core).
       - name: Resolve the commit to build
         id: target
         env:
@@ -67,11 +70,17 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           DISPATCHED: ${{ github.sha }}
+          BUILD_IMAGEPROC: ${{ inputs.build_imageproc }}
+          BUILD_GPU: ${{ inputs.build_gpu }}
         run: |
           if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$BUILD_IMAGEPROC" != "true" ] && [ "$BUILD_GPU" != "true" ]; then
+              echo "::error::a dispatch builds only the heavy images: set build_imageproc and/or build_gpu"
+              exit 1
+            fi
             echo "sha=$DISPATCHED" >> "$GITHUB_OUTPUT"
             echo "core=false" >> "$GITHUB_OUTPUT"
-            echo "Dispatch: building $DISPATCHED; :core is left as it is"
+            echo "Dispatch: building the requested heavy images of $DISPATCHED; the core image, :<sha> and :core are left as they are"
             exit 0
           fi
           HEAD_SHA=$(gh api "repos/$REPO_NAME/commits/main" --jq .sha)
@@ -116,7 +125,7 @@ jobs:
       # process the runner starts, the overnight photos press) must IMPORT inside the built image before it is pushed. A boot-time NameError
       # (a missing import in serve()) used to reach dev as a crash-looping task; now it fails the build.
       - name: Build image and smoke-import its entrypoints
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           SHA: ${{ steps.target.outputs.sha }}
@@ -126,22 +135,18 @@ jobs:
           docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.config.control.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, stone_pipeline.io.medusa_inputs, stone_pipeline.io.deliverables, stone_pipeline.io.image_wipe, stone_pipeline.io.texture_job, stone_pipeline.photos.process, deploy.start_photos_run"
           echo "Entrypoint imports OK in $REPO:core"
 
-      # :<sha> is immutable and always pushed; :core (dev's image) only from main's head (Resolve).
+      # Only the merge deploy of main's head builds the core image, so :<sha> (the tag prod is pinned to) and :core
+      # (dev's image) are pushed together, from the one build dev then runs.
       - name: Push image
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           SHA: ${{ steps.target.outputs.sha }}
-          CORE: ${{ steps.target.outputs.core }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker push "$REPO:$SHA"
-          if [ "$CORE" = "true" ]; then
-            docker push "$REPO:core"
-            echo "Pushed $REPO:core and :$SHA"
-          else
-            echo "Pushed $REPO:$SHA only"
-          fi
+          docker push "$REPO:core"
+          echo "Pushed $REPO:core and :$SHA"
 
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
       # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
@@ -169,7 +174,8 @@ jobs:
           sudo docker builder prune -af || true
           df -h /
 
-      # Heavy CPU-torch variant (~10 GB with baked models); only on manual dispatch with the flag set.
+      # Heavy CPU-torch variant (~10 GB with baked models); only on manual dispatch with the flag set. Smoke-imported
+      # like core before its push: the texture job's entrypoint and the generator stack it needs (GEN_DEPS).
       - name: Build and push imageproc image
         if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
         env:
@@ -177,6 +183,7 @@ jobs:
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target imageproc -t "$REPO:imageproc" .
+          docker run --rm --entrypoint python "$REPO:imageproc" -c "import stone_pipeline.prepare_variant_images, fal_client, torch"
           docker push "$REPO:imageproc"
           echo "Pushed $REPO:imageproc"
 
@@ -190,7 +197,10 @@ jobs:
           sudo docker builder prune -af || true
           df -h /
 
-      # GPU image for the AWS Batch texture job; :gpu = dev (mutable), :gpu-<sha> = promote to prod.
+      # GPU image for the AWS Batch texture job; :gpu = dev (mutable), :gpu-<sha> = promote to prod. :gpu-<sha> is
+      # pushed once: a second dispatch of the same commit fails before building instead of moving the tag prod may be
+      # pinned to (BatchGetImage reports a missing tag as a failure entry, not an error, so an absent tag reads empty).
+      # Smoke-imported before its push: the job's entrypoint (RUN_MODE=generate-textures) and GEN_DEPS.
       - name: Build and push gpu image
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
         env:
@@ -198,7 +208,14 @@ jobs:
           SHA: ${{ steps.target.outputs.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
+          EXISTING=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag="gpu-$SHA" \
+            --query 'images[].imageId.imageDigest' --output text)
+          if [ -n "$EXISTING" ]; then
+            echo "::error::$REPO:gpu-$SHA already exists ($EXISTING): an immutable tag is never re-pushed"
+            exit 1
+          fi
           docker build --target gpu -t "$REPO:gpu" -t "$REPO:gpu-$SHA" .
+          docker run --rm --entrypoint python "$REPO:gpu" -c "import stone_pipeline.prepare_variant_images, fal_client, torch"
           docker push "$REPO:gpu"
           docker push "$REPO:gpu-$SHA"
           echo "Pushed $REPO:gpu and :gpu-$SHA"
