@@ -37,6 +37,8 @@ log = logfmt.get_logger("prepare_variant_images")
 VARIATIONS_PREFIX = f"{ENV_SEGMENT}/variations/"   # where a variant's {Key}.png must land (its Image URL home)
 # rb_images.py writes the background-removed {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
 DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
+# genetate_images.py writes FLUX's {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./images") and resumes over what is there.
+GEN_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "images"
 # The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
 PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
 # The produce PUBLISHES its queue under a UNIQUE key here and passes that key to the GPU job via
@@ -298,6 +300,15 @@ def _dispatch(prompts_path: Path, queued: int) -> None:
                   "GPU queue+jobdef config)", queued, extra={"extra_fields": {"queued": queued}})
 
 
+def _clear_local_outputs(keys: list[str]) -> None:
+    """Remove the queued keys' local FLUX and BEN2 outputs before generating. genetate_images resumes over an existing
+    images/{Key}.png and BEN2 de-backgrounds it, so a PNG an earlier run left on a dev box would otherwise be uploaded
+    as this run's texture. A fresh GPU task has none. What is already on S3 was pruned from `keys` before this."""
+    for key in keys:
+        for folder in (GEN_OUTPUT_DIR, DEBG_OUTPUT_DIR):
+            (folder / f"{key}.png").unlink(missing_ok=True)
+
+
 def _generate_queued_images() -> list[str]:
     """Run the image_pipeline chain (FLUX.2 -> BEN2) on the queued prompts, in this process's interpreter: the
     committed scripts stay the one generator. Returns the scripts that exited non-zero or timed out (empty: all
@@ -349,6 +360,7 @@ def run() -> int:
         raise TextureJobFailed(f"{len(targets)} variant texture(s) queued, but the generator cannot run here: "
                                f"missing {blockers} (fal_client + torch + FAL_KEY)")
 
+    _clear_local_outputs(targets)                  # never re-upload a PNG an earlier run left behind
     failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}.png
     uploaded, missing = upload_variant_images(targets)
     not_landed = set(missing)

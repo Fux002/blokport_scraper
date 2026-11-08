@@ -277,6 +277,7 @@ class _Job:
         settings.paths = types.SimpleNamespace(workspace_root=tmp_path)
         monkeypatch.setattr(pvi, "SETTINGS", settings)
         monkeypatch.setattr(pvi, "DEBG_OUTPUT_DIR", ip / "to_upload")
+        monkeypatch.setattr(pvi, "GEN_OUTPUT_DIR", ip / "images")
         monkeypatch.setattr(pvi.image_prompts, "build", lambda: q)
         monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
         monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: set())
@@ -291,13 +292,16 @@ class _Job:
         monkeypatch.setattr(pvi.refresh_images, "mark_best_model",
                             lambda keys, client=None: job.marked.append(sorted(keys)) or job.mark_ok)
 
-    def generated(self, raw=(), debackgrounded=(), failed=()):
+    def leftovers(self, raw=(), debackgrounded=()):
         """FLUX wrote images/{Key}.png for `raw`; BEN2 wrote to_upload/{Key}.png for `debackgrounded`."""
         for k in raw:
             (self.ip / "images" / f"{k}.png").write_bytes(b"with background")
         for k in debackgrounded:
             (self.ip / "to_upload" / f"{k}.png").write_bytes(b"clean")
-        return lambda: list(failed)
+
+    def generated(self, raw=(), debackgrounded=(), failed=()):
+        """The generator, which writes those outputs when the job runs it (_generate_queued_images)."""
+        return lambda: self.leftovers(raw, debackgrounded) or list(failed)
 
 
 def test_a_texture_ben2_did_not_finish_is_never_uploaded_or_marked(tmp_path, monkeypatch):
@@ -362,3 +366,21 @@ def test_the_queue_build_fails_loud_on_a_bug_and_holds_on_an_unreadable_input(mo
     monkeypatch.setattr(pvi.image_prompts, "build", unreadable)
     assert pvi.queue_new_textures() == 0
     assert any("queue build failed" in r.getMessage() for r in caplog.records)
+
+
+def test_a_stale_local_texture_is_cleared_before_the_generator_runs(tmp_path, monkeypatch):
+    # #569 review: genetate_images resumes over an existing images/{Key}.png and BEN2 de-backgrounds it, so a PNG an
+    # earlier run left on a dev box would be uploaded as this run's texture. The queued keys' outputs go first.
+    job = _Job(tmp_path, monkeypatch, ["slab_a"])
+    job.leftovers(raw=["slab_a", "slab_other"], debackgrounded=["slab_a"])       # an earlier run's leftovers
+    seen = {}
+
+    def generate():
+        seen["raw"] = (job.ip / "images" / "slab_a.png").exists()
+        seen["clean"] = (job.ip / "to_upload" / "slab_a.png").exists()
+        (job.ip / "to_upload" / "slab_a.png").write_bytes(b"this run")
+        return []
+    monkeypatch.setattr(pvi, "_generate_queued_images", generate)
+    assert pvi.run() == 1
+    assert seen == {"raw": False, "clean": False}
+    assert (job.ip / "images" / "slab_other.png").exists()                        # a key not queued is left alone
