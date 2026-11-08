@@ -300,7 +300,6 @@ def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: 
         if resolved_alias:
             outcome["resolved_alias"] = True
         return outcome
-    renamed = _norm(name) != _norm(spelling)
     meaning = _global_meaning(conn, spelling, stone_type, exists_as, alias_target, clean)
     if meaning and _norm(meaning[0]) == _norm(name) and _norm(meaning[1]) == _norm(stone_type):
         outcome["result"], outcome["level"] = "minted", "global"      # restates the global meaning: nothing new
