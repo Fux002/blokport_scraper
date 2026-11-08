@@ -15,8 +15,13 @@ Stores unioned (the scraper manager, 8 Nov): the ledger `variation` table (all r
 config.db `retired_variation` and `protected_variation` (Keys), the committed base copies
 (`variants_export_base.csv`), the backbone files and `backbone_additions`.
 
+The new Key's name is the identity's CANONICAL Name (the stored Name with any bracketed alias split off,
+D1 rev 8), found by joining the old-Key MIDDLE (branch and uuid stripped) across stores: the bracket
+identities carry the bracketed slug in every old Key but one clean Name, so a row-less Key takes that Name
+and never parses its own slug (which would mint a second new Key).
+
 Aborts (each lists the offending Keys, then the run fails):
-  - name_tie: one old Key carries different display names (D1 tie rule).
+  - name_tie: one identity carries two canonical names (D1 tie rule).
   - unresolved_type: a row-less Key whose type cannot be parsed, or whose parsed/row type does not map to
     exactly one Medusa type name in the vocabulary (`from_medusa/<env>/attributes.csv` type rows, both envs).
   - type_conflict: one old Key carries two different types across stores.
@@ -35,6 +40,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.core.text import split_bracket_alias
 from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.stages.curate.keys import BRANCHES, _slug_us
 
@@ -155,6 +161,22 @@ def _branch_of(old_key: str) -> str:
     return old_key.split("_", 1)[0]
 
 
+def _middle(old_key: str) -> str:
+    """The identity core of an OLD Key `{branch}_{slug_type}_{slug_name}_{uuid}`: branch and uuid removed.
+    Every copy of one identity (its slab/block/tile Keys, and any retired/protected copy with no store row)
+    carries the SAME middle, so it is the join key by which a string-only Key finds its identity and that
+    identity's canonical Name. The uuid is the final `_`-token; the branch is the first."""
+    without_uuid = old_key.rsplit("_", 1)[0]
+    return without_uuid.split("_", 1)[1] if "_" in without_uuid else ""
+
+
+def _canonical(name: str | None) -> str | None:
+    """The identity's canonical Name: the stored Name with any bracketed alias pulled off (D1, rev 8). The old
+    Keys of the bracket identities carry the bracketed slug, but the new Key's name must be the clean Name, so
+    the name slug is NEVER read from the old Key."""
+    return split_bracket_alias(name)[0] if name else None
+
+
 def parse_type_slug(old_key: str, known_type_slugs) -> tuple[str, str] | None:
     """(slug_type, slug_name) for a row-less Key `{branch}_{slug_type}_{slug_name}_{uuid}`, by longest match of
     the type slug. The uuid is the final `_`-token (hyphenated, no underscore); the branch is the first. None
@@ -183,40 +205,44 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
     for rec in records:
         by_key.setdefault(rec.old_key, []).append(rec)
 
+    # indexes over the IDENTITY (the old-Key middle), so a copy or a row-less Key reads the one canonical Name
+    # and type (D1, rev 8): the name slug of the new Key is never the old Key's own (possibly bracketed) slug.
+    names_of: dict[str, set[str]] = {}
+    types_of: dict[str, set[str]] = {}
+    untyped_mids: set[str] = set()
     known_type_slugs = set(type_vocab)
-    for recs in by_key.values():
-        for r in recs:
-            if r.type_name:
-                known_type_slugs.add(_slug_us(r.type_name))
+    for rec in records:
+        mid = _middle(rec.old_key)
+        canon = _canonical(rec.name)
+        if canon:
+            names_of.setdefault(mid, set()).add(canon)
+        if rec.type_name:
+            types_of.setdefault(mid, set()).add(rec.type_name)
+            known_type_slugs.add(_slug_us(rec.type_name))
+        if rec.untyped:
+            untyped_mids.add(mid)
 
     protected_to_new: dict[str, set[str]] = {}
 
     for old_key in sorted(by_key):
         recs = by_key[old_key]
-        typed = [r for r in recs if r.type_name]
-        names = sorted({r.name for r in recs if r.name})
-        protected = any(r.protected for r in recs)
-
-        if typed:
-            types = sorted({r.type_name for r in typed})
-            if len(types) > 1:
-                res.aborts.setdefault("type_conflict", []).append(old_key)
-                continue
-            type_name, name = types[0], (names[0] if names else _slug_us(types[0]))
-            slug_type, slug_name = _slug_us(type_name), _slug_us(name)
-        elif any(r.untyped for r in recs):
-            res.untyped.append(old_key)            # store marks it type-less (stone_type ''): held, never guessed
-            continue
-        else:
-            parsed = parse_type_slug(old_key, known_type_slugs)
-            if parsed is None:
-                res.aborts.setdefault("unresolved_type", []).append(old_key)
-                continue
-            slug_type, slug_name = parsed
-            type_name = None   # resolved from the vocabulary below
-
-        if len(names) > 1:                          # D1 tie: one old Key, different display names
+        mid = _middle(old_key)
+        canon_names = names_of.get(mid, set())
+        if len(canon_names) > 1:                    # D1 tie: one identity, different canonical names
             res.aborts.setdefault("name_tie", []).append(old_key)
+            continue
+        canonical_name = next(iter(canon_names)) if canon_names else None
+
+        types = types_of.get(mid, set())
+        if len(types) > 1:                          # one identity, two types across stores
+            res.aborts.setdefault("type_conflict", []).append(old_key)
+            continue
+        parsed = parse_type_slug(old_key, known_type_slugs)
+        slug_type = _slug_us(next(iter(types))) if types else (parsed[0] if parsed else None)
+
+        if slug_type is None:                       # names no type: held if the store said '', else unresolved
+            target = res.untyped if (mid in untyped_mids) else res.aborts.setdefault("unresolved_type", [])
+            target.append(old_key)
             continue
 
         vocab_names = type_vocab.get(slug_type)
@@ -225,14 +251,19 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
             continue
         type_name = next(iter(vocab_names))         # the one live Medusa type name
 
+        name_for_key = canonical_name if canonical_name is not None else (parsed[1] if parsed else None)
+        if name_for_key is None:                    # a row-less Key that joins no named row and cannot parse
+            res.aborts.setdefault("unresolved_type", []).append(old_key)
+            continue
+
         branch = _branch_of(old_key)
         if branch not in BRANCH_ORDER:
             res.aborts.setdefault("unresolved_branch", []).append(old_key)
             continue
 
-        nk = new_key(type_name, slug_name)          # _slug_us is idempotent on the already-slugged name
+        nk = new_key(type_name, name_for_key)       # _slug_us is idempotent on an already-slugged fallback
         res.rows.append(MapRow(old_key, nk, BRANCH_ORDER.index(branch), type_name))
-        if protected:
+        if any(r.protected for r in recs):
             protected_to_new.setdefault(nk, set()).add(old_key)
 
     for nk, keys in sorted(protected_to_new.items()):

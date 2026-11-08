@@ -38,6 +38,28 @@ def test_identity_copies_and_retired_only_key_collapse_to_one_new_key():
 
 
 # --- aborts ---------------------------------------------------------------------------------------------
+def test_bracket_identity_gets_one_clean_new_key():
+    # The 33 bracket identities (rev 8): every old Key carries the BRACKETED slug, but there is one clean Name
+    # per copy. The new Key must use the clean Name, so all copies and a retired-only copy collapse to ONE Key.
+    recs = [
+        _led("development", "slab_granite_absolute_black_nero_assoluto_u1", "Granite", "Absolute Black"),
+        _led("production", "block_granite_absolute_black_nero_assoluto_u2", "Granite", "Absolute Black"),
+        Record("production", "config.retired", "tile_granite_absolute_black_nero_assoluto_u3"),  # no row
+    ]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok, res.aborts
+    new_keys = {m.new_key for m in res.rows}
+    assert new_keys == {new_key("Granite", "Absolute Black")} and len(res.rows) == 3
+    # NOT the bracketed-slug Key that parsing the old Key's own slug would have minted
+    assert new_key("Granite", "absolute black nero assoluto") not in new_keys
+
+
+def test_bracketed_store_name_is_cleaned_for_the_new_key():
+    recs = [_led("development", "slab_granite_g562_maple_red_u1", "Granite", "G562 (Maple Red)")]
+    res = build_key_map(recs, VOCAB)
+    assert res.ok and res.rows[0].new_key == new_key("Granite", "G562")
+
+
 def test_name_tie_across_envs_aborts():
     recs = [_led("development", "slab_marble_x_u1", "Marble", "Absolute Black"),
             _led("production", "slab_marble_x_u1", "Marble", "Absolute Blk")]
