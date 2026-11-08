@@ -275,3 +275,9 @@ def test_the_lot_summary_counts_each_lot_s_pieces():
     assert lots.summary(rows) == [{"lot_code": "L-1", "variety": "Calacatta Viola",
                                    "pieces": 2, "sold": 0, "emitted": 1, "held": 1,
                                    "awaiting_answer": False}]
+
+def test_a_lot_code_label_is_written_by_its_field():
+    # W27: the readable part passes product.lot_code's rule; the uuid part is unchanged
+    from stone_pipeline.stages.lots import lot_code
+    code = lot_code("MAR", "ref-1", "Løt 1")
+    assert code.startswith("Lot 1-") and code.split("-", 2)[-1] == lot_code("MAR", "ref-1", "Lot 1").split("-", 2)[-1]
