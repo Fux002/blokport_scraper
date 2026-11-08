@@ -1291,6 +1291,13 @@ def boot(config_db, ledger_path) -> None:
     from stone_pipeline.io import medusa_inputs
     if medusa_inputs.fetch_attributes():
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    # The name-field kinds: a boot failure is logged, not fatal. The routes that clean a name read the map per
+    # request and answer 503 until a later boot or produce fetch has written a valid one.
+    try:
+        medusa_inputs.fetch_field_kinds()
+        log.info("boot: fetched field-kinds.json")
+    except Exception:
+        log.warning("boot: field-kinds.json not fetched; the name routes answer 503 until it is", exc_info=True)
 
 
 def shutdown(config_db, periodic) -> None:
