@@ -205,9 +205,11 @@ def test_malformed_branch_refused_and_isolated():
 def _full_snapshot_env(root: Path, env: str) -> Path:
     d = root / env
     (d / "backbone_additions").mkdir(parents=True)
+    (d / "s3_base").mkdir(parents=True)
     (d / "ledger.db").write_bytes(b"x")
     (d / "config.db").write_bytes(b"x")
     (d / "variants_export_base.csv").write_text("Key,Name\n", encoding="utf-8")
+    (d / "s3_base" / "variants_export_base.csv").write_text("Key,Name\n", encoding="utf-8")
     (d / "attributes.csv").write_text("category,value,sourceid\n", encoding="utf-8")
     (d / "backbone_slabs.json").write_text("{}", encoding="utf-8")
     (d / "backbone_additions" / "slab.json").write_text("[]", encoding="utf-8")
@@ -217,17 +219,18 @@ def _full_snapshot_env(root: Path, env: str) -> Path:
 def test_build_stores_requires_every_store_and_names_what_is_missing(tmp_path):
     from stone_pipeline.phase1.keymap import MissingStore, build_stores
     d = _full_snapshot_env(tmp_path, "development")
-    # a complete snapshot builds; base_copies (optional) is absent and that is fine
+    # a complete snapshot builds; the S3 base copies are a required store too
     stores = build_stores(tmp_path, envs=("development",))
-    assert stores[0].ledger_db and stores[0].config_db and stores[0].base_csv and stores[0].base_copies == ()
-    # remove each REQUIRED store in turn; a missing one aborts and is named
+    assert stores[0].ledger_db and stores[0].config_db and stores[0].base_csv and stores[0].base_copies != ()
+    # remove each required store in turn; a missing one aborts and is named (no store is optional)
     for rel, token in (("ledger.db", "ledger_db"), ("config.db", "config_db"),
-                       ("variants_export_base.csv", "base_csv"), ("attributes.csv", "attributes_csv")):
-        (d / rel).rename(d / (rel + ".bak"))
+                       ("variants_export_base.csv", "base_csv"), ("attributes.csv", "attributes_csv"),
+                       ("s3_base/variants_export_base.csv", "base_copies")):
+        (d / rel).rename(d / (str(rel).replace("/", "_") + ".bak"))
         with pytest.raises(MissingStore) as exc:
             build_stores(tmp_path, envs=("development",))
         assert token in str(exc.value)
-        (d / (rel + ".bak")).rename(d / rel)
+        (d / (str(rel).replace("/", "_") + ".bak")).rename(d / rel)
 
 
 # --- determinism ----------------------------------------------------------------------------------------

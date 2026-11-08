@@ -64,12 +64,13 @@ SNAPSHOT_STORES = {
     "backbone_additions": ("backbone_additions/slab.json", "backbone_additions/block.json",
                            "backbone_additions/tile.json"),
 }
-# Every REQUIRED store must be present in the snapshot, or build_stores ABORTS and names the absent ones: a
-# silently skipped store would shrink the "every store" proof. A multi-file store is required to have at least
-# one file. The ONE optional store is the S3 base copies: they are a live-base cross-check beside the
-# committed base_csv, which is itself the authoritative base here, so their absence never drops a base Key.
-REQUIRED_STORES = ("ledger_db", "config_db", "base_csv", "attributes_csv", "backbone_files", "backbone_additions")
-OPTIONAL_STORES = ("base_copies",)
+# Every configured store is REQUIRED: build_stores ABORTS and names any absent from the snapshot, so a
+# silently skipped store can never shrink the "every store" proof (spec rev 8 section 3 names each one). A
+# multi-file store is required to have at least one file. The S3 base copies are the deployed task's authority
+# on a stack and have diverged from the committed base before (an S3 base edit git never saw), so they are a
+# store in their own right, not a cross-check. No store is optional.
+REQUIRED_STORES = ("ledger_db", "config_db", "base_csv", "base_copies", "attributes_csv",
+                   "backbone_files", "backbone_additions")
 
 
 class MissingStore(Exception):
@@ -367,9 +368,9 @@ def write_map(result: KeyMapResult, out_csv: Path) -> str:
 
 
 def build_stores(snapshot_root: Path, envs: tuple[str, ...] = ENVS) -> list[StorePaths]:
-    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). Every
-    REQUIRED store must be present, or this ABORTS (MissingStore) naming each absent (env, store): the proof is
-    "every store", so a missing one is never skipped silently. Only OPTIONAL_STORES may be absent."""
+    """Assemble each env's StorePaths from a private frozen-snapshot root (SNAPSHOT_STORES layout). Every store
+    must be present, or this ABORTS (MissingStore) naming each absent (env, store): the proof is "every store",
+    so a missing one is never skipped silently. No store is optional."""
     root = Path(snapshot_root)
 
     def present(rels: tuple[str, ...], env: str) -> tuple[Path, ...]:
