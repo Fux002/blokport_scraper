@@ -403,16 +403,16 @@ def choose(client, rounds, listing, exclude, spend=None, owner=None):
                 fallback = (tag, sha)
     return fallback, complete
 
-def fixable(client, rnd, sha, exclude):
+def fixable(client, rnd, sha, exclude, judged=None):
     """What a cleaned copy of this photo would fix, or None when it could not pass: {"kinds": [...]} when the judge failed
     its result only for reflections, marks or fills, {"held": reason} when the retouch or logo step held it. A photo held
-    for its outline, or never judged, is not worth an edit."""
+    for its outline, or never judged, is not worth an edit. judged: its judged answer when the caller already read it."""
     if sha in exclude:
         return None
     if sha in rnd.finished:
         if sha not in rnd.judged:
             return None
-        found = _get_json(client, f"{rnd.prefix}judged/{sha}.json")
+        found = judged if judged is not None else _get_json(client, f"{rnd.prefix}judged/{sha}.json")
         if judge.current(found) and judge.fixable(found):            # an outdated fail is judged again first
             return {"kinds": sorted({p["kind"] for p in found["problems"]})}
         return None
@@ -766,15 +766,15 @@ def photo_notes(client, rounds, listing, exclude, conflicts, click=None, state=N
 # The hidden-listings page's reasons (review.json, GET /config/v1/photos/hidden): its contract, not a setting. The first
 # seven come from a photos run's report (review_row); the last four only from the config API's join of the ledger's
 # hidden listings with the photo stores (owner_removed, not_worked_yet, chosen_not_linked) and publish's tiles.
-REVIEW_REASONS = ("not_fixable", "awaiting_auto", "awaiting_click", "clean_failed", "photo_conflict", "pending",
+REVIEW_REASONS = ("not_fixable", "awaiting_auto", "awaiting_click", "clean_failed", C.CONFLICT_REASON, "pending",
                   "excluded", "owner_removed", "tile_no_stone", "not_worked_yet", "chosen_not_linked")
 
 
-def result_state(client, rnd, sha):
+def result_state(client, rnd, sha, judged=None):
     """Where one photo's result stands in a round, from its stored answers (choose reads them in the same order): "held"
     (the standardiser held it), "no_result", "unchecked" (its outline recheck not settled), "not_judged", "unparsed"
     (the judge's answer could not be read: asked again), "outdated" (a verdict under an older bar: judged again),
-    "pass" or "fail"."""
+    "pass" or "fail". judged: its judged answer when the caller already read it."""
     if sha in rnd.held:
         return "held"
     if sha not in rnd.finished:
@@ -783,7 +783,7 @@ def result_state(client, rnd, sha):
         return "unchecked"
     if sha not in rnd.judged:
         return "not_judged"
-    found = _get_json(client, f"{rnd.prefix}judged/{sha}.json")
+    found = judged if judged is not None else _get_json(client, f"{rnd.prefix}judged/{sha}.json")
     if found["verdict"] == "unparsed":
         return "unparsed"
     if not judge.current(found):
@@ -799,9 +799,9 @@ def review_photo(client, rounds, listing, sha, exclude, blocked):
     Selection.blocked (the exclude list and the listing's conflict photos)."""
     (tag, gpu), (_, cl) = rounds
     g, c = gpu[listing["source"]], cl[listing["source"]]
-    state = ("excluded" if sha in exclude else "conflict" if sha in blocked else result_state(client, g, sha))
-    found = _get_json(client, f"{g.prefix}judged/{sha}.json") if sha in g.judged else None
-    cause = fixable(client, g, sha, blocked)
+    found = _get_json(client, f"{g.prefix}judged/{sha}.json") if sha in g.judged else None    # read once, used thrice
+    state = ("excluded" if sha in exclude else "conflict" if sha in blocked else result_state(client, g, sha, found))
+    cause = fixable(client, g, sha, blocked, found)
     return {"sha": sha, "tag": tag, "state": state,
             "kinds": sorted({p.get("kind", "?") for p in found.get("problems", [])}) if found else [],
             "held": _get_json(client, f"{g.prefix}held/{sha}.json")["reason"] if sha in g.held else None,
@@ -813,14 +813,14 @@ def review_photo(client, rounds, listing, sha, exclude, blocked):
 
 def review_reason(listing, outcome, photos, state, blocked):
     """Why a listing the run did not give a good photo is hidden (REVIEW_REASONS), from its outcome (report), its photos
-    (review_photo) and its click's state (click_state): "pending" while not fully judged; "excluded" or "photo_conflict"
+    (review_photo) and its click's state (click_state): "pending" while not fully judged; "excluded" or "photo_conflict" (C.CONFLICT_REASON)
     when none of its photos may be chosen by itself; "clean_failed" when its cleaned copy failed the judge or every
     fixable photo has no model left; "not_fixable" when no cleaned copy could fix any; "awaiting_auto" when a mark may
     still be cleaned without a click (authorised); else "awaiting_click"."""
     if outcome == "pending":
         return "pending"
     if listing["photos"] and not candidates(listing, blocked):
-        return "photo_conflict" if any(p["state"] == "conflict" for p in photos) else "excluded"
+        return C.CONFLICT_REASON if any(p["state"] == "conflict" for p in photos) else "excluded"
     if (state is not None and state[0] == "cleaned") or any(p["clean"]["copy"] is not None for p in photos):
         return "clean_failed"
     fixes = [p for p in photos if p["fixable"]]
