@@ -17,7 +17,9 @@ name: Deploy
 # completion brings the deploy that builds it), so whichever deploy runs last builds the head. A manual dispatch
 # builds ONLY the heavy images it asks for (imageproc, gpu) from the dispatched ref: never the core image, so it never
 # re-pushes a :<sha> a merge deploy already pushed (a rebuild is a new digest, and the tag would move off the image dev
-# ran: 2026-11-08, :89b3b34 re-pushed by the gpu dispatch) and never moves :core. Its :gpu-<sha> is pushed only once.
+# ran: 2026-11-08, :89b3b34 re-pushed by the gpu dispatch) and never moves :core. One rule holds for every run: an
+# existing :<sha> or :gpu-<sha> never moves. A merge deploy that finds its head's :<sha> already pushed (an older
+# commit's CI finishing after the head's, or a CI re-run) points :core at that image instead of rebuilding it.
 on:
   workflow_run:
     workflows: [CI]
@@ -80,7 +82,7 @@ jobs:
             fi
             echo "sha=$DISPATCHED" >> "$GITHUB_OUTPUT"
             echo "core=false" >> "$GITHUB_OUTPUT"
-            echo "Dispatch: building the requested heavy images of $DISPATCHED; the core image, :<sha> and :core are left as they are"
+            echo "Dispatch: the requested heavy images of $DISPATCHED; the core image, :<sha> and :core are untouched"
             exit 0
           fi
           HEAD_SHA=$(gh api "repos/$REPO_NAME/commits/main" --jq .sha)
@@ -121,11 +123,26 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
 
+      # :<sha> is the tag prod is pinned to, so it is pushed once. A merge deploy of a head whose :<sha> is already in
+      # ECR (an older commit's CI finished after the head's, or a CI re-run) reuses that image: no build, no push.
+      # BatchGetImage reports a missing tag as a failure entry, not an error, so an absent tag reads empty; a failed
+      # lookup (no access, no network) fails the deploy instead of reading as absent.
+      - name: Look up the head's :<sha> in ECR
+        id: existing
+        if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag="$SHA" \
+            --query 'images[].imageId.imageDigest' --output text)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          if [ -n "$DIGEST" ]; then echo ":$SHA is already $DIGEST: reused, not rebuilt"; else echo ":$SHA is new"; fi
+
       # The import smoke: every entrypoint module the :core container runs (the two servers, produce, the photo
       # process the runner starts, the overnight photos press) must IMPORT inside the built image before it is pushed. A boot-time NameError
       # (a missing import in serve()) used to reach dev as a crash-looping task; now it fails the build.
       - name: Build image and smoke-import its entrypoints
-        if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
+        if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true' && steps.existing.outputs.digest == ''
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           SHA: ${{ steps.target.outputs.sha }}
@@ -136,17 +153,46 @@ jobs:
           echo "Entrypoint imports OK in $REPO:core"
 
       # Only the merge deploy of main's head builds the core image, so :<sha> (the tag prod is pinned to) and :core
-      # (dev's image) are pushed together, from the one build dev then runs.
+      # (dev's image) are pushed together, from the one build dev then runs. When :<sha> already exists, :core is
+      # pointed at that image by copying its manifest (BatchGetImage + PutImage): nothing is rebuilt or re-pushed. The
+      # manifest is read in whatever media type it was stored as, and a :core already on it is left alone (ECR refuses
+      # a PutImage that changes nothing).
       - name: Push image
         if: steps.gate.outputs.ready == 'true' && steps.target.outputs.core == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           SHA: ${{ steps.target.outputs.sha }}
+          EXISTING: ${{ steps.existing.outputs.digest }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
-          docker push "$REPO:$SHA"
-          docker push "$REPO:core"
-          echo "Pushed $REPO:core and :$SHA"
+          if [ -z "$EXISTING" ]; then
+            docker push "$REPO:$SHA"
+            docker push "$REPO:core"
+            echo "Pushed $REPO:core and :$SHA"
+            exit 0
+          fi
+          CORE_DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag=core \
+            --query 'images[].imageId.imageDigest' --output text)
+          if [ "$CORE_DIGEST" = "$EXISTING" ]; then
+            echo "$REPO:core already names :$SHA ($EXISTING)"
+            exit 0
+          fi
+          # the manifest byte for byte (jq -j adds no newline), or PutImage would mint a new digest
+          IMAGE=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageDigest="$EXISTING" \
+            --accepted-media-types application/vnd.docker.distribution.manifest.v2+json \
+              application/vnd.oci.image.manifest.v1+json application/vnd.docker.distribution.manifest.list.v2+json \
+              application/vnd.oci.image.index.v1+json --output json)
+          MANIFEST=$(jq -j '.images[0].imageManifest' <<< "$IMAGE")
+          MEDIA=$(jq -j '.images[0].imageManifestMediaType' <<< "$IMAGE")
+          aws ecr put-image --repository-name blokport-scraper --image-tag core --image-manifest "$MANIFEST" \
+            --image-manifest-media-type "$MEDIA" > /dev/null
+          CORE_DIGEST=$(aws ecr batch-get-image --repository-name blokport-scraper --image-ids imageTag=core \
+            --query 'images[].imageId.imageDigest' --output text)
+          if [ "$CORE_DIGEST" != "$EXISTING" ]; then
+            echo "::error::$REPO:core is $CORE_DIGEST after the retag, not the existing :$SHA ($EXISTING)"
+            exit 1
+          fi
+          echo "Pointed $REPO:core at the existing :$SHA ($EXISTING); nothing rebuilt or re-pushed"
 
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
       # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
