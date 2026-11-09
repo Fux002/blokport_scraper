@@ -173,6 +173,9 @@ def test_adopt_attribute_ids_appends_only_new_values_in_the_files_shape(tmp_path
     new = tmp_path / "new.csv"
     new.write_text("category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n", encoding="utf-8")
     assert adopt_attribute_ids(filled, attributes_csv=new) == 1
+    # the new value is appended in the file's own five columns, active and not internal, with csv.writer's line end
+    assert new.read_bytes() == (b"category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n"
+                                b"color,Sea Green,col_9,active,false\r\n")
     assert [(a.value, a.status) for a in read_attributes(new, require_status=True)] == [
         ("Black", "archived"), ("Sea Green", "active")]
     assert adopt_attribute_ids(filled, attributes_csv=new) == 0        # idempotent
