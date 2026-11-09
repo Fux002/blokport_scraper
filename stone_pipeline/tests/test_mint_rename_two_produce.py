@@ -22,7 +22,7 @@ from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, decisions, match_variation, normalize, reconcile_tree
 from stone_pipeline.tests.test_mint_type_authority import _typed_gap_row
 
-EXPORT_FIELDS = ["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+EXPORT_FIELDS = ["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)", "status"]
 EXISTING_KEY = "slab_granite_alpine_00000000-0000-0000-0000-000000000001"
 
 
@@ -39,7 +39,7 @@ def _write_export(path: Path, rows: list[dict]) -> None:
         w = csv.DictWriter(h, fieldnames=EXPORT_FIELDS)
         w.writeheader()
         for r in rows:
-            w.writerow({f: r.get(f, "") for f in EXPORT_FIELDS})
+            w.writerow({f: r.get(f, "") for f in EXPORT_FIELDS} | {"status": r.get("status") or "active"})
 
 
 def _read_export(path: Path) -> list[dict]:

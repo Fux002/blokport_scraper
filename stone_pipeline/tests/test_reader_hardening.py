@@ -52,13 +52,13 @@ def test_load_units_skips_a_non_numeric_factor_keeps_the_rest(tmp_path):
     assert "bad" not in units.by_token                  # the bad row was skipped, others loaded
 
 
-def test_load_attributes_tolerates_a_missing_column(tmp_path):
+def test_load_attributes_skips_a_blank_value_row(tmp_path):
     from stone_pipeline.stages.tree_build import _load_attributes
     csv_path = tmp_path / "attributes.csv"
-    # a header missing 'sourceid' + a blank-value row: both are skipped, the good row still loads (no KeyError)
-    csv_path.write_text("category,value,sourceid\n"
-                        "color,Black,col_1\n"
-                        "color,,col_2\n", encoding="utf-8")
+    # a blank-value row is skipped, the good row still loads
+    csv_path.write_text("category,value,sourceid,status,internal\n"
+                        "color,Black,col_1,active,false\n"
+                        "color,,col_2,active,false\n", encoding="utf-8")
     attr = _load_attributes(csv_path)
     assert attr["color"]["black"] == "col_1" and len(attr["color"]) == 1
 

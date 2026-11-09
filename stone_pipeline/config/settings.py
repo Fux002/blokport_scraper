@@ -86,12 +86,12 @@ _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-sourc
 # to_upload/<env>/ (the copy of it published as a manifest-listed deliverable).
 VARIANTS_BASE_FILE = "variants_export_base.csv"
 
-# Blokport change 1 (VE2) adds status/internal columns to attributes.csv. While False an absent column reads as
-# active and not internal; step C flips this once Blokport change 1 is live on prod, so a missing column fails loud.
-ATTRIBUTES_STATUS_REQUIRED = False
-# The same change adds a status column (active|archived) to Medusa's variants_export.csv, flipped with it in
-# step C. Only that export is held to it: the scraper's own base files never carry the column.
-VARIANTS_EXPORT_STATUS_REQUIRED = False
+# Blokport change 1 (VE2) gives attributes.csv status/internal columns (VE2 step C, after Blokport's prod release):
+# a file without them fails loud, naming the file, instead of reading every value as active and not internal.
+ATTRIBUTES_STATUS_REQUIRED = True
+# The same change gives Medusa's variants_export.csv a status column (active|archived), required with it. Only that
+# export is held to it: the scraper's own Id-free base and delta never carry the column (loaders.variants_status_required).
+VARIANTS_EXPORT_STATUS_REQUIRED = True
 
 
 def _env_bool(name: str, default: bool) -> bool:

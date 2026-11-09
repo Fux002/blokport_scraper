@@ -139,11 +139,11 @@ def test_restore_attribute_ids_restores_every_kind_from_the_export(tmp_path):
     # the export (a scraped new colour) stays pending for normal sync.
     from stone_pipeline.ledger.bootstrap import restore_attribute_ids
     attrs = tmp_path / "attributes.csv"
-    attrs.write_text("category,value,sourceid\n"
-                     "category,Slabs,pcat_SLAB\n"
-                     "color,Black,C1\n"
-                     "finish,Polished,F1\n"
-                     "type,Marble,T1\n", encoding="utf-8")
+    attrs.write_text("category,value,sourceid,status,internal\n"
+                     "category,Slabs,pcat_SLAB,active,false\n"
+                     "color,Black,C1,active,false\n"
+                     "finish,Polished,F1,active,false\n"
+                     "type,Marble,T1,active,false\n", encoding="utf-8")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         for cat, val in (("category", "Slabs"), ("color", "Black"), ("finish", "Polished"),

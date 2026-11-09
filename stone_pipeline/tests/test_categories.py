@@ -103,15 +103,16 @@ def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
     attrs = tmp_path / "attributes.csv"
     try:
         # 1) an export with NO category rows (the stale pre-fix state) -> the registry goes inactive
-        attrs.write_text("category,value,sourceid\ncolor,Black,col_x\n", encoding="utf-8")
+        attrs.write_text("category,value,sourceid,status,internal\ncolor,Black,col_x,active,false\n", encoding="utf-8")
         categories.refresh_category_pcats()
         assert categories.active_categories() == ()
         assert categories.category("slab").pcat_id == ""            # inactive: nothing can emit
 
         # 2) the corrected export arrives AFTER import -> refresh reactivates from the live file
         attrs.write_text(
-            "category,value,sourceid\n"
-            "category,Slabs,pcat_slab\ncategory,Blocks,pcat_block\ncategory,Tiles,pcat_tile\n",
+            "category,value,sourceid,status,internal\n"
+            "category,Slabs,pcat_slab,active,false\ncategory,Blocks,pcat_block,active,false\n"
+            "category,Tiles,pcat_tile,active,false\n",
             encoding="utf-8")
         categories.refresh_category_pcats()
         assert categories.category("slab").pcat_id == "pcat_slab"   # re-derived from the fresh export
@@ -129,7 +130,7 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
     monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_TILE_OVERRIDE")
     (tmp_path / "attributes.csv").write_text(
-        "category,value,sourceid\ncategory,Tiles,pcat_tile_from_file\n", encoding="utf-8")
+        "category,value,sourceid,status,internal\ncategory,Tiles,pcat_tile_from_file,active,false\n", encoding="utf-8")
     try:
         categories.refresh_category_pcats()
         assert categories.category("tile").pcat_id == "pcat_TILE_OVERRIDE"  # override, not the file value

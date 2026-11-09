@@ -29,15 +29,18 @@ def _seed_ledger_like_the_sync_server(ledger_path, tmp_path) -> None:
     # The sync server seeds the variation table from the Id-bearing live export. Here the ledger is seeded
     # from the SAME file the matcher's candidate index reads (live export, else the committed base), with
     # the loader's own id rule (Id, else Key): the emitted STN Variation Id and the ledger's medusa_id then
-    # come from one source, locally and in CI alike.
+    # come from one source, locally and in CI alike. Medusa's export carries status; the base does not, so a
+    # base row stands in as active.
     export = tmp_path / "variants_export.csv"
     with existing_varieties_file().open(encoding="utf-8-sig", newline="") as src, \
             export.open("w", encoding="utf-8", newline="") as dst:
         reader = csv.DictReader(src)
-        writer = csv.DictWriter(dst, fieldnames=["Id"] + [c for c in reader.fieldnames if c != "Id"])
+        writer = csv.DictWriter(dst, fieldnames=["Id"] + [c for c in reader.fieldnames if c not in ("Id", "status")]
+                                + ["status"])
         writer.writeheader()
         for row in reader:
             row["Id"] = (row.get("Id") or "").strip() or row["Key"]
+            row["status"] = (row.get("status") or "").strip() or "active"
             writer.writerow(row)
     with Ledger.open(ledger_path, env="development") as ledger:
         bootstrap.seed_attributes(ledger)

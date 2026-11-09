@@ -169,22 +169,19 @@ def test_only_medusa_files_parses_the_attributes_file():
 
 def test_adopt_attribute_ids_appends_only_new_values_in_the_files_shape(tmp_path):
     from stone_pipeline.stages.decisions import adopt_attribute_ids
-    old = _file(tmp_path, "category,value,sourceid\ncolor,Black,col_1\n")
     filled = {("color", "black"): ("Black", "col_1"), ("color", "sea green"): ("Sea Green", "col_9")}
-    assert adopt_attribute_ids(filled, attributes_csv=old) == 1
-    assert old.read_bytes() == b"category,value,sourceid\ncolor,Black,col_1\ncolor,Sea Green,col_9\r\n"
-    assert adopt_attribute_ids(filled, attributes_csv=old) == 0        # idempotent
-
     new = tmp_path / "new.csv"
     new.write_text("category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n", encoding="utf-8")
     assert adopt_attribute_ids(filled, attributes_csv=new) == 1
     assert [(a.value, a.status) for a in read_attributes(new, require_status=True)] == [
         ("Black", "archived"), ("Sea Green", "active")]
+    assert adopt_attribute_ids(filled, attributes_csv=new) == 0        # idempotent
 
 
 def test_finish_ids_reads_the_text_form():
     from stone_pipeline.standardise.tile_plan import finish_ids
-    text = "﻿category,value,sourceid\nfinish,Polished,fin_1\nfinish,Honed,fin_2\ncolor,Black,col_1\n"
+    text = ("﻿category,value,sourceid,status,internal\nfinish,Polished,fin_1,active,false\n"
+            "finish,Honed,fin_2,active,false\ncolor,Black,col_1,active,false\n")
     assert finish_ids(text) == {"fin_1", "fin_2"}
 
 
@@ -282,7 +279,7 @@ def test_own_variants_keeps_the_status_column_whole(tmp_path):
 
 def test_variety_names_reads_the_text_form():
     from stone_pipeline.standardise.tile_plan import variety_names
-    assert variety_names("Id,Key,Name\nv1,slab_a_1,A\n,slab_b_1,B\nv3,slab_c_1,\n") == {"v1": "A"}
+    assert variety_names("Id,Key,Name,status\nv1,slab_a_1,A,active\n,slab_b_1,B,active\nv3,slab_c_1,,active\n") == {"v1": "A"}
 
 
 # Medusa's variants export reaches the code through these names. Inside a function, the export is a marker

@@ -27,10 +27,10 @@ from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.categories import CATEGORIES, default_form_name
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
-from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required
+from stone_pipeline.reference.loaders import variants_status_required
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
@@ -47,7 +47,7 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
     'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way. The
     read_attributes guards conflicting duplicates."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
-    for a in read_attributes(Path(path), require_status=attributes_status_required(Path(path))):
+    for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
         if a.sourceid:
             attr[match_key(a.category)][match_key(a.value)] = a.sourceid
     return attr
@@ -299,7 +299,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     # VE2 PR5: the restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
     # in the expand phase (no status column), so the fan-out below is byte-identical until then.
     restricted_ids = {a.sourceid for a in read_attributes(
-        Path(attributes_csv), require_status=attributes_status_required(Path(attributes_csv)))
+        Path(attributes_csv), require_status=ATTRIBUTES_STATUS_REQUIRED)
         if not a.assignable and a.sourceid}
     emitted_tuples = _load_product_tuples(products_csv)
     archived_keys: set[str] = set()

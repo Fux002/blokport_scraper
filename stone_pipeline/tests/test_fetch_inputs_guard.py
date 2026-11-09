@@ -51,8 +51,8 @@ _NO_SUCH_KEY = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "
 def _committed(tmp_path, lines: int):
     """A tmp attributes.csv seeded with `lines` colour rows (the committed baseline stand-in)."""
     target = tmp_path / "attributes.csv"
-    target.write_text("category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(lines)), encoding="utf-8")
+    target.write_text("category,value,sourceid,status,internal\n" + "".join(
+        f"color,c{i},id{i},active,false\n" for i in range(lines)), encoding="utf-8")
     return target
 
 
@@ -65,7 +65,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
     # replace found the first one's file gone (FileNotFoundError, a 500)
     import threading
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    live = "category,value,sourceid,status,internal\n" + "".join(f"color,c{i},id{i},active,false\n" for i in range(38))
     both = threading.Barrier(2)
 
     class _Together(_FakeS3):
@@ -91,7 +91,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
 
 def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    live = "category,value,sourceid,status,internal\n" + "".join(f"color,c{i},id{i},active,false\n" for i in range(38))
     assert fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target) is True
     assert target.read_text().count("color,") == 38          # replaced with the live vocab
     assert _leftovers(tmp_path) == []                         # temp cleaned up
@@ -99,7 +99,7 @@ def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
 
 def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
     target = _committed(tmp_path, 100)
-    thin = "category,value,sourceid\ncolor,c0,id0\n"          # 2 lines << 50% of 101 -> floor keeps committed
+    thin = "category,value,sourceid,status,internal\ncolor,c0,id0,active,false\n"          # 2 lines << 50% of 101 -> floor keeps committed
     assert fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target) is False
     assert target.read_text().count("color,") == 100          # committed seed preserved
     assert _leftovers(tmp_path) == []
@@ -202,7 +202,7 @@ def test_with_no_local_export_a_header_only_one_stays_absent(tmp_path, monkeypat
 
 def test_with_no_local_export_a_full_one_is_taken(tmp_path, monkeypatch):
     _committed_base(tmp_path)
-    full = "Id,Key,Name\n" + "".join(f"v{i},slab_x_{i:04d},X\n" for i in range(10))     # an export carries Name
+    full = "Id,Key,Name,status\n" + "".join(f"v{i},slab_x_{i:04d},X,active\n" for i in range(10))     # an export carries Name
     _main_with(tmp_path, monkeypatch, "variants_export.csv", full)
     assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8").count("slab_x_") == 10
 
@@ -219,8 +219,8 @@ def test_the_thin_copy_floor_is_one_setting():
 _MALFORMED_ATTRIBUTES = {
     "empty status cell": "category,value,sourceid,status,internal\n" + "".join(
         f"color,c{i},id{i},active,false\n" for i in range(30)) + "color,cx,idx,,false\n",
-    "conflicting duplicate": "category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(30)) + "color,C0,other\n",
+    "conflicting duplicate": "category,value,sourceid,status,internal\n" + "".join(
+        f"color,c{i},id{i},active,false\n" for i in range(30)) + "color,C0,other,active,false\n",
 }
 
 
