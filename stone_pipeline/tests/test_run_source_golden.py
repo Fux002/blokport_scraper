@@ -217,9 +217,21 @@ def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
         digests[f"MANIFEST:{source}"] = _sha(json.dumps(manifest.to_dict(), sort_keys=True, default=str).encode())
     for path in sorted(p for p in out.rglob("*") if p.is_file()):
         digests[str(path.relative_to(out))] = _file_digest(path)
+    _assert_no_photo_held(ledger_path)
     digests.update(_ledger_digests(ledger_path))
     digests["magnitude_baselines"] = _file_digest(magnitude_drift._path())
     return digests
+
+
+def _assert_no_photo_held(ledger_path: Path) -> None:
+    """The fixtures publish no standardised photo and link none (their passthrough pool read finds none), so no product
+    of a scenario is held back by an unpublished one: the golden pins served products, never ones the guard stopped."""
+    con = sqlite3.connect(ledger_path)
+    try:
+        total, held = con.execute("SELECT COUNT(*), COUNT(photo_unpublished) FROM product").fetchone()
+    finally:
+        con.close()
+    assert total > 0 and held == 0, f"{held} of {total} products carry photo_unpublished"
 
 
 def _full_run(data_dir, known=None):
