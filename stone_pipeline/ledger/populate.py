@@ -370,7 +370,7 @@ def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceCon
     produced = {_sku(r, cfg) for r in rows}
     stale = [(r["sku"], r["held"]) for r in ledger.execute(
         f"SELECT p.sku, {in_medusa_sql('p')} AS held FROM product p "
-        "WHERE p.source = ? AND p.state IN ('pending', 'dirty')", (cfg.source_code,)) if r["sku"] not in produced]
+        f"WHERE p.source = ? AND p.state IN ('pending', 'dirty') AND NOT {in_medusa_sql('p')}", (cfg.source_code,)) if r["sku"] not in produced]
     now = now_iso()
     for sku, held in stale:
         if held:
