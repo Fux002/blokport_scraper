@@ -12,12 +12,11 @@ rule everywhere, so a dup can never enter from any path."""
 from __future__ import annotations
 
 import csv
-import re
 from functools import lru_cache
 from typing import Optional
 
 from stone_pipeline.adapters.tokens import explicit_type_word
-from stone_pipeline.core.text import ascii_fold
+from stone_pipeline.core.text import slugify
 from stone_pipeline.reference.loaders.attributes import load_attributes
 from stone_pipeline.reference.loaders.common import env, norm
 
@@ -32,10 +31,10 @@ def _type_slugs() -> set[str]:
     if _TYPE_SLUGS is None:
         names = [v for v, _ in load_attributes().by_category.get("type", {}).values()]
         names += list(env().load_synonyms("type").values())
-        # slugify the SAME way gen_key encodes a Key's type ([^a-z0-9]+ -> '_'), so a multi-word OR
+        # slugify the SAME way gen_key encodes a Key's type (the one slug rule), so a multi-word OR
         # hyphenated type ('Semi-Precious Stone' -> 'semi_precious_stone') matches the underscore-keyed
         # Key. Joining on whitespace alone kept the hyphen ('semi-precious_stone') and never matched.
-        _TYPE_SLUGS = {re.sub(r"[^a-z0-9]+", "_", norm(n)).strip("_") for n in names if n}
+        _TYPE_SLUGS = {slugify(n, "_") for n in names if n}
     return _TYPE_SLUGS
 
 
@@ -53,7 +52,7 @@ def type_slug_from_key(key: str) -> str:
 
 
 def _name_slug(name: str) -> str:
-    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", ascii_fold(name or "").casefold())).strip("_")
+    return slugify(name, "_")
 
 
 def variety_identity(key: str, name: str) -> tuple[str, str, str]:
