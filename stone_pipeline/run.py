@@ -37,7 +37,7 @@ from stone_pipeline import gates
 from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds
 from stone_pipeline.state.writeback import WriteBack
 from stone_pipeline.stages import (
     constants,
@@ -756,6 +756,7 @@ def run_source(
 ) -> Manifest:
     """One source end to end: acquire, preflight, resolve, finalize_rows, decide_delist, write_outputs, record. `mode`
     says what it writes (OutputMode). Exits 2 on any guard (RunAborted) or a failed ledger write-through."""
+    field_kinds.require_present()   # every name is written by the map; fail loud up front, before any row is touched
     adapter: AdapterBase = adapter_registry.REGISTRY.get(source)
     if adapter is None:
         raise SystemExit(

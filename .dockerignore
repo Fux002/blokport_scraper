@@ -14,6 +14,8 @@ state/
 data/
 to_upload/
 review/
+# fetched at run time only (io/medusa_inputs.py); a stray local copy in the image would mask a failed fetch
+from_medusa/**/field-kinds.json
 **/from_medusa/**/variants_export.csv
 images/
 image_pipeline/images/
