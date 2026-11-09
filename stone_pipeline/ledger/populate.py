@@ -375,7 +375,7 @@ def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceCon
     for sku, held in stale:
         if held:
             ledger.execute("UPDATE product SET state = 'synced', sync_attempts = 0, sync_error = NULL, "
-                           "retry_after = NULL, payload_hash = '', updated_at = ? WHERE sku = ?", (now, sku))
+                           "retry_after = NULL, updated_at = ? WHERE sku = ?", (now, sku))
         else:
             ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
             ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
