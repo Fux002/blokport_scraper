@@ -173,10 +173,19 @@ def test_a_dropped_dirty_product_medusa_holds_is_withdrawn_kept_and_delisted(led
 
 
 def test_the_withdrawn_product_re_emitted_with_its_old_content_is_served(ledger_path):
-    _held_row(ledger_path, "MAR-P/03/06")
-    _record(ledger_path, [], discontinued=[("MAR-P/03/06", "h-p-03-06")])
-    _record(ledger_path, [_emitted("P/03/06")])                                     # the vendor lists it again
-    assert _row(ledger_path, "MAR-P/03/06")["state"] == "dirty"
+    # the unsent change is REAL content: the produce wrote it (its payload_hash H), Medusa holds an older version. The
+    # withdrawal must blank H: the ledger no longer holds what Medusa acked, so the same content coming back is a change
+    # to serve. Had it kept H, the identical re-emit would match, stay synced and never reach Medusa.
+    _record(ledger_path, [_emitted("P/03/06")])
+    with _open(ledger_path) as ledger:
+        ledger.execute("UPDATE product SET state = 'dirty', medusa_id = 'prod_1', last_synced = ? "
+                       "WHERE sku = 'MAR-P/03/06'", (_OLD,))
+        unsent = ledger.get("product", "sku", "MAR-P/03/06")["payload_hash"]
+    assert unsent
+    _record(ledger_path, [], discontinued=[("MAR-P/03/06", "h-p-03-06")])          # dropped: the change is withdrawn
+    _record(ledger_path, [_emitted("P/03/06")])                                     # the identical content returns
+    row = _row(ledger_path, "MAR-P/03/06")
+    assert (row["payload_hash"], row["state"]) == (unsent, "dirty")
     assert _served(ledger_path) == ["MAR-P/03/06"]
 
 
