@@ -402,7 +402,7 @@ def mark_unpublished_photos(ledger: Ledger, published: frozenset[str], cfg: Sour
         missing = sorted(_linked_standard(row) - published)
         value = json.dumps(missing) if missing else None
         if value != row["photo_unpublished"]:
-            ledger.execute("UPDATE product SET photo_unpublished = ? WHERE sku = ?", (value, row["sku"]))
+            pass
         if missing:
             marked.append(row["sku"])
     return sorted(marked)
