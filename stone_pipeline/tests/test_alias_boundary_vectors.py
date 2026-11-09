@@ -1,11 +1,13 @@
-"""The paired phase 2 alias-boundary vectors (P2-10 C0 and C1): the scraper's alias boundary agrees with the backend
-on every case.
+"""The paired phase 2 vectors (P2-10 C0 and C1): the scraper's slug and its alias boundary agree with the backend on
+every case.
 
-The fixture is a PAIRED file, a byte-identical copy of the backend's file at `feat/phase2-alias` (184e8a9e):
-`fixtures/alias_problem_vectors.json` = `src/model/catalog/__tests__/alias-problem.vectors.json` (P2-2, table 171):
-aliasProblem's seven checks in order, and codeMatcher over nameKey's tokens. The slug vectors
-(`name-slug.vectors.json`, P2-3a) join this file once the backend writes them ASCII-escaped like the name-key vectors
-(a literal em dash in them trips the repo's em-dash gate).
+Both fixtures are PAIRED files, byte-identical copies of the backend's:
+- `fixtures/name_slug_vectors.json` = `src/model/catalog/__tests__/name-slug.vectors.json` at backend 30f2b6943
+  (sha256 a9bd8c37b8113b0c14bfec06d384548ca39656af3c90336e5f99c34504f21d89), P2-3a, table 175 S1: the backend's
+  nameSlug is the scraper's slugify step for step. Written ASCII-escaped, like the name-key vectors
+  (gen_name_key_vectors.py), so no literal em dash reaches the repo's em-dash gate;
+- `fixtures/alias_problem_vectors.json` = `src/model/catalog/__tests__/alias-problem.vectors.json` at backend 184e8a9e
+  (`feat/phase2-alias`), P2-2, table 171: aliasProblem's seven checks in order, and codeMatcher over nameKey's tokens.
 A change to either side is a paired PR. The key is core.text.match_key, the backend nameKey's paired twin
 (test_name_key_vectors.py).
 """
@@ -17,8 +19,10 @@ import json
 from pathlib import Path
 
 from stone_pipeline.config.domain import load_pack
+from stone_pipeline.core.text import slugify
 
 _FIXTURES = Path(__file__).parent / "fixtures"
+_SLUG = json.loads((_FIXTURES / "name_slug_vectors.json").read_text(encoding="utf-8"))
 _ALIAS = json.loads((_FIXTURES / "alias_problem_vectors.json").read_text(encoding="utf-8"))
 # the pack each brand's stack runs (infra/modules/scraper/variables.tf:82: blokport = stone, wudport = wood)
 _BRAND_PACK = {"blokport": "stone", "wudport": "wood"}
@@ -37,6 +41,12 @@ def _context(raw: dict):
 
 def _pattern(case: dict):
     return case["pattern"] if "pattern" in case else _ALIAS["brands"][case["brand"]]
+
+
+def test_slugify_agrees_with_every_shared_slug_vector():
+    wrong = [(c["input"], c["expected"], slugify(c["input"])) for c in _SLUG["cases"]
+             if slugify(c["input"]) != c["expected"]]
+    assert not wrong, f"{len(wrong)} slug vectors disagree, first: {wrong[:3]}"
 
 
 def test_alias_problem_agrees_with_every_shared_vector():
