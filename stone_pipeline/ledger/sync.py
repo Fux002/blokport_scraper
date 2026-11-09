@@ -25,13 +25,14 @@ dormant C3 case). No em dashes (design principle 2).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
-                                      STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql, now_iso,
-                                      on_sale_sql)
+                                      RESERVE_KEEPS_SQL, RESERVE_STATE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL,
+                                      Ledger, in_medusa_sql, now_iso, on_sale_sql)
 from stone_pipeline.ledger.payloads import product_payload, variation_payload
 
 log = logfmt.get_logger("ledger.sync")
@@ -641,6 +642,26 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
         raise ValueError(f"unsupported requeue type {type_!r}; expected one of {REQUEUE_TYPES}")
     now = now_iso()
     return sum(ledger.execute(_REQUEUE_SQL[lane], (now,)).rowcount for lane in ([type_] if type_ else REQUEUE_TYPES))
+
+
+def reserve_variations(ledger: Ledger, external_ids: Iterable[str]) -> dict[str, list[str]]:
+    """POST /sync/v1/reserve: re-serve exactly these variation Keys once, with their whole payload (the backend's
+    variety restore, 173 F18). Each Key lands in exactly one sorted list, so together they are the deduped Keys:
+    `unknown` has no ledger row and is never created; `frozen` exists but the ledger never re-serves it (archived,
+    the VE2 freeze; or retiring, its tombstone is deleting it) and is never marked; `reserved` is every other row,
+    marked by RESERVE_STATE_SQL. A row's retry wait, attempt count and serve gates (in_full, type) are kept, so it
+    serves once it is eligible. Idempotent: a reserved row is already pending or dirty, so a second call writes
+    nothing. The bound (SETTINGS.sync.max_reserve_ids) is the route's to enforce, before any write."""
+    keys = sorted(set(external_ids))
+    marks = ",".join("?" * len(keys))
+    # the write first: it opens the transaction, so the read below classifies the same rows the write marked
+    ledger.execute(f"UPDATE variation SET {RESERVE_STATE_SQL}, updated_at = ? WHERE key IN ({marks}) "
+                   f"AND archived = 0 AND state NOT IN {RESERVE_KEEPS_SQL}", (now_iso(), *keys))
+    held = {r["key"]: bool(r["archived"]) or r["state"] == "retiring"
+            for r in ledger.execute(f"SELECT key, state, archived FROM variation WHERE key IN ({marks})", keys)}
+    return {"reserved": [k for k in keys if k in held and not held[k]],
+            "unknown": [k for k in keys if k not in held],
+            "frozen": [k for k in keys if held.get(k)]}
 
 
 def serve_in_flight(ledger: Ledger) -> bool:

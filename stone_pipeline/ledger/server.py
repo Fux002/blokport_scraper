@@ -23,6 +23,10 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       once, answering {released: n}. The consumer's catalog run calls it before its first pull: under its
       catalog lock it is this ledger's only puller of the leasing lanes, so any lease is a dead run's
       (PHASE-0 Q8), and its rows re-serve now instead of after the 900 s lease.
+    POST /sync/v1/reserve   body: {type: "variations", external_ids: [Key, ...]}  -- re-serve exactly those
+      variations once (the backend's variety restore), answering {reserved, unknown, frozen}: disjoint sorted
+      lists, together the deduped Keys sent (sync.reserve_variations). At most SETTINGS.sync.max_reserve_ids
+      distinct Keys; more is a 400 with nothing marked.
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -94,6 +98,14 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         return 200, {"requeued": sync.requeue_dead_lettered(ledger, type_=type_)}
     if method == "POST" and resource == "release-leases":
         return 200, {"released": sync.reap_stale_syncing(ledger, older_than_s=0)}
+    if method == "POST" and resource == "reserve":
+        ids = body.get("external_ids") if isinstance(body, dict) else None
+        if (not isinstance(body, dict) or body.get("type") != "variations" or not isinstance(ids, list)
+                or not all(isinstance(i, str) for i in ids)):
+            return 400, {"error": 'reserve body must be {type: "variations", external_ids: [Key, ...]}'}
+        if (n := len(set(ids))) > SETTINGS.sync.max_reserve_ids:   # refused whole, before any write
+            return 400, {"error": f"at most {SETTINGS.sync.max_reserve_ids} distinct external_ids per call, got {n}"}
+        return 200, sync.reserve_variations(ledger, ids)
     if method == "POST" and resource == "abandon":
         # the opposite of requeue: drop ONE structurally-re-rejecting dead-letter to a terminal
         # `abandoned_at` -- it stops re-serving, requeue no longer resurrects it, and it still renders in

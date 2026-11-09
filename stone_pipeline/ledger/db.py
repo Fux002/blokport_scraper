@@ -79,6 +79,11 @@ CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = 
 # Forget the last synced stock, so the row serves again from zero (a reset).
 FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
                            "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
+# Re-serve a variation once with its whole payload (POST /sync/v1/reserve, an un-archive): every state becomes 'dirty'
+# except these. pending and dirty already serve once; a retiring row is being deleted (its tombstone serves /removed)
+# and is never resurrected. A syncing row follows the produce's content-change rule (populate.py): dirty.
+RESERVE_KEEPS_SQL = "('pending', 'dirty', 'retiring')"
+RESERVE_STATE_SQL = f"state = CASE WHEN state IN {RESERVE_KEEPS_SQL} THEN state ELSE 'dirty' END"
 
 
 class LedgerError(Exception):
