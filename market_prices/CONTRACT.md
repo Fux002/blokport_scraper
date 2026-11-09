@@ -63,6 +63,12 @@ A listing that cannot be read or delivered (for example a cell over 100,000 char
 
 Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_checked_on`, `decision`, `observed_at`, `run_id`, `contract_version`, `brand`, `site_id`.
 
+## Running
+
+- **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for that deployment's brand (`SCRAPER_BRAND`), env and bucket. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
+- **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
+- **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (`PILOT_BRAND`, `PILOT_SITE_ID` in `config.py`) against development's bucket and prints a summary with the first rows. It refuses any other environment, and any site the register has not approved, before a single request.
+
 ## Adding a site
 
 One entry in `market_prices/sites/<brand>.yaml`. `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
