@@ -1,0 +1,46 @@
+{
+  "_header": "PAIRED FILE, BACKEND-OWNED. The scraper keeps a byte-identical copy and runs it against its cleaner (PHASE-2-SPEC WP2.1, row P2-10): a change here is a paired change there. aliasProblem(value, context) returns the FIRST code that applies, in this order, or null: (1) delimiter, the RAW value holds '|', a newline or a CR alone (a comma is part of a name); (2) empty, the key nameKey(value) is empty; (3) own_name, the key equals nameKey(ownName) and that is not empty; (4) own_name_type_word, the key equals nameKey(ownName) + ' ' + one of typeWords; (5) same_type_name, the key is in sameTypeNameKeys; (6) bare_vocabulary_word, the key is in vocabularyKeys; (7) too_short, the key has two characters or fewer. Every case carries its own context (the sets hold keys, already through nameKey), so both runtimes compute the same answer from the same context; the sides differ only in how they build it. codeMatcher(pattern): a value is a CODE when nameKey(value) has at least one token and EVERY token fully matches the pattern, case-insensitively (the tokens are lowercase); a null pattern means the brand has no codes. Each brand's pattern is in `brands` below and must equal its pack's name_code_pattern (the scraper's copy runs against the pack itself, so a drift fails there).",
+  "brands": {
+    "blokport": "[Gg]\\d+[A-Za-z]?",
+    "wudport": null
+  },
+  "alias_cases": [
+    { "group": "delimiter: a pipe", "value": "Carrara|Bianco", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "delimiter" },
+    { "group": "delimiter: a newline", "value": "Carrara\nBianco", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "delimiter" },
+    { "group": "delimiter: a CR alone", "value": "Carrara\rBianco", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "delimiter" },
+    { "group": "delimiter: a comma is part of a name", "value": "Rosa, Beta Classic", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null },
+    { "group": "empty: a script the fold drops", "value": "大理石", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "empty" },
+    { "group": "empty: punctuation only", "value": " -- ", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "empty" },
+    { "group": "empty: a variety with no name", "value": "", "context": { "ownName": "", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "empty" },
+    { "group": "own_name: another casing", "value": "ROSA BETA", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "own_name" },
+    { "group": "own_name: accents and punctuation", "value": "Rosá-Beta", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "own_name" },
+    { "group": "own_name: a variety with no name matches nothing", "value": "Rosa Beta", "context": { "ownName": "", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null },
+    { "group": "own_name_type_word: a trailing type word", "value": "Rosa Beta Granite", "context": { "ownName": "Rosa Beta", "typeWords": ["granite", "marble"], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "own_name_type_word" },
+    { "group": "own_name_type_word: a leading type word is not one", "value": "Granite Rosa Beta", "context": { "ownName": "Rosa Beta", "typeWords": ["granite"], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null },
+    { "group": "own_name_type_word: a word not in typeWords", "value": "Rosa Beta Classic", "context": { "ownName": "Rosa Beta", "typeWords": ["granite"], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null },
+    { "group": "same_type_name: another variety's name", "value": "Bianco Sardo", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": ["bianco sardo"] }, "expected": "same_type_name" },
+    { "group": "bare_vocabulary_word: a colour", "value": "Black", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": ["black", "granite"], "sameTypeNameKeys": [] }, "expected": "bare_vocabulary_word" },
+    { "group": "too_short: two characters", "value": "  st  ", "context": { "ownName": "St Laurent", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "too_short" },
+    { "group": "too_short: one character", "value": "x", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "too_short" },
+    { "group": "too_short: three characters is not", "value": "Ice", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null },
+    { "group": "order: own_name outranks too_short", "value": "ST", "context": { "ownName": "St", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": "own_name" },
+    { "group": "order: own_name_type_word outranks same_type_name", "value": "Rosa Beta Granite", "context": { "ownName": "Rosa Beta", "typeWords": ["granite"], "vocabularyKeys": [], "sameTypeNameKeys": ["rosa beta granite"] }, "expected": "own_name_type_word" },
+    { "group": "order: same_type_name outranks bare_vocabulary_word", "value": "Nero", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": ["nero"], "sameTypeNameKeys": ["nero"] }, "expected": "same_type_name" },
+    { "group": "order: bare_vocabulary_word outranks too_short", "value": "UV", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": ["uv"], "sameTypeNameKeys": [] }, "expected": "bare_vocabulary_word" },
+    { "group": "an ordinary alias", "value": "Rosa Beta Classic", "context": { "ownName": "Rosa Beta", "typeWords": ["granite"], "vocabularyKeys": ["black"], "sameTypeNameKeys": ["bianco sardo"] }, "expected": null },
+    { "group": "a value with digits that is not a code stays an alias", "value": "Bianco 2000", "context": { "ownName": "Rosa Beta", "typeWords": [], "vocabularyKeys": [], "sameTypeNameKeys": [] }, "expected": null }
+  ],
+  "code_cases": [
+    { "group": "a granite code", "brand": "blokport", "value": "G682", "expected": true },
+    { "group": "a granite code, lowercase with a letter suffix", "brand": "blokport", "value": "g682b", "expected": true },
+    { "group": "every token a code", "brand": "blokport", "value": " G682  G603 ", "expected": true },
+    { "group": "a space splits the letter from the digits", "brand": "blokport", "value": "G 562", "expected": false },
+    { "group": "a hyphen splits the letter from the digits", "brand": "blokport", "value": "G-682", "expected": false },
+    { "group": "one token is not a code", "brand": "blokport", "value": "G682 Bianco", "expected": false },
+    { "group": "a value with digits that is not a code", "brand": "blokport", "value": "Bianco 2000", "expected": false },
+    { "group": "another letter-digit shape", "brand": "blokport", "value": "AB123", "expected": false },
+    { "group": "an empty value", "brand": "blokport", "value": "", "expected": false },
+    { "group": "a brand with no codes", "brand": "wudport", "value": "G682", "expected": false },
+    { "group": "an upper-case-only pattern still matches the lowercase tokens", "pattern": "[A-Z]\\d+", "value": "G682", "expected": true }
+  ]
+}
