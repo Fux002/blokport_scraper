@@ -40,8 +40,10 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.core.text import split_bracket_alias
 from stone_pipeline.phase1.variety_key import new_key
+from stone_pipeline.reference.medusa_files import read_attributes
 from stone_pipeline.stages.curate.keys import BRANCHES, _slug_us
 
 # --- config ---------------------------------------------------------------------------------------------
@@ -181,15 +183,13 @@ def backbone_records(paths, env: str, store: str = "backbone"):
 
 def load_type_vocab(attributes_paths) -> dict[str, set[str]]:
     """slug -> the set of Medusa type names with that slug, across every env's attributes.csv type rows. A
-    parsed or row type resolves only when its slug maps to EXACTLY one name here."""
+    parsed or row type resolves only when its slug maps to EXACTLY one name here. Archived and internal types
+    are kept: an old Key may carry a type Medusa has since archived, and it still has to resolve."""
     vocab: dict[str, set[str]] = {}
     for path in attributes_paths:
-        with Path(path).open(encoding="utf-8", newline="") as fh:
-            for r in csv.DictReader(fh):
-                if (r.get("category") or "").strip().lower() == "type":
-                    name = (r.get("value") or "").strip()
-                    if name:
-                        vocab.setdefault(_slug_us(name), set()).add(name)
+        for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
+            if a.category.lower() == "type":
+                vocab.setdefault(_slug_us(a.value), set()).add(a.value)
     return vocab
 
 
