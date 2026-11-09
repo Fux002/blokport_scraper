@@ -186,7 +186,7 @@ def _sub_limit(limit: int | None) -> str:
 _ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archived = 0 "
                        "AND type IS NOT NULL AND type != '' "
                        "AND (retry_after IS NULL OR retry_after <= ?)")
-_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND p.photo_unpublished IS NULL "
+_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') "
                      f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
                      "AND v.type IS NOT NULL AND v.type != '' "
                      "AND v.image_url IS NOT NULL AND v.image_url != '' "
