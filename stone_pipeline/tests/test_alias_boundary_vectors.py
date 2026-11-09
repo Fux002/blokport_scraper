@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from pathlib import Path
+
+import pytest
 
 from stone_pipeline.config.domain import load_pack
 from stone_pipeline.core.text import slugify
@@ -57,8 +60,14 @@ def test_alias_problem_agrees_with_every_shared_vector():
     assert not wrong, f"{len(wrong)} alias vectors disagree, first: {wrong[:3]}"
 
 
-def test_alias_problem_ignores_case_and_accents():
-    # the backend's spec runs every case upper-cased too: the answer never depends on the case
+def test_every_vector_list_is_non_empty():
+    # an empty list would make its agreement test pass vacuously
+    assert _SLUG["cases"] and _ALIAS["alias_cases"] and _ALIAS["code_cases"] and _ALIAS["brands"]
+
+
+def test_alias_problem_ignores_case():
+    # the backend's spec runs every case upper-cased too: the answer never depends on the case (accents are folded by
+    # match_key, which test_name_key_vectors.py pins)
     boundary = _boundary()
     wrong = [c["group"] for c in _ALIAS["alias_cases"]
              if boundary.alias_problem(c["value"].upper(), _context(c["context"])) != c["expected"]]
@@ -75,6 +84,26 @@ def test_code_matcher_agrees_with_every_shared_vector():
     wrong = [(c["group"], c["expected"]) for c in _ALIAS["code_cases"]
              if boundary.code_matcher(_pattern(c))(c["value"]) != c["expected"]]
     assert not wrong, f"{len(wrong)} code vectors disagree, first: {wrong[:3]}"
+
+
+def test_an_empty_or_invalid_code_pattern_raises_like_the_backend():
+    with pytest.raises(ValueError, match="empty code pattern"):
+        _boundary().code_matcher("")
+    with pytest.raises(re.error):
+        _boundary().code_matcher("[G")
+
+
+def test_alias_refusal_tests_the_code_first_then_the_alias_checks():
+    boundary = _boundary()
+    stone = boundary.code_matcher(_ALIAS["brands"]["blokport"])
+    no_codes = boundary.code_matcher(None)
+    own = boundary.AliasContext(own_name="G682", type_words=frozenset(), vocabulary_keys=frozenset(),
+                                same_type_name_keys=frozenset())
+    assert boundary.alias_refusal("g682", own, stone) == "is_code"          # a code, even though it is the own name
+    assert boundary.alias_refusal("g682", own, no_codes) == "own_name"      # no codes: the alias checks decide
+    wrong = [c["group"] for c in _ALIAS["alias_cases"]
+             if boundary.alias_refusal(c["value"], _context(c["context"]), no_codes) != c["expected"]]
+    assert not wrong, f"without codes alias_refusal must equal alias_problem: {wrong[:3]}"
 
 
 def test_each_brands_code_pattern_is_its_packs_pattern():

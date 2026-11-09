@@ -51,7 +51,8 @@ def alias_problem(value: str, context: AliasContext) -> Optional[str]:
     own = match_key(context.own_name)
     if own and key == own:
         return "own_name"
-    if own and any(key == f"{own} {word}" for word in context.type_words):
+    # a key's words are joined by single spaces, so the tail after "<own> " is the one candidate type word
+    if own and key.startswith(f"{own} ") and key[len(own) + 1:] in context.type_words:
         return "own_name_type_word"
     if key in context.same_type_name_keys:
         return "same_type_name"
@@ -62,13 +63,24 @@ def alias_problem(value: str, context: AliasContext) -> Optional[str]:
     return None
 
 
+def alias_refusal(value: str, context: AliasContext, is_code: Callable[[str], bool]) -> Optional[str]:
+    """THE ALIAS JUDGEMENT, in one place (the backend's aliasRefusal): a value the brand's code pattern accepts is a
+    code, never an alias, so `is_code` is tested first; otherwise alias_problem in the variety's context. The cleaner
+    judges every alias value here, so the order is stated once."""
+    return "is_code" if is_code(value) else alias_problem(value, context)
+
+
 @lru_cache(maxsize=None)
 def code_matcher(pattern: Optional[str]) -> Callable[[str], bool]:
     """The test for a CODE under a brand's pattern (its pack's name_code_pattern): a value is a code when its key has
     at least one token and EVERY token fully matches the pattern, case-insensitively (the key's tokens are lower
-    case). A None pattern means the brand has no codes, so nothing is one. Compiled once per pattern."""
+    case). A None pattern means the brand has no codes, so nothing is one. An empty pattern raises (it matches no
+    token, so it would quietly mean "no codes": a brand with none states None), and so does an invalid one
+    (re.error). Compiled once per pattern."""
     if pattern is None:
         return lambda value: False
+    if pattern == "":
+        raise ValueError("an empty code pattern matches no token; a brand with no codes states None")
     compiled = re.compile(pattern, re.IGNORECASE)
 
     def is_code(value: str) -> bool:
