@@ -17,7 +17,9 @@ if TYPE_CHECKING:
 
 _API_SPEC_FIELDS = ("sku", "weight", "formatted_weight", "formatted_dimensions")
 _DIMENSION_FIELDS = ("length", "width", "height")
-_LIST_OPEN = re.compile(r"<li\b[^>]*>", re.IGNORECASE)
+# [^<>]: an opening tag ends at the next '<' as well, so a '<li' that never reaches its '>' fails at once instead of
+# scanning to the end of the page on every attempt (quadratic on a page of them)
+_LIST_OPEN = re.compile(r"<li\b[^<>]*>", re.IGNORECASE)
 _LIST_CLOSE = re.compile(r"</li\s*>", re.IGNORECASE)
 
 

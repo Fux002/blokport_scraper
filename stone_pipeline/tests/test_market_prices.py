@@ -268,12 +268,14 @@ def test_only_a_text_descriptions_list_items_are_read(description):
     assert "Dikte" not in row.stated_specs
 
 
-def test_a_description_of_unclosed_list_items_is_read_in_bounded_time():
-    # a hostile description: a megabyte of <li> that never closes must not stall the listing (it once took minutes)
+@pytest.mark.parametrize("unit", ["<li>", "<li ", "<li x"])
+def test_a_description_of_unclosed_list_items_is_read_in_bounded_time(unit):
+    # a hostile description, about a megabyte: list items that never close, or opening tags that never reach their
+    # '>', must not stall the listing (each once took minutes)
     import time
     from market_prices.collectors.woocommerce_store import _list_items
     started = time.monotonic()
-    assert _list_items("<li>" * 250_000) == []
+    assert _list_items(unit * (1_000_000 // len(unit))) == []
     assert time.monotonic() - started < 2.0
 
 
