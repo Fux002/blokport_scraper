@@ -31,7 +31,7 @@ def mint(spelling: str, stone_type: str | None = None, name: str | None = None, 
 def actions(**lookups) -> dict[tuple[str, str], dict]:
     """variety_actions(): {(vendor, spelling): {action, seed_*, spelling, source, asked_by}} (mint + reject)."""
     return {k: {"action": "mint" if s.is_mint else "reject", "seed_color": s.color, "seed_type": s.stone_type,
-                "seed_country": s.origin_iso, "seed_name": s.name, "spelling": s.display, "source": s.source,
+                "seed_country": s.origin_iso, "seed_name": s.name if s.renamed else None, "spelling": s.display, "source": s.source,
                 "asked_by": s.asked_by}
             for k, s in load(**lookups).statements.items()}
 
@@ -49,7 +49,7 @@ def seed_colors(**lookups) -> dict[tuple[str, str], str]:
 
 
 def seed_names(**lookups) -> dict[tuple[str, str], str]:
-    return {k: s.name for k, s in load(**lookups).statements.items() if s.is_mint and s.name}
+    return {k: s.name for k, s in load(**lookups).statements.items() if s.is_mint and s.renamed}
 
 
 def seed_types(**lookups) -> dict[tuple[str, str], str]:

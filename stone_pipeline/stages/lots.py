@@ -33,6 +33,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.stages.product_state import sku_from
 
 log = logfmt.get_logger("lots")
@@ -52,8 +53,9 @@ Answer = tuple[int, frozenset[int]]
 
 def lot_code(source_code: str, lot_ref: str, label: Optional[str]) -> str:
     """`<label>-<uuid5>`: unique (the uuid covers source + lot ref), byte-identical on every piece, and the
-    same on every run. The label is the vendor's printed reference (readable only), else the lot ref."""
-    readable = " ".join((label or "").split()) or lot_ref
+    same on every run. The label is the vendor's printed reference (readable only), else the lot ref, written by
+    the lot code's field rule (UnfoldableName propagates to the row guard: never a half-folded code)."""
+    readable = field_kinds.clean(field_kinds.PRODUCT_LOT_CODE, " ".join((label or "").split()) or lot_ref)
     return f"{readable}-{uuid.uuid5(_NAMESPACE, f'{source_code}:{lot_ref}')}"
 
 

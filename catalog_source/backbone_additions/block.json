@@ -49,9 +49,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Matarazzo"
-    ],
+    "aliases": [],
     "image_file": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed.png",
     "exists": "no",
     "in_csv": "yes",
@@ -79,9 +77,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "AVOCATUS"
-    ],
+    "aliases": [],
     "image_file": "block_avocatus_0dd048a8-8cc3-54e5-b54f-c8721e4b2acc.png",
     "exists": "no",
     "in_csv": "yes",
@@ -109,9 +105,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "CAPOLAVORO"
-    ],
+    "aliases": [],
     "image_file": "block_capolavoro_22b2e15b-0142-5e4a-8086-76daf294dbe5.png",
     "exists": "no",
     "in_csv": "yes",
@@ -139,9 +133,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Crystallo Bianco"
-    ],
+    "aliases": [],
     "image_file": "block_crystallo_bianco_86d2c6a8-d35f-5814-85b5-9d0d29a4177b.png",
     "exists": "no",
     "in_csv": "yes",
@@ -169,9 +161,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "CRYSTALLO TRASLUX"
-    ],
+    "aliases": [],
     "image_file": "block_crystallo_traslux_3ce16dbc-fbc1-5a83-a8f8-d9724d46d27e.png",
     "exists": "no",
     "in_csv": "yes",
@@ -199,9 +189,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "DA VINCI"
-    ],
+    "aliases": [],
     "image_file": "block_da_vinci_ef6785fb-8f18-5fdd-9103-c5c1fc693abb.png",
     "exists": "no",
     "in_csv": "yes",
@@ -229,9 +217,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "JASPER GREEN"
-    ],
+    "aliases": [],
     "image_file": "block_jasper_green_5cbc2cab-8f84-5392-8d0f-cf663fba4b92.png",
     "exists": "no",
     "in_csv": "yes",
@@ -289,9 +275,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "AQUA BLUE"
-    ],
+    "aliases": [],
     "image_file": "block_aqua_blue_267fad66-8a2e-53c6-84df-05dc7a9ee7a7.png",
     "exists": "no",
     "in_csv": "yes",
@@ -319,9 +303,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata Blue Spiral"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_blue_spiral_629082a1-e33d-565e-8417-ec1a7964e512.png",
     "exists": "no",
     "in_csv": "yes",
@@ -349,9 +331,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata Brown"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_brown_2dc4832d-1041-550d-afeb-1c6d3ad731a4.png",
     "exists": "no",
     "in_csv": "yes",
@@ -379,9 +359,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata Colors"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_colors_dcdcd7c0-e1f9-5019-a5c4-0a6444db6de5.png",
     "exists": "no",
     "in_csv": "yes",
@@ -409,9 +387,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata Natural"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_natural_37bb1729-deeb-5bc8-bf5f-e9bdf81ee8ab.png",
     "exists": "no",
     "in_csv": "yes",
@@ -439,9 +415,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata Tropicalia"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_tropicalia_98a240d2-0366-53d7-90cc-5eccaf508f2c.png",
     "exists": "no",
     "in_csv": "yes",
@@ -469,9 +443,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Agata White"
-    ],
+    "aliases": [],
     "image_file": "block_agate_agata_white_2583c363-baf1-5164-b55d-ddc3761c900e.png",
     "exists": "no",
     "in_csv": "yes",
@@ -499,9 +471,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Cappadocia"
-    ],
+    "aliases": [],
     "image_file": "block_quartzite_cappadocia_1576a970-b843-5061-bd6b-6a13d3b07b0b.png",
     "exists": "no",
     "in_csv": "yes",

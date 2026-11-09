@@ -5,12 +5,11 @@ Key every run (idempotent output), and the image base name IS the Key (a 1:1 ima
 
 from __future__ import annotations
 
-import re
 import uuid
 
 from stone_pipeline.config.categories import CATEGORIES, active_categories
 from stone_pipeline.config.settings import SETTINGS
-from stone_pipeline.core.text import ascii_fold
+from stone_pipeline.core.text import slugify
 
 # deterministic namespace for variant key uuids (fixed, so keys are reproducible)
 _KEY_NS = uuid.UUID("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
@@ -28,10 +27,9 @@ def active_branches() -> tuple[str, ...]:
 
 
 def _slug_us(text: str) -> str:
-    """Underscore slug matching the existing Key convention (agata_black). Accent-folded so the
-    Key is fold-invariant -- same key whether the caller passes 'Porriño' or 'Porrino' -- matching
-    title_case/slugify and so the deterministic Key can never split one variety in two."""
-    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", ascii_fold(text or "").casefold())).strip("_")
+    """Underscore slug matching the existing Key convention (agata_black): the one slug rule, so the deterministic
+    Key can never split one variety in two ('Porriño' and 'Porrino', or a curly and a straight apostrophe)."""
+    return slugify(text, "_")
 
 
 def gen_key(branch: str, stone_type: str, name: str) -> str:

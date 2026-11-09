@@ -3,8 +3,9 @@
   * tree_build inherited colours/qualities from products keyed by variety NAME only, so one type's product
     colours leaked onto a same-name variety of another type (Gamma Quartzite sold Grey -> Gamma Marble Grey);
     the same-category backbone post was also looked up by name only.
-  * 1_variants_update.csv was written only when non-empty, but emit_catalog reads it as THIS run's delta, so in
-    a long-lived task a previous run's delta was re-applied.
+  * curate's update delta was written only when non-empty, but emit_catalog reads it as THIS run's delta, so in
+    a long-lived task a previous run's delta was re-applied. Since W26 the delta is curate_delta.csv (emit
+    publishes 1_variants_update.csv from it).
   (The multi-country origin hold is rule d in test_origin_multi_country.py.)
 Hermetic.
 """
@@ -58,10 +59,12 @@ def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch):
     dirs = {a: tmp_path / a for a in ("to_upload_dir", "catalog_source_dir", "review_dir")}
     for d in dirs.values():
         d.mkdir(parents=True)
+    stale = tmp_path / "outputs" / "curate_delta.csv"
+    stale.parent.mkdir()
     monkeypatch.setattr(curate.output, "SETTINGS",
-                        dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, **dirs)))
+                        dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, **dirs,
+                                                                                curate_delta_csv=stale)))
     monkeypatch.setattr(decisions, "write_backbone_leaf_pending", lambda *a, **k: 0)
-    stale = dirs["to_upload_dir"] / "1_variants_update.csv"
     stale.write_text("Key,Name,Image,Aliases,Volume per kg (m³/kg)\r\nslab_marble_old_1,Old,,,\r\n", encoding="utf-8")
     empty = CurationResult(alias_additions={b: [] for b in BRANCHES}, new_variants={b: [] for b in BRANCHES},
                            backbone_new={b: [] for b in BRANCHES})

@@ -1,0 +1,41 @@
+name: Golden rewrite
+
+# Regenerates the run_source golden on a branch and hands it back as an artifact; it never commits. Owner order (9 Nov):
+# no test runs on the Mac, so an INTENDED output change gets its new golden here. The author downloads the artifact,
+# checks that only the expected digests moved, and commits it; the PR's CI then proves it green.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch whose run_source golden to regenerate"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install -r stone_pipeline/requirements.txt
+      # The test fails by design after a rewrite, so the step passes only when the log shows the rewrite happened.
+      - name: Rewrite the golden
+        env:
+          RUN_SOURCE_GOLDEN: rewrite
+        run: |
+          rc=0; pytest -q stone_pipeline/tests/test_run_source_golden.py > /tmp/rewrite.log 2>&1 || rc=$?
+          cat /tmp/rewrite.log
+          grep -q "golden REWRITTEN" /tmp/rewrite.log || { echo "the golden was not rewritten (pytest exit $rc)"; exit 1; }
+          git diff --stat -- stone_pipeline/tests/fixtures/run_source_golden.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: run-source-golden
+          path: stone_pipeline/tests/fixtures/run_source_golden.json
+          if-no-files-found: error

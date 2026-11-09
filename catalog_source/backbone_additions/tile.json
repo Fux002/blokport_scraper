@@ -48,9 +48,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "AVOCATUS"
-    ],
+    "aliases": [],
     "image_file": "tile_avocatus_fbf47030-c55a-5c14-a636-d5544f8ff795.png",
     "exists": "no",
     "in_csv": "yes",
@@ -78,9 +76,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "CAPOLAVORO"
-    ],
+    "aliases": [],
     "image_file": "tile_capolavoro_5543fdcf-2132-52fa-a2fe-8de61d0d4638.png",
     "exists": "no",
     "in_csv": "yes",
@@ -108,9 +104,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Crystallo Bianco"
-    ],
+    "aliases": [],
     "image_file": "tile_crystallo_bianco_f431c380-30da-52c5-b6ed-fd627d1bc213.png",
     "exists": "no",
     "in_csv": "yes",
@@ -138,9 +132,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "CRYSTALLO TRASLUX"
-    ],
+    "aliases": [],
     "image_file": "tile_crystallo_traslux_03325ea6-1b6b-58f6-aee5-0d459d3b81e6.png",
     "exists": "no",
     "in_csv": "yes",
@@ -168,9 +160,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "DA VINCI"
-    ],
+    "aliases": [],
     "image_file": "tile_da_vinci_0df0b812-61bb-5382-a185-bfb37201edad.png",
     "exists": "no",
     "in_csv": "yes",
@@ -198,9 +188,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "JASPER GREEN"
-    ],
+    "aliases": [],
     "image_file": "tile_jasper_green_7fc658fd-f59a-5731-a126-fc81dcd5e4e5.png",
     "exists": "no",
     "in_csv": "yes",
@@ -258,9 +246,7 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "AQUA BLUE"
-    ],
+    "aliases": [],
     "image_file": "tile_aqua_blue_1e5635be-4aae-5ab5-a043-01f4c5278072.png",
     "exists": "no",
     "in_csv": "yes",
