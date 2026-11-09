@@ -515,8 +515,8 @@ def _ack_entity(ledger: Ledger, type_: str, external_id: str, medusa_id: str | N
     # next pull serves it (sync.reserve_variations).
     synced = "CASE WHEN reserved_at IS NOT NULL THEN 'dirty' ELSE 'synced' END" if table == "variation" else "'synced'"
     cur = ledger.execute(
-        f"UPDATE {table} SET medusa_id = ?, state = {synced}, sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
-        f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
+        f"UPDATE {table} SET medusa_id = ?, state = {synced}, sync_attempts = 0, sync_error = NULL, "
+        f"retry_after = NULL, last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
         (medusa_id, now, now, external_id, *version_params))
     if cur.rowcount == 0 and type_ == "products":
         log.warning("refused a product ack ahead of its variation (out-of-order / not resolvable)",
@@ -649,8 +649,10 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
 
 
 # Why the scraper does not serve an existing variation, the first that applies (NULL = it serves). The reserve answers
-# it as `frozen` and never marks the row. The same gates as _ELIGIBLE_VARIATION, save the retry wait, which only delays.
-_FROZEN_REASON_SQL = ("CASE WHEN archived = 1 THEN 'archived' WHEN state = 'retiring' THEN 'retiring' "
+# it as `frozen` and never marks the row. The operator's terminal verdict (an abandoned dead-letter) outranks the rest;
+# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays.
+_FROZEN_REASON_SQL = ("CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned' "
+                      "WHEN archived = 1 THEN 'archived' WHEN state = 'retiring' THEN 'retiring' "
                       "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' END")
 
 

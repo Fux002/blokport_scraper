@@ -25,9 +25,9 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       (PHASE-0 Q8), and its rows re-serve now instead of after the 900 s lease.
     POST /sync/v1/reserve   body: {type: "variations", external_ids: [Key, ...]}  -- re-serve exactly those
       variations once (the backend's variety restore), answering {reserved: [Key], unknown: [Key],
-      frozen: [{external_id, reason}]}: disjoint, together the deduped Keys sent, reason the first of archived |
-      retiring | not_in_full | no_type (sync.reserve_variations). At most SETTINGS.sync.max_reserve_ids distinct
-      Keys; more is a 400 with nothing marked.
+      frozen: [{external_id, reason}]}: disjoint, together the deduped Keys sent, reason the first of
+      abandoned | archived | retiring | not_in_full | no_type (sync.reserve_variations). At most
+      SETTINGS.sync.max_reserve_ids distinct Keys; more is a 400 with nothing marked.
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract

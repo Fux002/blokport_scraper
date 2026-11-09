@@ -152,6 +152,18 @@ def test_unarchive_outranks_a_lease_issued_before_it(tmp_path):
         assert sync.ready(ledger, "variations") == []                         # once
 
 
+def test_unarchive_never_revives_an_operator_abandoned_row(tmp_path):
+    # the same re-mark rule as a reserve: an abandoned dead-letter is the operator's terminal verdict, kept as it is
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="gap_held", archived=1)
+        ledger.execute("UPDATE variation SET abandoned_at = '2000-01-01T00:00:00+00:00'")
+        exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "active")])
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 1
+        row = ledger.get("variation", "key", "slab_v1")
+        assert row["archived"] == 0 and row["state"] == "gap_held" and row["abandoned_at"]
+        assert sync.ready(ledger, "variations") == []
+
+
 def test_unarchive_never_resurrects_a_retiring_row_or_demotes_a_pending_one(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="retiring", archived=1)

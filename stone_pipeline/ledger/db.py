@@ -81,13 +81,15 @@ CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = 
 FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
                            "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
 # Re-serve a variation once with its whole payload, a re-mark (POST /sync/v1/reserve, an un-archive). Every state
-# becomes 'dirty' except pending and dirty (they already serve once) and retiring (being deleted, its tombstone serves
-# /removed: never resurrected); a leased (syncing) row too. What keeps an ack of a lease issued BEFORE the mark from
+# becomes 'dirty' except pending and dirty (they already serve once), retiring (being deleted, its tombstone serves
+# /removed: never resurrected) and an operator-abandoned dead-letter (a terminal verdict: only new content or a global
+# reset clears it); a leased (syncing) row too. What keeps an ack of a lease issued BEFORE the mark from
 # syncing the row away: for a content change (populate.py) it is the new payload_hash, which that ack's echoed hash
 # no longer matches; a re-mark keeps the hash, so it is the stamp reserved_at. The ack records what Medusa did but
 # leaves a stamped row dirty, and only the next lease clears the stamp (sync.ready_variations), so only a lease issued
 # after the mark can sync it. The one parameter is the time.
-RESERVE_SQL = ("state = CASE WHEN state IN ('pending', 'dirty', 'retiring') THEN state ELSE 'dirty' END, "
+RESERVE_SQL = ("state = CASE WHEN state IN ('pending', 'dirty', 'retiring') OR abandoned_at IS NOT NULL THEN state "
+               "ELSE 'dirty' END, "
                "reserved_at = COALESCE(reserved_at, ?)")
 
 

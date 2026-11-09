@@ -2,8 +2,8 @@
 restored Keys once, so each comes back with its whole payload. The answer is {reserved, unknown, frozen}, whose
 external_ids are disjoint and together exactly the deduped external_ids sent. `reserved` WILL serve on a coming
 pull (a retry wait only delays it); an unknown Key is reported, never created; a frozen Key exists but the scraper
-does not serve it, so it is never marked: {external_id, reason}, reason the first of archived | retiring |
-not_in_full | no_type. A reserve outranks every lease issued before it (the reserved_at stamp). At most
+does not serve it, so it is never marked: {external_id, reason}, reason the first of abandoned | archived |
+retiring | not_in_full | no_type. A reserve outranks every lease issued before it (the reserved_at stamp). At most
 SETTINGS.sync.max_reserve_ids distinct Keys per call; a call over the bound is refused whole with nothing marked.
 """
 
@@ -64,15 +64,28 @@ def test_unknown_is_reported_and_never_created(tmp_path):
         assert ledger.get("variation", "key", "slab_zz_9") is None
 
 
-def _frozen_alone(tmp_path, **row) -> list[dict]:
+def _abandon(ledger, key):
+    """The operator's terminal verdict on a dead-letter (sync.abandon_dead_letter's write)."""
+    ledger.execute("UPDATE variation SET state = 'gap_held', abandoned_at = ? WHERE key = ?", (_OLD, key))
+
+
+def _frozen_alone(tmp_path, abandoned=False, **row) -> list[dict]:
     """Reserve one row built with `row`; assert it is frozen, nothing else, and wholly untouched. Returns frozen."""
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_a_1", **row)
+        if abandoned:
+            _abandon(ledger, "slab_a_1")
         before = dict(ledger.get("variation", "key", "slab_a_1"))
         code, answer = _reserve(ledger, ["slab_a_1"])
         assert code == 200 and answer["reserved"] == [] and answer["unknown"] == []
         assert dict(ledger.get("variation", "key", "slab_a_1")) == before     # never marked, never stamped
         return answer["frozen"]
+
+
+def test_an_abandoned_row_is_frozen_abandoned_and_never_revived(tmp_path):
+    # an operator-abandoned dead-letter is terminal: a reserve that revived it would, on a further failure, strand it
+    # (requeue skips an abandoned row and abandon answers "already"), so the operator's verdict is respected
+    assert _frozen_alone(tmp_path, abandoned=True) == [{"external_id": "slab_a_1", "reason": "abandoned"}]
 
 
 def test_an_archived_row_is_frozen_archived(tmp_path):
@@ -97,9 +110,12 @@ def test_the_frozen_reason_is_the_first_that_applies(tmp_path):
         _variation(ledger, "slab_b_2", "retiring", in_full=0, type_="")
         _variation(ledger, "slab_c_3", in_full=0, type_="")
         _variation(ledger, "slab_d_4", "syncing", archived=1)            # archived beats a live lease too
-        assert _reserve(ledger, ["slab_d_4", "slab_c_3", "slab_b_2", "slab_a_1"])[1]["frozen"] == [
+        _variation(ledger, "slab_e_5", archived=1, in_full=0)
+        _abandon(ledger, "slab_e_5")                                      # the operator's ruling outranks the rest
+        assert _reserve(ledger, ["slab_e_5", "slab_d_4", "slab_c_3", "slab_b_2", "slab_a_1"])[1]["frozen"] == [
             {"external_id": "slab_a_1", "reason": "archived"}, {"external_id": "slab_b_2", "reason": "retiring"},
-            {"external_id": "slab_c_3", "reason": "not_in_full"}, {"external_id": "slab_d_4", "reason": "archived"}]
+            {"external_id": "slab_c_3", "reason": "not_in_full"}, {"external_id": "slab_d_4", "reason": "archived"},
+            {"external_id": "slab_e_5", "reason": "abandoned"}]
         assert _state(ledger, "slab_d_4") == "syncing"
 
 
@@ -210,12 +226,15 @@ def test_the_lists_are_disjoint_and_exactly_the_deduped_ids_sent(tmp_path):
         _variation(ledger, "slab_ret_4", "retiring")
         _variation(ledger, "slab_out_5", in_full=0)
         _variation(ledger, "slab_untyped_6", type_="")
+        _variation(ledger, "slab_dead_7")
+        _abandon(ledger, "slab_dead_7")
         sent = ["slab_zz_9", "slab_a_1", "slab_arch_3", "slab_a_1", "slab_ret_4", "slab_b_2", "slab_out_5",
-                "slab_untyped_6", "slab_zz_9"]
+                "slab_untyped_6", "slab_dead_7", "slab_zz_9"]
         code, answer = _reserve(ledger, sent)
         assert code == 200 and set(answer) == {"reserved", "unknown", "frozen"}
         assert all(set(f) == {"external_id", "reason"} for f in answer["frozen"])
-        assert {f["reason"] for f in answer["frozen"]} == {"archived", "retiring", "not_in_full", "no_type"}
+        assert {f["reason"] for f in answer["frozen"]} == {"abandoned", "archived", "retiring", "not_in_full",
+                                                         "no_type"}
         lists = [answer["reserved"], answer["unknown"], [f["external_id"] for f in answer["frozen"]]]
         flat = [k for lst in lists for k in lst]
         assert len(flat) == len(set(flat))                       # disjoint, and no Key twice within a list
