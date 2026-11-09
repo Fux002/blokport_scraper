@@ -19,7 +19,9 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
   `backbone_value_updates.csv` (existing varieties missing a colour/finish). Apply
   these to the backbones before building the tree.
 
-- `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …).
+- `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …, kind),
+  in the backend ports export's column order, so it imports as is (Settings > Ports). Every row
+  states its `kind` (sea | rail | air | inland): the backend's import refuses a row without one.
   Assign which ports each supplier ships from in `config/sources.yaml` `ports_default`,
   by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
 - `origin_map.csv` — the per-VARIETY quarry country (origin is a property of the stone, NOT the
