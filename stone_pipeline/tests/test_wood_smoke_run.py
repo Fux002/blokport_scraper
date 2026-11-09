@@ -44,6 +44,12 @@ def build_workspace(root: Path) -> Path:
     (root / "catalog_source").mkdir()
     shutil.copy(REPO / "catalog_source" / "ports.csv", root / "catalog_source" / "ports.csv")
     shutil.copytree(FIXTURE / "workspace", root, dirs_exist_ok=True)
+    # The backend publishes field-kinds.json at run time; it is gitignored under from_medusa/, so the smoke run
+    # stages the committed test fixture map into the wood instance, exactly as a produce would fetch it. Without
+    # it the pipeline fails loud up front (field_kinds.require_present): correct, but not what this test exercises.
+    (root / "from_medusa" / "development").mkdir(parents=True, exist_ok=True)
+    shutil.copy(Path(__file__).parent / "fixtures" / "field-kinds.json",
+                root / "from_medusa" / "development" / "field-kinds.json")
     shutil.copy(FIXTURE / "wood_feed.py", root / "stone_pipeline" / "adapters" / "wood_feed.py")
     sources = root / "stone_pipeline" / "config" / "sources.yaml"
     sources.write_text(sources.read_text(encoding="utf-8") + "\n" + (FIXTURE / "source.yaml").read_text(encoding="utf-8"),
