@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 import polars as pl
+from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
@@ -702,8 +703,17 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
     from stone_pipeline.ledger import writethrough
     ledger_failed = False
     if writethrough.enabled():
-        if not writethrough.record_source(validation.emit, tuple(delist.discontinued), source_cfg,
-                                          mode=ctx.mode, replaced=delist.replaced_codes):
+        try:
+            # the files the photos side keeps, listed now: the ledger write checks every product's photos against them
+            published = images.published_keys()
+        except (BotoCoreError, ClientError) as exc:
+            published = None
+            run_log.error("the published photos could not be listed; the ledger is not written, so no product can "
+                          "serve a photo nobody verified", extra={"extra_fields": {"source": source_cfg.source_code,
+                                                                                   "error": str(exc)}})
+        if published is None or not writethrough.record_source(
+                validation.emit, tuple(delist.discontinued), source_cfg, mode=ctx.mode, published=published,
+                replaced=delist.replaced_codes):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this

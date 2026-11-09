@@ -27,7 +27,7 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 15  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
@@ -41,6 +41,8 @@ SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- su
 #                      v14: variation.archived -- the VE2 freeze, a pure mirror of the Medusa export's status
 #                           column (recomputed every produce). attribute.restricted is NOT kept here: PR4
 #                           decides restricted values from the files through the one reader, the single authority.
+#                      v15: product.photo_unpublished -- the standardised files a product links that are not
+#                           published (never served while any); null on every existing row until its next produce.
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -253,6 +255,8 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
         if "made_to_order" not in prod_cols:   # v12: on sale with no count (read by Blokport at create)
             self.conn.execute("ALTER TABLE product ADD COLUMN made_to_order INTEGER NOT NULL DEFAULT 0")
+        if "photo_unpublished" not in prod_cols:   # v15: no backfill, the next produce of each source computes it
+            self.conn.execute("ALTER TABLE product ADD COLUMN photo_unpublished TEXT")
         if from_version < 13:
             # v13 reads "Medusa holds it" from last_synced (in_medusa_sql); before, a products export row was only
             # 'synced' (seed_products and populate_discontinued wrote no last_synced). Keyed on the version: a 'synced'

@@ -43,7 +43,10 @@ Item (now pinned; `updated_at` added for the drill-down):
   "updated_at": "<ISO8601>" } // last-attempt timestamp
 ```
 Ordered newest-first, capped at `limit` (default 200, via `?limit=`). `variations`/`products` items are rows
-in state `gap_held`; `removed` items are tombstones stuck in state `dead`.
+in state `gap_held`; `removed` items are tombstones stuck in state `dead`. A `products` item can also carry state
+`photo_unpublished` (additive, ledger v15): a product a change waits on that is held back because it links a
+standardised photo the photos side has not published; `error` is `photo not published: N files (<first key>)`. It is
+never served and clears on its own when a produce finds the files published; a requeue or a reset does not revive it.
 
 ## S-3 -- GET /sync/v1/status  (sync server :8723)  -- READ THE GOTCHAS
 
@@ -56,7 +59,8 @@ Response:
   "gap":         { ... },
   "removed":     { "<state>": <count>, ... },   // dead-letters are state 'dead' HERE (NOT gap_held)
   "inventory":   { "total": <int>, "delta": <int> },   // NOT a state histogram: NO gap_held key
-  "variation_reconcile": { "orphaned": <int> } }   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "variation_reconcile": { "orphaned": <int> },   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "product_photos": { "unpublished": <int> } }    // additive (v15): products held back by an unpublished photo (the /failures photo_unpublished items)
 ```
 
 Three things that make `status.scraper[type].gap_held` read wrong if assumed:

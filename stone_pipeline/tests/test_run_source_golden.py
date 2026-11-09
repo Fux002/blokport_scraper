@@ -46,7 +46,7 @@ from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.run import OutputMode, run_source
-from stone_pipeline.stages import magnitude_drift
+from stone_pipeline.stages import images, magnitude_drift
 from stone_pipeline.stages.product_state import sku_from
 from stone_pipeline.tests.test_ledger_writethrough import _seed_ledger_like_the_sync_server
 
@@ -207,6 +207,7 @@ def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
     ledger_path = base / "scenario.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     _seed_ledger_like_the_sync_server(ledger_path, base)
     out = base / "out"
     digests = {}

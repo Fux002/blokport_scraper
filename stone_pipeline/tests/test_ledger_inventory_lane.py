@@ -358,7 +358,7 @@ def test_a_v12_ledger_gains_the_columns_and_serves_only_rows_with_a_reason(tmp_p
     p = tmp_path / "mig.ledger"
     _v12_ledger(p)
     with Ledger.open(p, env="development") as ledger:
-        assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 14
+        assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
         assert _columns(ledger) == fresh_columns
         assert {r["sku"]: r["sync_attempts"] for r in ledger.execute("SELECT * FROM inventory")} == {"S-1": 0, "S-2": 0}
         assert _lane(ledger) == ["S-2"]                               # its last synced reason is not known
