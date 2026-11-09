@@ -268,6 +268,26 @@ def test_only_a_text_descriptions_list_items_are_read(description):
     assert "Dikte" not in row.stated_specs
 
 
+def test_a_description_of_unclosed_list_items_is_read_in_bounded_time():
+    # a hostile description: a megabyte of <li> that never closes must not stall the listing (it once took minutes)
+    import time
+    from market_prices.collectors.woocommerce_store import _list_items
+    started = time.monotonic()
+    assert _list_items("<li>" * 250_000) == []
+    assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.parametrize("html", [
+    "<ul><li>Dikte: 3</li><LI class='x'>Formaat: 60x60</LI ></ul>",
+    "<li>a<li>b</li><li>c</li>", "<link><li>x</li>", "<li>open", "</li><li>y</lix><li>z</li>", "",
+])
+def test_the_list_scan_reads_items_as_the_html_list_holds_them(html):
+    import re
+    from market_prices.collectors.woocommerce_store import _list_items
+    expected = re.findall(r"<li\b[^>]*>(.*?)</li\s*>", html, re.IGNORECASE | re.DOTALL)
+    assert _list_items(html) == expected
+
+
 def test_a_sellers_less_than_sign_stays_text():
     row = _run(_shop(_page([_listing(name="Slab <3cm and >2cm", short_description="")]))).observations[0]
     assert row.listing_text == "Slab <3cm and >2cm"

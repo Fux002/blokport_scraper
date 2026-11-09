@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 
 _API_SPEC_FIELDS = ("sku", "weight", "formatted_weight", "formatted_dimensions")
 _DIMENSION_FIELDS = ("length", "width", "height")
-_LIST_ITEM = re.compile(r"<li\b[^>]*>(.*?)</li\s*>", re.IGNORECASE | re.DOTALL)
+_LIST_OPEN = re.compile(r"<li\b[^>]*>", re.IGNORECASE)
+_LIST_CLOSE = re.compile(r"</li\s*>", re.IGNORECASE)
 
 
 def _mapping(value: object, what: str) -> Mapping:
@@ -86,6 +87,21 @@ def _attributes(listing: Mapping) -> dict[str, str]:
     return labelled
 
 
+def _list_items(html: str) -> list[str]:
+    """The text inside each <li>...</li>, in page order: an opening tag, then the next closing tag after it. Each
+    search resumes where the last one stopped, so the scan is linear even on a hostile page of unclosed <li> (a
+    lazy regex over the whole item retried from every opening, and a megabyte of them stalled a listing for minutes).
+    Once no closing tag follows an opening, no later item can close either, so the scan stops."""
+    items, at = [], 0
+    while (opening := _LIST_OPEN.search(html, at)) is not None:
+        closing = _LIST_CLOSE.search(html, opening.end())
+        if closing is None:
+            break
+        items.append(html[opening.end():closing.start()])
+        at = closing.end()
+    return items
+
+
 def _description_specs(listing: Mapping) -> list[tuple[str, str]]:
     """The "Label: value" items of the description's HTML list, as the seller wrote them, in page order. An item with
     no label, an empty side, or a label or value too long to be a spec is prose and is left out."""
@@ -93,7 +109,7 @@ def _description_specs(listing: Mapping) -> list[tuple[str, str]]:
     if not isinstance(description, str):
         return []
     items = []
-    for item in _LIST_ITEM.findall(description):
+    for item in _list_items(description):
         text = clean_text(item)
         if not text or ":" not in text:
             continue

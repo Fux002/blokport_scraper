@@ -71,3 +71,16 @@ def test_the_hops_are_capped(public):
     with pytest.raises(ssrf.RedirectFailed, match="too many redirects: https://a.example/x"):
         ssrf.follow_redirects("https://a.example/x", hops)
     assert len(hops.sent) == ssrf.MAX_REDIRECTS + 1
+
+
+def test_carrier_grade_nat_space_is_not_public(monkeypatch):
+    # 100.64.0.0/10 is shared address space, reachable inside a provider network: never a public host
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", lambda host, port: [(None, None, None, None, ("100.64.0.1", 0))])
+    assert ssrf.url_allowed("https://cgnat.example/x") is False
+
+
+@pytest.mark.parametrize("url", ["https://user:secret@a.example/x", "https://user@a.example/x", "https://@a.example/x"])
+def test_a_url_carrying_credentials_is_refused(url, monkeypatch):
+    monkeypatch.setattr(ssrf.socket, "getaddrinfo", lambda host, port: [(None, None, None, None, ("93.184.216.34", 0))])
+    assert ssrf.url_allowed(url) is False
+    assert ssrf.url_allowed("https://a.example/x") is True

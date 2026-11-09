@@ -21,6 +21,9 @@ MAX_CRAWL_DELAY_SECONDS = 60.0
 # The live transport (market_prices/transport.py): one plain GET per request, no retry. A page of WOO_PAGE_SIZE products
 # is a few MB, so a body over the cap is not a catalogue page; it is refused before or while it is read, never kept.
 FETCH_TIMEOUT_SECONDS = 30.0
+# ... and the whole request, redirects and body together, ends by this wall-clock deadline (FETCH_TIMEOUT_SECONDS bounds
+# each read, so a body trickled in just inside it would otherwise hold the request until MAX_RESPONSE_BYTES)
+FETCH_DEADLINE_SECONDS = 120.0
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 BLOCK_STATUSES = frozenset({401, 403, 406, 429, 451})

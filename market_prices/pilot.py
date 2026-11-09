@@ -12,7 +12,7 @@ from pathlib import Path
 
 from market_prices import config, run
 from market_prices.register import Register, RegisterError, load_register
-from stone_pipeline.config.settings import IS_PRODUCTION
+from stone_pipeline.config.settings import BRAND, IS_PRODUCTION
 
 
 def pilot_register(brand: str, site_id: str, sites_dir: Path = config.SITES_DIR) -> Register:
@@ -29,6 +29,8 @@ def pilot_register(brand: str, site_id: str, sites_dir: Path = config.SITES_DIR)
 def main() -> None:
     if IS_PRODUCTION:
         raise SystemExit("the market-price pilot runs only in development, against dev's bucket")
+    if config.PILOT_BRAND != BRAND:     # it publishes into this deployment's bucket, which must be the brand's own
+        raise SystemExit(f"the pilot is for {config.PILOT_BRAND!r} but this deployment is {BRAND!r}")
     outcome = run.run_live(pilot_register(config.PILOT_BRAND, config.PILOT_SITE_ID))
     print(run.summary(outcome, sample=config.PILOT_SAMPLE_ROWS))
 

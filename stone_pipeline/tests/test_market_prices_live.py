@@ -138,6 +138,27 @@ def test_the_client_never_follows_redirects_itself_nor_reads_proxy_settings(monk
         assert client.timeout.read == config.FETCH_TIMEOUT_SECONDS
 
 
+def test_a_body_that_trickles_past_the_deadline_is_unexpected(monkeypatch):
+    # each read is inside httpx's per-operation timeout, yet the request as a whole is held too long
+    monkeypatch.setattr(config, "FETCH_DEADLINE_SECONDS", 10.0)
+    ticks = iter(range(0, 1000, 4))                     # every clock read is 4 s later
+
+    def trickle():
+        for _ in range(10):
+            yield b"x"
+    server = _Server({f"{BASE}/a": httpx.Response(200, content=trickle())})
+    transport = LiveTransport(http_transport=httpx.MockTransport(server), clock=lambda: float(next(ticks)))
+    with transport, pytest.raises(UnexpectedResponse, match="deadline"):
+        transport.get(f"{BASE}/a")
+
+
+def test_a_start_url_that_is_not_public_says_so():
+    transport, server = _transport({})
+    with transport, pytest.raises(UnexpectedResponse, match="internal.example/x is not a public"):
+        transport.get("http://internal.example/x")
+    assert server.seen == []
+
+
 def test_the_body_is_decoded_by_its_declared_charset():
     transport, _ = _transport({f"{BASE}/a": httpx.Response(
         200, content="Prijs € 5".encode("cp1252"), headers={"content-type": "text/html; charset=windows-1252"})})
@@ -257,6 +278,14 @@ def test_the_pilot_refuses_a_site_that_is_not_approved_before_any_request(tmp_pa
     sites_dir = _write_register(tmp_path, _site("waiting", decision="pending"))
     with pytest.raises(RegisterError, match=why):
         pilot.pilot_register("blokport", site_id, sites_dir)
+
+
+def test_the_pilot_refuses_another_brands_deployment(monkeypatch):
+    # a pilot of blokport's sites in wudport's deployment would write blokport prices into wudport's bucket
+    monkeypatch.setattr(pilot, "BRAND", "wudport")
+    monkeypatch.setattr(pilot, "pilot_register", lambda *args: pytest.fail("the register was read"))
+    with pytest.raises(SystemExit, match="wudport"):
+        pilot.main()
 
 
 def test_the_pilot_refuses_to_run_outside_development(monkeypatch):

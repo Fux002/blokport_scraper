@@ -52,12 +52,13 @@ Answer = TypeVar("Answer", bound=_Answer)
 
 
 def _ip_is_public(ip: str) -> bool:
+    """Globally reachable by IANA's special-purpose registries (so not private, loopback, link-local, reserved,
+    unspecified or the 100.64.0.0/10 shared CGNAT space), and not multicast, which is_global does not exclude."""
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    return not (addr.is_private or addr.is_loopback or addr.is_link_local
-                or addr.is_reserved or addr.is_multicast or addr.is_unspecified)
+    return addr.is_global and not addr.is_multicast
 
 
 def url_allowed(url: str) -> bool:
@@ -69,6 +70,8 @@ def url_allowed(url: str) -> bool:
     except Exception:
         return False
     if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.hostname:
+        return False
+    if "@" in parsed.netloc:        # userinfo: a redirect must never carry credentials to the next host
         return False
     try:
         ips = [info[4][0] for info in socket.getaddrinfo(parsed.hostname, None)]

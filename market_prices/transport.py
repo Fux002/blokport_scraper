@@ -9,7 +9,8 @@ config.MAX_RESPONSE_BYTES is refused, before it is read when the site declares i
 
 from __future__ import annotations
 
-from typing import Optional
+import time
+from typing import Callable, Optional
 
 import httpx
 
@@ -18,7 +19,9 @@ from market_prices.fetching import Response, TransportError, UnexpectedResponse
 from stone_pipeline.io.ssrf import RedirectFailed, SSRFBlocked, follow_redirects
 
 
-def _read_capped(answer: httpx.Response, url: str) -> bytes:
+def _read_capped(answer: httpx.Response, url: str, deadline: float, clock: Callable[[], float]) -> bytes:
+    """The body, under the size cap and the request's wall-clock deadline. httpx's timeout bounds each read, not the
+    whole: a site sending a byte just inside it would otherwise hold the request until the size cap."""
     declared = answer.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > config.MAX_RESPONSE_BYTES:
         raise UnexpectedResponse(f"{url} declares {declared} bytes, over the cap of {config.MAX_RESPONSE_BYTES}")
@@ -27,6 +30,8 @@ def _read_capped(answer: httpx.Response, url: str) -> bytes:
         body += chunk
         if len(body) > config.MAX_RESPONSE_BYTES:
             raise UnexpectedResponse(f"{url} sent over {config.MAX_RESPONSE_BYTES} bytes")
+        if clock() > deadline:
+            raise UnexpectedResponse(f"{url} took over the {config.FETCH_DEADLINE_SECONDS}s deadline")
     return bytes(body)
 
 
@@ -34,7 +39,9 @@ class LiveTransport:
     """One client for one run. Use it as a context manager, so its connections are closed when the run ends.
     `http_transport` replaces the network for tests (httpx.MockTransport); production passes nothing."""
 
-    def __init__(self, http_transport: Optional[httpx.BaseTransport] = None):
+    def __init__(self, http_transport: Optional[httpx.BaseTransport] = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
         self._client = httpx.Client(timeout=config.FETCH_TIMEOUT_SECONDS, follow_redirects=False, trust_env=False,
                                     headers={"User-Agent": config.USER_AGENT}, transport=http_transport)
 
@@ -45,6 +52,7 @@ class LiveTransport:
         self._client.close()
 
     def get(self, url: str) -> Response:
+        deadline = self._clock() + config.FETCH_DEADLINE_SECONDS
         opened: list[httpx.Response] = []
 
         def send(hop: str) -> httpx.Response:
@@ -54,12 +62,14 @@ class LiveTransport:
         try:
             try:
                 final_url, answer = follow_redirects(url, send)
-                body = _read_capped(answer, final_url)
+                body = _read_capped(answer, final_url, deadline, self._clock)
             finally:
                 for each in opened:     # every hop, read or not, so no connection is left held
                     each.close()
         except SSRFBlocked as exc:
-            raise UnexpectedResponse(f"{url} redirects to {exc.url}, which is not a public http(s) address") from exc
+            where = (f"{url} is not a public http(s) address" if exc.url == url
+                     else f"{url} redirects to {exc.url}, which is not a public http(s) address")
+            raise UnexpectedResponse(where) from exc
         except (RedirectFailed, httpx.InvalidURL) as exc:
             raise UnexpectedResponse(f"{url}: {exc}") from exc
         except httpx.HTTPError as exc:     # timeout, connection, protocol or decoding failure: no usable answer
