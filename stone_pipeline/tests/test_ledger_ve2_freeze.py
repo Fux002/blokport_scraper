@@ -131,6 +131,27 @@ def test_an_unarchived_synced_row_is_served_exactly_once(tmp_path):
         assert sync.ready(ledger, "variations") == []
 
 
+def test_unarchive_outranks_a_lease_issued_before_it(tmp_path):
+    # the #591 review's race on the mirror: the produce runs it in another process than the pulls, so a lease can be
+    # in flight across an archive and un-archive. That lease's ack, echoing the same hash, records what Medusa did
+    # but must not consume the un-archive's re-serve: the row stays dirty and the next pull serves it once.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="dirty", archived=0)
+        leased = sync.ready(ledger, "variations")                             # the lease, before the flip
+        assert [i["external_id"] for i in leased] == ["slab_v1"]
+        for status in ("archived", "active"):                                 # archive, then un-archive
+            writethrough.mirror_archived_variations(
+                ledger, export_path=_export_csv(tmp_path, [("i1", "slab_v1", "A", status)]))
+        assert sync.ack(ledger, "variations", "slab_v1", "V-2", payload_hash=leased[0]["payload_hash"]) == 1
+        row = ledger.get("variation", "key", "slab_v1")
+        assert row["state"] == "dirty" and row["medusa_id"] == "V-2"           # recorded, not synced
+        served = sync.ready(ledger, "variations")
+        assert [i["external_id"] for i in served] == ["slab_v1"]
+        sync.ack(ledger, "variations", "slab_v1", "V-2", payload_hash=served[0]["payload_hash"])
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "synced"
+        assert sync.ready(ledger, "variations") == []                         # once
+
+
 def test_unarchive_never_resurrects_a_retiring_row_or_demotes_a_pending_one(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="retiring", archived=1)

@@ -91,7 +91,7 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
 
     attribute.restricted is deliberately NOT mirrored here: PR4 decides restricted values from the files through
     medusa_files.read_attributes, the single authority, so no partial copy is kept in the ledger."""
-    from stone_pipeline.ledger.db import RESERVE_STATE_SQL, now_iso
+    from stone_pipeline.ledger.db import RESERVE_SQL, now_iso
     from stone_pipeline.reference.loaders import variants_status_required
     from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -111,8 +111,8 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
     # without its current payload: the same UPDATE marks it to re-serve once (173 F18e), as a reserve does.
     for key in sorted(current - archived):
         changed += ledger.execute(
-            f"UPDATE variation SET archived = 0, {RESERVE_STATE_SQL}, updated_at = ? WHERE key = ? AND archived = 1",
-            (now, key)).rowcount
+            f"UPDATE variation SET archived = 0, {RESERVE_SQL}, updated_at = ? WHERE key = ? AND archived = 1",
+            (now, now, key)).rowcount
     return changed
 
 

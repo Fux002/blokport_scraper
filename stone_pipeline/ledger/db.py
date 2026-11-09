@@ -27,7 +27,7 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 15  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
@@ -41,6 +41,7 @@ SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- su
 #                      v14: variation.archived -- the VE2 freeze, a pure mirror of the Medusa export's status
 #                           column (recomputed every produce). attribute.restricted is NOT kept here: PR4
 #                           decides restricted values from the files through the one reader, the single authority.
+#                      v15: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -79,11 +80,15 @@ CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = 
 # Forget the last synced stock, so the row serves again from zero (a reset).
 FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
                            "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
-# Re-serve a variation once with its whole payload (POST /sync/v1/reserve, an un-archive): every state becomes 'dirty'
-# except these. pending and dirty already serve once; a retiring row is being deleted (its tombstone serves /removed)
-# and is never resurrected. A syncing row follows the produce's content-change rule (populate.py): dirty.
-RESERVE_KEEPS_SQL = "('pending', 'dirty', 'retiring')"
-RESERVE_STATE_SQL = f"state = CASE WHEN state IN {RESERVE_KEEPS_SQL} THEN state ELSE 'dirty' END"
+# Re-serve a variation once with its whole payload, a re-mark (POST /sync/v1/reserve, an un-archive). Every state
+# becomes 'dirty' except pending and dirty (they already serve once) and retiring (being deleted, its tombstone serves
+# /removed: never resurrected); a leased (syncing) row too. What keeps an ack of a lease issued BEFORE the mark from
+# syncing the row away: for a content change (populate.py) it is the new payload_hash, which that ack's echoed hash
+# no longer matches; a re-mark keeps the hash, so it is the stamp reserved_at. The ack records what Medusa did but
+# leaves a stamped row dirty, and only the next lease clears the stamp (sync.ready_variations), so only a lease issued
+# after the mark can sync it. The one parameter is the time.
+RESERVE_SQL = ("state = CASE WHEN state IN ('pending', 'dirty', 'retiring') THEN state ELSE 'dirty' END, "
+               "reserved_at = COALESCE(reserved_at, ?)")
 
 
 class LedgerError(Exception):
@@ -227,6 +232,8 @@ class Ledger:
         variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
         if "archived" not in variation_cols:
             self.conn.execute("ALTER TABLE variation ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        if "reserved_at" not in variation_cols:   # v15: NULL = no reserve waiting for a lease
+            self.conn.execute("ALTER TABLE variation ADD COLUMN reserved_at TEXT")
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
