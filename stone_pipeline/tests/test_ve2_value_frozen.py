@@ -33,10 +33,11 @@ def test_restricted_values_reads_archived_and_internal(tmp_path):
     assert restricted_values(p) == {"finish": {norm("Polished")}, "color": {norm("SecretBlue")}}
 
 
-def test_restricted_values_empty_without_status_columns(tmp_path):
+def test_restricted_values_without_status_columns_fails_loud(tmp_path):
     p = tmp_path / "attributes.csv"
     p.write_text("category,value,sourceid\ncolor,Beige,c1\n", encoding="utf-8")
-    assert restricted_values(p) == {}   # expand phase: nothing is restricted until the columns exist
+    with pytest.raises(ValueError, match=f"{p}: missing required column"):   # never read as "nothing restricted"
+        restricted_values(p)
 
 
 def test_restricted_values_absent_file(tmp_path):

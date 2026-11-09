@@ -57,9 +57,9 @@ class ExistingVariants:
 
 
 def variants_status_required(path: Path) -> bool:
-    """Whether reading `path` requires the status column: only Medusa's live export carries it. The existing-variety
-    file can also be the scraper's Id-free base, which never has the column, so the base is always read with
-    require_status False."""
+    """Whether reading `path` requires the status column: only Medusa's live export carries it. The same readers
+    also take the scraper's own files of that shape (the Id-free base, the curate delta), which never have the
+    column by design: they are not Medusa's statement, so they are read with require_status False."""
     return VARIANTS_EXPORT_STATUS_REQUIRED and Path(path) == env().SETTINGS.paths.export_file
 
 

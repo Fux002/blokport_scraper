@@ -48,9 +48,9 @@ The change ships in three steps so prod is never caught between shapes:
      then fails loud instead of defaulting to active.
    - `VARIANTS_EXPORT_STATUS_REQUIRED` -- the same for the variants export's status column.
 
-   The requirement is path-aware (`attributes_status_required` / `variants_status_required`): it binds only
-   the real Medusa download, never an internal ledger dump of the same shape, so the flip touches exactly the
-   two files Blokport publishes.
+   For `attributes.csv` it is one rule: every attributes file the scraper reads carries the columns (the ledger
+   render's dump writes both). For the variants export it binds only Medusa's export (`variants_status_required`):
+   the scraper's own Id-free base and delta of the same shape never carry status, by design.
 
 ## 4. The ledger archived mirror and the lane freeze
 

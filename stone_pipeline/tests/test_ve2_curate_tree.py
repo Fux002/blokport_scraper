@@ -33,15 +33,6 @@ def _attrs_status(tmp_path, archived=(), internal=(), name="attributes.csv"):
     return p
 
 
-def _attrs_plain(tmp_path, name="attributes_plain.csv"):
-    p = tmp_path / name
-    with p.open("w", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
-        w.writerows(_ATTR_ROWS)
-    return p
-
-
 def _export_status(tmp_path, rows):   # rows: (Id, Key, Name, status)
     p = tmp_path / "export_status.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
@@ -57,15 +48,6 @@ def _scene(tmp_path):
                                     color=("White", "Grey"))])
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     return bb, exp
-
-
-def test_dormant_is_byte_identical(tmp_path):
-    # status columns present but nothing restricted == no status columns at all (expand phase)
-    bb, exp = _scene(tmp_path)
-    prod = _products(tmp_path, [_prow(vid="v1", fin="f_pol", col="c_white")])
-    plain, _, _ = tree_build.build_combinations(exp, _attrs_plain(tmp_path), [bb], prod)
-    statused, _, _ = tree_build.build_combinations(exp, _attrs_status(tmp_path), [bb], prod)
-    assert plain == statused
 
 
 def test_restricted_finish_drops_from_fanout_but_stays_for_an_emitted_product(tmp_path):
@@ -336,8 +318,8 @@ def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path):
     p = tmp_path / "attrs_no_category.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
-        w.writerows([r for r in _ATTR_ROWS if r[0] != "category"])   # NO category pcat rows
+        w.writerow(["category", "value", "sourceid", "status", "internal"])
+        w.writerows(r + ("active", "false") for r in _ATTR_ROWS if r[0] != "category")   # NO category pcat rows
     bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",))])
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     _combos, _stats, unc = tree_build.build_combinations(exp, p, [bb], None)

@@ -266,26 +266,22 @@ def test_inventory_lane_ignores_archived(tmp_path):
         assert [r["external_id"] for r in sync.ready_inventory(ledger)] == ["P-1"]
 
 
-# --- F. B1: status required decided only on the Medusa download path ----------
+# --- F. B1: a variants file needs status only when it is Medusa's export --------
+# (attributes.csv has one rule: every attributes file read carries status/internal, the render's dump included)
 
-def test_status_required_is_decided_by_the_download_path(monkeypatch, tmp_path):
+def test_variants_status_required_is_decided_by_the_export_path(monkeypatch, tmp_path):
     other = tmp_path / "render_dump.csv"
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", False)
-    monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", False)
     assert loaders.variants_status_required(SETTINGS.paths.export_file) is False
-    assert loaders.attributes_status_required(SETTINGS.paths.attributes_csv) is False
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", True)
-    monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", True)
     assert loaders.variants_status_required(SETTINGS.paths.export_file) is True
-    assert loaders.attributes_status_required(SETTINGS.paths.attributes_csv) is True
     assert loaders.variants_status_required(other) is False
-    assert loaders.attributes_status_required(other) is False
 
 
 def test_render_combinations_reads_its_temp_dumps_even_when_status_required(monkeypatch, tmp_path):
     from stone_pipeline.ledger.render import render_combinations
-    # force step-C strictness; the render dumps are the OLD shape (no status column), so a non-path-aware
-    # read would fail loud here. The path-aware decision keeps the internal dumps tolerant.
+    # step-C strictness: the render's variants dump is the scraper's own shape (no status column) and stays
+    # readable through the export-path rule; its attributes dump always carries status/internal.
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", True)
     monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", True)
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:

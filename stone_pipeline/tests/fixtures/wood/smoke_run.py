@@ -30,15 +30,16 @@ class _EveryUrlImproved(dict):
 
 
 def _medusa_export() -> None:
-    """from_medusa/<env>/variants_export.csv as Medusa would publish it for the seed: every variety with its Id."""
+    """from_medusa/<env>/variants_export.csv as Medusa would publish it for the seed: every variety with its Id,
+    active."""
     paths = SETTINGS.paths
     with paths.variants_export_base_csv.open(encoding="utf-8", newline="") as src, \
             paths.variants_export_csv.open("w", encoding="utf-8", newline="") as dst:
         reader = csv.DictReader(src)
-        writer = csv.DictWriter(dst, fieldnames=["Id"] + reader.fieldnames)
+        writer = csv.DictWriter(dst, fieldnames=["Id"] + reader.fieldnames + ["status"])
         writer.writeheader()
         for row in reader:
-            writer.writerow({"Id": row["Key"], **row})
+            writer.writerow({"Id": row["Key"], **row, "status": "active"})
 
 
 def main() -> None:

@@ -28,8 +28,8 @@ def _attrs(tmp_path):
             ("color", "White", "c_white"), ("color", "Grey", "c_grey"), ("quality", "A", "q_a")]
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
-        w.writerows(rows)
+        w.writerow(["category", "value", "sourceid", "status", "internal"])
+        w.writerows(row + ("active", "false") for row in rows)
     return p
 
 
@@ -258,7 +258,7 @@ def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
     export = tmp_path / "variants_export.csv"
     export.write_text("Id\n", encoding="utf-8")
     attrs = tmp_path / "attributes.csv"
-    attrs.write_text("category,value,sourceid\n", encoding="utf-8")
+    attrs.write_text("category,value,sourceid,status,internal\n", encoding="utf-8")
     to_upload, review = tmp_path / "to_upload", tmp_path / "review"
     to_upload.mkdir(); review.mkdir()
     tree_build.write_combinations({("c", "t", "old", "f", "k", "q")}, to_upload / "2_valid_combinations.csv")

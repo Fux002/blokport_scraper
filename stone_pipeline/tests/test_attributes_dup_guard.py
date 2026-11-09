@@ -13,7 +13,7 @@ from stone_pipeline.stages.tree_build import _load_attributes
 
 def _write(tmp_path, rows):
     p = tmp_path / "attributes.csv"
-    body = "category,value,sourceid\n" + "".join(f"{c},{v},{i}\n" for c, v, i in rows)
+    body = "category,value,sourceid,status,internal\n" + "".join(f"{c},{v},{i},active,false\n" for c, v, i in rows)
     p.write_text(body, encoding="utf-8")
     return p
 
