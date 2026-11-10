@@ -281,6 +281,23 @@ def test_a_misfit_is_reported_with_both_figures(monkeypatch):
     assert {f["listing"] for f in found} == {"h1"}
 
 
+def _cut_corner(w_px, h_px, right):
+    """The outline of an irregular piece (a cut corner, top right) in a w x h px cut-out whose stone reaches only
+    `right` of its width: its bounding box is right x 1 of the frame, not the frame."""
+    return {**_meta(w_px, h_px), "outline": [[0.0, 0.0], [right - 0.1, 0.0], [right, 0.15], [right, 1.0], [0.0, 1.0]]}
+
+
+def test_the_gate_measures_the_outline_s_bounding_box_not_the_cut_out_s_frame(monkeypatch):
+    # Mas (SEN-7074-30, a true lot-piece size with a cut corner): compare the outline's own extent with the listing
+    framed = _slab_row(1.8, 1.0)
+    _link(monkeypatch, framed, _cut_corner(1800, 1000, right=0.8))          # frame 1.8:1 fits; outline 1.44:1 does not
+    assert framed.model_3d_key is None
+    stone = _slab_row(1.8, 1.0)
+    _link(monkeypatch, stone, _cut_corner(2000, 1000, right=0.9))           # frame 2:1 does not; outline 1.8:1 fits
+    assert stone.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+    assert cutout.outline_size(_cut_corner(2000, 1000, right=0.9)) == pytest.approx((1800.0, 1000.0))
+
+
 def test_one_proportion_rule_serves_the_3d_slab_and_the_tile_stone():
     # Blokport's renders measure the same: abs(cut-out W:H / listing L:W - 1) in percent, 5 inclusive
     assert cutout.aspect_misfit(1905, 1260, 2.3, 1.5) is None
