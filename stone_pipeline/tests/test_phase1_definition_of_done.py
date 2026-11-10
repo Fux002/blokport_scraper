@@ -5,6 +5,7 @@ fixtures:
 - the old helpers `category_for_key`, `mirror_of` and `_branch_of`;
 - the Key prefix split `split("_", 1)[0]` and the type slice `split("_")[1:-1]`;
 - a prefixed Key literal: a quoted Key-shaped string starting `slab_`, `block_` or `tile_`.
+A comment line is not code: one may name a retired helper to say it is refused (domain.py on `mirror_of`).
 """
 from __future__ import annotations
 
@@ -38,6 +39,8 @@ def test_no_code_reads_a_category_from_a_variety_key():
             if _exempt(path) or path.resolve() == Path(__file__).resolve():
                 continue
             for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
                 for what, pattern in FORBIDDEN.items():
                     if pattern.search(line):
                         found.append(f"{path.relative_to(ROOT)}:{n}: {what}")
