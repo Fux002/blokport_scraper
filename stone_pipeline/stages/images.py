@@ -263,11 +263,11 @@ def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
            outlines: dict[tuple[str, str, str], tuple[float, float]],
            shared: dict[str, set[str]]) -> Optional[dict]:
     """None when a product may carry its lead's 3D slab: a lot piece shown from its own photo, never its lot's shared
-    one (Mas: no 3D until its own photo passes), and its length and width measured (not filled from the pack's
-    defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule Blokport's renders measure too:
-    the cut-out's width is the listing's length). Else why not (a photo_scale_mismatch row of the source's
-    diagnostics): the judge's reason for a lot piece, both figures for a size. outlines: each outline's px size by
-    (source, sha, ETag), read once a run; shared: the lots' shared photos (_lot_shared)."""
+    one (Mas: no 3D until its own photo passes), and its length and width measured (inside the category's band, not
+    filled from the pack's defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule
+    Blokport's renders measure too: the cut-out's width is the listing's length). Else why not, a photo_scale_mismatch
+    row of the source's diagnostics: the judge's reason for a lot piece, both figures (and the band) for a size.
+    outlines: each outline's px size by (source, sha, ETag), read once a run; shared: the lots' shared photos."""
     _, src, sha = lead
     if sha in shared.get(row.lot_code or "", ()):
         return {"listing": row.handle, "reason": "lot_shared_photo", "lead": sha,
@@ -283,6 +283,10 @@ def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
                 "fit_pct": None}
     found |= {"listing_aspect": round(row.length / row.width, 3), "cutout_aspect": round(w_px / h_px, 3),
               "fit_pct": round(cutout.aspect_off(w_px, h_px, row.length, row.width), 2)}
+    band = {f.field: f.detail for f in row.review_flags
+            if f.code == FlagCode.dimension_out_of_range and f.field in ("length", "width")}
+    if band:                                            # derive's range check: no size of its category (Mas)
+        return {**found, "reason": "size_out_of_band", "band": band}
     if _defaulted_size(row, ("length", "width")):
         return {**found, "reason": "size_defaulted"}
     if cutout.aspect_misfit(w_px, h_px, row.length, row.width) is not None:

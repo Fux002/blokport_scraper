@@ -66,7 +66,8 @@ reason is recorded, never a guess. Publish makes the 3D slab from it. A close-up
 close view, no 3D.
 
 The 3D slab keeps the proportions its photo measured. The produce's image stage links it to a product only at that
-product's own measured size: length and width not filled from the pack's defaults, and the cut-out's width:height
+product's own measured size: length and width inside the category's band (derive's range check, its flag naming
+the band; Mas: else `size_out_of_band`) and not filled from the pack's defaults, and the cut-out's width:height
 within `PHOTO_ASPECT_TOLERANCE_PCT` (5, inclusive) of the product's length:width (`cutout.aspect_misfit`, the one rule
 the tile stone uses too, measured as Blokport's renders measure it). Otherwise the product keeps its photos with no 3D,
 and it is listed with both figures under `photo_scale_mismatch` in its source's diagnostics (`stages.json`, served by
