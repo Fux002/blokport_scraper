@@ -52,15 +52,21 @@ class Provenance:
     source: str
 
 
+def _key(surrogate_key: str) -> str:
+    """The surrogate key as the SKU states it: the office works from SKUs, which are upper-cased (sku_from), while a
+    scraped key may not be (marenostone's mint_...). SKUs are unique upper-cased, so this loses nothing."""
+    return surrogate_key.upper()
+
+
 @dataclass
 class Overrides:
-    # (src_site, surrogate_key) -> {field: value}
+    # (src_site, surrogate_key as _key gives it) -> {field: value}
     by_key: dict[tuple[str, str], dict[str, str]] = dc_field(default_factory=dict)
     # (src_site, surrogate_key, field) -> who confirmed it, when and from what (filled by load_overrides)
     provenance: dict[tuple[str, str, str], Provenance] = dc_field(default_factory=dict)
 
     def get(self, src_site: str, surrogate_key: str, field: str):
-        return self.by_key.get((src_site, surrogate_key), {}).get(field)
+        return self.by_key.get((src_site, _key(surrogate_key)), {}).get(field)
 
     def __len__(self) -> int:
         return sum(len(v) for v in self.by_key.values())
@@ -99,7 +105,7 @@ def load_overrides(path: Path | None = None) -> Overrides:
             except ValueError as exc:
                 raise OverridesError(f"{where}: confirmed_at {cells['confirmed_at']!r} is not an ISO-8601 date") \
                     from exc
-            site, key, field = cells["src_site"], cells["surrogate_key"], cells["field"]
+            site, key, field = cells["src_site"], _key(cells["surrogate_key"]), cells["field"]
             overrides.by_key.setdefault((site, key), {})[field] = cells["value"]
             overrides.provenance[(site, key, field)] = Provenance(*(cells[c] for c in _PROVENANCE_COLUMNS))
     return overrides

@@ -89,6 +89,7 @@ polonine,620,length,3.1,fons,2026-11-10,https://vendor.example/p/620
   `surrogate_key` is everything after the first `-`: `POL-620` is `polonine,620`. The codes: `POL` polonine, `MAR`
   marenostone, `ZUC` zucchi, `VAR` varsha, `FUL` fuleistone, `SEN` sentas (`stone_pipeline/config/sources.yaml`).
   A lot piece keeps its `-N` position: `SEN-B123-2` is `sentas,B123-2`.
+  Case does not matter in the key (`MAR-MINT_E77E...` matches the scraped `mint_e77e...`).
 - `field` is a canonical field: `length`, `width`, `height` (metres; `height` is the thickness, `width` the short
   face; each within its category's plausible band, so `325` for a slab is refused), `bundle_size`,
   `origin_country_code`, `title`, `color_name`, `variation_id`, ... A field no step reads is refused, naming the line.
