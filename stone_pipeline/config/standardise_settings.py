@@ -48,6 +48,12 @@ class STANDARDISE:
     SIDE_RATIO_MAX = 2.5           # opposite sides may differ by this factor (a slab shot at an angle): steeper leaves the far
                                    # end too soft to show (19ab0177 at 3.1; 2.4 still sharp, adeebb0f)
     SIDE_RATIO_MEASURED = 1.35     # up to this the sides measure the slab's proportions; steeper, its real size does
+    # A keystone (top and bottom differ: the camera tipped up or down at the standing slab) shortens the slab's height at
+    # a far smaller side ratio than a turn shortens its width. Measured 2026-11-10 on the dev diag set's fitted quads: all
+    # 12 keystones from 1.12 came out too wide (+0.8% to +12.4%: POL-736 1.18 +12.4%, POL-649 1.19 +7.0%); below it the
+    # error has either sign (the outline's own noise). From this, a keystone is squared at its real size. DEV-DERIVED
+    # (39 quads): the owner-confirmed prod re-run's corner records confirm the break point, or this moves to theirs.
+    SIDE_RATIO_KEYSTONE = 1.12
     ASPECT_TOLERANCE = 0.10        # the real proportions may be this much narrower than a foreshortened photo shows
     OCR_CLUSTER = 1.5              # words within this many word-heights of each other form one mark
     OCR_LINE_GAP = 3.0             # a word on a surely-read word's text line, within this many word-heights, joins it

@@ -38,9 +38,11 @@ def steep_aspect(q, size):
     """The width/height to flatten slab q at. None for a shot near square-on: its sides measure it. A steeper shot
     foreshortens one axis, so the slab's real proportions (size = (length, width)), the long side across as a slab
     stands; a str (why it is held) when the real size is unknown or does not fit the photo: foreshortening only
-    shortens, so the real proportions are at least as wide as seen when the width is the shortened axis."""
+    shortens, so the real proportions are at least as wide as seen when the width is the shortened axis. The height
+    is the shortened axis when top and bottom differ more than the sides (a keystone), already from
+    SIDE_RATIO_KEYSTONE; the width from SIDE_RATIO_MEASURED."""
     across, up = _sides(q)
-    if max(across, up) <= C.SIDE_RATIO_MEASURED:
+    if (across <= C.SIDE_RATIO_MEASURED) if across >= up else (up <= C.SIDE_RATIO_KEYSTONE):
         return None
     if size is None:
         return "slab shot at a steep angle and its real size is unknown"
