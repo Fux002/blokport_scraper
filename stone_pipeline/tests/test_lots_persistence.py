@@ -16,9 +16,10 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import add_icon
 from stone_pipeline.stages import emit
 
-KEY = "slab_marble_calacatta_viola_1"
+KEY = "marble__calacatta_viola_1"
 
 
 # -- config store: no lots setting --------------------------------------------------------------------------
@@ -62,12 +63,12 @@ def _row(lot_code="B6392-u", lot_position=5):
 
 def _seed_variation(ledger):
     now = now_iso()
-    ledger.upsert("variation", {"key": KEY, "branch": "slab", "type": "Marble", "name": "Calacatta Viola",
-                                "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None,
-                                "image_model": None,
-                                "volume": "", "medusa_id": "V1", "in_full": 1, "payload_hash": "",
+    ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Calacatta Viola",
+                                "aliases": "[]",
+                                "medusa_id": "V1", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, KEY)
 
 
 def test_the_ledger_stores_the_lot_and_a_lot_change_re_serves_the_piece(tmp_path):
@@ -89,7 +90,7 @@ def test_the_pull_payload_carries_the_lot_and_null_outside_one(tmp_path):
         now = now_iso()
         for sku, code, pos in [("SEN-7149-5", "B6392-u", 5), ("SEN-2213", None, None)]:
             ledger.upsert("product", {"sku": sku, "source": "sen", "variation_key": KEY, "state": "pending",
-                                      "lot_code": code, "lot_position": pos,
+                                      "category": "slabs", "lot_code": code, "lot_position": pos,
                                       "created_at": now, "updated_at": now}, pk=("sku",))
         by = {r["external_id"]: r["payload"] for r in ready(ledger, "products")}
         assert (by["SEN-7149-5"]["lot_code"], by["SEN-7149-5"]["lot_position"]) == ("B6392-u", 5)

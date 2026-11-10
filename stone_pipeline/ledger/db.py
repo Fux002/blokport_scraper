@@ -28,8 +28,8 @@ from typing import Any, Iterable, Sequence
 from stone_pipeline.core import ids as _ids
 
 SCHEMA_VERSION = 15  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
-#                      variation_category_image, and branch/image_url/image_sha256/image_model/volume, the combination
-#                      table and product.bundle_size gone. No in-place migration below v15: the phase 1 store
+#                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
+#                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes v15 stores; an older ledger is refused (_apply_schema).
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -85,11 +85,14 @@ _SYNC_STATES = ("pending", "dirty", "syncing", "synced", "needs_resync", "gap_he
 STATES: dict[str, tuple[str, ...]] = {
     "attribute": ("pending", "dirty", "syncing", "synced", "needs_resync"),
     "variation": _SYNC_STATES,
-    "combination": _SYNC_STATES,
     "product": _SYNC_STATES,
     "gap": ("open", "resolved"),
     "removed": ("pending", "dead"),
 }
+
+# Keys per IN (...) list: below SQLite's oldest bound-parameter limit (999), so one statement never exceeds it.
+_IN_BATCH = 500
+
 
 def now_iso() -> str:
     """UTC ISO8601 timestamp, the one timestamp format the ledger stores."""
@@ -281,3 +284,25 @@ class Ledger:
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         """Escape hatch for the populate/render layers; the DAL stays thin."""
         return self.conn.execute(sql, tuple(params))
+
+    def executemany(self, sql: str, rows: Iterable[Sequence[Any]]) -> sqlite3.Cursor:
+        """One statement over many parameter rows (populate's icon pairs)."""
+        return self.conn.executemany(sql, [tuple(r) for r in rows])
+
+
+def variation_icons(ledger: Ledger, keys: Iterable[str] | None = None) -> dict[str, list[sqlite3.Row]]:
+    """{Key: its `variation_category_image` rows} for `keys`, or for every variety when None. A Key with no icon is
+    absent from the result."""
+    sql = "SELECT key, category_handle, s3_key, etag FROM variation_category_image"
+    out: dict[str, list[sqlite3.Row]] = {}
+    if keys is None:
+        batches: list[list[str] | None] = [None]
+    else:
+        wanted = list(keys)
+        batches = [wanted[i:i + _IN_BATCH] for i in range(0, len(wanted), _IN_BATCH)]
+    for batch in batches:
+        rows = (ledger.execute(sql) if batch is None
+                else ledger.execute(f"{sql} WHERE key IN ({','.join('?' * len(batch))})", batch))
+        for r in rows:
+            out.setdefault(r["key"], []).append(r)
+    return out

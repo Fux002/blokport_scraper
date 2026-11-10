@@ -29,13 +29,13 @@ def _seed_ids(ledger: Ledger) -> None:
             "created_at": now, "updated_at": now,
         }, pk=("category", "value"))
     for key, mid, name in [
-        ("slab_marble_carrara_white_0001", "V1", "Carrara White"),
-        ("block_marble_nero_0002", "V2", "Nero"),
+        ("marble__carrara_white_0001", "V1", "Carrara White"),
+        ("marble__nero_0002", "V2", "Nero"),
     ]:
         ledger.upsert("variation", {
-            "key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": name,
-            "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-            "volume": "", "medusa_id": mid, "payload_hash": "", "state": "synced",
+            "key": key, "type": "Marble", "name": name,
+            "aliases": "[]",
+            "medusa_id": mid, "payload_hash": "", "state": "synced",
             "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
         }, pk=("key",))
 

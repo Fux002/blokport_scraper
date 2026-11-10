@@ -20,8 +20,9 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import populate, writethrough
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
 
-KEY = "slab_marble_carrara_0001"
+KEY = "marble__carrara_0001"
 SKU = "POL-AAA"
 
 
@@ -30,13 +31,15 @@ def ledger_path(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
     path = tmp_path / "dev.ledger"
-    with _open(path) as ledger:                     # a synced, textured variety, so its products are servable
+    with _open(path) as ledger:                     # a synced variety with a slab icon, so its products serve
         now = now_iso()
         ledger.upsert("variation", {
-            "key": KEY, "branch": "slab", "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
-            "image_url": f"https://bucket/variations/{KEY}.png", "volume": "", "medusa_id": "V1",
+            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
+            "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
+        add_icon(ledger, KEY)
+        seed_slab_category(ledger)
     return path
 
 
@@ -51,6 +54,7 @@ def _rule(monkeypatch, on):
 
 def _row(standard_photo, qty="5"):
     return CanonicalRow(src_site="polonine", surrogate_key="AAA", variation_key=KEY, handle="h-aaa", title="Carrara",
+                        category_pcat_id=SLAB_PCAT,
                         inventory_quantity=qty, thumbnail_key="products/AAA/thumb.webp",
                         product_image_keys=["products/AAA/1.webp"], standard_photo=standard_photo)
 

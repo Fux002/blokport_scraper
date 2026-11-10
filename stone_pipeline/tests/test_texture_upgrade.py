@@ -49,43 +49,6 @@ def test_prune_keeps_upgrades_but_still_drops_mints(monkeypatch, tmp_path):
     assert names == {"slab_up", "slab_mint_new"}       # rewritten queue matches
 
 
-def test_ledger_records_the_generator_and_never_re_serves_for_it(tmp_path, monkeypatch):
-    """image_model is provenance, not content: it must be stored, refreshed on re-run, and must NOT
-    change payload_hash (recording who made a texture cannot re-sync the variant to Medusa)."""
-    import csv as _csv
-    from stone_pipeline.ledger import populate as pop
-    from stone_pipeline.ledger.db import Ledger
-
-    cs = tmp_path / "catalog_source"; cs.mkdir()
-    with (cs / "image_model.csv").open("w", newline="", encoding="utf-8") as h:
-        w = _csv.writer(h); w.writerow(["Key", "model", "generated"])
-        w.writerow(["slab_a", "flux-2-max", "2026-09-07"])
-    audit = cs / "image_model.csv"
-    assert pop._image_models(audit) == {"slab_a": "flux-2-max"}
-    assert pop._image_models(tmp_path / "nope.csv") == {}      # absent audit -> empty, never a crash
-    monkeypatch.setattr(pop, "_image_models", lambda *a, **k: {"slab_a": "flux-2-max"})
-
-    full = tmp_path / "1_variants_full.csv"
-    with full.open("w", newline="", encoding="utf-8") as h:
-        w = _csv.writer(h); w.writerow(list(pop._VARIANTS_FULL_COLS))
-        w.writerow(["slab_a", "A", "https://x/slab_a.png", "", "0.001"])
-        w.writerow(["slab_b", "B", "https://x/slab_b.png", "", "0.001"])
-
-    with Ledger.open(tmp_path / "t.ledger", env="development") as led:
-        pop.populate_variations_full(led, full)
-        rows = {r[0]: r[1:] for r in led.execute(
-            "SELECT key, image_model, payload_hash FROM variation").fetchall()}
-        assert rows["slab_a"][0] == "flux-2-max"   # recorded from the audit
-        assert rows["slab_b"][0] is None           # absent from the audit -> no provenance, not a crash
-        ph_before = rows["slab_a"][1]
-
-        pop.populate_variations_full(led, full)    # idempotent re-run
-        after = {r[0]: r[1:] for r in led.execute(
-            "SELECT key, image_model, payload_hash FROM variation").fetchall()}
-        assert after["slab_a"][0] == "flux-2-max"
-        assert after["slab_a"][1] == ph_before     # provenance never re-serves the variant
-
-
 def test_a_fresh_mint_is_marked_so_the_drip_never_redoes_it(monkeypatch):
     """The cold-start loop: mint -> texture made by the BEST model -> marked. If a mint were left
     unmarked, the upgrade drip would later regenerate (and re-charge for) an already-best texture."""

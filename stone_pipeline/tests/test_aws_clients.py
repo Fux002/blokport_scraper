@@ -197,7 +197,7 @@ def test_the_variation_image_clients_honour_the_profile(built, monkeypatch):
     catalog._s3_image_copier()
     prepare_variant_images._s3_client()
     refresh_images._s3_client()
-    _drive(emit_catalog._s3_variation_keys)
+    _drive(emit_catalog._s3_icon_pairs)
     assert built == [_s3(BOUNDED, PROFILE)] * 4
 
 

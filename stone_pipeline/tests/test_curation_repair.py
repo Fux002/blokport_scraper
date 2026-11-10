@@ -19,9 +19,9 @@ from stone_pipeline.ledger.sync import (abandon_dead_letter, cancel_variation_to
 
 def _variation(ledger, key, state, medusa_id=None, name="x", in_full=1):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": name,
-                                "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": medusa_id,
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": name,
+                                "aliases": "[]",
+                                "medusa_id": medusa_id,
                                 "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
@@ -34,7 +34,7 @@ def test_v4_to_v5_migration_adds_abandoned_at_and_preserves_data(tmp_path):
         pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v4 shape")
     p = tmp_path / "mig.ledger"
     with Ledger.open(p, env="development") as lg:               # create current schema
-        _variation(lg, "slab_marble_keep_1", "gap_held", medusa_id="V9")
+        _variation(lg, "marble__keep_1", "gap_held", medusa_id="V9")
     raw = sqlite3.connect(p)                                    # simulate a v4 ledger: strip the v5 column
     for t in ("variation", "product", "removed"):
         raw.execute(f"ALTER TABLE {t} DROP COLUMN abandoned_at")
@@ -46,34 +46,34 @@ def test_v4_to_v5_migration_adds_abandoned_at_and_preserves_data(tmp_path):
         for t in ("variation", "product", "removed"):
             cols = [r[1] for r in lg.conn.execute(f"PRAGMA table_info({t})")]
             assert "abandoned_at" in cols                       # column re-added by the ALTER migration
-        assert lg.get("variation", "key", "slab_marble_keep_1")["state"] == "gap_held"   # data intact
-        assert abandon_dead_letter(lg, "variations", "slab_marble_keep_1")["abandoned"] is True
+        assert lg.get("variation", "key", "marble__keep_1")["state"] == "gap_held"   # data intact
+        assert abandon_dead_letter(lg, "variations", "marble__keep_1")["abandoned"] is True
 
 
 # -- C: abandon a dead-letter -------------------------------------------------
 
 def test_abandon_dead_letter_is_terminal_and_auditable(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_bad_1", "gap_held", medusa_id="V1")
+        _variation(lg, "marble__bad_1", "gap_held", medusa_id="V1")
         lg.execute("UPDATE variation SET sync_attempts = 5, sync_error = 'boom' WHERE key = ?",
-                   ("slab_marble_bad_1",))
+                   ("marble__bad_1",))
 
-        res = abandon_dead_letter(lg, "variations", "slab_marble_bad_1")
+        res = abandon_dead_letter(lg, "variations", "marble__bad_1")
         assert res["abandoned"] is True and res["was"] == "gap_held"
-        assert lg.get("variation", "key", "slab_marble_bad_1")["abandoned_at"] is not None
+        assert lg.get("variation", "key", "marble__bad_1")["abandoned_at"] is not None
 
         # terminal: not served, and Requeue must NOT resurrect it
-        assert all(r["payload"]["key"] != "slab_marble_bad_1" for r in ready(lg, "variations"))
+        assert all(r["payload"]["key"] != "marble__bad_1" for r in ready(lg, "variations"))
         assert requeue_dead_lettered(lg) == 0
-        assert lg.get("variation", "key", "slab_marble_bad_1")["abandoned_at"] is not None
+        assert lg.get("variation", "key", "marble__bad_1")["abandoned_at"] is not None
 
         # still auditable in /failures, tagged abandoned
         fs = {f["external_id"]: f for f in failures(lg)}
-        assert fs["slab_marble_bad_1"]["state"] == "abandoned"
-        assert fs["slab_marble_bad_1"]["error"] == "boom"
+        assert fs["marble__bad_1"]["state"] == "abandoned"
+        assert fs["marble__bad_1"]["error"] == "boom"
 
         # idempotent
-        again = abandon_dead_letter(lg, "variations", "slab_marble_bad_1")
+        again = abandon_dead_letter(lg, "variations", "marble__bad_1")
         assert again["abandoned"] is True and again.get("already") is True
 
 
@@ -81,26 +81,26 @@ def test_abandon_sync_route_maps_status_codes(tmp_path):
     # Abandon lives on the SYNC plane (next to requeue, same failures list), keyed by {type, external_id}.
     from stone_pipeline.ledger.server import dispatch
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_dead_1", "gap_held", medusa_id="V4")
-        _variation(lg, "slab_marble_live_1", "synced", medusa_id="V5")
+        _variation(lg, "marble__dead_1", "gap_held", medusa_id="V4")
+        _variation(lg, "marble__live_1", "synced", medusa_id="V5")
 
         assert dispatch(lg, "POST", "abandon", {}, {})[0] == 400                       # missing body
         assert dispatch(lg, "POST", "abandon", {}, {"type": "widgets", "external_id": "x"})[0] == 400
         assert dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "nope"})[0] == 404
-        assert dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "slab_marble_live_1"})[0] == 409
-        code, body = dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "slab_marble_dead_1"})
+        assert dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "marble__live_1"})[0] == 409
+        code, body = dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "marble__dead_1"})
         assert code == 200 and body["abandoned"] is True
         # renders in the same /sync/v1/failures list, tagged abandoned
         fs = {f["external_id"]: f for f in dispatch(lg, "GET", "failures", {}, None)[1]["failures"]}
-        assert fs["slab_marble_dead_1"]["state"] == "abandoned"
+        assert fs["marble__dead_1"]["state"] == "abandoned"
 
 
 def test_abandon_refuses_a_live_row_and_unknown_id(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_live_1", "synced", medusa_id="V2")
-        live = abandon_dead_letter(lg, "variations", "slab_marble_live_1")
+        _variation(lg, "marble__live_1", "synced", medusa_id="V2")
+        live = abandon_dead_letter(lg, "variations", "marble__live_1")
         assert live["abandoned"] is False and "not a dead-letter" in live["error"]
-        assert lg.get("variation", "key", "slab_marble_live_1")["state"] == "synced"   # untouched
+        assert lg.get("variation", "key", "marble__live_1")["state"] == "synced"   # untouched
 
         missing = abandon_dead_letter(lg, "variations", "nope")
         assert missing["found"] is False
@@ -113,16 +113,16 @@ def test_abandon_refuses_a_live_row_and_unknown_id(tmp_path):
 
 def test_cancel_variation_tombstone_restores_and_is_idempotent(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_twin_1", "retiring", medusa_id="V3")
-        record_tombstones(lg, [("slab_marble_twin_1", None)], reason="reseed_dedup", kind="variation")
+        _variation(lg, "marble__twin_1", "retiring", medusa_id="V3")
+        record_tombstones(lg, [("marble__twin_1", None)], reason="reseed_dedup", kind="variation")
 
-        res = cancel_variation_tombstone(lg, "slab_marble_twin_1")
+        res = cancel_variation_tombstone(lg, "marble__twin_1")
         assert res["tombstone_cleared"] == 1 and res["restored"] is True and res["known"] is True
-        assert lg.get("variation", "key", "slab_marble_twin_1")["state"] == "dirty"       # medusa_id -> dirty
+        assert lg.get("variation", "key", "marble__twin_1")["state"] == "dirty"       # medusa_id -> dirty
         assert lg.execute("SELECT COUNT(*) n FROM removed WHERE external_id = ?",
-                          ("slab_marble_twin_1",)).fetchone()["n"] == 0
+                          ("marble__twin_1",)).fetchone()["n"] == 0
 
-        again = cancel_variation_tombstone(lg, "slab_marble_twin_1")     # idempotent
+        again = cancel_variation_tombstone(lg, "marble__twin_1")     # idempotent
         assert again["tombstone_cleared"] == 0 and again["known"] is True
 
 
@@ -132,34 +132,34 @@ def test_reconcile_drops_and_tombstones_non_seed_varieties(tmp_path):
     # deletes it. A seed variety is untouched.
     from stone_pipeline.reference.loaders import variety_identity
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_carrara_seed1", "synced", name="Carrara")            # IN the seed
-        _variation(lg, "block_dolomite_venatto_blue_test", "synced", name="Venatto Blue")  # NOT in the seed
-        seed_ids = {variety_identity("slab_marble_carrara_seed1", "Carrara")}             # only Carrara is seed
+        _variation(lg, "marble__carrara_seed1", "synced", name="Carrara")            # IN the seed
+        _variation(lg, "dolomite__venatto_blue_test", "synced", name="Venatto Blue")  # NOT in the seed
+        seed_ids = {variety_identity("marble__carrara_seed1", "Carrara")}             # only Carrara is seed
         r = reconcile_variations_to_seed(lg, seed_keys=set(), seed_identities=seed_ids)
 
         assert r["not_in_seed"] == 1 and r["dedup"] == 0
         remaining = {v["key"] for v in lg.execute("SELECT key FROM variation")}
-        assert remaining == {"slab_marble_carrara_seed1"}          # seed variety kept, non-seed dropped
+        assert remaining == {"marble__carrara_seed1"}          # seed variety kept, non-seed dropped
         tomb = lg.execute("SELECT external_id, kind, reason FROM removed").fetchall()
         assert len(tomb) == 1
         assert (tomb[0]["external_id"], tomb[0]["kind"], tomb[0]["reason"]) == \
-               ("block_dolomite_venatto_blue_test", "variation", "not_in_seed")
+               ("dolomite__venatto_blue_test", "variation", "not_in_seed")
 
 
 def test_reconcile_without_seed_identities_only_dedups(tmp_path):
     # backward compatible: omit seed_identities -> the old dedup-only behaviour, non-seed varieties untouched.
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "block_dolomite_venatto_blue_test", "synced", name="Venatto Blue")
+        _variation(lg, "dolomite__venatto_blue_test", "synced", name="Venatto Blue")
         r = reconcile_variations_to_seed(lg, seed_keys=set())     # no seed_identities
         assert r["not_in_seed"] == 0
-        assert {v["key"] for v in lg.execute("SELECT key FROM variation")} == {"block_dolomite_venatto_blue_test"}
+        assert {v["key"] for v in lg.execute("SELECT key FROM variation")} == {"dolomite__venatto_blue_test"}
 
 
 def test_reconcile_never_drops_a_protected_key(tmp_path):
     # two DISTINCT varieties the dedup would collapse; protecting the loser keeps BOTH (operator override).
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_aqua_blue_aaaa", "synced", name="Aqua Blue")
-        _variation(lg, "slab_marble_aqua_blue_bbbb", "synced", name="Aqua Blue")
+        _variation(lg, "marble__aqua_blue_aaaa", "synced", name="Aqua Blue")
+        _variation(lg, "marble__aqua_blue_bbbb", "synced", name="Aqua Blue")
 
         # without protection: one of the twins is dropped + tombstoned
         r1 = reconcile_variations_to_seed(lg, seed_keys=set())
@@ -168,11 +168,11 @@ def test_reconcile_never_drops_a_protected_key(tmp_path):
         assert len(remaining) == 1
 
     with Ledger.open(tmp_path / "dev2.ledger", env="development") as lg:
-        _variation(lg, "slab_marble_aqua_blue_aaaa", "synced", name="Aqua Blue")
-        _variation(lg, "slab_marble_aqua_blue_bbbb", "synced", name="Aqua Blue")
+        _variation(lg, "marble__aqua_blue_aaaa", "synced", name="Aqua Blue")
+        _variation(lg, "marble__aqua_blue_bbbb", "synced", name="Aqua Blue")
         # protect BOTH -> neither is dropped
         reconcile_variations_to_seed(lg, seed_keys=set(),
-                                     protected={"slab_marble_aqua_blue_aaaa", "slab_marble_aqua_blue_bbbb"})
+                                     protected={"marble__aqua_blue_aaaa", "marble__aqua_blue_bbbb"})
         remaining = {v["key"] for v in lg.execute("SELECT key FROM variation")}
-        assert remaining == {"slab_marble_aqua_blue_aaaa", "slab_marble_aqua_blue_bbbb"}
+        assert remaining == {"marble__aqua_blue_aaaa", "marble__aqua_blue_bbbb"}
         assert lg.execute("SELECT COUNT(*) n FROM removed").fetchone()["n"] == 0

@@ -19,12 +19,13 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import add_icon
 from stone_pipeline.stages import emit, images
 from stone_pipeline.standardise import cutout
 
 A, B, C3 = "a" * 64, "b" * 64, "c" * 64
 BASE = f"https://bucket.s3.amazonaws.com/{ENV_SEGMENT}/products"
-KEY = "slab_marble_calacatta_viola_1"
+KEY = "marble__calacatta_viola_1"
 
 
 def _slab_png(w, h, alpha):
@@ -422,11 +423,12 @@ def test_the_misfits_reach_the_source_s_diagnostics(tmp_path):
 
 def _seed_variation(ledger):
     now = now_iso()
-    ledger.upsert("variation", {"key": KEY, "branch": "slab", "type": "Marble", "name": "Calacatta Viola",
-                                "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "V1", "in_full": 1, "payload_hash": "",
+    ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Calacatta Viola",
+                                "aliases": "[]",
+                                "medusa_id": "V1", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, KEY)
 
 
 def _row(model_3d_key, standard_version=None):
@@ -471,7 +473,7 @@ def test_the_pull_payload_carries_both_3d_files_and_null_without_one(tmp_path):
         now = now_iso()
         for sku, key in (("SEN-7154-4", url), ("SEN-2213", None)):
             ledger.upsert("product", {"sku": sku, "source": "sen", "variation_key": KEY, "state": "pending",
-                                      "model_3d_key": key, "created_at": now, "updated_at": now}, pk=("sku",))
+                                      "category": "slabs", "model_3d_key": key, "created_at": now, "updated_at": now}, pk=("sku",))
         by = {r["external_id"]: r["payload"] for r in ready(ledger, "products")}
         assert by["SEN-7154-4"]["model_3d"] == {"cutout": url, "meta": f"{BASE}/standard/cutout/sentas/{A}.json"}
         assert by["SEN-2213"]["model_3d"] is None

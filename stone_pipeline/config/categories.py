@@ -53,6 +53,12 @@ class Category:
         return bool(self.pcat_id)
 
     @property
+    def handle(self) -> str:
+        """The category's immutable Medusa HANDLE, the one identifier the sync wire and the ledger carry (PHASE-1-SPEC
+        D11): the pack's plural, never the renameable label."""
+        return self.plural
+
+    @property
     def backbone_path(self) -> Path:
         # pack-namespaced (stone flat); never stone-fallback
         return settings._catalog_source_file(self.backbone_filename)
@@ -114,6 +120,11 @@ def category(name: str) -> "Category | None":
     # silently falling through to the slab default.
     key = (name or "").strip().casefold()
     return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
+
+
+def category_by_handle(handle: str) -> "Category | None":
+    """The category whose handle (D11) is exactly `handle`, or None."""
+    return next((c for c in _BY_NAME.values() if c.handle == handle), None)
 
 
 def category_for_key(key: str) -> "Category | None":

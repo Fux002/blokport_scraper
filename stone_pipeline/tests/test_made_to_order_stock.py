@@ -23,9 +23,10 @@ from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.derive import derive_inventory
 from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
 from stone_pipeline.tests.test_ledger_products import _fixture_rows, _seed_ids
 
-KEY = "tile_marble_pietra_grey_0001"
+KEY = "marble__pietra_grey_0001"
 
 
 @pytest.fixture(scope="module")
@@ -35,6 +36,7 @@ def cfg():
 
 def _row(sku: str, *, made_to_order: bool, count: str = "5") -> CanonicalRow:
     r = CanonicalRow(src_site="polonine", surrogate_key=sku, variation_id="V1", handle=f"h-{sku.lower()}",
+                     category_pcat_id=SLAB_PCAT,
                      raw_slab_count=count, free_size_length=0.8 if made_to_order else None,
                      free_size_width=0.4 if made_to_order else None)
     derive_inventory(r)
@@ -44,10 +46,11 @@ def _row(sku: str, *, made_to_order: bool, count: str = "5") -> CanonicalRow:
 def _seed(ledger: Ledger) -> None:
     now = now_iso()
     ledger.upsert("variation", {
-        "key": KEY, "branch": "tile", "type": "Marble", "name": "Pietra Grey", "aliases": "[]",
-        "image_url": f"https://bucket/variations/{KEY}.png", "image_sha256": None, "image_model": None,
-        "volume": "", "medusa_id": "V1", "payload_hash": "", "state": "synced", "first_seen": now,
+        "key": KEY, "type": "Marble", "name": "Pietra Grey", "aliases": "[]",
+        "medusa_id": "V1", "payload_hash": "", "state": "synced", "first_seen": now,
         "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, KEY)
+    seed_slab_category(ledger)
 
 
 def _synced(ledger: Ledger, rows, cfg) -> None:

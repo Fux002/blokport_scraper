@@ -22,7 +22,7 @@
 --
 -- v15 (phase 1): ONE variation row per (type, name), Key `{type slug}__{name slug}_{uuid}` with no category
 -- prefix; `branch`, `image_url`, `image_sha256`, `image_model` and `volume` are gone, as are the unused
--- `combination` table and `product.bundle_size`. A ledger below v15 is not migrated here: the phase 1 store
+-- `combination` table. A ledger below v15 is not migrated here: the phase 1 store
 -- migration (phase1.migrate_stores) writes v15 stores, and the DAL refuses an older one.
 --
 -- payload_hash inputs are documented per table (design section 4 / M3). The DAL
@@ -87,10 +87,11 @@ CREATE INDEX IF NOT EXISTS idx_variation_serve ON variation (state, created_at, 
 -- variation_category_image: a variety's icon per (variety, category) pair (PHASE-1-SPEC D3, section 4). The
 -- category is its HANDLE (the pack's plural, D11), like the product rows; s3_key is the full object key in the
 -- env's staging bucket, `{ENV_SEGMENT}/variations/{key}/{category name}.png`; etag is the object's ETag, so a
--- re-made icon at the same key re-serves its variety (both are in the variation payload hash).
+-- re-made icon at the same key re-serves its variety (both are in the variation payload hash). The icons are the
+-- variety's own: deleting the variety deletes them (ON DELETE CASCADE), so no delete path has to name this table.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS variation_category_image (
-    key              TEXT NOT NULL REFERENCES variation (key),
+    key              TEXT NOT NULL REFERENCES variation (key) ON DELETE CASCADE,
     category_handle  TEXT NOT NULL,
     s3_key           TEXT NOT NULL,
     etag             TEXT NOT NULL,
@@ -152,7 +153,7 @@ CREATE TABLE IF NOT EXISTS product (
     finish               TEXT,
     quality              TEXT,
     type                 TEXT,                          -- the product's stone type name (-> type_id, type_name)
-    category             TEXT,                          -- canonical category name (-> category_pcat_id)
+    category             TEXT,                          -- the category HANDLE, the pack's plural (D11; -> category_pcat_id)
     -- presentation fields (reproduce the legacy import CSV)
     title                TEXT,
     description          TEXT,
@@ -180,6 +181,8 @@ CREATE TABLE IF NOT EXISTS product (
     visibility           TEXT,                          -- null -> render the config constant
     discountable         TEXT,                          -- null -> render the config constant
     sold_in_bundle       INTEGER,                       -- 0/1
+    -- render only (the import template's STN Bundle Size): not served, so not in the payload hash (SC-4 2c)
+    bundle_size          INTEGER,
     inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
     made_to_order        INTEGER NOT NULL DEFAULT 0,    -- 1: on sale with no count (a free-size shape)
     lot_code             TEXT,                          -- shared by every piece of a lot; null = not in a lot

@@ -21,7 +21,7 @@ def _accessory() -> categories.Category:
 def test_one_entry_adds_a_category(monkeypatch):
     monkeypatch.setitem(categories._BY_NAME, "accessory", _accessory())
     assert categories.category("accessory").label == "Accessories"
-    assert categories.category_for_key("accessory_sink_x_uuid").name == "accessory"
+    assert categories.category_by_handle("accessories").name == "accessory"   # its handle is the plural (D11)
 
 
 def test_standalone_not_in_fanout(monkeypatch):
@@ -135,34 +135,6 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
         assert categories.category("tile").pcat_id == "pcat_TILE_OVERRIDE"  # override, not the file value
     finally:
         categories._ENV_PCATS, categories._BY_NAME, categories._BY_LABEL_CF = saved
-
-
-def test_uniform_fill_follows_the_runtime_registry_not_the_frozen_tuple(monkeypatch):
-    # The slab-only-mint bug: emit's union-fill gated the fan-out on the FROZEN import-time CATEGORIES
-    # tuple, which refresh_category_pcats never rebuilds. So when block/tile pcats were absent at import,
-    # a genuinely-new variety fanned to slab ONLY, even after the registry was refreshed -- and the fill,
-    # meant to be the safety net, could not heal it. The fill must read the runtime registry
-    # (active_categories) so it agrees with curate.active_branches().
-    from dataclasses import replace
-    from stone_pipeline.config import categories
-    from stone_pipeline.stages import emit_catalog
-
-    cats = list(categories._BY_NAME.values())
-    saved = categories._BY_NAME
-    # runtime registry: ALL categories active (post-refresh state); frozen tuple: block/tile still inactive
-    active = {c.name: replace(c, pcat_id=f"pcat_{c.name}") for c in cats}
-    frozen_stale = tuple(replace(c, pcat_id=("pcat_slab" if c.name == "slab" else "")) for c in cats)
-    monkeypatch.setattr(categories, "_BY_NAME", active)
-    monkeypatch.setattr(categories, "CATEGORIES", frozen_stale)     # the never-rebuilt import snapshot
-    assert not hasattr(emit_catalog, "CATEGORIES"), "emit_catalog must never hold the frozen tuple"
-
-    slab_only = {"slab_granite_novum_abc12345-0000-5000-8000-000000000000":
-                 {"Key": "slab_granite_novum_abc12345-0000-5000-8000-000000000000", "Name": "Novum",
-                  "Aliases": "", "Image": "", "Volume per kg (m³/kg)": ""}}
-    filled = emit_catalog._uniform_rows(slab_only)
-    branches = {r["Key"].split("_", 1)[0] for r in filled}
-    categories._BY_NAME = saved
-    assert branches == {"block", "tile"}, f"union-fill must fan to the runtime-active categories, got {branches}"
 
 
 def test_load_all_refreshes_the_category_registry(monkeypatch):
