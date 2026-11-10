@@ -42,6 +42,8 @@ _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'co
 # curate path built the card). nearest_existing is NOT cleaned: it lists existing Names with their types,
 # 'Copacabana (Granite); Panda Black (Granite)', which the name rule would flatten; it keeps its casing step.
 _CARD_NAME_FIELDS = {"variant": field_kinds.VARIATION_NAME, "color": field_kinds.COLOR_NAME}
+# a colour_unconfirmed card's own fields (stages.curate.review.colour_cards), carried only by that card
+_COLOUR_CARD_FIELDS = ("colours", "skus", "count")
 
 
 def _card_text(field: str, value: str) -> str:
@@ -83,7 +85,8 @@ def write_confirm_file(pending: list[dict]) -> int:
             if c in _CARD_NAME_FIELDS:
                 return _card_text(_CARD_NAME_FIELDS[c], str(row.get(c) or ""))
             return title_case(str(row.get(c) or "")) if c == "nearest_existing" else row.get(c, "")
-        return {c: value(c) for c in _PENDING_VARIETY_FIELDS}
+        return {**{c: value(c) for c in _PENDING_VARIETY_FIELDS},
+                **{c: row[c] for c in _COLOUR_CARD_FIELDS if c in row}}
     # one card per identity; every (vendor, scraped spelling) listing behind it rides along as `listings`, so
     # ONE statement on the card is applied to each listing under ITS vendor (decisions are keyed by vendor +
     # spelling; a card shared by two vendors must never decide the second vendor's listings as the first's).
@@ -104,8 +107,11 @@ def write_confirm_file(pending: list[dict]) -> int:
         if (scope := _norm(row.get("ref_scope", "") or "")):
             ref = f"{name}|{stone_type}|{scope}"
         card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
-        if row.get("scraped") and row.get("src"):
-            listing = {"source": row["src"], "scraped": row["scraped"]}
+        # a card that names its listings itself (a colour card: every spelling of the vendor's variety) brings
+        # them; any other card is one listing, its own (src, scraped)
+        own = row.get("listings") or ([{"source": row["src"], "scraped": row["scraped"]}]
+                                      if row.get("scraped") and row.get("src") else [])
+        for listing in own:
             listings = card["payload"].setdefault("listings", [])
             if listing not in listings:
                 listings.append(listing)

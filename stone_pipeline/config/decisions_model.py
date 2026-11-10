@@ -61,7 +61,8 @@ class Decisions:
     vendor_origins: dict[tuple[str, str, str], str] = field(default_factory=dict)  # (vendor, name, type) -> ISO
     widened: dict[tuple[str, str, str], str] = field(default_factory=dict)         # the ones the operator widened
     colours: dict[tuple[str, str], list[str]] = field(default_factory=dict)         # (name, type) -> documented colours
-    listing_colours: dict[Key, str] = field(default_factory=dict)   # (vendor, spelling) -> the colour its listings ARE
+    # (vendor, variety, type) -> the colour that vendor's listings of the variety ARE (the operator's latest word)
+    listing_colours: dict[tuple[str, str, str], str] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> "Decisions":
@@ -72,14 +73,14 @@ class Decisions:
     def from_statements(cls, rows: Iterable[dict], exists_as: Callable[[str, str], bool],
                         alias_target: Callable[[str, str], str | None]) -> "Decisions":
         """Build from `statement` rows ({source, spelling_norm, spelling, verdict, name, stone_type, color,
-        origin_iso, widen, asked_by}) and the two variety lookups the derivation needs (config.varieties on
+        origin_iso, widen, asked_by, decided_at?}) and the two variety lookups the derivation needs (config.varieties on
         the ledger; injected so the rule is testable without one)."""
         statements: dict[Key, Statement] = {}
         bindings: dict[Key, tuple[str, str]] = {}
         origins: dict[tuple[str, str, str], str] = {}
         widened: dict[tuple[str, str, str], str] = {}
         colours: dict[tuple[str, str], list[str]] = {}
-        listing_colours: dict[Key, str] = {}
+        listing_colours: dict[tuple[str, str, str], tuple[str, str]] = {}   # -> (decided_at, colour)
         for r in rows:
             src, sp = _norm(r["source"]), _norm(r["spelling_norm"])
             display = r.get("spelling") or r["spelling_norm"]
@@ -101,8 +102,11 @@ class Decisions:
                 known = colours.setdefault((_norm(target), _norm(stone_type)), [])
                 if colour not in known:
                     known.append(colour)
-                if src:
-                    listing_colours[(src, sp)] = colour
+                # ...and, stated by a vendor, the colour of every listing that vendor has of the variety: one
+                # decision per (vendor, variety), the latest one winning when two spellings disagree
+                group, decided = (src, _norm(target), _norm(stone_type)), r.get("decided_at") or ""
+                if src and decided >= listing_colours.get(group, ("", ""))[0]:
+                    listing_colours[group] = (decided, colour)
             if src:
                 bindings[(src, sp)] = (target, stone_type)
                 if iso:
@@ -120,7 +124,7 @@ class Decisions:
                 name=(r.get("name") or None), stone_type=stone_type or None, color=r.get("color") or None,
                 origin_iso=iso, widen=widen, asked_by=r.get("asked_by") or "")
         return cls(statements=statements, bindings=bindings, vendor_origins=origins, widened=widened,
-                   colours=colours, listing_colours=listing_colours)
+                   colours=colours, listing_colours={k: c for k, (_, c) in listing_colours.items()})
 
     @classmethod
     def from_legacy(cls, actions: dict, scoped: dict | None = None, origins: dict | None = None,
@@ -207,14 +211,11 @@ class Decisions:
         """(vendor, spelling) -> operator stone type, for every mint statement that set one."""
         return {k: s.stone_type for k, s in self.statements.items() if s.is_mint and s.stone_type}
 
-    def listing_colour(self, source: str, spelling: str, clean: str | None = None) -> str | None:
-        """The colour the operator stated for this vendor's listing (its scraped spelling, else its variety), bound
+    def listing_colour(self, source: str, variety: str, stone_type: str) -> str | None:
+        """The colour the operator stated for this vendor's listings of the variety, on any of its spellings, bound
         and minted statements alike. Vendor level only: a listing's colour is that vendor's product, so one
         vendor's word never colours another vendor's listings of the same variety."""
-        for level, s in self._keys(source, spelling, clean):
-            if level and (colour := self.listing_colours.get((level, s))):
-                return colour
-        return None
+        return self.listing_colours.get((_norm(source), _norm(variety), _norm(stone_type)))
 
     def colour_leaves(self) -> dict[tuple[str, str], dict[str, list[str]]]:
         """(norm name, norm type) -> {"color": [...]}: every colour an operator stated for a variety, in the

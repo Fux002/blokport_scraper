@@ -32,7 +32,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData,
     collect_matched_aliases(c)
     observe_branches_and_images(c)
     classify(c)
-    c.pending_confirm.extend(colour_cards(rows))
+    c.pending_confirm.extend(colour_cards(rows, ref))
     drop_confirmed_from_review(c)
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},

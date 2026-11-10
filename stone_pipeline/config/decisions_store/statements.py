@@ -23,7 +23,8 @@ def scope_key(source: str, spelling: str) -> tuple[str, str]:
     return (_norm(source), _norm(spelling))
 
 
-_STATEMENT_COLS = "source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, widen, asked_by"
+_STATEMENT_COLS = ("source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, widen, asked_by, "
+                   "decided_at")
 
 
 def _statement_rows() -> list[dict]:
@@ -34,7 +35,7 @@ def _statement_rows() -> list[dict]:
 
 def statement_rows() -> list[dict]:
     """Every stored operator statement as a row dict (source, spelling_norm, spelling, verdict, name,
-    stone_type, color, origin_iso, widen, asked_by). The public reader other packages use; the review
+    stone_type, color, origin_iso, widen, asked_by, decided_at). The public reader other packages use; the review
     API's VE2 re-confirm check reads it to compare a decision against what is already stored."""
     return _statement_rows()
 

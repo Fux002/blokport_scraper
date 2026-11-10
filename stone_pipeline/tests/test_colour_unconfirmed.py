@@ -101,13 +101,77 @@ def test_a_decision_updates_every_row_of_its_source_and_variety(ref, patagonia):
     assert other.color_method == "colour_unconfirmed"                # another vendor's listings are its own decision
 
 
-def test_curate_raises_one_card_per_source_variety_and_type(ref, patagonia):
+def _decide(*statements):
+    return Decisions.from_statements(
+        [{"source": src, "spelling_norm": sp.lower(), "spelling": sp, "verdict": "is", "name": "Patagonia",
+          "stone_type": "Quartzite", "color": colour, "origin_iso": None, "widen": 0, "asked_by": src,
+          "decided_at": at} for src, sp, colour, at in statements],
+        exists_as=lambda name, stone_type: True, alias_target=lambda name, stone_type: None)
+
+
+def test_the_latest_decision_on_any_spelling_of_the_variety_wins(ref, patagonia):
+    ref.decisions = _decide(("varsha", "Patagonia Quartzite", "White", "2026-11-10T09:00:00"),
+                            ("varsha", "Patagonia", "Beige", "2026-11-10T10:00:00"))
+    row = _reconcile(ref, _row(patagonia, variety_match_key="Patagonia Leather"))   # a spelling never decided
+    assert (row.color_name, row.color_method) == ("Beige", "operator")
+
+
+# --- the operator's item: ONE per (source, variety), in the existing review queue ---------------------------------
+
+def _cards(ref, patagonia):
+    rows = [_reconcile(ref, _row(patagonia, surrogate_key="1217", variety_match_key="Patagonia Quartzite Polished",
+                                 raw_image_urls=["https://varsha.example/p/1217.jpg"])),
+            _reconcile(ref, _row(patagonia, surrogate_key="1056", raw_image_urls=["https://varsha.example/p/1056.jpg"])),
+            _reconcile(ref, _row(patagonia, surrogate_key="2230")),
+            _reconcile(ref, _row(patagonia, src_site="sentas", surrogate_key="9"))]
     from stone_pipeline.stages.curate import review
-    rows = [_reconcile(ref, _row(patagonia, surrogate_key=k)) for k in ("1056", "1217")]
-    cards = review.colour_cards(rows)
-    assert [(c["kind"], c["variant"], c["stone_type"], c["src"], c["scraped"]) for c in cards] == [
-        ("colour_unconfirmed", "Patagonia", "Quartzite", "varsha", "Patagonia")]
-    assert "colour" in cards[0]["reason"]
+    return review.colour_cards(rows, ref)
+
+
+def test_one_item_per_source_and_variety_carries_what_the_decision_needs(ref, patagonia):
+    from stone_pipeline.config.sources import load_source
+    code = load_source("varsha").source_code.upper()
+    item = next(c for c in _cards(ref, patagonia) if c["src"] == "varsha")
+    assert len(_cards(ref, patagonia)) == 2                            # varsha's and sentas's, never merged
+    assert (item["kind"], item["variant"], item["stone_type"], item["color"]) == (
+        "colour_unconfirmed", "Patagonia", "Quartzite", "")            # no colour prefilled: never guessed
+    assert item["listings"] == [{"source": "varsha", "scraped": "Patagonia"},
+                                {"source": "varsha", "scraped": "Patagonia Quartzite Polished"}]
+    assert item["skus"] == [f"{code}-1056", f"{code}-1217", f"{code}-2230"] and item["count"] == 3
+    assert item["colours"] == [*patagonia.colors, "Multicolor"]
+    assert item["image"] == "https://varsha.example/p/1056.jpg"        # the scraped lead of the first listing
+    assert item["reason"].startswith("No vendor colour") and item["ref_scope"] == "varsha"
+
+
+def test_the_items_photo_is_the_published_standardised_main_view(ref, patagonia):
+    from stone_pipeline.stages.curate import review
+    row = _reconcile(ref, _row(patagonia, raw_image_urls=["https://varsha.example/p/1056.jpg"]))
+    row.standard_photo, row.image_keys = True, ["https://cdn.example/standard/main/varsha/abc.jpg"]
+    assert review.colour_cards([row], ref)[0]["image"] == "https://cdn.example/standard/main/varsha/abc.jpg"
+
+
+def test_the_queue_stores_the_item_as_the_review_api_serves_it(ref, patagonia, monkeypatch):
+    from stone_pipeline.stages import decisions
+    seen = {}
+    monkeypatch.setattr(decisions.decisions_store, "replace_pending", lambda kind, rows: seen.setdefault(kind, rows))
+    decisions.write_confirm_file(_cards(ref, patagonia))
+    stored = {r["ref"]: r["payload"] for r in seen["variety"]}
+    assert set(stored) == {"patagonia|quartzite|varsha", "patagonia|quartzite|sentas"}
+    item = stored["patagonia|quartzite|varsha"]
+    assert item["count"] == 3 and item["colours"][-1] == "Multicolor"
+    assert item["listings"] == [{"source": "varsha", "scraped": "Patagonia"},
+                                {"source": "varsha", "scraped": "Patagonia Quartzite Polished"}]
+
+
+def test_one_decision_on_the_item_updates_every_listing_of_its_group(ref, patagonia):
+    # the decision is PUT /review/decide {listings: the item's listings, name, type, color}: one statement per
+    # listing, all with the one colour; every row of the vendor's variety takes it, whatever its spelling
+    item = next(c for c in _cards(ref, patagonia) if c["src"] == "varsha")
+    ref.decisions = _decide(*((l["source"], l["scraped"], "Gold", "2026-11-10T11:00:00") for l in item["listings"]))
+    rows = [_reconcile(ref, _row(patagonia, surrogate_key=k, variety_match_key=sp))
+            for k, sp in (("1056", "Patagonia"), ("1217", "Patagonia Quartzite Polished"), ("2230", "Patagonia"))]
+    assert {(r.color_name, r.color_method) for r in rows} == {("Gold", "operator")}
+    assert not any(_unconfirmed(r) for r in rows)
 
 
 # --- rule 3: one allowed colour is unchanged -----------------------------------------------------------------------

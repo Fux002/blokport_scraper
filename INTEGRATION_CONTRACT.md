@@ -1,6 +1,6 @@
 # Frozen response contracts (scraper side) for the :4200 integration
 
-Exact shapes for the endpoints the Blokport integration binds to (S-1..S-5), verified against the actual
+Exact shapes for the endpoints the Blokport integration binds to (S-1..S-6), verified against the actual
 response-builders (`ledger/sync.py`, `lifecycle.py`), not assumptions. Bind to THESE field names exactly and
 fail loud on any mismatch. The full endpoint list is in `FRONTEND_API.md`; this pins the shapes.
 
@@ -99,6 +99,92 @@ A row is abandonable only in its dead-letter state: `variations`/`products` in `
 | `409` | the row exists but is not a dead-letter (still live or serving); nothing written | `{ "type", "external_id", "abandoned": false, "error": "not a dead-letter (not <state>)" }` |
 
 `abandoned` is a boolean in every body. A `4xx` is a refusal, never a `200`.
+
+## S-6 -- the colour decision (config server :8724, the existing review API)
+
+No new endpoint. The colour item is one more card in the existing review queue (kind `colour_unconfirmed`),
+decided with the existing statement call. Built by `stages/curate/review.colour_cards`, stored by
+`stages/decisions.write_confirm_file`, served by `config/decisions_store/queue.list_pending`. Every call takes
+`Authorization: Bearer <SCRAPER_CONFIG_TOKEN>` (`401 {"error": "unauthorized"}` without it).
+
+When: a stone variety the backbone sells in several colours, a vendor listing that gives NO colour, and no
+operator colour for that (vendor, variety) yet. ONE item per (vendor, variety, type). A NEW listing of it is held
+until decided. A listing already in Medusa stays listed with the colour it has, and is covered by the item.
+
+### GET /config/v1/review/variants
+
+No paging, no query filter: the whole queue in one list (variety cards, then origin cards, then decision gaps,
+each in `ref` order). Decided cards sort to the end; undecided ones keep their order. The client filters on
+`kind == "colour_unconfirmed"`. Response `200`:
+```
+{ "variants": [ <item>, ... ],
+  "counts": { "total": <int>, "decided": <int>, "undecided": <int> } }   // over the WHOLE list, every kind
+```
+One colour item:
+```
+{ "ref": "patagonia|quartzite|varsha",       // <norm variety>|<norm type>|<norm vendor>: one per vendor
+  "kind": "colour_unconfirmed",
+  "variant": "Patagonia",                    // the variety it decides for
+  "stone_type": "Quartzite",
+  "src": "varsha",                           // the vendor it decides for
+  "colours": ["Black", "White", "Beige", "Gold", "Pink", "Multicolor"],   // the variety's backbone colours,
+                                             //   then "Multicolor" (unless the backbone already has it)
+  "count": 3,                                // listings (products) it covers
+  "skus": ["VAR-1056", "VAR-1217", "VAR-2230"],
+  "listings": [ { "source": "varsha", "scraped": "Patagonia" },     // every scraped spelling behind it,
+                { "source": "varsha", "scraped": "Patagonia Quartzite Polished" } ],   // as on other cards
+  "spellings": ["Patagonia", "Patagonia Quartzite Polished"],
+  "image": "https://...",                    // the standardised main view if published, else the scraped
+                                             //   lead photo ("" if neither)
+  "reason": "No vendor colour: varsha gives none and Patagonia comes in Black, White, Beige, Gold and Pink, so
+             none is guessed. Pick this supplier's Patagonia colour; it applies to all 3 listing(s). ...",
+  "color": "",                               // never prefilled: the item never guesses
+  "decided": false,
+  "current_action": null,                    // "colour" once decided
+  "current_color": null,                     // the colour decided, applied on the next produce
+  "scraped": "Patagonia", "src_url": "...", "description": "...",   // the first listing's evidence
+  "nearest_existing": "", "score": "", "model_prob": "", "sources": [] }
+```
+`decided` / `current_color` show a decision made since the last produce. The next produce applies it and drops
+the item.
+
+### PUT /config/v1/review/decide (the existing statement)
+
+Request: the item's own listings, variety, type and the chosen colour:
+```
+{ "listings": <item.listings>, "name": <item.variant>, "type": <item.stone_type>, "color": "<one of item.colours>" }
+```
+It stores one durable statement per listing, in one transaction (all or none). On the next produce, EVERY listing
+of that vendor's variety takes the colour, by add or update only: the ones on the item, and any spelling the vendor
+lists later. If statements on two spellings disagree, the latest one wins. Picking a colour the backbone variety
+lacks (e.g. "Multicolor") adds it to that variety's documented colours, so it is assignable.
+
+Response `200`:
+```
+{ "source": "varsha", "scraped": "Patagonia", "name": "Patagonia", "stone_type": "Quartzite",
+  "color": "Gold", "origin": null, "result": "bound",                   // the first listing's outcome
+  "listings": [ { "source": "varsha", "scraped": "Patagonia", "result": "bound" }, ... ],
+  "decided": 2 }                                                        // statements stored (= listings)
+```
+Refusals (`{"error": "..."}`; nothing is stored):
+| code | when |
+|---|---|
+| `400` | the body is not an object; `listings` is missing or malformed; `name` or `type` is missing |
+| `400` | `name` is not its own clean form (the body carries `clean`); `type` is not a Medusa stone type |
+| `400` | `color` is not a Medusa colour attribute. Any Medusa colour is accepted: a colour outside `item.colours` is NOT refused. |
+| `409` | the variety is retired (`"retired": true`) |
+| `503` | the field kinds are not published yet (retry) |
+
+There is no stale-item refusal. Deciding an item the last produce already dropped still stores the statement
+(`200`), which then applies on the next produce.
+
+### Undo: DELETE /config/v1/review/decide (the existing call)
+
+`{ "listings": <item.listings> }` clears each listing's statement, all or none. Responses:
+- `200 { "listings": [...], "cleared": [{"statements": <n>}, ...] }`. This always works before the next produce.
+- `409 { "error": ..., "blocked": [{source, scraped, products}] }` once a produce has applied the colour and live
+  products depend on it. Restate with PUT and another colour instead.
+- `400` for a malformed body.
 
 ## Notes
 - `combinations` is NOT a sync lane (dormant): it never appears in `/failures` and its `status.combination`

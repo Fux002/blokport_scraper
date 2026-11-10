@@ -76,8 +76,7 @@ def _fill_missing_colour(row: CanonicalRow, allowed: list[str], ref: ReferenceDa
         _fill_missing_from_variety(row, "color", allowed, stats)
         return
     stats.filled_from_variety += 1
-    stated = ref.decisions.listing_colour(row.src_site or "", row.variety_match_key or row.raw_name or "",
-                                          row.variation_name)
+    stated = ref.decisions.listing_colour(row.src_site or "", row.variation_name or "", row.type_name or "")
     if stated:
         row.color_name, row.color_confidence, row.color_method = stated, Confidence.high.name, "operator"
         return
