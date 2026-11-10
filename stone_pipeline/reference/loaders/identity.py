@@ -1,10 +1,10 @@
 """Variety identity: the ONE rule the whole pipeline dedups by.
 
-A variety is (branch, stone-type, name). Two Keys with the same identity are the SAME variety twice --
-the class that ships duplicate products (a legacy Key whose name-slug baked in an alias:
-`..._verde_ubatuba_ubatuba_...` vs the clean `..._verde_ubatuba_...`). Type comes from type_slug_from_key
-(multi-word aware, so `sodalite_syenite` is one type and a genuine multi-type homonym like Aqua Blue as
-gneiss/granite/marble/onyx stays distinct). Name is the DISPLAY Name accent-folded + slugged, so an
+A variety is (stone-type, name), with no category (PHASE-1-SPEC rev 8, 2a): one record per (type, name). Two Keys
+with the same identity are the SAME variety twice -- the class that ships duplicate products (a Key whose
+name-slug baked in an alias: `..._verde_ubatuba_ubatuba_...` vs the clean `..._verde_ubatuba_...`). Type comes
+from the Key through the ONE parser (phase1.variety_key: the part before the first `__`), so `sodalite_syenite` is
+one type and a genuine multi-type homonym like Aqua Blue as gneiss/granite/marble/onyx stays distinct. Name is the DISPLAY Name accent-folded + slugged, so an
 alias in a legacy Key's slug never splits the variety. This single rule is used by emit (collapse
 before write), the matcher reference (exclude non-survivors), and the ledger reconcile -- one identical
 rule everywhere, so a dup can never enter from any path."""
@@ -13,64 +13,31 @@ from __future__ import annotations
 
 import csv
 from functools import lru_cache
-from typing import Optional
 
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core.text import slugify
-from stone_pipeline.reference.loaders.attributes import load_attributes
+from stone_pipeline.phase1.variety_key import variety_key_name_slug, variety_key_type
 from stone_pipeline.reference.loaders.common import env, norm
 
-_TYPE_SLUGS: Optional[set[str]] = None
-
-
-def _type_slugs() -> set[str]:
-    """All backend type slugs (incl. multi-word 'Dolomite Marble' -> 'dolomite_marble' and the
-    Sodalite->Sodalite Syenite synonym targets), cached. Lets is_mistyped_variant find where the
-    Key's type ends instead of assuming it is a single segment."""
-    global _TYPE_SLUGS
-    if _TYPE_SLUGS is None:
-        names = [v for v, _ in load_attributes().by_category.get("type", {}).values()]
-        names += list(env().load_synonyms("type").values())
-        # slugify the SAME way gen_key encodes a Key's type (the one slug rule), so a multi-word OR
-        # hyphenated type ('Semi-Precious Stone' -> 'semi_precious_stone') matches the underscore-keyed
-        # Key. Joining on whitespace alone kept the hyphen ('semi-precious_stone') and never matched.
-        _TYPE_SLUGS = {slugify(n, "_") for n in names if n}
-    return _TYPE_SLUGS
-
-
 def type_slug_from_key(key: str) -> str:
-    """The stone-type SLUG embedded in a variant Key, MULTI-WORD aware: the longest known type slug
-    that == or prefixes the post-branch portion -- 'slab_dolomite_marble_angelus_..' -> 'dolomite_marble'
-    (not the truncated 'dolomite'), 'slab_semi_precious_stone_..' -> 'semi_precious_stone'. Falls back to
-    the single token after the branch when nothing matches (a brand-new/unknown type)."""
-    parts = (key or "").split("_")
-    if len(parts) < 2:
-        return ""
-    after_branch = "_".join(parts[1:])
-    return max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
-               key=len, default=parts[1].casefold())
+    """The type slug of a variety Key: the part before the first `__` (phase1.variety_key, the one parser; no type
+    list). Raises ValueError on a Key that is not of the form, an old prefixed Key included, never a guessed type."""
+    return variety_key_type(key)
 
 
 def _name_slug(name: str) -> str:
     return slugify(name, "_")
 
 
-def variety_identity(key: str, name: str) -> tuple[str, str, str]:
-    """(branch, type-slug, folded name-slug) -- the dedup identity of a variety. See the module docstring."""
-    return (key.split("_", 1)[0] if key else "", type_slug_from_key(key), _name_slug(name))
-
-
-def _key_name_slug(key: str) -> str:
-    """The name-slug portion of a Key (between the type and the trailing uuid) -- for survivor choice."""
-    parts = key.split("_")
-    uuid_at = next((i for i, p in enumerate(parts) if "-" in p), len(parts))
-    return "_".join(parts[2:uuid_at])
+def variety_identity(key: str, name: str) -> tuple[str, str]:
+    """(type-slug, folded name-slug) -- the dedup identity of a variety. See the module docstring."""
+    return (type_slug_from_key(key), _name_slug(name))
 
 
 def survivor_of(keys, seed_keys) -> str:
     """The one Key to keep for an identity group: prefer a committed-seed Key, then the cleanest name-slug
-    (shortest -- an alias-laden legacy slug loses), then lexical. Deterministic and stable across runs."""
-    return min(keys, key=lambda k: (k not in seed_keys, len(_key_name_slug(k)), k))
+    (shortest -- an alias-laden slug loses), then lexical. Deterministic and stable across runs."""
+    return min(keys, key=lambda k: (k not in seed_keys, len(variety_key_name_slug(k)), k))
 
 
 @lru_cache(maxsize=1)
@@ -137,10 +104,9 @@ def is_mistyped_variant(key: str, name: str) -> bool:
     post-branch portion rather than taking parts[1] (which falsely flagged 'Dolomite Marble' /
     'Sodalite Syenite' variants named with their second word)."""
     ntw = explicit_type_word(name)
-    parts = (key or "").split("_")
-    if not ntw or len(parts) < 3:
+    if not ntw:
         return False
-    key_type = type_slug_from_key(key)   # multi-word aware (shared with the variation index)
+    key_type = type_slug_from_key(key)   # the one parser, multi-word aware
     # Resolve the name's type word to its CANONICAL type before comparing (the same synonym map
     # resolve_id uses), so 'Agata' -> 'Agate' and 'Sodalite' -> 'Sodalite Syenite' are judged against
     # the canonical, not the literal foreign spelling -- else 'Agata Blue' keyed 'agate' would falsely

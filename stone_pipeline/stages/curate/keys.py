@@ -9,10 +9,7 @@ import uuid
 
 from stone_pipeline.config.categories import CATEGORIES, active_categories
 from stone_pipeline.config.settings import SETTINGS
-from stone_pipeline.core.text import slugify
-
-# deterministic namespace for variant key uuids (fixed, so keys are reproducible)
-_KEY_NS = uuid.UUID("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
+from stone_pipeline.phase1.variety_key import _KEY_NS, _slug_us
 
 # every category derives from the registry.
 BRANCHES = tuple(c.name for c in CATEGORIES)
@@ -24,12 +21,6 @@ def active_branches() -> tuple[str, ...]:
     A new variety is created in each, but only its product-backed branch gets an
     image (see product_backed below)."""
     return tuple(c.name for c in active_categories() if c.fan_out)
-
-
-def _slug_us(text: str) -> str:
-    """Underscore slug matching the existing Key convention (agata_black): the one slug rule, so the deterministic
-    Key can never split one variety in two ('Porriño' and 'Porrino', or a curly and a straight apostrophe)."""
-    return slugify(text, "_")
 
 
 def gen_key(branch: str, stone_type: str, name: str) -> str:

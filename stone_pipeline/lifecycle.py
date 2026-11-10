@@ -641,7 +641,7 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
         by_ident: dict[tuple, list[tuple[str, str]]] = {}
         for r in lg.execute("SELECT key, name FROM variation").fetchall():
             k, n = (r["key"] or "").strip(), (r["name"] or "").strip()
-            ident = variety_identity(k, n)[1:]         # branch-free: (type-slug, name-slug)
+            ident = variety_identity(k, n)             # (type-slug, name-slug)
             ident_of[k] = ident
             by_ident.setdefault(ident, []).append((k, n))
         out = {"unminted": [], "varieties": [], "skipped": []}

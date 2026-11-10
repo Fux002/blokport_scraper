@@ -1,20 +1,28 @@
-"""Phase 1 variety Key rule (SC-1): mint the new `{type}__{name}_{uuid}` Key and the ONE parse of it.
+"""The variety Key rule (PHASE-1-SPEC rev 8, D1 and 2a): mint a `{type slug}__{name slug}_{uuid}` Key and its ONE parse.
 
-OFFLINE and ADDITIVE. This is NOT the production type parser (`type_slug_from_key` and friends): that rewrite
-is the Phase 1 code hold and the PROTECTED type area, untouched here. These helpers are used only by the union
-key-map generator (`keymap.py`) and the paired vectors file, so SC-1 can run and prove itself with no change to
-matching, curate, ledger or sync.
+This is the production parser: every reader of a Key's type or name goes through `variety_key_type` and
+`variety_key_name_slug`, with ONE split on `__` and no type list, so a type slug that prefixes another
+(`dolomite`, `dolomite_marble`) can never re-parse and adding a type changes no existing Key. A Key of the
+old prefixed form (`slab_...`) has no `__` and is refused by the same rule, never parsed into a wrong type.
 
-The slug is the repo's existing `_slug_us` (stages/curate/keys, core.text.slugify: D1, '&' reads 'and'), so the name
-part of a new Key is byte-identical to what curate already mints. The paired backend rule is
-`src/model/catalog/variety-key.ts` (154-fd P1-6); the vectors file (`fixtures/variety_key_vectors.json`, generated here
-and copied by the backend) pins both sides. No em dashes (design principle 2).
+The slug is `_slug_us` (core.text.slugify with `_`, D1: '&' reads 'and'), owned here; curate's keys import it. The paired
+backend rule is `src/model/catalog/variety-key.ts`; the vectors file (`fixtures/variety_key_vectors.json`,
+generated here and copied by the backend) pins both sides. No em dashes (design principle 2).
 """
 from __future__ import annotations
 
 import uuid
 
-from stone_pipeline.stages.curate.keys import _KEY_NS, _slug_us
+from stone_pipeline.core.text import slugify
+
+# The deterministic namespace of variety Key uuids (fixed, so Keys are reproducible; unchanged from the old Keys').
+_KEY_NS = uuid.UUID("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
+
+
+def _slug_us(text: str) -> str:
+    """The one slug rule of a Key's type and name parts (core.text.slugify with `_`, D1: '&' reads 'and'), so the
+    Key can never split one variety in two ('Porrino' and 'Porriño', or a curly and a straight apostrophe)."""
+    return slugify(text, "_")
 
 # The ONE separator between the type slug and the name slug (D1, section 2a). `_slug_us` collapses runs of
 # `_`, so `__` never occurs inside a slug, and the type is the part before the FIRST `__`, one split.
@@ -73,3 +81,10 @@ def variety_key_type(key: str) -> str:
     if problem is not None:
         raise ValueError(f"not a variety Key ({problem}): {key!r}")
     return key.split(SEP, 1)[0]
+
+
+def variety_key_name_slug(key: str) -> str:
+    """The name slug: between the first `__` and the trailing `_{uuid}`, for a Key that passes
+    `variety_key_problem` (raises on any other, as variety_key_type)."""
+    variety_key_type(key)
+    return key.split(SEP, 1)[1].rsplit("_", 1)[0]

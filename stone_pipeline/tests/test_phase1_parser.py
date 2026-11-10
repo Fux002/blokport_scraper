@@ -9,7 +9,6 @@ import csv
 
 import pytest
 
-from stone_pipeline.config import categories
 from stone_pipeline.io import medusa_inputs
 from stone_pipeline.reference.loaders import identity
 
@@ -37,10 +36,6 @@ def test_the_survivor_prefers_the_seed_then_the_cleanest_name_slug():
     clean, laden = "granite__verde_ubatuba_u1", "granite__verde_ubatuba_ubatuba_u2"
     assert identity.survivor_of([laden, clean], set()) == clean
     assert identity.survivor_of([laden, clean], {laden}) == laden
-
-
-def test_no_key_names_a_category_any_more():
-    assert not hasattr(categories, "category_for_key")
 
 
 def _export(path, header, rows):
