@@ -253,6 +253,8 @@ class STANDARDISE:
     # The same value as the backend renders' PHOTO_ASPECT_TOLERANCE_PCT (blokport_backend src/model/project/renders/
     # layout.ts:12, RND-3, Mas 10 Nov from the dev p95), measured the same way: kept equal by hand, one constant a side.
     PHOTO_ASPECT_TOLERANCE_PCT = 5
+    CUTOUT_OUTLINE_READ_WORKERS = 16   # the produce's image stage reads the linked 3D outlines this many at once: a
+                                       # fixed cap (Mas), never unbounded; about 4.9k outlines a full prod produce
     CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
     CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
     CUTOUT_MAX_POINTS = 64             # the contract's outline limit

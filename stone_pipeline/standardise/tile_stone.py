@@ -74,7 +74,8 @@ def grid_score(rgba: np.ndarray) -> float:
 
 def from_cutout(rgba: np.ndarray, length_m: float, width_m: float) -> Stone:
     """The stone of a slab's cut-out, its x along the slab's listed length. Refused: the cut-out carries a crosshatch
-    (TILE_GRID_MAX) or is not at the slab's listed proportions (its scale would be a guess)."""
+    (TILE_GRID_MAX) or its stone (the outline's extent, cutout.stone_outline_size) is not at the slab's listed
+    proportions (its scale would be a guess)."""
     if (score := grid_score(rgba)) > C.TILE_GRID_MAX:
         raise Refused(f"a crosshatch over the face (grid score {score:.1f} > {C.TILE_GRID_MAX})")
     h, w = rgba.shape[:2]
@@ -82,11 +83,15 @@ def from_cutout(rgba: np.ndarray, length_m: float, width_m: float) -> Stone:
     if h > w:                                          # the cut-out's long side is the slab's length
         rgba = np.ascontiguousarray(np.rot90(rgba))
         h, w = w, h
-    if (off := cutout.aspect_misfit(w, h, long_m, short_m)) is not None:
-        raise Refused(f"the cut-out ({w}x{h} px) is not at the slab's proportions ({long_m:g} x {short_m:g} m): "
-                      f"{off:.1f}% off")
+    try:                                               # the stone's own extent, as the 3D slab's gate measures it
+        stone_w, stone_h = cutout.stone_outline_size(rgba)
+    except ValueError as exc:
+        raise Refused(f"the cut-out has no outline: {exc}") from exc
+    if (off := cutout.aspect_misfit(stone_w, stone_h, long_m, short_m)) is not None:
+        raise Refused(f"the cut-out's stone ({stone_w:.0f}x{stone_h:.0f} px) is not at the slab's proportions "
+                      f"({long_m:g} x {short_m:g} m): {off:.1f}% off")
     rgb, alpha = rgba[:, :, :3], (rgba[:, :, 3] > C.CUTOUT_ALPHA_CUT).astype(np.uint8)
-    ppm = float(np.sqrt((w / long_m) * (h / short_m)))
+    ppm = float(np.sqrt((stone_w / long_m) * (stone_h / short_m)))
     inset = max(1, int(round(C.TILE_STONE_INSET_M * ppm)))
     valid = cv2.erode(alpha, np.ones((2 * inset + 1,) * 2, np.uint8), borderValue=0) > 0
     valid &= marks.flare_mask(np.ascontiguousarray(rgb), alpha) == 0

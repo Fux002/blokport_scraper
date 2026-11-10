@@ -233,20 +233,22 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     conflicts = {(src, sha) for src, photos in by_source.items() for sha in photos}
     removed, assigned = removed or set(), assigned or {}
     skus = _skus(rows) if removed or conflicts else {}
-    outlines: dict[tuple[str, str, str], tuple[float, float]] = {}
     shared = _lot_shared(rows)
+    # each product's view of the pool and its lead, read from its own photos before the views replace them; then the
+    # 3D outlines (and a lot piece's judge record) those leads need, read at once under the settings cap
+    leads = [_lead_of(row, _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned), cfg)
+             if image_pipeline else None for row in rows]
+    outlines, judged = _read_3d_inputs(rows, leads, shared)
     misfits: list[tuple[CanonicalRow, dict]] = []
-    for row in rows:
+    for row, found in zip(rows, leads):
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
-        if not image_pipeline:                         # off: it keeps the hosted scraped photos
+        if found is None:                              # off: it keeps the hosted scraped photos
             continue
-        seen = _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned)
-        lead = listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen)
+        seen, lead = found
         row.standard_photo = lead is not None if known else None
         if row.image_keys:
-            # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(seen, lead) if _is_3d_format(row) else None
-            if row.model_3d_key and (misfit := _no_3d(row, lead, seen, outlines, shared)) is not None:
+            if row.model_3d_key and (misfit := _no_3d(row, lead, seen, outlines, shared, judged)) is not None:
                 row.model_3d_key = None
                 misfits.append((row, misfit))
             row.standard_version = standard_version(seen, lead, with_3d=bool(row.model_3d_key))
@@ -259,9 +261,42 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     return None if views is None else by_source
 
 
+def _lead_of(row: CanonicalRow, seen: dict[str, dict[str, str]],
+             cfg) -> tuple[dict[str, dict[str, str]], Optional[Lead]]:
+    """(the published views as the product sees them, its lead): a tile's own rendered set, any other's photo."""
+    return seen, (listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen))
+
+
+def _read_3d_inputs(rows: list[CanonicalRow], leads: list, shared: dict[str, set[str]]):
+    """({(source, sha, ETag): outline px size}, {(source, sha): judge record or None}) of what _no_3d needs: the
+    outline of every lead's 3D slab, and the judge's record of the own photo of every lot piece shown from its lot's
+    shared photo. Read at once, CUTOUT_OUTLINE_READ_WORKERS at a time (a fixed cap, Mas); any read failure raises."""
+    from stone_pipeline.photos.publish import pool_map
+
+    wanted, owns = set(), set()
+    for row, found in zip(rows, leads):
+        if found is None or not row.image_keys or not _is_3d_format(row):
+            continue
+        seen, lead = found
+        if model_3d(seen, lead) is None:
+            continue
+        _, src, sha = lead
+        lot_shared = shared.get(row.lot_code or "", set())
+        if sha in lot_shared:
+            if (own := _own_photo(row, lot_shared)) is not None:
+                owns.add(own)
+        else:
+            wanted.add((src, sha, seen[imagestore.CUTOUT_SUBDIR][sha]))
+    wanted, owns = sorted(wanted), sorted(owns)
+    cap = STANDARDISE.CUTOUT_OUTLINE_READ_WORKERS
+    outlines = dict(zip(wanted, pool_map(cap, lambda w: _outline_size(w[0], w[1]), wanted)))
+    judged = dict(zip(owns, pool_map(cap, lambda o: _judged(*o), owns)))
+    return outlines, judged
+
+
 def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
            outlines: dict[tuple[str, str, str], tuple[float, float]],
-           shared: dict[str, set[str]]) -> Optional[dict]:
+           shared: dict[str, set[str]], judged: dict[tuple[str, str], Optional[dict]]) -> Optional[dict]:
     """None when a product may carry its lead's 3D slab: a lot piece shown from its own photo, never its lot's shared
     one (Mas: no 3D until its own photo passes), and its length and width measured (inside the category's band, not
     filled from the pack's defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule
@@ -271,11 +306,8 @@ def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
     _, src, sha = lead
     if sha in shared.get(row.lot_code or "", ()):
         return {"listing": row.handle, "reason": "lot_shared_photo", "lead": sha,
-                "why": _own_photo_state(row, shared[row.lot_code])}
-    where = (src, sha, seen[imagestore.CUTOUT_SUBDIR][sha])
-    if where not in outlines:
-        outlines[where] = _outline_size(src, sha)
-    w_px, h_px = outlines[where]
+                "why": _own_photo_state(_own_photo(row, shared[row.lot_code]), judged)}
+    w_px, h_px = outlines[(src, sha, seen[imagestore.CUTOUT_SUBDIR][sha])]
     found = {"listing": row.handle, "length_m": row.length, "width_m": row.width,
              "cutout_px": [round(w_px), round(h_px)]}
     if not (row.length and row.width and row.length > 0 and row.width > 0):
@@ -305,13 +337,17 @@ def _lot_shared(rows: list[CanonicalRow]) -> dict[str, set[str]]:
     return {lot: {sha for sha, n in seen.items() if n > 1} for lot, seen in shows.items()}
 
 
-def _own_photo_state(row: CanonicalRow, shared: set[str]) -> str:
-    """Why a lot piece is not shown from its own photo (its first photo not shared in its lot): the judge's reason when
-    it failed, as the photo process's latest run of it recorded (the clean run's, else the standardiser run's)."""
-    own = next(((src, sha) for src, sha in _shown(row) if sha not in shared), None)
+def _own_photo(row: CanonicalRow, shared: set[str]) -> Optional[tuple[str, str]]:
+    """(source, sha) of a lot piece's own photo: its first photo not shared in its lot; None when it has none."""
+    return next(((src, sha) for src, sha in _shown(row) if sha not in shared), None)
+
+
+def _own_photo_state(own: Optional[tuple[str, str]], judged: dict[tuple[str, str], Optional[dict]]) -> str:
+    """Why a lot piece is not shown from its own photo: the judge's reason when it failed, as the photo process's latest
+    run of it recorded (_judged, read ahead into `judged`)."""
     if own is None:
         return "no own photo"
-    record = _judged(*own)
+    record = judged[own]
     if record is None:
         return "own photo not judged"
     if record.get("verdict") != "fail":
