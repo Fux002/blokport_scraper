@@ -68,11 +68,11 @@ def test_seed_variations_loads_synthetic_export(tmp_path):
         n = bootstrap.seed_variations(ledger, path=export)
         assert n == 2
         row = ledger.execute(
-            "SELECT name, aliases, medusa_id, branch FROM variation WHERE key = ?",
+            "SELECT name, type, aliases, medusa_id FROM variation WHERE key = ?",
             (_VARIATION_KEY,)).fetchone()
     assert row["name"] == "Carrara"
     assert row["medusa_id"] == "V1"
-    assert row["branch"] == "slab"
+    assert row["type"] == "Marble"                                     # the export's Type column
     assert "Statuario" in row["aliases"] and "Bianco" in row["aliases"]   # piped -> json list
 
 

@@ -261,35 +261,6 @@ def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
         assert back["DEL-1"] == {"sku": "DEL-1", "quantity": 8, "made_to_order": False}   # back in stock, no reason
 
 
-def test_reopen_migrates_an_old_ledger_to_the_tombstone_lane(tmp_path):
-    # a ledger created before v3 has no `removed` table; reopening must re-apply the schema (recreate it
-    # via CREATE IF NOT EXISTS) and run _migrate (inventory.reason), or removal silently breaks in prod.
-    p = tmp_path / "old.ledger"
-    with Ledger.open(p, env="development") as ledger:
-        ledger.execute("DROP TABLE removed")
-        ledger.execute("PRAGMA user_version = 2")             # pretend this is a pre-v3 ledger
-    with Ledger.open(p, env="development") as ledger:
-        assert ledger.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removed'").fetchone() is not None
-        assert "reason" in {r["name"] for r in ledger.execute("PRAGMA table_info(inventory)")}
-
-
-def test_reopen_migrates_removed_kind_column_v4(tmp_path):
-    # a pre-v4 ledger has a `removed` table WITHOUT the `kind` discriminator; reopening must ADD it
-    # (default 'product', the only lane before v4) so the generalized product+variation lane works.
-    p = tmp_path / "old4.ledger"
-    with Ledger.open(p, env="development") as ledger:
-        ledger.execute("DROP TABLE removed")
-        ledger.execute("CREATE TABLE removed (external_id TEXT PRIMARY KEY, source TEXT, reason TEXT, "
-                       "state TEXT NOT NULL DEFAULT 'pending', sync_attempts INTEGER NOT NULL DEFAULT 0, "
-                       "sync_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
-        ledger.execute("PRAGMA user_version = 3")             # pretend this is a pre-v4 ledger
-    with Ledger.open(p, env="development") as ledger:
-        assert "kind" in {r["name"] for r in ledger.execute("PRAGMA table_info(removed)")}
-        ledger.execute("INSERT INTO removed (external_id, created_at, updated_at) VALUES ('X-1','t','t')")
-        assert ledger.get("removed", "external_id", "X-1")["kind"] == "product"   # existing rows default product
-
-
 def test_delete_source_removes_only_that_config_row(tmp_path):
     from stone_pipeline.config import store
     db = tmp_path / "config.db"

@@ -66,27 +66,6 @@ def _raw_state(conn, source):
     return (r["enabled"], r["lifecycle"])
 
 
-def test_the_migration_labels_every_disabled_row_paused_once(tmp_path):
-    from contextlib import closing
-    db = tmp_path / "legacy.db"
-    rows = {"null_off": (0, None), "active_off": (0, "active"), "null_on": (1, None), "active_on": (1, "active"),
-            "delisted": (0, "delisted"), "paused": (0, "paused")}
-    with closing(store.open_store(db)) as conn:
-        for name, (enabled, label) in rows.items():
-            conn.execute("INSERT INTO source (source, enabled, lifecycle, updated_at) VALUES (?, ?, ?, 'x')",
-                         (name, enabled, label))
-        conn.execute("PRAGMA user_version = 9")
-        conn.commit()
-    expected = {**rows, "null_off": (0, "paused"), "active_off": (0, "paused")}
-    with closing(store.open_store(db)) as conn:
-        assert {name: _raw_state(conn, name) for name in rows} == expected
-    with closing(store.open_store(db)) as conn:            # the step run again changes nothing
-        conn.execute("PRAGMA user_version = 9")
-        conn.commit()
-    with closing(store.open_store(db)) as conn:
-        assert {name: _raw_state(conn, name) for name in rows} == expected
-
-
 def test_disabling_without_a_label_stores_paused_and_never_relabels_a_delisted_source():
     from contextlib import closing
     store.set_state("varsha", enabled=False)

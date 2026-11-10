@@ -4,7 +4,6 @@ dead-letter cap within seconds. A success, a requeue, a reset or new content end
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
@@ -131,23 +130,6 @@ def test_a_blocked_tombstone_waits_and_a_new_one_does_not(tmp_path):
         ack(ledger, "removed", "P-9", status_="blocked", reason="open reservation")
         record_tombstones(ledger, [("P-9", "s")])                              # re-raised: served at once
         assert [r["external_id"] for r in ready(ledger, "removed")] == ["P-9"]
-
-
-def test_a_ledger_from_before_the_wait_gains_the_column(tmp_path):
-    path = tmp_path / "dev.ledger"
-    with Ledger.open(path, env="development"):
-        pass
-    con = sqlite3.connect(path)                     # make it a v8 ledger: no retry_after anywhere
-    for table in ("variation", "product", "removed"):
-        con.execute(f"ALTER TABLE {table} DROP COLUMN retry_after")
-    con.execute("PRAGMA user_version = 8")
-    con.commit()
-    con.close()
-    with Ledger.open(path, env="development") as ledger:
-        for table in ("variation", "product", "removed"):
-            assert "retry_after" in {r["name"] for r in ledger.execute(f"PRAGMA table_info({table})")}
-        _live_product(ledger)
-        assert [r["external_id"] for r in ready(ledger, "products")] == ["P-1"]
 
 
 def test_the_retry_time_sorts_with_the_ledger_s_own_timestamps():

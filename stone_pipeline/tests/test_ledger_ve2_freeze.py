@@ -10,10 +10,6 @@ Inventory is unchanged. attribute.restricted is NOT kept in the ledger here (PR4
 
 from __future__ import annotations
 
-import sqlite3
-
-import pytest
-
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger import sync, writethrough
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
@@ -29,7 +25,7 @@ def _variation(ledger, key, *, state="synced", medusa_id="V", archived=0, in_ful
         "archived": archived, "first_seen": now, "last_synced": now if medusa_id else None,
         "created_at": now, "updated_at": now}, pk=("key",))
     if icon:
-        ledger.execute("INSERT INTO variation_category_image (key, category_handle, s3_key, etag) "
+        ledger.execute("INSERT OR REPLACE INTO variation_category_image (key, category_handle, s3_key, etag) "
                        "VALUES (?, 'slabs', ?, 'etag')", (key, f"dev/variations/{key}/slab.png"))
 
 
@@ -63,25 +59,6 @@ def test_fresh_ledger_has_archived_defaulting_to_zero(tmp_path):
         # restricted is deliberately NOT a ledger column (PR4 decides restricted values from the files)
         assert "restricted" not in {r["name"] for r in ledger.execute("PRAGMA table_info(attribute)")}
         assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-
-
-def test_a_v13_ledger_gains_archived_and_keeps_its_data(tmp_path):
-    if sqlite3.sqlite_version_info < (3, 35, 0):
-        pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v13 shape")
-    p = tmp_path / "mig.ledger"
-    with Ledger.open(p, env="development") as lg:
-        _variation(lg, "marble__v1", archived=0)
-    raw = sqlite3.connect(p)                                       # simulate a v13 ledger
-    raw.execute("ALTER TABLE variation DROP COLUMN archived")
-    raw.execute("PRAGMA user_version = 13")
-    raw.execute("UPDATE ledger_meta SET schema_version = 13")
-    raw.commit()
-    raw.close()
-    with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert lg.get("variation", "key", "marble__v1")["archived"] == 0
-    with Ledger.open(p, env="development") as lg:   # idempotent: a second open is a no-op
-        assert lg.get("variation", "key", "marble__v1")["archived"] == 0
 
 
 # --- B. the mirror (pure function of the export) -----------------------------

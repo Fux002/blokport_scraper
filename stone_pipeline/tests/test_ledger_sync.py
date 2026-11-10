@@ -14,7 +14,7 @@ from stone_pipeline.phase1.variety_key import variety_key_type
 
 
 def _icon(ledger, key, handle="slabs"):
-    ledger.execute("INSERT INTO variation_category_image (key, category_handle, s3_key, etag) VALUES (?, ?, ?, ?)",
+    ledger.execute("INSERT OR REPLACE INTO variation_category_image (key, category_handle, s3_key, etag) VALUES (?, ?, ?, ?)",
                    (key, handle, f"dev/variations/{key}/{handle}.png", "etag"))
 
 
