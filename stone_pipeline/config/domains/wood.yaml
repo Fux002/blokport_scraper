@@ -91,6 +91,7 @@ finish_phrase_default: "a natural wood surface"
 # digit-bearing token is treated as a supplier code) and trailing_grade_letters is off unless Wudport grades
 # with a trailing lone letter. Set these to match Wudport's real naming before the smoke run.
 name_code_pattern: null
+multicolour_value: null
 trailing_grade_letters: false
 
 # The stone-tuned CV colour palette cannot read wood tones, so texture-colour classification is OFF: colour

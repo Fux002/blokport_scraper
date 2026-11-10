@@ -234,7 +234,7 @@ def _emittable_piece(code="L-1", position=1, variation_key="slab_marble_cv_1", q
 
 
 def _lot_rejects(rows):
-    validate.run(rows, emit_on_review=True, source_code="test")
+    validate.run(rows, emit_on_review=True, source_code="test", published=frozenset())
     return [[r.detail for r in row.reject_reasons if r.rule == "lot_inconsistent"] for row in rows]
 
 
