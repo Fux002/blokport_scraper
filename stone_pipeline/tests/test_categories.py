@@ -13,9 +13,8 @@ from stone_pipeline.stages import image_prompts
 
 def _accessory() -> categories.Category:
     return categories.Category(
-        "accessory", "accessories", "Accessories", "pcat_ACC_X",
-        "accessories_backbone.json", base_image="",
-        shares_variety_vocab=False, fan_out=False, mirror_of=None)
+        "accessory", "accessories", "Accessories", "pcat_ACC_X", base_image="",
+        shares_variety_vocab=False, fan_out=False)
 
 
 def test_one_entry_adds_a_category(monkeypatch):
