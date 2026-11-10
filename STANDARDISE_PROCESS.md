@@ -168,6 +168,32 @@ the text reader), then stops for a slab drawn the same; only the slabs drawn dif
 they cost a judge call (one each, its candidate's, in the same run). The round is sized to the month's budget and window
 like any other: what does not fit goes on in the next run.
 
+## A scoped run (a re-run list)
+
+A fix the outline recheck cannot see (#605's keystone squaring: `layout.drawn_differently` compares the wall and the
+sawn edge only) reaches no published photo by itself. A scoped run takes an explicit list instead:
+`SCRAPER_STANDARDISE_SCOPE_KEY` names one S3 JSON object, `{"listings": [SKU, ...], "restandardise": [sha, ...]}`, read
+as ONLY_KEY's lists are (`process.read_scope`).
+
+- Steps 1 to 7 work the listed listings alone, in the list's order (`process.scoped`); the decisions, the conflict
+  assignments and publish stay the whole sheet's, and the run's rows merge into `tracked.csv` and `review.json`
+  (`merge_review`), so a listing not on the list is never touched.
+- Each listed photo is a finished photo of a listed listing (`process.restandardise_items`); the run tag's GPU round
+  takes it once more (`Selection.gpu_todo`; its slice names it to the job as `RESTANDARDISE_KEY`, stored and read as
+  `ONLY_KEY` is), drawn in full (`photo.standardise(redo="restandardise")`) as a candidate under
+  `STANDARDISE.RESTANDARDISED` whatever its outline reads. The judge settles it as it settles a recheck's (`settle`):
+  promoted over the result on a pass, discarded on a fail. Either way, or when the re-run gives no whole slab, the
+  rule's note `<run folder><RESTANDARDISED><sha>.json` is written: it is the record, so a re-run never redoes it, and a
+  run cut short before its candidate was complete redoes it. A later fix that wants another pass takes a new folder
+  name.
+- A photo kept as it was is listed in the run's summary (`restandardise_kept`) and problems with the reason (the judge's,
+  or why the re-run gave no slab): the 3D gate still blocks it, so it goes to the people's list.
+- `SCRAPER_STANDARDISE_RUN_CAP_USD` is required with a scope (`process.unconfigured`): the run's total, its GPU rounds,
+  verdicts, edits and checks together, never passes it whatever the monthly budgets leave (`select.RunCap`, reserved by
+  both of its Spends in `Spend.reserve`).
+- An unknown SKU, a SKU listed twice, or a photo that is no finished photo of a listed listing is refused at the start,
+  every one named, before anything is paid (`ScopeRefused`, exit 2). Without a scope the run is as before.
+
 ## Tile listings
 
 The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone, from any

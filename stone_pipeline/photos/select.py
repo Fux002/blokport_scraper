@@ -33,8 +33,8 @@ import httpx
 from botocore.exceptions import ClientError
 
 from stone_pipeline.photos.publish import MISSING, chosen_prefix, excluded, pool_map
-from stone_pipeline.photos.source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
-                                       remove_candidate, round_prefix, undecided)
+from stone_pipeline.photos.source import (JUDGED_RULES, LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard,
+                                       noted, promote, remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -57,6 +57,33 @@ class Halted(RuntimeError):
     """The run was stopped: no hosted call may start any more."""
 
 
+class RunCap:
+    """A scoped run's own cap (C.RUN_CAP_USD) over everything it spends: both of its Spends (the process budget and the
+    cleaning cap) reserve against it and settle into it, so the run's total never passes it whatever the monthly
+    budgets leave. Used under a Spend's lock (Spend.reserve, left, settle); its own lock keeps the two Spends apart."""
+
+    def __init__(self, usd):
+        self.usd, self.spent, self.reserved = usd, 0.0, 0.0
+        self._lock = threading.Lock()
+
+    def left(self):
+        with self._lock:
+            return self.usd - self.spent - self.reserved
+
+    def take(self, usd):
+        """Reserve usd, or False (nothing reserved) when it would pass the cap."""
+        with self._lock:
+            if self.spent + self.reserved + usd > self.usd:
+                return False
+            self.reserved += usd
+            return True
+
+    def settle(self, reserved, cost):
+        with self._lock:
+            self.reserved -= reserved
+            self.spent += cost
+
+
 class Spend:
     """Spend against the month's budget (hosted calls and GPU rounds): `before` is what the month's other runs spent
     (others(), summed again at every settle, so a run written since is never missed), then this run's. A price is
@@ -67,8 +94,9 @@ class Spend:
     lock is held (a slow write never blocks the other calls), and a stop halts it without taking that lock (a SIGTERM
     may arrive while it is held)."""
 
-    def __init__(self, budget, others=None, save=None, cap_error=SpendCapReached):
-        self.budget, self.others, self.save, self.cap_error = budget, others, save, cap_error
+    def __init__(self, budget, others=None, save=None, cap_error=SpendCapReached, run=None):
+        """run: the scoped run's RunCap both of its Spends reserve against (None: an unscoped run)."""
+        self.budget, self.others, self.save, self.cap_error, self.run = budget, others, save, cap_error, run
         self.before = others() if others else 0.0
         self.spent, self.reserved, self.capped = 0.0, 0.0, False
         self.uses = []
@@ -83,9 +111,10 @@ class Spend:
         self._halt.set()
 
     def left(self):
-        """What the month's budget still covers, reserves counted."""
+        """What the month's budget still covers, reserves counted; never more than the run's cap leaves."""
         with self._lock:
-            return self.budget - self.before - self.spent - self.reserved
+            month = self.budget - self.before - self.spent - self.reserved
+        return month if self.run is None else min(month, self.run.left())
 
     def reserve(self, usd):
         with self._lock:
@@ -93,6 +122,9 @@ class Spend:
                 raise Halted(self._why)
             if self.before + self.spent + self.reserved + usd > self.budget:
                 raise self._refusal()
+            if self.run is not None and not self.run.take(usd):
+                self.capped = True
+                raise self.cap_error(f"spend would pass the run's cap of ${self.run.usd:.2f}")
             self.reserved += usd
             self._version += 1
         self._keep()
@@ -113,6 +145,8 @@ class Spend:
             self.reserved -= reserved
             self.spent += cost
             self._version += 1
+            if self.run is not None:
+                self.run.settle(reserved, cost)
         if self.others:
             before = self.others()
             with self._lock:
@@ -174,8 +208,8 @@ def read_candidates(client, out):
 
 # Where a run folder keeps what it holds of one photo: <sha>.<view> at its top, then each folder by <sha>. Round reads
 # exactly these, so a Round of a few photos (shas) lists each of them here and nothing else.
-ROUND_FOLDERS = ("", "noslab/", LOGO_STEP, C.OUTLINE_CHECKED, "held/", "judged/", "cleaned/", "attempts/", REDRAW,
-                 f"{REDRAW}judged/")
+ROUND_FOLDERS = ("", "noslab/", LOGO_STEP, C.OUTLINE_CHECKED, C.RESTANDARDISED, "held/", "judged/", "cleaned/",
+                 "attempts/", REDRAW, f"{REDRAW}judged/")
 
 
 class Round(_Locks):
@@ -200,6 +234,7 @@ class Round(_Locks):
         self.noslab = _shas(keys, "noslab/")
         self.logo_step = _shas(keys, LOGO_STEP)        # made by the retired logo step: never completed
         self.checked = _shas(keys, C.OUTLINE_CHECKED)  # whole slabs drawn under the current outline rule
+        self.restandardised = _shas(keys, C.RESTANDARDISED)   # re-standardised once (a scoped run's list), settled
         self.redraw = Candidates(self.prefix, keys)
         self.redrawn = self.redraw.complete            # whole slabs whose candidate waits for the judge (settle)
         self.held = _shas(keys, "held/")
@@ -875,15 +910,21 @@ class Selection:
     what the listings a run may publish show now (stone_pipeline.photos.process.live_choices): an outdated one goes to the GPU
     too, its listing not picked again (its verdict and choice stand); clicks = {SKU: the owner's click to clean one
     photo} (publish.clicks_prefix); frozen = {(source, sha)} of the photos of the listings whose choice record cannot be
-    read (stone_pipeline.photos.process): left exactly as published, so their pending redraws wait (settle)."""
+    read (stone_pipeline.photos.process): left exactly as published, so their pending redraws wait (settle);
+    restandardise = {(source, sha)} of a scoped run's photos to re-standardise once (gpu_todo; empty: none); scoped:
+    the listings are a scoped run's, so its report merges into the review list (stone_pipeline.photos.process.run)."""
 
-    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks, frozen):
+    restandardise, scoped = frozenset(), False
+
+    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks, frozen,
+                 restandardise=frozenset(), scoped=False):
         if not run_tag or not clean_tag or run_tag == clean_tag:
             raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
         self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
         self.owner, self.conflicts, self.rounds, self.chosen = owner, conflicts, rounds, sorted(set(chosen))
-        self.clicks, self.frozen = clicks, frozen
-        self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
+        self.clicks, self.frozen, self.restandardise, self.scoped = clicks, frozen, frozenset(restandardise), scoped
+        self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen}
+                              | {src for src, _ in self.restandardise})
         self.exclude = excluded()
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
         self._asked = {}
@@ -906,7 +947,7 @@ class Selection:
         stores (the same rounds, so what one step stores the other reads); none of the live choices (they are the whole
         run's)."""
         narrowed = copy.copy(self)
-        narrowed.listings, narrowed.clicks, narrowed.chosen = listings, clicks, []
+        narrowed.listings, narrowed.clicks, narrowed.chosen, narrowed.restandardise = listings, clicks, [], frozenset()
         narrowed.sources = sorted({l["source"] for l in listings})
         return narrowed
 
@@ -942,13 +983,15 @@ class Selection:
 
     def gpu_todo(self):
         """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet,
-        or whose result is outdated, none of a listing the owner chose a photo for; and the chosen results of this run
-        tag that are outdated (excluded ones left out)."""
+        or whose result is outdated, none of a listing the owner chose a photo for; the chosen results of this run
+        tag that are outdated (excluded ones left out); and a scoped run's photos to re-standardise that are not yet
+        (restandardise_due)."""
         gpu = self.rounds[0][1]
         picked = [(l["source"], sha) for l in self.listings if self.owner_pick(l) is None
                   for sha in candidates(l, self.blocked(l))]
         chosen = [(src, sha) for tag, src, sha in self.chosen if tag == self.tags[0] and sha not in self.exclude]
-        return _by_source((src, sha) for src, sha in picked + chosen if needs_gpu(gpu[src], sha))
+        redo = [(src, sha) for src, sha in self.restandardise if restandardise_due(gpu[src], sha)]
+        return _by_source([(src, sha) for src, sha in picked + chosen if needs_gpu(gpu[src], sha)] + redo)
 
     def clean_todo(self):
         """{source: shas} of the cleaned copies of this run's listings' photos and of the chosen cleaned copies (excluded
@@ -958,6 +1001,13 @@ class Selection:
         wanted = ({sha for l in self.listings for sha in l["photos"]} |
                   {sha for tag, _, sha in self.chosen if tag == self.tags[1]}) - self.exclude
         return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned & wanted if needs_gpu(cl[src], sha))
+
+
+def restandardise_due(rnd, sha):
+    """Whether a scoped run's listed photo is still to be re-standardised (from the round's listing, as
+    stone_pipeline.photos.source.restandardise_due reads it): finished, no note of C.RESTANDARDISED, no candidate
+    waiting for the judge."""
+    return sha in rnd.finished and sha not in rnd.restandardised and sha not in rnd.redrawn
 
 
 def needs_gpu(rnd, sha):
@@ -1016,7 +1066,7 @@ def settle_one(client, cands, src, sha):
         remove_candidate(client, out, sha)
         return True
     found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
-    if rule == C.OUTLINE_CHECKED and (found is None or not judge.current(found)):
+    if rule in JUDGED_RULES and (found is None or not judge.current(found)):
         return False
     if found is not None and judge.passed(found):
         promote(client, out, sha, rule)

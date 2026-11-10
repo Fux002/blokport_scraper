@@ -154,6 +154,12 @@ class STANDARDISE:
     # beside a broken right corner), it is redrawn as a candidate beside it, judged, and promoted over it only on a pass.
     # A later rule change = a new folder name, and every whole slab is checked once again.
     OUTLINE_CHECKED = "outline-v2/"
+    # A photo named in a scoped run's re-standardise list (stone_pipeline.photos.process: SCRAPER_STANDARDISE_SCOPE_KEY)
+    # goes to the GPU once even when finished: a fix the outline recheck cannot see (#605's squaring; drawn_differently
+    # compares the wall and the sawn edge only) reaches it. Its redraw is a candidate under this rule, judged and
+    # promoted over the result only on a pass; settled, it has the note <run folder><this><sha>.json, so a re-run never
+    # redoes it. A later fix that wants another pass = a new folder name.
+    RESTANDARDISED = "restandardise-v1/"
     # On: the runner starts the photo process after each full produce (stage all, the owner's button), never after the
     # republish Blokport's Publish button runs (it must never find the run slot taken).
     AUTO = _env_bool("SCRAPER_STANDARDISE_AUTO", False)
@@ -380,6 +386,10 @@ Your whole answer is one JSON object and nothing else:
     # (owner 2026-11-05: the cleaning has its own cap). An edit is reserved with its check, so a copy paid for is always
     # checked in the run that paid for it. No default: unset, no photo is sent to an edit (the run says so once).
     CLEAN_BUDGET_USD = _env_float("SCRAPER_STANDARDISE_CLEAN_BUDGET_USD", None)
+    # A scoped run's own cap (process.unconfigured: required with SCRAPER_STANDARDISE_SCOPE_KEY): what the run may
+    # spend in all, its GPU rounds, verdicts, edits and checks together, whatever the monthly budgets above leave
+    # (select.RunCap, reserved by both Spends). None: no run cap (an unscoped run, as before).
+    RUN_CAP_USD = _env_float("SCRAPER_STANDARDISE_RUN_CAP_USD", None)
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
     # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14

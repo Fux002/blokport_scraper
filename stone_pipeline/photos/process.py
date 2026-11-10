@@ -25,6 +25,12 @@ With SCRAPER_STANDARDISE_CLOSE_ONLY on (the runner sets it for a close_only phot
 round instead: every chosen photo's close-up not made yet under the current rule made again from the photo its run
 started from (stone_pipeline.photos.close, a GPU job per slice, under the same lock, budget, window and run id), then
 publish and relink as above; its summary is close-summary.json.
+With SCRAPER_STANDARDISE_SCOPE_KEY set (a scoped run: read_scope), steps 1 to 7 work the scope's listings alone, in its
+order, and its listed finished photos go to the GPU once more under STANDARDISE.RESTANDARDISED (a candidate the judge
+settles, never over the published result; settled, the rule's note is the record, so a re-run never redoes it; one
+kept as it was is listed in the summary, restandardise_kept). The decisions, conflict assignments and publish stay the
+whole sheet's, and its rows merge into tracked.csv and review.json, so no other listing is touched. It needs
+SCRAPER_STANDARDISE_RUN_CAP_USD: what the run may spend in all, binding both budgets whatever the months leave.
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
 GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. The judge
 and GPU rounds together never take the month past STANDARDISE.BUDGET_USD, and the clean-up edits with their checks never
@@ -39,9 +45,9 @@ Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY (not for a close-onl
 SCRAPER_STANDARDISE_CLOSE_ONLY (set by the runner, true only for a close_only run): the close-up round instead of 1 to 7;
 SCRAPER_STANDARDISE_CLICKS_ONLY (set by the runner, true only for a clicks_only run): steps 1 to 7 for the listings with
 the owner's click alone (the clicks' steps), their rows merged into tracked.csv and review.json, summary
-clicks-summary.json.
+clicks-summary.json. SCRAPER_STANDARDISE_SCOPE_KEY (a scoped run's scope) with SCRAPER_STANDARDISE_RUN_CAP_USD.
 Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
-or no produce has stored the conflict set yet;
+no produce has stored the conflict set yet, or a scope that cannot be worked (ScopeRefused);
 4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
 """
 
@@ -49,6 +55,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import sys
 import threading
@@ -63,7 +70,7 @@ from stone_pipeline.photos import batch as gpu
 from stone_pipeline.photos import close as close
 from stone_pipeline.photos import publish as publish
 from stone_pipeline.photos import select as select
-from stone_pipeline.photos.source import sheet_and_photos
+from stone_pipeline.photos.source import checked_key, round_prefix, sheet_and_photos
 from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import image_pipeline_off
@@ -204,7 +211,7 @@ def spend_prefix(directory, month):
     return f"{ROOT}{directory}/{month}/"
 
 
-def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached):
+def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached, run=None):
     """This run's Spend against one monthly budget whose runs keep their spend under `directory`. Each run keeps only its
     own file (<run id>.json, {"usd"}), so no run can overwrite another's; the month's other runs are summed from their
     files, read again only when changed (ETag). The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
@@ -226,7 +233,7 @@ def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached)
     def save(total, uses):
         s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6), "uses": uses}).encode(),
                       ContentType="application/json")
-    return select.Spend(budget, others, save, cap_error)
+    return select.Spend(budget, others, save, cap_error, run)
 
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
@@ -249,6 +256,94 @@ def photo_listings(sheet, photos):
     """The sheet's listings shown from their own photos (index.listings): every one but a tile listing, which is
     rendered from its variety's slab stone at publish (stone_pipeline.photos.publish), never through the GPU and judge."""
     return [l for l in index.listings(sheet, photos) if l["format"] != C.TILE_FORMAT]
+
+
+class ScopeRefused(ValueError):
+    """A scoped run's scope file cannot be worked: not a scope, or it names a listing or photo the run cannot work. The
+    run is refused before anything is paid, every offending name given (a typo must never shrink the run silently)."""
+
+
+@dataclass(frozen=True)
+class Scope:
+    """A scoped run's scope (SCRAPER_STANDARDISE_SCOPE_KEY, one S3 JSON object read as ONLY_KEY's lists are): the SKUs
+    of the listings to work, in that order, and the photos (shas) to re-standardise once (C.RESTANDARDISED)."""
+    skus: tuple
+    restandardise: frozenset
+
+
+_SHA_TEXT = re.compile(r"[0-9a-f]{64}")
+
+
+def read_scope(s3, key):
+    """The Scope stored at `key`: {"listings": [SKU, ...], "restandardise": [sha, ...]}, both lists required (either may
+    be empty but not both), a SKU listed once. ScopeRefused naming the key on anything else; a read failure raises."""
+    try:
+        doc = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
+    except ValueError as exc:
+        raise ScopeRefused(f"the scope {key} is not JSON: {exc}") from exc
+    if not isinstance(doc, dict) or set(doc) != {"listings", "restandardise"}:
+        raise ScopeRefused(f"the scope {key} is not an object of exactly \"listings\" and \"restandardise\"")
+    skus, shas = doc["listings"], doc["restandardise"]
+    if not isinstance(skus, list) or not all(isinstance(v, str) and v.strip() == v and v for v in skus):
+        raise ScopeRefused(f"the scope {key}'s listings are not a list of SKUs")
+    if not isinstance(shas, list) or not all(isinstance(v, str) and _SHA_TEXT.fullmatch(v) for v in shas):
+        raise ScopeRefused(f"the scope {key}'s restandardise is not a list of photo shas")
+    if twice := sorted({v for v in skus if skus.count(v) > 1}):
+        raise ScopeRefused(f"the scope {key} lists a SKU twice: {', '.join(twice)}")
+    if not skus and not shas:
+        raise ScopeRefused(f"the scope {key} names nothing to work")
+    return Scope(tuple(skus), frozenset(shas))
+
+
+def scoped(listings, scope):
+    """The listings a run works on: every one (no scope, today's run), or the scope's, in its order. ScopeRefused naming
+    every SKU the sheet does not have."""
+    if scope is None:
+        return listings
+    by_sku = {}
+    for l in listings:
+        by_sku.setdefault(l["sku"], []).append(l)
+    if unknown := [sku for sku in scope.skus if sku not in by_sku]:
+        raise ScopeRefused(f"the scope names listings the sheet does not have: {', '.join(unknown)}")
+    return [l for sku in scope.skus for l in by_sku[sku]]
+
+
+def restandardise_items(scope, listings, rounds):
+    """{(source, sha)} of the scope's photos to re-standardise, each a finished photo (the run tag's round) of one of
+    the scope's `listings`. ScopeRefused naming every one that is not."""
+    finished = dict(rounds)[C.RUN_TAG]
+    items, refused = set(), []
+    for sha in sorted(scope.restandardise):
+        owner = next((l for l in listings if sha in l["photos"]), None)
+        if owner is None:
+            refused.append(f"{sha[:12]}: no listed listing shows it")
+        elif sha not in finished[owner["source"]].finished:
+            refused.append(f"{sha[:12]}: not finished in {C.RUN_TAG} ({owner['source']})")
+        else:
+            items.add((owner["source"], sha))
+    if refused:
+        raise ScopeRefused("the scope's photos to re-standardise cannot all be: " + "; ".join(refused))
+    return frozenset(items)
+
+
+def restandardise_kept(s3, items, run_folder):
+    """[{source, sha, why}] of the re-standardised photos whose result was kept as it was (their note under
+    C.RESTANDARDISED: the judge failed the redraw, or the re-run gave no whole slab), sorted: the 3D gate still blocks
+    them, so the run lists them for the people, never leaves them silent. run_folder(source) = its run tag's folder. A
+    photo not settled yet (no note) is not listed; a note that cannot be read raises."""
+    def note(item):
+        src, sha = item
+        try:
+            key = checked_key(run_folder(src), sha, C.RESTANDARDISED)
+            body = s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+        except ClientError as exc:
+            if _code(exc) in publish.MISSING:
+                return None
+            raise
+        return json.loads(body)
+    notes = publish.pool_map(C.STORE_WORKERS, note, sorted(items))
+    return [{"source": src, "sha": sha, "why": n["kept"]} for (src, sha), n in zip(sorted(items), notes)
+            if n is not None and "kept" in n]
 
 
 def tile_listings(sheet, photos):
@@ -363,10 +458,14 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     the work window or stuck, a round Batch refused or failed (review 2026-11-06, A2.7: never the run's end), a round
     skipped (too little window left, or the budget left covers not one slice: the hosted steps still judge what is
     finished, within their own reservations), listed photos left without a result.
-    stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts."""
+    stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts. A scoped run's round of
+    the run tag also names its photos to re-standardise (sel.restandardise); any other round is called as it always was.
+    """
+    forced = sel.restandardise if tag == sel.tags[0] else frozenset()
     try:
         problems = [f"GPU job {name} failed: {why}"
-                    for name, why in gpu.run_round(batch, sel.client, tag, todo, run_id, deadline, spend)]
+                    for name, why in gpu.run_round(batch, sel.client, tag, todo, run_id, deadline, spend,
+                                                   **({"forced": forced} if forced else {}))]
     except select.Halted as exc:
         return [f"GPU round {tag} not started: {exc}"], True
     except (gpu.Skipped, select.SpendCapReached) as exc:
@@ -378,7 +477,8 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
-                 if select.needs_gpu(rnd[src], sha)]
+                 if select.needs_gpu(rnd[src], sha)
+                 or ((src, sha) in forced and select.restandardise_due(rnd[src], sha))]
     return problems, False
 
 
@@ -484,7 +584,8 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     report always runs, so what is chosen is recorded and published, unless a promotion failed: raised, and the next
     run of either kind finishes it at its start (select.finish, in process) before anything is published. clicks_only
     (a clicks-only run, its selection only the listings with a click): the clicks' steps alone, and its report merges
-    into the review list (select.report merge)."""
+    into the review list (select.report merge); so does a scoped run's (sel.scoped: its listings are the scope's,
+    every other listing's row stays)."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
     problems = []
     # no cleaning cap: no edit can be paid, so every ready click and every mark says what it waits for
@@ -528,7 +629,7 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     if not ended and not clicks_only:
         through(then, deadline, clock, problems)
     problems = list(dict.fromkeys(problems))           # a click waiting at both clean steps is named once
-    result = select.report(sel, waiting, marks_waiting, merge=clicks_only)
+    result = select.report(sel, waiting, marks_waiting, merge=clicks_only or sel.scoped)
     by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
@@ -583,11 +684,13 @@ def unreadable_problems(frozen, decisions):
     return [f"{l['key']}: {decisions.unreadable[l['sku']]}: left exactly as published" for l in frozen]
 
 
-def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen, clicks_only):
+def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen, clicks_only,
+                 restandardise=frozenset(), scoped=False):
     """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one of `frozen`, whose
     choice record cannot be read: the owner's decision is unknown, so it is left exactly as published, its photos'
     pending redraws included), only those with the owner's click when clicks_only, work on them and report: (problems,
-    counts, kept, {SKU: its review row}, the SKUs worked)."""
+    counts, kept, {SKU: its review row}, the SKUs worked). A scoped run (scoped: `listings` are its scope's) also sends
+    its listed photos to re-standardise (restandardise, {(source, sha)}) to the GPU once."""
     removed, records = removed_listings(s3), decisions.chosen
     workable = [l for l in listings if l not in frozen]
     found = todo(workable, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
@@ -596,7 +699,7 @@ def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
         found = [l for l in found if l["sku"] in decisions.clicks]
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
                            live_choices(workable, records, removed, decisions), decisions.clicks,
-                           {(l["source"], sha) for l in frozen for sha in l["photos"]})
+                           {(l["source"], sha) for l in frozen for sha in l["photos"]}, restandardise, scoped)
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
@@ -634,15 +737,21 @@ def close_round(s3, batch, spend, run_id, deadline, root, say, frozen):
     return problems, {"close_only": True, "photos": photos, "to_do": to_do}, {}
 
 
-def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False, clicks_only=False):
+def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False, clicks_only=False, scope_key=None):
     """Clear, work (photos_round, or close_round when close_only), report and publish (steps 0 to 8), inside the lock: the
     run's summary (counts), also kept with what is pending and the problems under the clean tag (summary.json, or
     close-summary.json for a close-only run). Both publish only the conflict photos the owner assigned (assignments):
     a close-only run republishes the same choices, so it decides them the same way. At the end of the work window paid
     work stops (no hosted call or GPU round starts after it). clicks_only: steps 1 to 7 over the listings with the
-    owner's click alone, its summary clicks-summary.json and its rows merged into the review list (merge_review)."""
+    owner's click alone, its summary clicks-summary.json and its rows merged into the review list (merge_review).
+    scope_key: a scoped run's scope (read_scope): steps 1 to 7 over the scope's listings in its order, its photos to
+    re-standardise sent to the GPU once, its rows merged into the review list; the decisions, the conflict assignments
+    and publish stay the whole sheet's, so no other listing is touched. A scope that cannot be worked is refused
+    (ScopeRefused) before anything is paid."""
     if close_only and clicks_only:
         raise ValueError("a photos run is close-only or clicks-only, never both")
+    if scope_key and (close_only or clicks_only):
+        raise ValueError("a scoped run is neither close-only nor clicks-only")
     root = f"{ROOT}{C.CLEAN_TAG}/"
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
@@ -652,7 +761,10 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
     listings = photo_listings(sheet, photos)
+    scope = read_scope(s3, scope_key) if scope_key else None
+    work = scoped(listings, scope)
     decisions = read_decisions(s3, root, listings)
+    restandardise = restandardise_items(scope, work, decisions.rounds) if scope else frozenset()
     frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
@@ -664,10 +776,13 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
             review = None
         else:
             problems, counts, kept, review, worked = photos_round(s3, batch, spend, clean, run_id, deadline, root, say,
-                                                                  listings, decisions, frozen, clicks_only)
+                                                                  work, decisions, frozen, clicks_only, restandardise,
+                                                                  scope is not None)
     finally:
         closing.cancel()
     problems += conflicted + unreadable_problems(frozen, decisions)
+    kept_as_was = restandardise_kept(s3, restandardise, lambda src: round_prefix(C.RUN_TAG, src))
+    problems += [f"re-standardise {r['source']} {r['sha'][:12]} kept as it was: {r['why']}" for r in kept_as_was]
     try:
         published = publish.publish(s3, root, sheet, photos, say, assigned=assigned,
                                     held={(l["source"], sha) for l in frozen for sha in l["photos"]})
@@ -682,10 +797,11 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped, **clean_summary(clean)}
     s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{summary_file(close_only, clicks_only)}",
-                  Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
+                  Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden,
+                                   "restandardise_kept": kept_as_was},
                                   sort_keys=True).encode(),
                   ContentType="application/json")
-    if clicks_only:
+    if clicks_only or scope is not None:
         merge_review(s3, root, review, worked, hidden, tile_listings(sheet, photos))
     elif review is not None:
         write_review(s3, root, review, hidden, tile_listings(sheet, photos))
@@ -791,7 +907,7 @@ def reap(run_id):
           flush=True)
 
 
-def unconfigured(close_only=False):
+def unconfigured(close_only=False, scoped=False):
     """What is missing or wrong in the settings: the GPU target and the pool's idle ceiling, the hosted key (not for a
     close-only run: it makes no hosted call), the month's budget, and a work window that leaves the GPU rounds their minimum after the judge's share
     (not for a close-only run: it judges nothing) and that, plus its finish, must end before the runner's ceiling."""
@@ -810,6 +926,8 @@ def unconfigured(close_only=False):
         missing.append("FAL_KEY")
     if C.BUDGET_USD is None:
         missing.append("SCRAPER_STANDARDISE_BUDGET_USD")
+    if scoped and C.RUN_CAP_USD is None:                       # a scoped run's cap binds whatever the months leave
+        missing.append("SCRAPER_STANDARDISE_RUN_CAP_USD (required with SCRAPER_STANDARDISE_SCOPE_KEY)")
     if not close_only and C.WORK_SECONDS < C.JUDGE_WINDOW_SECONDS + C.GPU_MIN_WINDOW_SECONDS:   # close-only: no judge
         missing.append(f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) at least JUDGE_WINDOW_SECONDS "
                        f"({C.JUDGE_WINDOW_SECONDS}) + GPU_MIN_WINDOW_SECONDS ({C.GPU_MIN_WINDOW_SECONDS})")
@@ -819,7 +937,7 @@ def unconfigured(close_only=False):
     return missing
 
 
-def cleaning_cap(s3, run_id, close_only):
+def cleaning_cap(s3, run_id, close_only, run=None):
     """This run's Spend against the month's cleaning cap (owner 2026-11-05: the hosted clean-up edits and their checks
     have their own cap), or None when no edit can be paid: no cap set (said once, here), or a close-only run (it makes
     no hosted call)."""
@@ -829,7 +947,7 @@ def cleaning_cap(s3, run_id, close_only):
         print("==> no cleaning cap (SCRAPER_STANDARDISE_CLEAN_BUDGET_USD unset): no photo is sent to a paid clean-up edit "
               "this run", flush=True)
         return None
-    return month_spend(s3, run_id, C.CLEAN_BUDGET_USD, C.CLEAN_SPEND_DIR, select.CleanCapReached)
+    return month_spend(s3, run_id, C.CLEAN_BUDGET_USD, C.CLEAN_SPEND_DIR, select.CleanCapReached, run)
 
 
 def hand_over(summary):
@@ -846,7 +964,12 @@ def main() -> int:
         print("ERROR: SCRAPER_STANDARDISE_CLOSE_ONLY and SCRAPER_STANDARDISE_CLICKS_ONLY are both set: a photos run is "
               "one kind; aborting")
         return 2
-    if missing := unconfigured(close_only):
+    scope_key = env.getenv("STANDARDISE_SCOPE_KEY")    # a scoped run (process): its scope's S3 key
+    if scope_key and (close_only or clicks_only):
+        print("ERROR: SCRAPER_STANDARDISE_SCOPE_KEY is set on a close-only or clicks-only run: a scoped run is a full "
+              "run of its listings; aborting")
+        return 2
+    if missing := unconfigured(close_only, scoped=bool(scope_key)):
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
@@ -854,18 +977,20 @@ def main() -> int:
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it
     # has to kill it; a process started by hand names itself.
     run_id = env.getenv("RUN_ID") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    spend = month_spend(s3, run_id, C.BUDGET_USD, C.SPEND_DIR)
-    clean = cleaning_cap(s3, run_id, close_only)
+    run_cap = select.RunCap(C.RUN_CAP_USD) if scope_key else None   # both budgets reserve against it
+    spend = month_spend(s3, run_id, C.BUDGET_USD, C.SPEND_DIR, run=run_cap)
+    clean = cleaning_cap(s3, run_id, close_only, run_cap)
     stop_on_signal(spend, clean)                       # before the lock: a stop at any point releases it
     try:
         with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only,
                             "clicks_only": clicks_only},
                        on_lost=lambda: halt((spend, clean), "the run lock was taken over")):
-            summary = process(s3, batch, spend, clean, run_id, deadline, close_only=close_only, clicks_only=clicks_only)
+            summary = process(s3, batch, spend, clean, run_id, deadline, close_only=close_only, clicks_only=clicks_only,
+                              scope_key=scope_key)
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4
-    except publish.NoConflictSet as exc:
+    except (publish.NoConflictSet, ScopeRefused) as exc:
         print(f"ERROR: {exc}; nothing done")
         return 2
     print(f"==> spent ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month"
