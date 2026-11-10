@@ -21,7 +21,8 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.core import csvio, logfmt
-from stone_pipeline.core.schema import CanonicalRow, FlagCode
+from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.stages import images
 from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
 from stone_pipeline.standardise import index
 
@@ -165,18 +166,13 @@ def write_photos_json(rows: list[CanonicalRow], path: Path) -> Path:
         handle, refs = row.handle or "", index.photo_refs(row.own_photo_keys)
         if photos.setdefault(handle, refs) != refs:
             raise ValueError(f"product handle {handle!r} has two different photo lists")
-        if _footprint_defaulted(row):
+        if images._defaulted_size(row, ("length", "width")):    # the footprint a photo is squared to
             defaulted.add(handle)
     body = json.dumps(photos, sort_keys=True, separators=(",", ":"))
     csvio.atomic_write(path, lambda handle: handle.write(body))
     listed = json.dumps(sorted(defaulted), separators=(",", ":"))
     csvio.atomic_write(Path(path).parent / STANDARDISE.DEFAULTED_FILE, lambda handle: handle.write(listed))
     return Path(path)
-
-
-def _footprint_defaulted(row: CanonicalRow) -> bool:
-    """The row's length or width was filled from the pack's defaults (the footprint a photo is squared to)."""
-    return any(f.code == FlagCode.dimension_defaulted and f.field in ("length", "width") for f in row.review_flags)
 
 
 def write_review_csv(rows: list[CanonicalRow], path: Path) -> Path:
