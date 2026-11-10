@@ -17,7 +17,9 @@ import dataclasses
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, decisions, tree_build
 from stone_pipeline.stages.curate import CurationResult
-from stone_pipeline.tests.test_tree_build import COL, _attrs, _backbone, _export, _for, _post, _products, _prow
+from stone_pipeline.tests.test_tree_build import (COL, _attrs, _backbone, _block_declares_raw, _export, _for,  # noqa: F401
+                                                  _post, _products, _prow)
+# _block_declares_raw is an autouse fixture: imported, it applies here too (the fixture vocabulary holds Raw)
 
 
 # --- combinations: (type, name) inheritance ----------------------------------------------------------------
