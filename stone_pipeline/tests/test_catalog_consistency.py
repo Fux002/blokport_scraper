@@ -96,8 +96,8 @@ def test_verify_consistency_roundtrip_pins_column_order(tmp_path, monkeypatch):
     from stone_pipeline.stages import product_state
 
     up = tmp_path / "to_upload"; up.mkdir()
-    _write_csv(tmp_path / "variants_export.csv", ["Id", "Key", "Name"],     # an export carries Key and Name
-               [{"Id": "v1", "Key": "slab_marble_x_1", "Name": "X"}])
+    _write_csv(tmp_path / "variants_export.csv", ["Id", "Key", "Name", "Type"],   # an export carries Key, Name, Type
+               [{"Id": "v1", "Key": "slab_marble_x_1", "Name": "X", "Type": "Marble"}])
     _write_csv(up / "2_valid_combinations.csv",
                ["product_category_id", "type_id", "variation_id", "finish_id", "color_id", "quality_id"],
                [{"product_category_id": "pc", "type_id": "Tm", "variation_id": "v1",
@@ -131,8 +131,8 @@ def test_tuples_missing_column_fails_loud(tmp_path, monkeypatch):
     from stone_pipeline import catalog
     from stone_pipeline.stages import product_state
     up = tmp_path / "to_upload"; up.mkdir()
-    _write_csv(tmp_path / "variants_export.csv", ["Id", "Key", "Name"],     # an export carries Key and Name
-               [{"Id": "v1", "Key": "slab_marble_x_1", "Name": "X"}])
+    _write_csv(tmp_path / "variants_export.csv", ["Id", "Key", "Name", "Type"],   # an export carries Key, Name, Type
+               [{"Id": "v1", "Key": "slab_marble_x_1", "Name": "X", "Type": "Marble"}])
     _write_csv(up / "3_products_all.csv",
                ["STN Type Id", "STN Variation Id", "STN Finish Id", "STN Color Id", "STN Quality Id"],
                [{"STN Type Id": "Tm", "STN Variation Id": "v1", "STN Finish Id": "F",

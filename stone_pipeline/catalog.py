@@ -173,51 +173,49 @@ def run(outputs_root: Path | None = None) -> Path:
     return sync
 
 
-def _s3_image_checker():
-    """Return a callable Key -> bool reporting whether <env>/variations/{Key}.png exists on S3, or
-    None when S3 is unreachable (no boto3/creds -- CI/sandbox) so the gate no-ops there. Backed by a
-    SINGLE list_objects_v2 of the variations prefix (one network round-trip TOTAL, shared with
-    emit_catalog), not a head_object per Key -- so the cost is O(1) network calls regardless of how
-    many variants are checked. The check is READ-ONLY, so it runs even under s3.dry_run."""
-    from stone_pipeline.stages.emit_catalog import _s3_variation_keys
-    keys = _s3_variation_keys()
-    return None if keys is None else (lambda key: key in keys)
-
-
-def _s3_image_copier():
-    """Return a callable (old_key, new_key) -> bool that copies {old}.png to {new}.png in
-    <env>/variations/ on S3, or None when S3 is unreachable. A re-typed variant is the SAME stone, so
-    its existing image is copied to the new Key rather than regenerated."""
-    from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS as _S
+def _s3_object_copier():
+    """Return a callable (source object key, target object key) -> bool that copies one object within the env's
+    staging bucket, or None when S3 is unreachable. A re-typed variety is the SAME stone, so its existing icons are
+    copied to the new Key rather than regenerated."""
+    from stone_pipeline.config.settings import SETTINGS as _S
     s3 = _S.s3
     try:
         client = storage.aws_client("s3", config=storage.BOUNDED, profile=s3.credentials_profile)
     except Exception:
         return None
-    prefix = f"{ENV_SEGMENT}/variations/"
 
-    def copy(old: str, new: str) -> bool:
+    def copy(source: str, target: str) -> bool:
         try:
-            client.copy_object(Bucket=s3.bucket, Key=f"{prefix}{new}.png",
-                               CopySource={"Bucket": s3.bucket, "Key": f"{prefix}{old}.png"})
+            client.copy_object(Bucket=s3.bucket, Key=target, CopySource={"Bucket": s3.bucket, "Key": source})
             return True
         except Exception:
             return False
     return copy
 
 
-def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
-    """When a variant is re-typed (its mis-typed Key is flagged in variants_to_delete and its NAME
-    resolves to a different, correct type), copy its S3 image from the old Key to the new correct Key
-    -- so the re-typed variant keeps its image instead of being held imageless out of the upload.
-    Idempotent (skips when the new Key already has an image); no-op when S3 is unreachable, so the
-    local sandbox is unchanged and AWS does it in-build."""
+def copy_variety_icons(old: str, new: str, existing: dict[str, dict[str, str]], copier) -> int:
+    """Copy each category icon of `old` that `new` does not have yet (`existing`: the S3 listing, {Key: {category
+    name: ETag}}), pair by pair through io.variety_icons. Returns the number copied."""
+    from stone_pipeline.io import variety_icons
+    have = existing.get(new, {})
+    return sum(1 for name in sorted(existing.get(old, {})) if name not in have
+               and copier(variety_icons.icon_key(old, name), variety_icons.icon_key(new, name)))
+
+
+def migrate_retyped_variant_images(ref, existing=None, copier=None) -> int:
+    """When a variety is re-typed (its mis-typed Key is flagged in variants_to_delete and its NAME resolves to a
+    different, correct type), copy its S3 icons, each category's, from the old Key to the new correct Key, so the
+    re-typed variety keeps its icons instead of being held imageless out of the upload. Idempotent (a pair the new
+    Key already has is skipped); no-op when S3 is unreachable, so the local sandbox is unchanged and AWS does it
+    in-build."""
     dele = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     if not dele.exists():
         return 0
-    checker = checker if checker is not None else _s3_image_checker()
-    copier = copier if copier is not None else _s3_image_copier()
-    if checker is None or copier is None:
+    if existing is None:
+        from stone_pipeline.stages.emit_catalog import _s3_icon_pairs
+        existing = _s3_icon_pairs()
+    copier = copier if copier is not None else _s3_object_copier()
+    if existing is None or copier is None:
         return 0
     from stone_pipeline.adapters.tokens import explicit_type_word
     from stone_pipeline.phase1.variety_key import new_key
@@ -231,8 +229,8 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
         if not looked:
             continue                                   # can't derive the correct type from the name
         new = new_key(looked[0], name)
-        if new != old and checker(old) and not checker(new) and copier(old, new):
-            copied += 1
+        if new != old:
+            copied += copy_variety_icons(old, new, existing, copier)
     if copied:
         log.info("migrated re-typed variant images to their new S3 Keys",
                  extra={"extra_fields": {"copied": copied}})
