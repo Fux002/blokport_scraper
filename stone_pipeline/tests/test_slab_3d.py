@@ -14,7 +14,7 @@ import pytest
 from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import load_source
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, Confidence, FlagCode, ReviewFlag
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
@@ -215,6 +215,89 @@ def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_phot
     assert [r.standard_photo for r in rows] == [True, True, False]
     assert rows[2].product_image_keys == [_improved(A)]                     # keeps its photo, hidden by the no-photo rule
     assert rows[0].thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"
+
+
+# -- the proportion gate: a listing gets its 3D slab only at its own measured size ----------------------------------
+
+def _meta(w_px, h_px):
+    """The outline JSON of a whole-rectangle w x h px cut-out, as cutout.encode writes it."""
+    return {"version": C.CUTOUT_VERSION, "width_px": w_px, "height_px": h_px,
+            "outline": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "edge_color": "#c8c8c8"}
+
+
+def _slab_row(length, width, defaulted=()):
+    row = CanonicalRow(src_site="sentas", surrogate_key="1", handle="h1", format_value="Slab",
+                       image_keys=[_improved(A)], length=length, width=width, height=0.02)
+    for field in defaulted:
+        row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_defaulted, confidence=Confidence.low,
+                                method="pack_default"))
+    return row
+
+
+def _link(monkeypatch, row, meta, **kw):
+    """The image stage on one slab row whose lead photo A has a published 3D slab with outline `meta`."""
+    monkeypatch.setattr(images, "_load_standard_views", lambda cfg: VIEWS)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
+    monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    outline = imagestore.cutout_key("sentas", A, "json")
+
+    def get(key):
+        assert key == outline, f"read {key}, not the lead photo's outline"
+        return json.dumps(meta).encode()
+    monkeypatch.setattr(images, "_get_object", get)
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+    images.run([row], cfg=cfg)
+    images.link_standard([row], [row], cfg=cfg, image_pipeline=True, **kw)
+
+
+def test_a_cut_out_not_at_the_listing_s_size_links_no_3d_and_the_photos_stay(monkeypatch):
+    # dev MAR-P/04/04: the vendor lists 2300 x 1500 (1.53:1), its photo's slab is 1905 x 824 px (2.31:1)
+    row = _slab_row(2.3, 1.5)
+    _link(monkeypatch, row, _meta(1905, 824))
+    assert row.model_3d_key is None
+    assert row.standard_version == "m1 w1 s1 c1"                           # the views without the 3D slab
+    assert row.thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"      # the photos stay
+
+
+def test_a_cut_out_at_the_listing_s_size_keeps_its_3d(monkeypatch):
+    row = _slab_row(2.3, 1.5)
+    _link(monkeypatch, row, _meta(1905, 1260))                              # 1.51:1, 1.4% off
+    assert row.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+
+
+def test_a_size_filled_from_the_pack_s_defaults_links_no_3d_even_when_it_happens_to_fit(monkeypatch):
+    row = _slab_row(3.3, 2.0, defaulted=("length", "width"))
+    _link(monkeypatch, row, _meta(1905, 1155))                              # 1.65:1: the default's own proportions
+    assert row.model_3d_key is None
+
+
+def test_a_misfit_is_reported_with_both_figures(monkeypatch):
+    found = []
+    _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 824), mismatches=found)
+    _link(monkeypatch, _slab_row(3.3, 2.0, defaulted=("length", "width")), _meta(1905, 872), mismatches=found)
+    assert [(f["reason"], f["length_m"], f["width_m"], f["cutout_px"], f["fit_pct"]) for f in found] == [
+        ("photo_scale_mismatch", 2.3, 1.5, [1905, 824], 50.78), ("size_defaulted", 3.3, 2.0, [1905, 872], 32.4)]
+    assert {f["listing"] for f in found} == {"h1"}
+
+
+def test_one_proportion_rule_serves_the_3d_slab_and_the_tile_stone():
+    # Blokport's renders measure the same: abs(cut-out W:H / listing L:W - 1) in percent, 5 inclusive
+    assert cutout.aspect_misfit(1905, 1260, 2.3, 1.5) is None
+    assert cutout.aspect_misfit(1905, 824, 2.3, 1.5) == pytest.approx(50.78, abs=0.01)
+    assert C.PHOTO_ASPECT_TOLERANCE_PCT == 5
+
+
+def test_the_misfits_reach_the_source_s_diagnostics(tmp_path):
+    from types import SimpleNamespace
+
+    from stone_pipeline import run as run_module
+    from stone_pipeline.core.manifest import Manifest
+    manifest = Manifest(run_id="sentas_1", source="sentas", code_version="x", environment="development")
+    manifest.photo_scale_mismatch = [{"listing": "h1", "reason": "photo_scale_mismatch", "fit_pct": 50.78}]
+    run_module._write_diagnostics(manifest, SimpleNamespace(diagnostics=tmp_path))
+    stages = json.loads((tmp_path / "stages.json").read_text(encoding="utf-8"))
+    assert stages["photo_scale_mismatch"] == manifest.photo_scale_mismatch
 
 
 # -- the ledger and the pull ---------------------------------------------------------------------------------------
