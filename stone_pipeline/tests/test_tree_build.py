@@ -39,23 +39,28 @@ def _backbone(tmp_path, posts, name="backbone.json"):
     return p
 
 
+def _type_of(key: str) -> str:
+    """A fixture row's stone type, the export's Type column (these fixtures name it in their Key)."""
+    return key.split("_")[1].title() if key.count("_") >= 2 else ""
+
+
 def _export(tmp_path, rows):  # rows: (Id, Key, Name)
     p = tmp_path / "export.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
         for vid, key, nm in rows:
-            w.writerow([vid, key, nm, "", "", ""])
+            w.writerow([vid, key, nm, _type_of(key), ""])
     return p
 
 
-def _export_no_volume(tmp_path, rows):  # 5-column export: Blokport's file after packing_factor removal
+def _export_no_volume(tmp_path, rows):  # the backend's export columns, with no Volume (SC-4 2b)
     p = tmp_path / "export_5col.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases"])   # NO "Volume per kg (m³/kg)" column
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
         for vid, key, nm in rows:
-            w.writerow([vid, key, nm, "", ""])
+            w.writerow([vid, key, nm, _type_of(key), ""])
     return p
 
 
@@ -220,10 +225,10 @@ def test_partial_export_row_is_warned_not_silently_dropped(tmp_path, caplog):
     exp = tmp_path / "export.csv"
     with exp.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
-        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "", "", ""])
-        w.writerow(["", "", "Orphan Marble", "", "", ""])   # data present, no Id/Key -> warned
-        w.writerow(["", "", "", "", "", ""])                # blank line -> silent
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
+        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "Marble", ""])
+        w.writerow(["", "", "Orphan Marble", "", ""])   # data present, no Id/Key -> warned
+        w.writerow(["", "", "", "", ""])                # blank line -> silent
     with caplog.at_level(logging.WARNING):
         combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], _products(tmp_path, [_prow()]))
     assert _for(combos, "v1")                               # the good row still built, no abort
