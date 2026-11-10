@@ -65,6 +65,13 @@ showing its stone (`CLOSEUP_SLAB_*`); when none does, or both halves of an open 
 reason is recorded, never a guess. Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
 close view, no 3D.
 
+The 3D slab keeps the proportions its photo measured. The produce's image stage links it to a product only at that
+product's own measured size: length and width not filled from the pack's defaults, and the cut-out's width:height
+within `PHOTO_ASPECT_TOLERANCE_PCT` (5, inclusive) of the product's length:width (`cutout.aspect_misfit`, the one rule
+the tile stone uses too, measured as Blokport's renders measure it). Otherwise the product keeps its photos with no 3D,
+and it is listed with both figures under `photo_scale_mismatch` in its source's diagnostics (`stages.json`, served by
+`GET /config/v1/diagnostics/{source}`). An outline that cannot be read fails the source's produce, never a silent no-3D.
+
 A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
 (in this run, or as the listing's choice from an earlier one, picked again as "kept"), only the listing's whole results
 are judged after it, and the first that passes becomes the choice; if none does, the close-up stays. What was already
@@ -170,7 +177,7 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
   finish (Tiger Black Flamed), none with a published 3D cut-out, or every one refused.
 - **Refused cut-outs**: a crosshatch over the face (straight lines along both axes: `TILE_GRID_*`; Tiger Black
   805cf5ac scores 17.6, every other of 510 prod cut-outs at most 1.97), or proportions more than
-  `TILE_ASPECT_TOLERANCE` from the slab's listed size (its scale would be a guess). Lamp reflections
+  `PHOTO_ASPECT_TOLERANCE_PCT` from the slab's listed size (its scale would be a guess). Lamp reflections
   (`marks.flare_mask`) and a 3 cm rim are never cut. The slab job's fills (labels, straps, flares it painted over) are
   not saved, so they cannot be avoided yet: the job would have to save a fill mask beside `<sha>.slab.png`
   (`<sha>.fill.png`, 8-bit, the squared slab's frame, 255 where it painted or a hosted edit changed the stone) and

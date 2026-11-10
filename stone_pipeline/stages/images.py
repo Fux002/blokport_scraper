@@ -40,6 +40,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.io import download as dl
 from stone_pipeline.io import imagestore
 from stone_pipeline.io import storage
+from stone_pipeline.standardise import cutout
 
 log = logfmt.get_logger("images")
 
@@ -208,7 +209,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
 
 
 def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None, *,
-                  image_pipeline: bool) -> Optional[dict[str, dict[str, list[str]]]]:
+                  image_pipeline: bool,
+                  mismatches: Optional[list[dict]] = None) -> Optional[dict[str, dict[str, list[str]]]]:
     """After validation: every product linked to its standardised photo, from the published pool, and the conflict set
     {source: {sha: [handles]}} of the emitted products (index.shared_photos, each with every photo it has: the products
     on the sheet, nothing validation rejected), returned to be stored (save_conflicts) as the one set the photo process
@@ -216,7 +218,9 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     pool cannot be read (nothing is stored then; the products keep their images and their listed state). The rows are one
     source's; `image_pipeline` is its switch as the produce loaded it (one value for the whole run). Off: every product
     keeps its hosted scraped photos (standard_photo stays None; populate never hides it), and the photo list and the
-    conflict set are made as for any source (the photo process refuses a source on the sheet without them)."""
+    conflict set are made as for any source (the photo process refuses a source on the sheet without them). A product
+    carries its lead's 3D slab only at its own measured size (_scale_misfit); each emitted product refused one is added
+    to `mismatches` (the source's diagnostics, photo_scale_mismatch) when given."""
     cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
     removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
@@ -228,6 +232,8 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     conflicts = {(src, sha) for src, photos in by_source.items() for sha in photos}
     removed, assigned = removed or set(), assigned or {}
     skus = _skus(rows) if removed or conflicts else {}
+    outlines: dict[tuple[str, str, str], tuple[float, float]] = {}
+    misfits: list[tuple[CanonicalRow, dict]] = []
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
         if not image_pipeline:                         # off: it keeps the hosted scraped photos
@@ -238,9 +244,54 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(seen, lead) if _is_3d_format(row) else None
+            if row.model_3d_key and (misfit := _scale_misfit(row, lead, seen, outlines)) is not None:
+                row.model_3d_key = None
+                misfits.append((row, misfit))
             row.standard_version = standard_version(seen, lead, with_3d=bool(row.model_3d_key))
             _slot_row(row, standardised(row.image_keys, seen, lead))
+    if mismatches is not None:
+        on_sheet = {id(r) for r in emitted}
+        reported = [(r, m) for r, m in misfits if id(r) in on_sheet]
+        sku_of = _skus([r for r, _ in reported])
+        mismatches.extend({**m, "sku": sku_of[id(r)]} for r, m in reported)
     return None if views is None else by_source
+
+
+def _scale_misfit(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
+                  outlines: dict[tuple[str, str, str], tuple[float, float]]) -> Optional[dict]:
+    """None when a product may carry its lead's 3D slab: its length and width measured (not filled from the pack's
+    defaults) and the cut-out at their proportions (cutout.aspect_misfit, the one rule Blokport's renders measure too:
+    the cut-out's width is the listing's length). Else why not, with both figures (a photo_scale_mismatch row of the
+    source's diagnostics). outlines: each outline's px size by (source, sha, ETag), read once a run."""
+    _, src, sha = lead
+    where = (src, sha, seen[imagestore.CUTOUT_SUBDIR][sha])
+    if where not in outlines:
+        outlines[where] = _outline_size(src, sha)
+    w_px, h_px = outlines[where]
+    found = {"listing": row.handle, "length_m": row.length, "width_m": row.width,
+             "cutout_px": [round(w_px), round(h_px)]}
+    if not (row.length and row.width and row.length > 0 and row.width > 0):
+        return {**found, "reason": "size_missing", "listing_aspect": None, "cutout_aspect": round(w_px / h_px, 3),
+                "fit_pct": None}
+    found |= {"listing_aspect": round(row.length / row.width, 3), "cutout_aspect": round(w_px / h_px, 3),
+              "fit_pct": round(cutout.aspect_off(w_px, h_px, row.length, row.width), 2)}
+    if _defaulted_size(row, ("length", "width")):
+        return {**found, "reason": "size_defaulted"}
+    if cutout.aspect_misfit(w_px, h_px, row.length, row.width) is not None:
+        return {**found, "reason": "photo_scale_mismatch"}
+    return None
+
+
+def _outline_size(src: str, sha: str) -> tuple[float, float]:
+    """A published 3D slab's outline size in px (cutout.outline_size). Raises when it cannot be read or is not one: the
+    produce fails loud for the source, never a silent "no 3D"."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    key = imagestore.cutout_key(src, sha, "json")
+    try:
+        return cutout.outline_size(json.loads(_get_object(key)))
+    except (BotoCoreError, ClientError, ValueError) as exc:     # ValueError: not JSON, or not an outline
+        raise RuntimeError(f"the 3D slab's outline {key} cannot be read: {exc}") from exc
 
 
 def save_conflicts(by_source: dict[str, dict[str, list[str]]]) -> None:
@@ -374,9 +425,8 @@ def standard_version(views: dict[str, dict[str, str]], lead: Optional[Lead], wit
     return " ".join(views[k][sha] for k in kinds if sha in views.get(k, ()))
 
 
-def _defaulted_size(row: CanonicalRow) -> bool:
-    return any(f.code == FlagCode.dimension_defaulted and f.field in ("length", "width", "height")
-               for f in row.review_flags)
+def _defaulted_size(row: CanonicalRow, fields: tuple[str, ...] = ("length", "width", "height")) -> bool:
+    return any(f.code == FlagCode.dimension_defaulted and f.field in fields for f in row.review_flags)
 
 
 def _is_tile(row: CanonicalRow) -> bool:

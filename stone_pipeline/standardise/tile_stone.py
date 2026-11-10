@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
-from stone_pipeline.standardise import marks
+from stone_pipeline.standardise import cutout, marks
 
 
 class Refused(ValueError):
@@ -82,8 +82,9 @@ def from_cutout(rgba: np.ndarray, length_m: float, width_m: float) -> Stone:
     if h > w:                                          # the cut-out's long side is the slab's length
         rgba = np.ascontiguousarray(np.rot90(rgba))
         h, w = w, h
-    if abs((w / h) / (long_m / short_m) - 1) > C.TILE_ASPECT_TOLERANCE:
-        raise Refused(f"the cut-out ({w}x{h} px) is not at the slab's proportions ({long_m:g} x {short_m:g} m)")
+    if (off := cutout.aspect_misfit(w, h, long_m, short_m)) is not None:
+        raise Refused(f"the cut-out ({w}x{h} px) is not at the slab's proportions ({long_m:g} x {short_m:g} m): "
+                      f"{off:.1f}% off")
     rgb, alpha = rgba[:, :, :3], (rgba[:, :, 3] > C.CUTOUT_ALPHA_CUT).astype(np.uint8)
     ppm = float(np.sqrt((w / long_m) * (h / short_m)))
     inset = max(1, int(round(C.TILE_STONE_INSET_M * ppm)))

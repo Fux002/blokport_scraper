@@ -69,3 +69,28 @@ def edge_color(bgra: np.ndarray, stone: np.ndarray) -> str:
     mean = bgra[:, :, :3][stone > 0].reshape(-1, 3).mean(0)[::-1]          # BGR -> RGB
     edge = np.clip(mean * (1 - C.CUTOUT_EDGE_WHITE) + 255 * C.CUTOUT_EDGE_WHITE, 0, 255)
     return "#%02x%02x%02x" % tuple(int(v) for v in edge)
+
+
+def outline_size(meta: dict) -> tuple[float, float]:
+    """(width, height) in px of a cut-out's outline (its JSON meta): the outline's bounding box times the cut-out's px,
+    as Blokport's renders measure it. ValueError on a meta that is not one."""
+    try:
+        us, vs = zip(*((float(u), float(v)) for u, v in meta["outline"]))
+        return (max(us) - min(us)) * float(meta["width_px"]), (max(vs) - min(vs)) * float(meta["height_px"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"not a cut-out outline: {exc!r}") from exc
+
+
+def aspect_off(w_px: float, h_px: float, length: float, width: float) -> float:
+    """How many percent a cut-out of w x h px (its width along the slab's length) is off the listed length:width.
+    ValueError on a size that is not positive."""
+    if min(w_px, h_px, length, width) <= 0:
+        raise ValueError(f"not a size: cut-out {w_px} x {h_px} px, listed {length} x {width}")
+    return abs((w_px / h_px) / (length / width) - 1) * 100
+
+
+def aspect_misfit(w_px: float, h_px: float, length: float, width: float) -> float | None:
+    """aspect_off when it is over PHOTO_ASPECT_TOLERANCE_PCT, None within it (inclusive): the one proportion rule for a
+    3D slab and a tile's stone."""
+    off = aspect_off(w_px, h_px, length, width)
+    return off if off > C.PHOTO_ASPECT_TOLERANCE_PCT else None

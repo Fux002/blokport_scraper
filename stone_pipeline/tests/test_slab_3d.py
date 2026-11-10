@@ -205,7 +205,9 @@ def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_phot
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
-    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)])
+    monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1500.0, 1000.0))   # at the slab's 2.85 x 1.9
+    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)],
+                         length=2.85, width=1.9, height=0.02)
             for k, f in (("1", "Slab"), ("2", "Block"), ("3", "Tile"))]
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
     images.run(rows, cfg=cfg)

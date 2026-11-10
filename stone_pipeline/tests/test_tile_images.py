@@ -695,7 +695,10 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1200.0, 600.0))    # rendered at the tile's 0.6 x 0.3
     rows = [_row("rb-tile"), _row("tb-flamed")]
+    for row in rows:
+        row.length, row.width, row.height = 0.6, 0.3, 0.02
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
     images.run(rows, cfg=cfg)
     images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
