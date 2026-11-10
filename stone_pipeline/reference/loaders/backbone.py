@@ -125,11 +125,15 @@ class Backbone:
 
 def read_posts(path: Path) -> list[dict]:
     """The posts of a backbone file ({"posts": [...]}) or an additions file (a bare list): the ONE reader every
-    backbone and additions read goes through. A post with no Key is HELD and skipped: an untyped addition has no
+    backbone and additions read goes through. A HELD post is skipped: an untyped addition has neither a type nor a
     phase 1 Key (it never gets a guessed type), so it is listed in the file and never read as a variety."""
     doc = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     posts = doc.get("posts", []) if isinstance(doc, dict) else doc
-    return [post for post in posts if (post.get("key") or "").strip()]
+    return [post for post in posts if not _held(post)]
+
+
+def _held(post: dict) -> bool:
+    return not (post.get("key") or "").strip() and not (post.get("stone_type") or "").strip()
 
 
 def load_backbone(path: Path | None = None) -> Backbone:

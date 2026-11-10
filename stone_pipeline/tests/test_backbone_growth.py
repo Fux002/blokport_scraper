@@ -24,7 +24,7 @@ from stone_pipeline.stages import decisions
 
 
 def _variety(quals=("A",), finishes=("Polished",), colors=("Black",), stone_type="Granite"):
-    return BackboneVariety(variant="Tiger Black", category="Slabs", stone_type=stone_type,
+    return BackboneVariety(variant="Tiger Black", stone_type=stone_type,
                            colors=list(colors), finishes=list(finishes), qualities=list(quals), aliases=[])
 
 

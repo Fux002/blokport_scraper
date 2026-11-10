@@ -65,7 +65,8 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict]:
     by_key: dict[str, dict] = {}
     by_type_name: dict[tuple, dict] = {}
     for post in _read_backbone(paths):
-        by_key[post["key"]] = post
+        if post.get("key"):
+            by_key[post["key"]] = post
         name = match_key(post.get("variant") or "")   # canonical name key (accent/separator/punct-proof)
         if name:
             by_type_name.setdefault((match_key(post.get("stone_type") or ""), name), post)
