@@ -85,8 +85,13 @@ The office drops ONE file at `s3://<staging bucket>/<ENV_NAME>/scraper/state/man
 src_site,surrogate_key,field,value,confirmed_by,confirmed_at,source
 polonine,620,length,3.1,fons,2026-11-10,https://vendor.example/p/620
 ```
+- From a SKU: the SKU is `<CODE>-<surrogate_key>` upper-cased, so `src_site` is the source the code names and
+  `surrogate_key` is everything after the first `-`: `POL-620` is `polonine,620`. The codes: `POL` polonine, `MAR`
+  marenostone, `ZUC` zucchi, `VAR` varsha, `FUL` fuleistone, `SEN` sentas (`stone_pipeline/config/sources.yaml`).
+  A lot piece keeps its `-N` position: `SEN-B123-2` is `sentas,B123-2`.
 - `field` is a canonical field: `length`, `width`, `height` (metres; `height` is the thickness, `width` the short
-  face), `bundle_size`, `origin_country_code`, `title`, `color_name`, `variation_id`, ...
+  face; each within its category's plausible band, so `325` for a slab is refused), `bundle_size`,
+  `origin_country_code`, `title`, `color_name`, `variation_id`, ... A field no step reads is refused, naming the line.
 - `confirmed_by`, `confirmed_at` (an ISO date) and `source` (a vendor URL, a card, "office") are REQUIRED on every
   entry, and the value cannot be blank: an unsigned or blank entry stops the produce, naming its line.
 - An override holds until you remove its line. When the vendor's own value later differs, the review list shows both

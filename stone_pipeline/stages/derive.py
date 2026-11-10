@@ -228,12 +228,14 @@ def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, defau
     return default
 
 
-def _dimension_overrides(row: CanonicalRow, ref: ReferenceData) -> dict[str, float]:
+def _dimension_overrides(row: CanonicalRow, ref: ReferenceData, category: str) -> dict[str, float]:
     """The operator's length/width/height overrides for the row, in metres (flat-dims: height = thickness, width =
-    the short face). A value that is not a positive finite number raises, so the row guard dead-letters the row
-    loudly instead of storing a wrong size."""
+    the short face). A value that is not a positive finite number, or that lies outside the category's plausible
+    band, raises, so the row guard dead-letters the row loudly instead of publishing a wrong size: an override skips
+    the unit correction (a person states metres), so an office "325" meant as 3.25 m must not become a 325 m slab."""
     if ref.overrides is None:
         return {}
+    ranges = active_pack().dimension_ranges[category]
     out: dict[str, float] = {}
     for field in ("length", "width", "height"):
         raw = ref.overrides.get(row.src_site, row.surrogate_key or "", field)
@@ -245,6 +247,10 @@ def _dimension_overrides(row: CanonicalRow, ref: ReferenceData) -> dict[str, flo
             metres = float("nan")
         if not (math.isfinite(metres) and metres > 0):
             raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is not a positive number of metres")
+        band_lo, band_hi = _plausible_band(*ranges.get(field, (0.0, 5.0)))
+        if not band_lo <= metres <= band_hi:
+            raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is outside the {category} band "
+                             f"{band_lo:g} to {band_hi:g} m")
         out[field] = metres
     return out
 
@@ -328,7 +334,7 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     methods: list[str] = []
     # An operator override (state/overrides.py) is the top strategy, applied HERE rather than in _apply_overrides
     # (which runs after this function), so the weight below is derived from the overridden size.
-    overridden = _dimension_overrides(row, ref)
+    overridden = _dimension_overrides(row, ref, category)
     length = _dimension(row, "length", faces.get("length"), defaults["length"], category, methods, overridden,
                         face_source)
     width = _dimension(row, "width", faces.get("height"), defaults["width"], category, methods, overridden,

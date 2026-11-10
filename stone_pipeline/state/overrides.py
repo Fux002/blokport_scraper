@@ -28,8 +28,14 @@ from dataclasses import dataclass, field as dc_field
 from datetime import datetime
 from pathlib import Path
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS
 
+# The fields a resolver reads (stages/match_variation variation_id, stages/format_resolve format_value,
+# stages/derive the dimensions and _apply_overrides' fields); the pack's attribute names (stages/normalize,
+# "<vocab>_name") are added by known_fields. An entry for any other field would load and never apply.
+_RESOLVER_FIELDS = ("variation_id", "format_value", "length", "width", "height", "bundle_size",
+                    "origin_country_code", "origin_city", "title", "description")
 _KEY_COLUMNS = ("src_site", "surrogate_key", "field", "value")
 _PROVENANCE_COLUMNS = ("confirmed_by", "confirmed_at", "source")
 
@@ -60,6 +66,11 @@ class Overrides:
         return sum(len(v) for v in self.by_key.values())
 
 
+def known_fields() -> frozenset[str]:
+    """Every field an override may set: the ones a resolver reads, and each of the active pack's attributes."""
+    return frozenset(_RESOLVER_FIELDS) | {f"{vocab}_name" for vocab in active_pack().attributes}
+
+
 def load_overrides(path: Path | None = None) -> Overrides:
     """The overrides file, every entry validated (the module docstring). A missing file is no overrides; an
     unreadable one raises (OSError), a malformed one raises OverridesError naming the line."""
@@ -67,6 +78,7 @@ def load_overrides(path: Path | None = None) -> Overrides:
     overrides = Overrides()
     if not path.exists():
         return overrides
+    fields = known_fields()
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         missing = [c for c in (*_KEY_COLUMNS, *_PROVENANCE_COLUMNS) if c not in (reader.fieldnames or ())]
@@ -79,6 +91,9 @@ def load_overrides(path: Path | None = None) -> Overrides:
             blank = [c for c in (*_KEY_COLUMNS, *_PROVENANCE_COLUMNS) if not cells[c]]
             if blank:
                 raise OverridesError(f"{where}: {', '.join(blank)} is blank")
+            if cells["field"] not in fields:
+                raise OverridesError(f"{where}: {cells['field']!r} is not a field an override can set "
+                                     f"({', '.join(sorted(fields))})")
             try:
                 datetime.fromisoformat(cells["confirmed_at"])
             except ValueError as exc:

@@ -229,3 +229,10 @@ def test_every_field_a_resolver_reads_loads(tmp_path):
     assert {"length", "width", "height", "variation_id", "format_value", "bundle_size", "title"} <= set(fields)
     loaded = ov.load_overrides(_file(tmp_path, *(f"polonine,620,{f},1,{_SIGNED}" for f in fields)))
     assert len(loaded) == len(fields)
+
+
+def test_an_override_written_from_the_sku_matches_a_lower_case_surrogate_key(tmp_path):
+    # the SKU is upper-cased (MAR-MINT_E77E...), the scraped key is not (mint_e77e...): the office writes from the SKU,
+    # and SKUs are unique upper-cased, so matching the key without case loses nothing and never silently misses
+    loaded = ov.load_overrides(_file(tmp_path, f"marenostone,MINT_E77E949AA734EF03,length,3.1,{_SIGNED}"))
+    assert loaded.get("marenostone", "mint_e77e949aa734ef03", "length") == "3.1"
