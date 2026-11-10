@@ -14,7 +14,7 @@ import pytest
 from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import load_source
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, Confidence, FlagCode, ReviewFlag
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
@@ -212,7 +212,9 @@ def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_phot
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
-    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)])
+    monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1500.0, 1000.0))   # at the slab's 2.85 x 1.9
+    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)],
+                         length=2.85, width=1.9, height=0.02)
             for k, f in (("1", "Slab"), ("2", "Block"), ("3", "Tile"))]
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
     images.run(rows, cfg=cfg)
@@ -222,6 +224,198 @@ def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_phot
     assert [r.standard_photo for r in rows] == [True, True, False]
     assert rows[2].product_image_keys == [_improved(A)]                     # keeps its photo, hidden by the no-photo rule
     assert rows[0].thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"
+
+
+# -- the proportion gate: a listing gets its 3D slab only at its own measured size ----------------------------------
+
+def _meta(w_px, h_px):
+    """The outline JSON of a whole-rectangle w x h px cut-out, as cutout.encode writes it."""
+    return {"version": C.CUTOUT_VERSION, "width_px": w_px, "height_px": h_px,
+            "outline": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], "edge_color": "#c8c8c8"}
+
+
+def _slab_row(length, width, defaulted=()):
+    row = CanonicalRow(src_site="sentas", surrogate_key="1", handle="h1", format_value="Slab",
+                       image_keys=[_improved(A)], length=length, width=width, height=0.02)
+    for field in defaulted:
+        row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_defaulted, confidence=Confidence.low,
+                                method="pack_default"))
+    return row
+
+
+def _link(monkeypatch, row, meta, **kw):
+    """The image stage on one slab row whose lead photo A has a published 3D slab with outline `meta`."""
+    monkeypatch.setattr(images, "_load_standard_views", lambda cfg: VIEWS)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
+    monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    outline = imagestore.cutout_key("sentas", A, "json")
+
+    def get(key):
+        assert key == outline, f"read {key}, not the lead photo's outline"
+        return json.dumps(meta).encode()
+    monkeypatch.setattr(images, "_get_object", get)
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+    images.run([row], cfg=cfg)
+    images.link_standard([row], [row], cfg=cfg, image_pipeline=True, **kw)
+
+
+def test_a_cut_out_not_at_the_listing_s_size_links_no_3d_and_the_photos_stay(monkeypatch):
+    # dev MAR-P/04/04: the vendor lists 2300 x 1500 (1.53:1), its photo's slab is 1905 x 824 px (2.31:1)
+    row = _slab_row(2.3, 1.5)
+    _link(monkeypatch, row, _meta(1905, 824))
+    assert row.model_3d_key is None
+    assert row.standard_version == "m1 w1 s1 c1"                           # the views without the 3D slab
+    assert row.thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"      # the photos stay
+
+
+def test_a_cut_out_at_the_listing_s_size_keeps_its_3d(monkeypatch):
+    row = _slab_row(2.3, 1.5)
+    _link(monkeypatch, row, _meta(1905, 1260))                              # 1.51:1, 1.4% off
+    assert row.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+
+
+def test_a_size_filled_from_the_pack_s_defaults_links_no_3d_even_when_it_happens_to_fit(monkeypatch):
+    row = _slab_row(3.3, 2.0, defaulted=("length", "width"))
+    _link(monkeypatch, row, _meta(1905, 1155))                              # 1.65:1: the default's own proportions
+    assert row.model_3d_key is None
+
+
+def test_a_defaulted_thickness_alone_keeps_the_3d(monkeypatch):
+    # dev: 19 of 20 defaulted sizes are Sentas lot pieces with only the thickness filled; the gate judges L:W only
+    row = _slab_row(2.3, 1.5, defaulted=("height",))
+    _link(monkeypatch, row, _meta(1905, 1260))
+    assert row.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+
+
+def test_a_size_outside_the_category_s_band_links_no_3d_and_is_reported_with_the_band(monkeypatch):
+    # prod POL-648: a thickness in the width field (3.15 x 0.20); the cut-out happens to be at those proportions
+    row = _slab_row(3.15, 0.2)
+    row.add_flag(ReviewFlag(field="width", code=FlagCode.dimension_out_of_range, raw_value="0.2",
+                            confidence=Confidence.low, method="range_check", detail="band 0.45 to 9"))
+    found = []
+    _link(monkeypatch, row, _meta(1905, 121), mismatches=found)              # 15.74:1, fits 15.75:1
+    assert row.model_3d_key is None
+    assert [(f["reason"], f["length_m"], f["width_m"], f["band"]) for f in found] == [
+        ("size_out_of_band", 3.15, 0.2, {"width": "band 0.45 to 9"})]
+
+
+def test_the_outlines_are_read_in_parallel_under_the_settings_cap(monkeypatch):
+    from stone_pipeline.photos import publish as photo_publish
+    calls = []
+    real = photo_publish.pool_map
+
+    def pooled(workers, work, items):
+        calls.append((workers, list(items)))
+        return real(1, work, items)
+    monkeypatch.setattr(photo_publish, "pool_map", pooled)
+    _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 1260))
+    assert calls[0] == (C.CUTOUT_OUTLINE_READ_WORKERS, [("sentas", A, "t1+j1")])
+
+
+def test_a_misfit_is_reported_with_both_figures(monkeypatch):
+    found = []
+    _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 824), mismatches=found)
+    _link(monkeypatch, _slab_row(3.3, 2.0, defaulted=("length", "width")), _meta(1905, 872), mismatches=found)
+    assert [(f["reason"], f["length_m"], f["width_m"], f["cutout_px"], f["fit_pct"]) for f in found] == [
+        ("photo_scale_mismatch", 2.3, 1.5, [1905, 824], 50.78), ("size_defaulted", 3.3, 2.0, [1905, 872], 32.4)]
+    assert {f["listing"] for f in found} == {"h1"}
+
+
+def _cut_corner(w_px, h_px, right):
+    """The outline of an irregular piece (a cut corner, top right) in a w x h px cut-out whose stone reaches only
+    `right` of its width: its bounding box is right x 1 of the frame, not the frame."""
+    return {**_meta(w_px, h_px), "outline": [[0.0, 0.0], [right - 0.1, 0.0], [right, 0.15], [right, 1.0], [0.0, 1.0]]}
+
+
+def test_the_gate_measures_the_outline_s_bounding_box_not_the_cut_out_s_frame(monkeypatch):
+    # Mas (SEN-7074-30, a true lot-piece size with a cut corner): compare the outline's own extent with the listing
+    framed = _slab_row(1.8, 1.0)
+    _link(monkeypatch, framed, _cut_corner(1800, 1000, right=0.8))          # frame 1.8:1 fits; outline 1.44:1 does not
+    assert framed.model_3d_key is None
+    stone = _slab_row(1.8, 1.0)
+    _link(monkeypatch, stone, _cut_corner(2000, 1000, right=0.9))           # frame 2:1 does not; outline 1.8:1 fits
+    assert stone.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+    assert cutout.outline_size(_cut_corner(2000, 1000, right=0.9)) == pytest.approx((1800.0, 1000.0))
+
+
+# -- a lot piece's 3D: only from its own photo (Mas, 2a) ------------------------------------------------------------
+
+LOT = "SEN-B6372"
+OWN1, OWN2, SHARED = "d" * 64, "e" * 64, C3                 # each piece's own photo first, then the bundle's photo
+
+
+def _piece(position, own, length=2.75, width=1.89):
+    return CanonicalRow(src_site="sentas", surrogate_key=f"2525-{position}", handle=f"p{position}", format_value="Slab",
+                        image_keys=[_improved(own), _improved(SHARED)], length=length, width=width, height=0.02,
+                        lot_code=LOT, lot_position=position)
+
+
+def _link_lot(monkeypatch, rows, published, judged, **kw):
+    """The image stage on a lot's pieces: `published` = the photos with views and a 3D slab; judged = {(tag, sha):
+    the judge's record} of the photo process's runs (a photo not in it was never judged in that run)."""
+    from botocore.exceptions import ClientError
+
+    from stone_pipeline.photos.source import round_prefix
+    views = {"main": {s: "m" for s in published}, "white": {s: "w" for s in published},
+             "studio": {s: "s" for s in published}, "close": {},
+             imagestore.CUTOUT_SUBDIR: {s: "t+j" for s in published}}
+    monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
+    monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    stored = {f"{round_prefix(tag, 'sentas')}judged/{sha}.json": json.dumps(rec).encode()
+              for (tag, sha), rec in judged.items()}
+    stored |= {imagestore.cutout_key("sentas", s, "json"): json.dumps(_meta(1905, 1309)).encode()    # fits 2.75 x 1.89
+               for s in published}
+
+    def get(key):
+        if key not in stored:
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not Found"}}, "GetObject")
+        return stored[key]
+    monkeypatch.setattr(images, "_get_object", get)
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+    images.run(rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True, **kw)
+
+
+def test_a_lot_piece_shown_from_the_lot_s_shared_photo_gets_no_3d_even_when_it_fits(monkeypatch):
+    # dev SEN-2525-1: its own photo failed the judge, so it is shown from the bundle's open-book photo
+    rows = [_piece(1, OWN1), _piece(2, OWN2)]
+    fail = {"verdict": "fail", "problems": [{"kind": "bad_fill", "where": "left edge, middle section"}]}
+    found = []
+    _link_lot(monkeypatch, rows, published={SHARED}, judged={(C.RUN_TAG, OWN1): fail}, mismatches=found)
+    assert [r.model_3d_key for r in rows] == [None, None]
+    assert [r.thumbnail_key for r in rows] == [f"{BASE}/standard/main/sentas/{SHARED}.jpg"] * 2    # the photos stay
+    assert [(f["listing"], f["reason"], f["why"]) for f in found] == [
+        ("p1", "lot_shared_photo", "own photo failed: bad_fill: left edge, middle section"),
+        ("p2", "lot_shared_photo", "own photo not judged")]
+
+
+def test_a_lot_piece_shown_from_its_own_photo_keeps_its_3d(monkeypatch):
+    rows = [_piece(1, OWN1), _piece(2, OWN2)]
+    _link_lot(monkeypatch, rows, published={OWN1, SHARED}, judged={})
+    assert rows[0].model_3d_key == f"{BASE}/standard/cutout/sentas/{OWN1}.webp"
+    assert rows[1].model_3d_key is None                                 # piece 2 is still shown from the shared photo
+
+
+def test_one_proportion_rule_serves_the_3d_slab_and_the_tile_stone():
+    # Blokport's renders measure the same: abs(cut-out W:H / listing L:W - 1) in percent, 5 inclusive
+    assert cutout.aspect_misfit(1905, 1260, 2.3, 1.5) is None
+    assert cutout.aspect_misfit(1905, 824, 2.3, 1.5) == pytest.approx(50.78, abs=0.01)
+    assert C.PHOTO_ASPECT_TOLERANCE_PCT == 5
+
+
+def test_the_misfits_reach_the_source_s_diagnostics(tmp_path):
+    from types import SimpleNamespace
+
+    from stone_pipeline import run as run_module
+    from stone_pipeline.core.manifest import Manifest
+    manifest = Manifest(run_id="sentas_1", source="sentas", code_version="x", environment="development")
+    manifest.photo_scale_mismatch = [{"listing": "h1", "reason": "photo_scale_mismatch", "fit_pct": 50.78}]
+    run_module._write_diagnostics(manifest, SimpleNamespace(diagnostics=tmp_path))
+    stages = json.loads((tmp_path / "stages.json").read_text(encoding="utf-8"))
+    assert stages["photo_scale_mismatch"] == manifest.photo_scale_mismatch
 
 
 # -- the ledger and the pull ---------------------------------------------------------------------------------------

@@ -392,7 +392,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
         if not band_lo <= value <= band_hi:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
                                     raw_value=str(value), confidence=Confidence.low,
-                                    method="range_check", src_url=row.src_url))
+                                    method="range_check", src_url=row.src_url,   # detail: what it was checked against
+                                    detail=f"band {band_lo:g} to {band_hi:g}"))
 
     row.length = round(length, 3) if length is not None else None
     row.width = round(width, 3) if width is not None else None

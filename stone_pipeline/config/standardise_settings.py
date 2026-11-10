@@ -246,6 +246,15 @@ class STANDARDISE:
     CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab from its photo,
                                        # and whose published 3D slabs are the stone tiles are cut from
     CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum
+    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs, 62
+    # off their listed size by more than 5%, 24 by more than 10%; dev 2026-11-10 (BP3), 24 of 126. Blokport draws the
+    # cut-out's width as the listing's length, so one off the listing's length:width by more than this many percent
+    # (inclusive) is linked to no listing as its 3D slab and is no tile's stone (cutout.aspect_misfit, the one rule).
+    # The same value as the backend renders' PHOTO_ASPECT_TOLERANCE_PCT (blokport_backend src/model/project/renders/
+    # layout.ts:12, RND-3, Mas 10 Nov from the dev p95), measured the same way: kept equal by hand, one constant a side.
+    PHOTO_ASPECT_TOLERANCE_PCT = 5
+    CUTOUT_OUTLINE_READ_WORKERS = 16   # the produce's image stage reads the linked 3D outlines this many at once: a
+                                       # fixed cap (Mas), never unbounded; about 4.9k outlines a full prod produce
     CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
     CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
     CUTOUT_MAX_POINTS = 64             # the contract's outline limit
@@ -600,12 +609,10 @@ Your whole answer is one JSON object and nothing else:
     TILE_FAILED_LISTED = 20            # the run record names at most this many tile listings whose step failed
     TILE_JPEG_QUALITY = 92
     # The stone: the slab's outer rim (sawn edge, mixed edge pixels) and its lamp reflections are never cut. Its scale is
-    # the listed size over the cut-out's px, so the cut-out must be at the listed proportions within this share (a tile
-    # then shows within about half of it of its real size); else the scale would be a guess and the slab is not used.
-    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs,
-    # 62 off by more than 5%, 24 by more than 10%.
+    # the listed size over the cut-out's px, so the cut-out must be at the listed proportions
+    # (PHOTO_ASPECT_TOLERANCE_PCT: a tile then shows within about half of it of its real size); else the scale would be
+    # a guess and the slab is not used.
     TILE_STONE_INSET_M = 0.03
-    TILE_ASPECT_TOLERANCE = 0.05
     # The cut-out check: a regular crosshatch (a mesh, a screen) over the face prints onto every tile, with no judge to
     # catch it. Straight lines along BOTH of the cut-out's axes put the face's fine detail on both axes of its spectrum;
     # stone is never like that (veins and grooves run one way). Measured 2026-11-02 on 510 prod cut-outs: Tiger Black

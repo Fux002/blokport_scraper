@@ -45,16 +45,22 @@ def _encode(bgra, extra):
         bgra = cv2.resize(bgra, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
     stone = (bgra[:, :, 3] > C.CUTOUT_ALPHA_CUT).astype(np.uint8)
     h, w = stone.shape
-    if min(h, w) < 2:
-        raise ValueError("the slab is too small to have an outline")
-    # The outer pixels' centres sit on the frame's edges, so a whole rectangle spans 0..1 like the texture it carries.
-    meta = {"version": C.CUTOUT_VERSION, "width_px": w, "height_px": h,
-            "outline": [[round(float(x) / (w - 1), 4), round(float(y) / (h - 1), 4)] for x, y in outline(stone)],
+    meta = {"version": C.CUTOUT_VERSION, "width_px": w, "height_px": h, "outline": _normalized_outline(stone),
             "edge_color": edge_color(bgra, stone), **extra}
     ok, buf = cv2.imencode(".webp", bgra, [cv2.IMWRITE_WEBP_QUALITY, C.CUTOUT_WEBP_QUALITY])
     if not ok:
         raise ValueError("could not encode the cut-out")
     return buf.tobytes(), json.dumps(meta).encode()
+
+
+def _normalized_outline(stone: np.ndarray) -> list[list[float]]:
+    """The outline the meta carries: outline(stone) as [u, v] from 0 to 1 over the frame. The outer pixels' centres sit
+    on the frame's edges, so a whole rectangle spans 0..1 like the texture it carries. ValueError on a stone mask too
+    small to have one."""
+    h, w = stone.shape
+    if min(h, w) < 2:
+        raise ValueError("the slab is too small to have an outline")
+    return [[round(float(x) / (w - 1), 4), round(float(y) / (h - 1), 4)] for x, y in outline(stone)]
 
 
 def outline(stone: np.ndarray) -> np.ndarray:
@@ -76,3 +82,37 @@ def edge_color(bgra: np.ndarray, stone: np.ndarray) -> str:
     mean = bgra[:, :, :3][stone > 0].reshape(-1, 3).mean(0)[::-1]          # BGR -> RGB
     edge = np.clip(mean * (1 - C.CUTOUT_EDGE_WHITE) + 255 * C.CUTOUT_EDGE_WHITE, 0, 255)
     return "#%02x%02x%02x" % tuple(int(v) for v in edge)
+
+
+def outline_size(meta: dict) -> tuple[float, float]:
+    """(width, height) in px of a cut-out's outline (its JSON meta): the outline's bounding box times the cut-out's px,
+    as Blokport's renders measure it. ValueError on a meta that is not one."""
+    try:
+        us, vs = zip(*((float(u), float(v)) for u, v in meta["outline"]))
+        return (max(us) - min(us)) * float(meta["width_px"]), (max(vs) - min(vs)) * float(meta["height_px"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"not a cut-out outline: {exc!r}") from exc
+
+
+def stone_outline_size(rgba: np.ndarray) -> tuple[float, float]:
+    """(width, height) in px of the outline a cut-out of this RGBA carries (its alpha's stone, _normalized_outline),
+    measured as outline_size measures a meta: the one measure of a 3D slab's gate and of a tile's stone. ValueError on
+    one with no outline."""
+    stone = (rgba[:, :, 3] > C.CUTOUT_ALPHA_CUT).astype(np.uint8)
+    h, w = stone.shape
+    return outline_size({"width_px": w, "height_px": h, "outline": _normalized_outline(stone)})
+
+
+def aspect_off(w_px: float, h_px: float, length: float, width: float) -> float:
+    """How many percent a cut-out of w x h px (its width along the slab's length) is off the listed length:width.
+    ValueError on a size that is not positive."""
+    if min(w_px, h_px, length, width) <= 0:
+        raise ValueError(f"not a size: cut-out {w_px} x {h_px} px, listed {length} x {width}")
+    return abs((w_px / h_px) / (length / width) - 1) * 100
+
+
+def aspect_misfit(w_px: float, h_px: float, length: float, width: float) -> float | None:
+    """aspect_off when it is over PHOTO_ASPECT_TOLERANCE_PCT, None within it (inclusive): the one proportion rule for a
+    3D slab and a tile's stone."""
+    off = aspect_off(w_px, h_px, length, width)
+    return off if off > C.PHOTO_ASPECT_TOLERANCE_PCT else None
