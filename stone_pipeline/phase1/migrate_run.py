@@ -35,7 +35,7 @@ from stone_pipeline.phase1 import store_writer
 from stone_pipeline.phase1.migrate_stores import MigrationRefused, read_key_map, read_survivor_map
 from stone_pipeline.phase1.rewrite_committed import rewrite_base
 from stone_pipeline.reference.medusa_files import read_variants_export
-from stone_pipeline.refresh_images import MARKER_KEY, parse_marker
+from stone_pipeline.refresh_images import MARKER_KEY
 from stone_pipeline.state.writeback import _write_records, load_alias_writeback_records
 
 log = logfmt.get_logger("phase1.migrate_run")
@@ -170,7 +170,8 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_
         files[name].write_text(rewrite_base(stores[name]["path"].read_text(encoding="utf-8-sig"), key_map,
                                             STORES[name][0]), encoding="utf-8")
     if stores["refreshed"]["path"] is not None:
-        pairs, sub = store_writer.remap_marker(sorted(parse_marker(stores["refreshed"]["path"].read_bytes())), key_map)
+        old_keys = store_writer.old_marker_keys(stores["refreshed"]["path"].read_bytes())
+        pairs, sub = store_writer.remap_marker(old_keys, key_map)
         _fold(report, sub)
         files["refreshed"] = work / "refreshed.json"
         files["refreshed"].write_text(json.dumps(pairs), encoding="utf-8")

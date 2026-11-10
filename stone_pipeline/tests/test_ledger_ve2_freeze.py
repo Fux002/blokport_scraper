@@ -10,6 +10,7 @@ Inventory is unchanged. attribute.restricted is NOT kept in the ledger here (PR4
 
 from __future__ import annotations
 
+from stone_pipeline.config.categories import category
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger import sync, writethrough
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
@@ -268,6 +269,10 @@ def test_render_combinations_reads_its_temp_dumps_even_when_status_required(monk
         ledger.upsert("attribute", {"category": "category", "value": "Slabs", "medusa_id": "A",
                                     "state": "synced", "created_at": now_iso(), "updated_at": now_iso()},
                       pk=("category", "value"))
+        for i, finish in enumerate(category("block").finishes):   # the vocabulary holds block's declared set
+            ledger.upsert("attribute", {"category": "finish", "value": finish, "medusa_id": f"F{i}",
+                                        "state": "synced", "created_at": now_iso(), "updated_at": now_iso()},
+                          pk=("category", "value"))
         _variation(ledger, "marble__v1", state="synced", medusa_id="V", archived=0)
         out = tmp_path / "2_valid_combinations.csv"
         written = render_combinations(ledger, out, backbone_paths=[], products_csv=None)

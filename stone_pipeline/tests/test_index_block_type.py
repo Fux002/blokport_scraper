@@ -19,7 +19,7 @@ def test_block_type_is_the_key_type_slug_not_the_backbone_display_form():
     vt.by_id["v1"] = Variant(variation_id="v1", key=key, name="Verde Ubatuba", aliases=[])
     bb = Backbone()
     bb.by_norm_name[_norm("Verde Ubatuba")] = [           # backbone DISPLAY form: 'Granite'
-        BackboneVariety(variant="Verde Ubatuba", category="slab", stone_type="Granite",
+        BackboneVariety(variant="Verde Ubatuba", stone_type="Granite",
                         colors=["Green"], finishes=[], qualities=[], aliases=[])]
     idx = build_variation_index(vt, bb)
     assert idx.candidates["v1"].block_type == proj.norm("granite")        # from the Key, normalized

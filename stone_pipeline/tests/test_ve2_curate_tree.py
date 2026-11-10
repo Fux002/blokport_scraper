@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import csv
 
+from stone_pipeline.config.categories import category
+from stone_pipeline.core.text import match_key
 from stone_pipeline.stages import tree_build
-from stone_pipeline.tests.test_tree_build import (COL, FIN, _backbone, _export, _for,
+from stone_pipeline.tests.test_tree_build import (_FINISH_IDS, COL, FIN, _backbone, _export, _for,
                                                   _post, _products, _prow)
 
 # the same vocabulary as test_tree_build._attrs, but written WITH status/internal columns so values can be
@@ -19,6 +21,9 @@ _ATTR_ROWS = [("category", "Slabs", "cat_slab"), ("category", "Blocks", "cat_blo
               ("type", "Quartzite", "t_quartz"),
               ("finish", "Polished", "f_pol"), ("finish", "Honed", "f_hon"), ("finish", "Raw", "f_raw"),
               ("color", "White", "c_white"), ("color", "Grey", "c_grey"), ("quality", "A", "q_a")]
+# the vocabulary holds every finish a category declares (block's set), as test_tree_build's does
+_ATTR_ROWS += [("finish", f, _FINISH_IDS.get(f, f"f_{match_key(f)}")) for f in sorted(category("block").finishes)
+               if f not in _FINISH_IDS]
 
 
 def _attrs_status(tmp_path, archived=(), internal=(), name="attributes.csv"):
@@ -46,16 +51,16 @@ def _export_status(tmp_path, rows):   # rows: (Id, Key, Name, status)
     p = tmp_path / "export_status.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)", "status"])
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases", "status"])
         for vid, key, nm, st in rows:
-            w.writerow([vid, key, nm, "", "", "", st])
+            w.writerow([vid, key, nm, "Marble", "", st])
     return p
 
 
 def _scene(tmp_path):
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished", "Honed"],
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished", "Honed"],
                                     color=("White", "Grey"))])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     return bb, exp
 
 
@@ -93,36 +98,33 @@ def test_a_product_tuple_absent_from_the_fanout_is_not_added(tmp_path):
 
 
 def test_restricted_category_pcat_drops_the_speculative_fanout_but_keeps_an_emitted_product(tmp_path):
-    # a tile variation whose category pcat (Tiles) is archived: its SPECULATIVE fan-out combinations drop, but
-    # an emitted product carrying the archived category keeps its exact tuple (validate allows it only acked).
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",)),
-                              _post("tile_marble_carrara_1", "Carrara", ["Polished"],
-                                    category="Tiles", color=("White", "Grey"))])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara"),
-                             ("vt", "tile_marble_carrara_1", "Carrara")])
-    prod = _products(tmp_path, [_prow(vid="v1"), _prow(cat="cat_tile", vid="vt", col="c_white")])
+    # the category pcat Tiles is archived: the variety's SPECULATIVE tile combinations drop, but an emitted tile
+    # product carrying the archived category keeps its exact tuple (validate allows it only acked).
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"], color=("White", "Grey"))])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
+    prod = _products(tmp_path, [_prow(vid="v1"), _prow(cat="cat_tile", vid="v1", col="c_white")])
     attrs = _attrs_status(tmp_path, archived=[("category", "Tiles")])
     combos, _, _ = tree_build.build_combinations(exp, attrs, [bb], prod)
-    assert _for(combos, "v1")                                                      # the slab still prices
-    assert ("cat_tile", "t_marble", "vt", "f_pol", "c_white", "q_a") in combos     # emitted product tuple kept
-    assert ("cat_tile", "t_marble", "vt", "f_pol", "c_grey", "q_a") not in combos  # speculative Tiles dropped
+    assert _for(combos, "v1", "cat_slab")                                          # the slab still prices
+    assert ("cat_tile", "t_marble", "v1", "f_pol", "c_white", "q_a") in combos     # emitted product tuple kept
+    assert ("cat_tile", "t_marble", "v1", "f_pol", "c_grey", "q_a") not in combos  # speculative Tiles dropped
 
 
 def test_a_frozen_variety_is_counted_frozen_not_uncovered(tmp_path):
     # an archived variety with NO colour/type source would be UNCOVERED; frozen, it is counted frozen instead
     bb = _backbone(tmp_path, [])                                 # no backbone post -> no colour/quality
-    exp = _export_status(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara", "archived")])
+    exp = _export_status(tmp_path, [("v1", "marble__carrara_1", "Carrara", "archived")])
     attrs = _attrs_status(tmp_path)
     combos, stats, uncovered = tree_build.build_combinations(exp, attrs, [bb], None)
     assert stats["frozen"] == 1
-    assert not any(u["Key"] == "slab_marble_carrara_1" for u in uncovered)
+    assert not any(u["Key"] == "marble__carrara_1" for u in uncovered)
 
 
 def test_a_variety_left_with_no_combination_after_the_filter_is_uncovered(tmp_path):
     # 6b: covered is counted AFTER the restricted filter -- a variety whose only colour is restricted, with no
     # emitted/acked product keeping a tuple, ends uncovered (not covered).
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",))])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     attrs = _attrs_status(tmp_path, archived=[("color", "White")])
     combos, stats, unc = tree_build.build_combinations(exp, attrs, [bb], None)   # no product to keep a tuple
     assert not _for(combos, "v1")                            # every combo dropped as restricted
@@ -134,19 +136,18 @@ def test_an_acked_product_absent_from_this_runs_emit_keeps_its_restricted_tuple(
     # whose source emitted NOTHING this run still keeps its combination (Blokport replaces the whole set).
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger, now_iso
-    key = "slab_marble_carrara_1"
+    key = "marble__carrara_1"
     lpath = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
     with Ledger.open(lpath, env=writethrough.ENV_NAME,
                      backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "Carrara",
-                                "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+        lg.upsert("variation", {"key": key, "type": "Marble", "name": "Carrara",
+                                "aliases": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
         lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1", "color": "White",
-                              "finish": "Polished", "quality": "A", "type": "Marble", "category": "Slabs",
+                              "finish": "Polished", "quality": "A", "type": "Marble", "category": "slabs",
                               "variation_key": key, "medusa_id": "M1", "state": "synced",
                               "created_at": now, "updated_at": now}, pk=("sku",))
     bb = _backbone(tmp_path, [_post(key, "Carrara", ["Polished"], color=("White",))])
@@ -312,8 +313,8 @@ def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path):
         w = csv.writer(h)
         w.writerow(["category", "value", "sourceid"])
         w.writerows([r for r in _ATTR_ROWS if r[0] != "category"])   # NO category pcat rows
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=("White",))])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"], color=("White",))])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     _combos, _stats, unc = tree_build.build_combinations(exp, p, [bb], None)
     entry = next(u for u in unc if u["Id"] == "v1")
     assert entry["missing"] == ""      # category-only shortfall -> empty, exactly as main writes it
@@ -323,20 +324,19 @@ def test_an_acked_product_that_cannot_be_rebuilt_is_counted(tmp_path, monkeypatc
     # fix 5: an acked product whose tuple cannot be rebuilt (an id/vid missing) is counted, not dropped silently.
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger, now_iso
-    key = "slab_marble_carrara_1"
+    key = "marble__carrara_1"
     lpath = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
     with Ledger.open(lpath, env=writethrough.ENV_NAME,
                      backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "Carrara",
-                                "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+        lg.upsert("variation", {"key": key, "type": "Marble", "name": "Carrara",
+                                "aliases": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
         lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1",
                               "color": "NoSuchColour", "finish": "Polished", "quality": "A", "type": "Marble",
-                              "category": "Slabs", "variation_key": key, "medusa_id": "M1", "state": "synced",
+                              "category": "slabs", "variation_key": key, "medusa_id": "M1", "state": "synced",
                               "created_at": now, "updated_at": now}, pk=("sku",))
     bb = _backbone(tmp_path, [_post(key, "Carrara", ["Polished"], color=("White",))])
     exp = _export(tmp_path, [("v1", key, "Carrara")])

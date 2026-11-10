@@ -47,7 +47,7 @@ def test_live_export_wins_when_present(tmp_path, monkeypatch):
     _write(paths.variants_export_base_csv, "Alpine Base", with_id=False)
     monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.export_file
-    assert curate.load_existing("slab").by_name_type[("alpine live", "granite")]["Key"] == KEY
+    assert curate.load_existing().by_name_type[("alpine live", "granite")]["Key"] == KEY
 
 
 def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path, monkeypatch):
@@ -56,7 +56,7 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
     monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.variants_export_base_csv
     # curate's existing index is populated from the base: the alias surface resolves to its owner
-    imp = curate.load_existing("slab")
+    imp = curate.load_existing()
     assert imp.by_name_type[("alpine", "granite")]["Aliases"] == "Alpine Granite"
     # the matcher's table reads the same file
     table = loaders.load_variants(loaders.existing_varieties_file())
@@ -68,4 +68,4 @@ def test_neither_file_is_a_hard_error(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError, match="variants_export.csv"):
         loaders.existing_varieties_file()
     with pytest.raises(FileNotFoundError, match="variants_export_base.csv"):
-        curate.load_existing("slab")
+        curate.load_existing()

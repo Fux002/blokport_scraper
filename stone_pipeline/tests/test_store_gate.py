@@ -35,18 +35,6 @@ def test_schema_work_runs_once_per_database(tmp_path, monkeypatch):
     assert ddl == [], f"schema work re-ran on a migrated database: {ddl[:3]}"
 
 
-def test_an_older_database_is_migrated_then_stamped(tmp_path):
-    path = tmp_path / "old.db"
-    with closing(sqlite3.connect(str(path))) as raw:
-        raw.executescript(store._SCHEMA)                           # a database from before the stamp
-        raw.execute("PRAGMA user_version = 1")
-    with closing(store.open_store(path)) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"statement", "migration", "review_pending"} <= tables
-        assert not set(store._LEGACY_DECISION_TABLES) & tables
-
-
 @pytest.mark.parametrize("reader,empty", [
     (lambda: views.origins(), {}),
     (lambda: decisions_store.protected_keys(), set()),

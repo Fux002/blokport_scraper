@@ -179,6 +179,18 @@ def plan_icon_copies(listing: dict[str, str], key_map: KeyMap) -> IconPlan:
     return plan
 
 
+def old_marker_keys(data: bytes) -> list[str]:
+    """The step-1 best-model marker's entries: a JSON list of OLD Keys (the marker before phase 1; today's reader,
+    refresh_images.parse_marker, reads pair ids and refuses these). Anything else is refused, never read as empty."""
+    try:
+        doc = json.loads(data)
+    except ValueError as exc:
+        raise ValueError(f"the step-1 marker is not JSON: {exc}") from exc
+    if not isinstance(doc, list) or not all(isinstance(k, str) for k in doc):
+        raise ValueError("the step-1 marker is not a list of Keys")
+    return sorted(doc)
+
+
 def remap_marker(old_keys: list[str], key_map: KeyMap) -> tuple[list[str], Report]:
     """The best-model marker's old Keys as sorted pair ids `{new Key}/{category}`; an old Key outside the map, or
     with no category prefix, aborts."""

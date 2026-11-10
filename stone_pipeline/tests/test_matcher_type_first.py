@@ -19,6 +19,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex, build_variation_index
 from stone_pipeline.reference.loaders.backbone import load_backbone
+from stone_pipeline.reference.loaders.identity import type_slug_from_key
 from stone_pipeline.reference.loaders.origins import load_origin_map
 from stone_pipeline.reference.loaders.variants import load_variants
 from stone_pipeline.state.writeback import is_learned
@@ -79,7 +80,7 @@ def test_seed_anatolia_black_marble_is_a_held_collision_never_nero_marquina(slab
     eng, table = slab_engine
     m = eng.match("Anatolia Black", block_type="Marble")
     assert m.cid is None and m.method.endswith("_collision")
-    owners = {table.by_id[c].key.split("_")[1] for c, _n, _s in m.candidates}
+    owners = {type_slug_from_key(table.by_id[c].key) for c, _n, _s in m.candidates}
     assert owners == {"marble"}
 
 
