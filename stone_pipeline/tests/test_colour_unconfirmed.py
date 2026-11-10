@@ -51,28 +51,30 @@ def _unconfirmed(row) -> bool:
 
 # --- rule 1: the vendor's own text names several colours ------------------------------------------------------------
 
+def _normalized(ref, raw_color, key="742"):
+    row = CanonicalRow(src_site="polonine", surrogate_key=key, raw_color=raw_color)
+    normalize.normalize_row(row, normalize.AttributeResolvers.build(ref), ref)
+    return row
+
+
 def test_a_vendor_text_naming_two_colours_is_multicolor(ref):
-    resolvers = normalize.AttributeResolvers.build(ref)
-    row = CanonicalRow(src_site="polonine", surrogate_key="742", raw_color="Black and White")
-    normalize.normalize_row(row, resolvers, ref)
+    row = _reconcile(ref, _normalized(ref, "Black and White"))
     assert row.color_name == "Multicolor" and row.color_method == "multicolor_from_vendor"
     assert row.color_id is not None
-    assert not any(f.code == FlagCode.multi_value and f.field == "color" for f in row.review_flags)
 
 
-def test_the_matcher_still_narrows_by_the_colours_the_vendor_named(ref):
-    # Multicolor is the ATTRIBUTE; which variety the listing is stays decided by the vendor's own colours, as before
-    # (the golden's polonine 542, Spider Black Quartzite 'Black and White', lost its variety when Multicolor blocked)
-    from stone_pipeline.stages import match_variation
-    row = CanonicalRow(src_site="polonine", surrogate_key="542", raw_color="Black and White")
-    normalize.normalize_row(row, normalize.AttributeResolvers.build(ref), ref)
-    assert row.color_name == "Multicolor" and match_variation._block_colour(row) == "Black"
+def test_the_matcher_sees_mains_colour_rule_1_applies_after_it(ref):
+    # The variety matcher (stages/match_variation, unchanged) narrows by row.color_name. normalize leaves exactly
+    # main's value there, the first colour named, so which variety a listing is never changes (the golden's polonine
+    # 542, Spider Black Quartzite 'Black and White', lost its variety when Multicolor reached the matcher); reconcile,
+    # after the matcher, makes it Multicolor.
+    row = _normalized(ref, "Black and White", key="542")
+    assert (row.color_name, row.color_method) == ("Black", "multi_value")
+    assert _reconcile(ref, row).color_name == "Multicolor"
 
 
 def test_one_colour_named_twice_is_not_multicolor(ref):
-    resolvers = normalize.AttributeResolvers.build(ref)
-    row = CanonicalRow(src_site="polonine", surrogate_key="743", raw_color="White, white")
-    normalize.normalize_row(row, resolvers, ref)
+    row = _reconcile(ref, _normalized(ref, "White, white", key="743"))
     assert row.color_name == "White"
 
 
@@ -121,8 +123,9 @@ def test_once_the_leaf_is_approved_the_listing_is_multicolor(ref):
 @pytest.fixture
 def no_multicolour(monkeypatch):
     import dataclasses
-    real = normalize.active_pack
-    monkeypatch.setattr(normalize, "active_pack", lambda: dataclasses.replace(real(), multicolour_value=None))
+    from stone_pipeline.config.domain import active_pack
+    monkeypatch.setattr(reconcile_tree, "active_pack", lambda: dataclasses.replace(active_pack(), multicolour_value=None),
+                        raising=False)
 
 
 def test_without_a_multicolour_value_a_published_listing_keeps_its_first_named_colour(ref, patagonia, no_multicolour):

@@ -20,7 +20,7 @@ from stone_pipeline.config.categories import bulk_form_name, default_form_name
 from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
-from stone_pipeline.core.schema import CanonicalRow, FlagCode, Resolution, ReviewFlag
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VocabResolver
@@ -61,24 +61,6 @@ def _override_name(ref: ReferenceData, row: CanonicalRow, vocab: str) -> str | N
     if ref.overrides is None:
         return None
     return ref.overrides.get(row.src_site, row.surrogate_key or "", f"{vocab}_name")
-
-
-def _several_colours(resolution: Resolution, resolver) -> Resolution:
-    """The vendor's own colour text names a LIST: two or more distinct colours are the pack's multicolour value
-    (stone 'Multicolor'), never the first one named. Without that value in the domain or its vocabulary the colour
-    is left unset and UNCONFIRMED: reconcile keeps a published listing on the first colour named (the colour it was
-    listed with) and queues it, a new one is held (rule 2). One colour named twice ('White, white') is just that
-    colour."""
-    named = resolution.evidence.get("resolved") or []
-    if len(named) < 2:
-        return resolution
-    value = active_pack().multicolour_value
-    canonical = resolver.resolve(value).value if value else None
-    if canonical is None:
-        return Resolution(value=None, confidence=Confidence.none, method="colour_unconfirmed",
-                          evidence={"named": named})
-    return Resolution(value=canonical, confidence=Confidence.medium, method="multicolor_from_vendor",
-                      evidence={"named": named})
 
 
 def _apply_last_resort(row: CanonicalRow, vocab: str, default_value: str | None, ref: ReferenceData) -> None:
@@ -122,13 +104,10 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         # 1. WHOLE value first: a genuine single value or an EXISTING compound ('Polished and Filled') wins.
         resolution = resolver.resolve(raw_value)
         # 2. else COMPOUND/MULTI: 'Polished + Leather' composes to the vocab's 'A and B' (or suggests it for
-        #    a compound-pattern vocab); a list 'Polished | Honed' keeps its primary, flagged multi_value, and a
-        #    colour list is the pack's multicolour value (_several_colours). All driven by the vocab -- a compound
-        #    colour is never invented. (synonym_none is a clean "no value".)
+        #    a compound-pattern vocab); a list 'Black | White' keeps its primary, flagged multi_value. All
+        #    driven by the vocab -- a compound colour is never invented. (synonym_none is a clean "no value".)
         if resolution.value is None and resolution.method != "synonym_none" and raw_value:
             resolution = resolver.resolve_multi(raw_value)
-            if vocab == "color" and resolution.method == "multi_value":
-                resolution = _several_colours(resolution, resolver)
         is_multi = resolution.method == "multi_value"
 
         canonical = resolution.value
@@ -142,10 +121,13 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         setattr(row, f"{vocab}_confidence", _confidence_name(resolution.confidence))
         setattr(row, f"{vocab}_method", resolution.method)
 
-        if resolution.method in ("multicolor_from_vendor", "colour_unconfirmed"):
+        # a colour LIST naming two or more distinct colours: recorded here, applied by reconcile (rule 1: the pack's
+        # multicolour value). The row keeps the first colour until then, so the matcher narrows by the vendor's own
+        # colour exactly as before; best_guess keeps it, the colour such a listing carried before rule 1.
+        if vocab == "color" and is_multi and len(resolution.evidence.get("resolved") or []) >= 2:
             row.add_flag(ReviewFlag(field=vocab, code=FlagCode.multicolour_from_vendor, raw_value=raw_value,
-                                    best_guess=resolution.evidence["named"][0], confidence=Confidence.medium,
-                                    method=resolution.method, src_url=row.src_url))
+                                    best_guess=canonical, confidence=Confidence.medium, method="multi_value",
+                                    src_url=row.src_url))
         if is_multi:
             row.add_flag(
                 ReviewFlag(
@@ -160,9 +142,7 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             )
         # synonym_none is a clean resolution to "no value" (e.g. finish Other),
         # not an unresolved error, so it does not flag.
-        # colour_unconfirmed: several colours named and no multicolour value to hold them; reconcile handles it (an
-        # attribute card proposing the vendor's list as a new colour value would invent a compound colour)
-        if attr_id is None and resolution.method not in ("synonym_none", "empty", "colour_unconfirmed"):
+        if attr_id is None and resolution.method not in ("synonym_none", "empty"):
             row.add_flag(
                 ReviewFlag(
                     field=vocab,

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from rapidfuzz import fuzz
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.stages._rowguard import isolate_rows
@@ -73,11 +74,11 @@ def _fill_missing_colour(row: CanonicalRow, allowed: list[str], ref: ReferenceDa
     then carries the variety's first colour, the one an already-published listing carries today, so validate can
     keep a published listing listed (loads never remove) while holding a new one, and curate queues it.
 
-    A vendor that named several colours the pack cannot hold (no multicolour value: normalize left the colour unset)
+    A vendor that named several colours the pack cannot hold (no multicolour value: _apply_vendor_colour_list left it unset)
     is unconfirmed too, whatever the variety allows, and carries the first colour it named when the variety allows
     it: the colour such a published listing was listed with."""
-    named = next((f.best_guess for f in row.review_flags
-                  if f.code == FlagCode.multicolour_from_vendor and f.method == "colour_unconfirmed"), None)
+    named = next((f.best_guess for f in row.review_flags if f.code == FlagCode.multicolour_from_vendor), None) \
+        if row.color_method == "colour_unconfirmed" else None
     if row.color_name or (len(allowed) < 2 and named is None):
         _fill_missing_from_variety(row, "color", allowed, stats)
         return
@@ -112,7 +113,25 @@ def _map_id(ref: ReferenceData, vocab: str, name: str | None) -> str | None:
     return looked[1] if looked else None
 
 
+def _apply_vendor_colour_list(row: CanonicalRow, ref: ReferenceData) -> None:
+    """Rule 1: a vendor colour text naming two or more distinct colours (normalize's multicolour_from_vendor flag) is
+    the pack's multicolour value, never the first one named. Applied here, AFTER the matcher, which narrowed by the
+    vendor's own first colour as it always has. Without that value in the pack or the colour vocabulary the colour is
+    UNCONFIRMED: _fill_missing_colour keeps a published listing on the first colour named and queues it."""
+    if not any(f.code == FlagCode.multicolour_from_vendor for f in row.review_flags):
+        return
+    value = active_pack().multicolour_value
+    looked = ref.attributes.resolve_id("color", value) if value else None
+    if looked:
+        row.color_name, row.color_id = looked
+        row.color_confidence, row.color_method = Confidence.medium.name, "multicolor_from_vendor"
+    else:
+        row.color_name, row.color_id = None, None
+        row.color_confidence, row.color_method = Confidence.none.name, "colour_unconfirmed"
+
+
 def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) -> None:
+    _apply_vendor_colour_list(row, ref)
     # A null variation cannot be validated; ensure it is in the gap queue and stop.
     if not row.variation_id:
         # rows already held distinctly in Stage 4 (no category reference yet, or a

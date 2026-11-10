@@ -104,7 +104,7 @@ def colour_cards(rows, ref) -> list[dict]:
         skus = list(dict.fromkeys(sku_from(code, r.surrogate_key) for r in members))
         evidence = {**review_evidence(first), "image": _stone_photo(members)}
         named = next((f.raw_value for r in members for f in r.review_flags
-                      if f.code == FlagCode.multicolour_from_vendor and f.method == "colour_unconfirmed"), None)
+                      if f.code == FlagCode.multicolour_from_vendor), None)
         why = (f"Colour unconfirmed: {src} names several colours ('{named}') and there is no multicolour value"
                if named else f"No vendor colour: {src} gives none and {variant} comes in {human_join(allowed)}")
         cards.append({**review_card(
