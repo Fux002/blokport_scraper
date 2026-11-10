@@ -21,13 +21,17 @@ _PCOLS = ["Product Category 1", "STN Type Id", "STN Variation Id",
 CAT, TYPE, VAR, FIN, COL, QUAL = range(6)
 
 
-@pytest.fixture(autouse=True)
-def _block_declares_raw(monkeypatch):
-    # the pack's block declares its own finish set (spec rev 8 D7), each of which must be in the vocabulary; this
-    # fixture vocabulary holds Raw, so block declares Raw (the set these tests' block posts carried)
+def block_declares_raw(monkeypatch) -> None:
+    """The pack's block declares its own finish set (spec rev 8 D7), each of which must be in the vocabulary. The
+    fixture vocabulary (_attrs) holds Raw, so block declares Raw, the set these tests' block posts carried."""
     import dataclasses
     cats = tuple(dataclasses.replace(c, finishes=("Raw",)) if c.finishes else c for c in tree_build.CATEGORIES)
     monkeypatch.setattr(tree_build, "CATEGORIES", cats)
+
+
+@pytest.fixture(autouse=True)
+def _block_declares_raw(monkeypatch):
+    block_declares_raw(monkeypatch)
 
 
 def _attrs(tmp_path):
