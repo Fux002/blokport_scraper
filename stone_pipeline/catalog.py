@@ -33,6 +33,7 @@ from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
 from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
+from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("catalog")
 
@@ -303,10 +304,13 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
     for old in to_upload.glob("3_products_*.csv"):
         old.unlink()
     (to_upload / STANDARDISE.PHOTOS_FILE).unlink(missing_ok=True)
+    (to_upload / STANDARDISE.DEFAULTED_FILE).unlink(missing_ok=True)
     header: list[str] | None = None
     all_rows: list[list[str]] = []
     photos: dict[str, list] = {}
+    defaulted: set[str] = set()
     without_photos: list[str] = []
+    without_defaulted: list[str] = []
     counts: dict[str, int] = {}
     for run_dir in latest_run_dirs(outputs_root):          # newest run per source only
         src_csv = run_dir / "4_products_import" / "medusa_import.csv"
@@ -335,6 +339,15 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
             for handle, refs in json.loads(own.read_text(encoding="utf-8")).items():
                 if photos.setdefault(handle, refs) != refs:
                     raise RuntimeError(f"collect_products: product handle {handle!r} has two different photo lists")
+            # Written with the photo list by the same emit (emit.write_photos_json). A run whose photo list predates it
+            # (the producer before #605) has none: none of its sizes is listed until a produce runs that source again,
+            # named loud with the sources missing a photo list. Remover: drop this fallback once every source's latest
+            # run is from a producer that writes it (the first full produce on both envs after #605 merges).
+            listed = own.parent / STANDARDISE.DEFAULTED_FILE
+            if listed.exists():
+                defaulted.update(index.parse_defaulted(listed.read_text(encoding="utf-8")))
+            else:
+                without_defaulted.append(source)
         else:
             without_photos.append(source)
         counts[source] = len(body)
@@ -346,6 +359,12 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
         csvio.write_rows(to_upload / "3_products_all.csv", header, all_rows)
         body_json = json.dumps(photos, sort_keys=True, separators=(",", ":"))
         csvio.atomic_write(to_upload / STANDARDISE.PHOTOS_FILE, lambda handle: handle.write(body_json))
+        listed_json = json.dumps(sorted(defaulted), separators=(",", ":"))
+        csvio.atomic_write(to_upload / STANDARDISE.DEFAULTED_FILE, lambda handle: handle.write(listed_json))
+    if without_defaulted:
+        log.warning("defaulted sizes incomplete: these sources' latest runs predate the list, so none of their sizes is "
+                    "held as defaulted until a produce runs them again: " + ", ".join(sorted(without_defaulted)),
+                    extra={"extra_fields": {"sources_without_defaulted_sizes": sorted(without_defaulted)}})
     if without_photos:
         log.warning("photo list incomplete: these sources' latest runs have none, so the photo process stops until a "
                     "produce runs them again: " + ", ".join(sorted(without_photos)),

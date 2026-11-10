@@ -466,9 +466,28 @@ def _photo_list(client):
         raise RuntimeError(f"the photo list s3://{S3_BUCKET}/{key} is malformed: {exc}") from exc
 
 
+def _defaulted_sizes(client):
+    """The handles whose length or width the produce defaulted (STANDARDISE.DEFAULTED_KEY, beside the photo list), read
+    once per job. Present but unreadable, it fails loud. Absent means none defaulted ONLY because the producer before #605
+    wrote no such file (grade 2). Remover: drop the absent branch once both envs' to_upload come from a produce that
+    writes it (the first full produce on dev and prod after #605 merges)."""
+    key = f"{ENV_SEGMENT}/{C.DEFAULTED_KEY}"
+    try:
+        text = _get(client, key).decode("utf-8")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            return frozenset()
+        raise
+    try:
+        return index.parse_defaulted(text)
+    except ValueError as exc:
+        raise RuntimeError(f"the defaulted-sizes list s3://{S3_BUCKET}/{key} is malformed: {exc}") from exc
+
+
 def sheet_photos(client):
-    """{sha: {source, key, format, size}} of this environment's product sheet and its photo list."""
-    return index.build(_sheet(client), _photo_list(client))
+    """{sha: {source, key, format, size}} of this environment's product sheet, its photo list and its defaulted sizes (a
+    defaulted size reads None: unknown)."""
+    return index.build(_sheet(client), _photo_list(client), _defaulted_sizes(client))
 
 
 def sheet_and_photos(client):

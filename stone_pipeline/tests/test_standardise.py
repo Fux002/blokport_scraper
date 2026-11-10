@@ -704,13 +704,13 @@ def _active_slab(monkeypatch):
 
 
 def test_the_index_links_a_photo_to_its_first_product(_active_slab):
-    photos = index.build(SHEET, PHOTOS)
+    photos = index.build(SHEET, PHOTOS, frozenset())
     assert photos["a" * 64]["key"] == "one" and photos["a" * 64]["size"] == (3.0, 2.0) and photos["b" * 64]["format"] == "slab"
 
 
 def test_an_unknown_category_fails_loud(_active_slab):
     with pytest.raises(ValueError, match="unknown product category"):
-        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"), PHOTOS)
+        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"), PHOTOS, frozenset())
 
 
 def _whole(shape=(800, 1200)):
@@ -1232,6 +1232,24 @@ def test_a_slab_shot_at_an_angle_is_fitted_up_to_its_far_side_at_two_fifths_of_i
 
 def test_a_slab_shot_near_square_on_is_measured_from_its_sides():
     q = np.float32([[200, 250], [1800, 300], [1800, 1200], [200, 1250]])
+    assert outline.steep_aspect(q, (3.0, 1.8)) is None
+
+
+# Fitted quads of two strapped slabs shot with the camera tipped (top wider than bottom), from the dev outline diagnostic
+# (dev/standardise-test/diag/main/<sha>.json, 2026-11-02): POL-736 083354ab (top/bottom 1.18) and POL-649 3461a992 (1.19).
+_KEYSTONES = (([[4.0, 14.0], [1128.3, 36.0], [1050.4, 610.9], [97.0, 626.9]], (2.85, 1.85)),
+              ([[3.0, 163.0], [1013.9, 160.0], [947.0, 663.4], [96.9, 707.4]], (3.2, 1.95)))
+
+
+@pytest.mark.parametrize("corners, size", _KEYSTONES)
+def test_a_slab_shot_with_the_camera_tipped_is_squared_at_its_real_proportions(corners, size):
+    q = np.float32(corners)
+    w, h = outline.square(q, outline.steep_aspect(q, size))[1]
+    assert w / h == pytest.approx(max(size) / min(size), rel=0.01)      # its sides alone: 7% and 12% too wide
+
+
+def test_a_slight_keystone_is_still_measured_from_its_sides():
+    q = np.float32([[200, 250], [1800, 250], [1760, 1250], [240, 1250]])   # top/bottom 1.05: the outline's own noise
     assert outline.steep_aspect(q, (3.0, 1.8)) is None
 
 

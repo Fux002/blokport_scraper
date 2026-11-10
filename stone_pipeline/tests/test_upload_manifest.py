@@ -149,7 +149,8 @@ def test_an_unversioned_bucket_fails_loud_before_the_manifest(tmp_path):
 
 
 def test_side_files_are_published_outside_the_deliverables(tmp_path):
-    assert UPLOAD_SIDE_FILES == {"SYNC_STEPS.md", "standardise_photo_list.json", "variant_image_shas.json"}
+    assert UPLOAD_SIDE_FILES == {"SYNC_STEPS.md", "standardise_photo_list.json", "standardise_defaulted_sizes.json",
+                                 "variant_image_shas.json"}
     s3 = _S3()
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
     for name in UPLOAD_SIDE_FILES:
