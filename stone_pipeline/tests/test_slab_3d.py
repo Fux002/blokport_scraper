@@ -298,6 +298,66 @@ def test_the_gate_measures_the_outline_s_bounding_box_not_the_cut_out_s_frame(mo
     assert cutout.outline_size(_cut_corner(2000, 1000, right=0.9)) == pytest.approx((1800.0, 1000.0))
 
 
+# -- a lot piece's 3D: only from its own photo (Mas, 2a) ------------------------------------------------------------
+
+LOT = "SEN-B6372"
+OWN1, OWN2, SHARED = "d" * 64, "e" * 64, C3                 # each piece's own photo first, then the bundle's photo
+
+
+def _piece(position, own, length=2.75, width=1.89):
+    return CanonicalRow(src_site="sentas", surrogate_key=f"2525-{position}", handle=f"p{position}", format_value="Slab",
+                        image_keys=[_improved(own), _improved(SHARED)], length=length, width=width, height=0.02,
+                        lot_code=LOT, lot_position=position)
+
+
+def _link_lot(monkeypatch, rows, published, judged, **kw):
+    """The image stage on a lot's pieces: `published` = the photos with views and a 3D slab; judged = {(tag, sha):
+    the judge's record} of the photo process's runs (a photo not in it was never judged in that run)."""
+    from botocore.exceptions import ClientError
+
+    from stone_pipeline.photos.source import round_prefix
+    views = {"main": {s: "m" for s in published}, "white": {s: "w" for s in published},
+             "studio": {s: "s" for s in published}, "close": {},
+             imagestore.CUTOUT_SUBDIR: {s: "t+j" for s in published}}
+    monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
+    monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    stored = {f"{round_prefix(tag, 'sentas')}judged/{sha}.json": json.dumps(rec).encode()
+              for (tag, sha), rec in judged.items()}
+    stored |= {imagestore.cutout_key("sentas", s, "json"): json.dumps(_meta(1905, 1309)).encode()    # fits 2.75 x 1.89
+               for s in published}
+
+    def get(key):
+        if key not in stored:
+            raise ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not Found"}}, "GetObject")
+        return stored[key]
+    monkeypatch.setattr(images, "_get_object", get)
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+    images.run(rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True, **kw)
+
+
+def test_a_lot_piece_shown_from_the_lot_s_shared_photo_gets_no_3d_even_when_it_fits(monkeypatch):
+    # dev SEN-2525-1: its own photo failed the judge, so it is shown from the bundle's open-book photo
+    rows = [_piece(1, OWN1), _piece(2, OWN2)]
+    fail = {"verdict": "fail", "problems": [{"kind": "bad_fill", "where": "left edge, middle section"}]}
+    found = []
+    _link_lot(monkeypatch, rows, published={SHARED}, judged={(C.RUN_TAG, OWN1): fail}, mismatches=found)
+    assert [r.model_3d_key for r in rows] == [None, None]
+    assert [r.thumbnail_key for r in rows] == [f"{BASE}/standard/main/sentas/{SHARED}.jpg"] * 2    # the photos stay
+    assert [(f["listing"], f["reason"], f["why"]) for f in found] == [
+        ("p1", "lot_shared_photo", "own photo failed: bad_fill: left edge, middle section"),
+        ("p2", "lot_shared_photo", "own photo not judged")]
+
+
+def test_a_lot_piece_shown_from_its_own_photo_keeps_its_3d(monkeypatch):
+    rows = [_piece(1, OWN1), _piece(2, OWN2)]
+    _link_lot(monkeypatch, rows, published={OWN1, SHARED}, judged={})
+    assert rows[0].model_3d_key == f"{BASE}/standard/cutout/sentas/{OWN1}.webp"
+    assert rows[1].model_3d_key is None                                 # piece 2 is still shown from the shared photo
+
+
 def test_one_proportion_rule_serves_the_3d_slab_and_the_tile_stone():
     # Blokport's renders measure the same: abs(cut-out W:H / listing L:W - 1) in percent, 5 inclusive
     assert cutout.aspect_misfit(1905, 1260, 2.3, 1.5) is None
