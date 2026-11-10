@@ -12,6 +12,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core.text import looks_code_shaped
+from stone_pipeline.phase1.variety_key import variety_key_type
 from stone_pipeline.reference.loaders.common import env, log
 from stone_pipeline.reference.loaders.identity import survivor_of, variety_identity
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
@@ -96,8 +97,11 @@ def load_variants(path: Path) -> VariantTable:
 
 
 def _table(records: list[ExportVariation]) -> VariantTable:
-    """The table of every eligible record. A Key the one parser refuses (an old prefixed Key) raises in the
-    identity grouping below, never read as some category's."""
+    """The table of every eligible record. Every record's Key is read by the one parser first, an excluded row's
+    too: a Key it refuses (an old prefixed Key) raises, never read as some category's or skipped silently."""
+    for record in records:
+        if record.key:
+            variety_key_type(record.key)
     table = VariantTable()
     # CRITICAL: a RETIRED variety must not be a resolution target here either. The matcher stamps a
     # product's variation_key from THIS reference (built off the lagging Medusa export, which still lists a
