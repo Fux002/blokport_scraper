@@ -259,7 +259,9 @@ def mapped_keys_sha256(posts: list[dict]) -> str:
 
 def run_backbones(key_map: KeyMap) -> tuple[dict[str, bool], str]:
     """Write the merged variety backbone and the merged additions, delete the per-category files they replace
-    and the two dropped catalog files; ({file: changed}, the mapped-Keys digest to pin)."""
+    and the two dropped catalog files; ({file: changed}, the mapped-Keys digest to pin). A merged-in copy's name
+    joins the aliases as written; `python -m stone_pipeline.reference.clean_committed_names` then makes the files
+    fixed points of the name rules (10 Nov: one alias re-cased), and a second run of this changes nothing."""
     changed: dict[str, bool] = {}
     if VARIETIES_FILE.exists():
         posts = merge_backbones(_read_posts(VARIETIES_FILE), [], [], key_map)

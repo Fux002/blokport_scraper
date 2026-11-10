@@ -60,7 +60,8 @@ def _backbone_types() -> dict[str, str]:
     for f in (SETTINGS.paths.backbone_json, SETTINGS.paths.backbone_additions_file):
         if f.exists():
             for p in read_posts(f):
-                ktype.setdefault(p["key"], (p.get("stone_type") or "").strip())
+                if p.get("key"):
+                    ktype.setdefault(p["key"], (p.get("stone_type") or "").strip())
     return ktype
 
 

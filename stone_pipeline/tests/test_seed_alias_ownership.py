@@ -33,8 +33,7 @@ def _assert_owned_by_pietra_grey(records):
     assert holders == {OWNER}, holders
 
 
-@pytest.mark.parametrize("path", ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-                                  "catalog_source/backbone_tiles.json"])
+@pytest.mark.parametrize("path", ["catalog_source/backbone_varieties.json"])
 def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
     posts = json.loads((ROOT / path).read_text(encoding="utf-8"))["posts"]
     _assert_owned_by_pietra_grey([(p["variant"], set(p["aliases"])) for p in posts if p["stone_type"] == TYPE])
@@ -64,8 +63,7 @@ def _assert_volakas_moved(records):
         assert VOLAKAS_ADDED <= aliases
 
 
-@pytest.mark.parametrize("path", ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-                                  "catalog_source/backbone_tiles.json"])
+@pytest.mark.parametrize("path", ["catalog_source/backbone_varieties.json"])
 def test_backbone_volakas_spellings_left_spider_red_for_volocas(path):
     posts = json.loads((ROOT / path).read_text(encoding="utf-8"))["posts"]
     _assert_volakas_moved([(p["variant"], set(p["aliases"])) for p in posts if p["stone_type"] == TYPE])

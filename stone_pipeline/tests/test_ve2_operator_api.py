@@ -182,7 +182,7 @@ def test_restating_a_varietys_backbone_colour_is_allowed(monkeypatch):
     # the variety's current colour lives in the BACKBONE seed (+ leaf overlay), not an operator statement;
     # restating that colour, even once it is restricted, is not an assignment
     monkeypatch.setattr(loaders, "restricted_values", lambda *a, **k: {"color": {"smoke"}})
-    seed = BackboneVariety(variant="Golden Lightning", category="slab", stone_type="Granite",
+    seed = BackboneVariety(variant="Golden Lightning", stone_type="Granite",
                            colors=["Smoke"], finishes=[], qualities=[], aliases=[])
     monkeypatch.setattr(loaders, "load_backbone", lambda *a, **k: _backbone(seed))
     code, body = _decide(source="zucchi", scraped="GL", name="Golden Lightning", type="Granite", color="Smoke")
