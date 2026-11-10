@@ -260,9 +260,11 @@ def test_colour_from_multicolour_variety_is_flagged(ref):
     )
     stats = reconcile_tree.ReconcileStats()
     reconcile_tree.reconcile_row(row, ref, stats)
-    assert row.color_name == multi.colors[0]  # primary
-    assert row.color_method == "from_variety_primary"
-    assert any(f.code == FlagCode.attr_from_variety for f in row.review_flags)
+    # no colour is guessed from the variety's list (test_colour_unconfirmed): the colour a published listing
+    # carries is kept, but it is UNCONFIRMED (a new listing is held at validate, a published one queued)
+    assert row.color_name == multi.colors[0]
+    assert row.color_method == "colour_unconfirmed"
+    assert any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags)
 
 
 def test_scrape_colour_is_not_overridden_by_variety(ref):
