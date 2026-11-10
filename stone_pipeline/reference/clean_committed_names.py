@@ -99,7 +99,7 @@ def clean_backbone(text: str) -> str:
     leaf values (type, category, colours, finishes, qualities) are Medusa's vocabulary spellings, cleaned with their
     case kept, never re-cased ('Brushed and Tumbled'). merged_from is NOT cleaned: it is the audit record of what a
     merge removed."""
-    doc = json.loads(text)
+    doc = json.loads(text)          # the raw document, not read_posts: it is rewritten whole, held posts included
     posts = doc["posts"] if isinstance(doc, dict) else doc
     alias = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
     for post in posts:
@@ -118,6 +118,7 @@ def clean_backbone(text: str) -> str:
 def _check_keys_stay(before: dict[str, str], after: dict[str, str]) -> None:
     """No Key moves: every variety post's deterministic Key (the one rule, over its type and name) is the same
     before and after cleaning. Compared before/after, so a post already missing on main is not counted."""
+    # the raw texts, not read_posts: the comparison is of the documents before and after cleaning
     old, new = (json.loads(t[VARIETY_BACKBONE])["posts"] for t in (before, after))
     moved = [o["variant"] for o, n in zip(old, new)
              if new_key(o["stone_type"], o["variant"]) != new_key(n["stone_type"], n["variant"])]

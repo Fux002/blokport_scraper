@@ -174,6 +174,7 @@ def fill_colors(backbone_paths: list[Path] | None = None,
     fallback_color = active_pack().fallback_color   # the pack's generic colour ('Natural' for stone)
     product_images = product_images or {}
     fetch = fetch or _fetch_product_image
+    # the raw documents, not read_posts: this edits the files in place, held posts included (is_blank skips them)
     docs = {p: json.loads(Path(p).read_text(encoding="utf-8")) for p in paths if Path(p).exists()}
     ref_docs = [json.loads(Path(p).read_text(encoding="utf-8"))
                 for p in (reference_paths or []) if Path(p).exists()]
