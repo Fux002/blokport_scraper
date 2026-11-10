@@ -40,9 +40,7 @@ def load_all_existing() -> dict[str, ImportFile]:
             v = {
                 "Key": r.key,
                 "Name": r.name,
-                "Image": r.image,
                 "Aliases": "|".join(r.aliases),
-                "Volume": r.volume,
                 "type": proj.norm(type_slug_from_key(r.key)),   # the variety's stone type, from its Key
                 # VE2 PR5: the export's archived flag. An archived variety STAYS in the index (a scrape still
                 # recognizes it, no re-mint); classify uses the flag to surface a card when a gapped scrape

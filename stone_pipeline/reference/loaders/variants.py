@@ -20,7 +20,6 @@ class Variant:
     variation_id: str
     key: str
     name: str
-    image: str
     aliases: list[str]
     # VE2: the export marks this variety archived. It STAYS in the matcher (recognition keeps the full
     # vocabulary), but the matcher must not LEARN a new alias onto it (match_variation write-back).
@@ -152,6 +151,6 @@ def _fill_tables(records: list[ExportVariation], table_for) -> None:
         if table is None:
             continue
         table.by_id[vid] = Variant(
-            variation_id=vid, key=key, name=name, image=record.image, aliases=list(record.aliases),
+            variation_id=vid, key=key, name=name, aliases=list(record.aliases),
             archived=record.archived,
         )
