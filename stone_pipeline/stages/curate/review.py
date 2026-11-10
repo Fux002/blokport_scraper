@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import re
 
+from stone_pipeline.config.domain import active_pack
+from stone_pipeline.config.sources import load_source
+from stone_pipeline.core.schema import FlagCode
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.stages.product_state import sku_from
 
 
 def attr_surface(row, vocab: str) -> str:
@@ -61,13 +65,65 @@ def review_card(kind: str, variant: str, reason: str, evidence: dict, *, stone_t
     """One shape for every review-queue card (variants_to_confirm) so the operator queue is uniform no
     matter which hold path built it, and no arm can silently omit a column. `kind` names WHY the card exists
     (new, similar, collision, no_type, new_type, code, retired; the origin queue adds origin; the VE2 freeze
-    adds archived_type, archived_value and archived_variety -- see ARCHIVED_AND_INTERNAL.md):
+    adds archived_type, archived_value and archived_variety -- see ARCHIVED_AND_INTERNAL.md; a guessed colour
+    adds colour_unconfirmed):
     it explains, it never limits what the operator may state. `evidence` is review_evidence()
     (src/scraped/src_url/image/description); its keys never collide with the card fields, so the spread is
     additive."""
     return {"confirm": "", "kind": kind, "variant": variant, "reason": reason, "stone_type": stone_type,
             "color": color, "nearest_existing": nearest_existing, "score": score,
             "model_prob": model_prob, **evidence}
+
+
+def colour_cards(rows, ref) -> list[dict]:
+    """The colour_unconfirmed holds (reconcile: no vendor colour, a variety sold in several): ONE card per (vendor,
+    variety, type), the one question an operator answers once for all of that vendor's listings of the variety. It
+    carries what the answer needs: every listing it covers (`listings`, each scraped spelling, which the decision is
+    stated on), their SKUs and count, the colours to pick from (the variety's backbone colours, then the pack's
+    multicolour value) and the stone's photo. `ref_scope` keeps one vendor's card apart from another's of the same
+    variety (stages.decisions.write_confirm_file). No colour is prefilled: the card never guesses."""
+    groups: dict[tuple[str, str, str], list] = {}
+    for row in rows:
+        if any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags):
+            key = (proj.norm(row.src_site), proj.norm(row.variation_name), proj.norm(row.type_name))
+            groups.setdefault(key, []).append(row)
+    codes: dict[str, str] = {}
+    cards = []
+    for key in sorted(groups):
+        members = groups[key]
+        src = members[0].src_site or ""
+        code = codes.setdefault(src, load_source(src).source_code)
+        members.sort(key=lambda r: sku_from(code, r.surrogate_key))
+        first = members[0]
+        variant, stone_type = first.variation_name or "", first.type_name or ""
+        variety = ref.backbone.lookup(variant, stone_type=stone_type)
+        allowed = list(dict.fromkeys(variety.colors if variety else []))
+        multi = active_pack().multicolour_value
+        colours = allowed + ([multi] if multi and proj.norm(multi) not in {proj.norm(c) for c in allowed} else [])
+        listings = sorted({(src, review_evidence(r)["scraped"]) for r in members if review_evidence(r)["scraped"]})
+        skus = list(dict.fromkeys(sku_from(code, r.surrogate_key) for r in members))
+        evidence = {**review_evidence(first), "image": _stone_photo(members)}
+        named = next((f.raw_value for r in members for f in r.review_flags
+                      if f.code == FlagCode.multicolour_from_vendor), None)
+        why = (f"Colour unconfirmed: {src} names several colours ('{named}') and there is no multicolour value"
+               if named else f"No vendor colour: {src} gives none and {variant} comes in {human_join(allowed)}")
+        cards.append({**review_card(
+            "colour_unconfirmed", variant,
+            f"{why}, so none is guessed. Pick this supplier's {variant} colour; it applies to all {len(skus)} "
+            f"listing(s). A listing already in the catalog keeps its colour until then; a new one waits.",
+            evidence, stone_type=stone_type),
+            "ref_scope": src, "listings": [{"source": s, "scraped": sp} for s, sp in listings],
+            "colours": colours, "skus": skus, "count": len(skus)})
+    return cards
+
+
+def _stone_photo(members) -> str:
+    """The stone's photo for a colour card: its standardised main view when one is published (images.standardised
+    puts it first in image_keys), else the scraped lead photo; the first listing (by SKU) that has one."""
+    for row in members:
+        if row.standard_photo and row.image_keys:
+            return row.image_keys[0]
+    return next((u for row in members for u in (row.raw_image_urls or []) if u), "")
 
 
 def human_join(items: list[str]) -> str:
