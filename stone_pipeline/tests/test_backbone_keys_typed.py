@@ -12,8 +12,8 @@ from pathlib import Path
 
 from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.config.settings import SETTINGS
-# the rule gen_key writes a Key's type segment with (main's core.text.slugify takes no separator)
-from stone_pipeline.stages.curate.keys import _slug_us
+# the rule gen_key writes a Key's type segment with (stages/curate/keys._slug_us is slugify with "_")
+from stone_pipeline.core.text import slugify
 
 
 def _backbones() -> list[tuple[str, Path]]:
@@ -41,7 +41,7 @@ def test_every_keyed_post_states_its_key_s_type():
                 untyped.append(f"{path.name}: {key}")
                 continue
             checked[category] = checked.get(category, 0) + 1
-            if not key.startswith(f"{category}_{_slug_us(stated)}_"):
+            if not key.startswith(f"{category}_{slugify(stated, '_')}_"):
                 wrong.append(f"{path.name} variant_id {post.get('variant_id')} {post.get('variant')!r} states "
                              f"{stated} but carries {key}")
     assert {"slab", "block", "tile"} <= set(checked)            # every category's backbone was read
