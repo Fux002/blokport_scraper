@@ -138,6 +138,8 @@ One colour item:
                                              //   lead photo ("" if neither)
   "reason": "No vendor colour: varsha gives none and Patagonia comes in Black, White, Beige, Gold and Pink, so
              none is guessed. Pick this supplier's Patagonia colour; it applies to all 3 listing(s). ...",
+             // or "Colour unconfirmed: <vendor> names several colours ('<its text>') and there is no
+             //   multicolour value, ..." when the vendor named a list the colour vocabulary cannot hold
   "color": "",                               // never prefilled: the item never guesses
   "decided": false,
   "current_action": null,                    // "colour" once decided
@@ -166,28 +168,46 @@ Response `200`:
   "listings": [ { "source": "varsha", "scraped": "Patagonia", "result": "bound" }, ... ],
   "decided": 2 }                                                        // statements stored (= listings)
 ```
-Refusals (`{"error": "..."}`; nothing is stored):
-| code | when |
-|---|---|
-| `400` | the body is not an object; `listings` is missing or malformed; `name` or `type` is missing |
-| `400` | `name` is not its own clean form (the body carries `clean`); `type` is not a Medusa stone type |
-| `400` | `color` is not a Medusa colour attribute. Any Medusa colour is accepted: a colour outside `item.colours` is NOT refused. |
-| `409` | the variety is retired (`"retired": true`) |
-| `503` | the field kinds are not published yet (retry) |
+Refusals (`{"error": "..."}`; nothing is stored). In the order the handler (`server._put_review_decide`) checks them:
+| code | when | extra keys |
+|---|---|---|
+| `400` | the body is not an object; `listings` is malformed; no listing given | |
+| `400` | `name` or `type` is missing | |
+| `503` | the field kinds are not published yet (retry) | |
+| `400` | `name` has no ASCII form | |
+| `400` | `name` is not its own clean form | `clean` |
+| `400` | `type` is not a Medusa stone type | |
+| `400` | `color` is not a Medusa colour attribute | |
+| `400` | `origin` is not an ISO-3166 country (not sent by the colour screen) | |
+| `409` | the variety is retired | `retired: true` |
+| `400` | the VE2 gate: the variety is archived in Medusa | `archived: true` |
+| `400` | the VE2 gate: `color` is archived or internal in Medusa and the variety does not already carry it | `restricted: true` |
+| `400` | the store refuses a listing (`InvalidDecision`, e.g. a spelling or name with no usable key) | |
+
+The VE2 gate (`server._ve2_decide_gate`) is dormant until Blokport publishes the attribute status columns: until
+then no colour or variety is restricted or archived. So "any Medusa colour is accepted", including one outside
+`item.colours`, holds only while those columns are absent.
 
 There is no stale-item refusal. Deciding an item the last produce already dropped still stores the statement
 (`200`), which then applies on the next produce.
 
-**For the FE: offer only `item.colours`.** The server accepts any Medusa colour, not only the item's list, and it
-has no stale-item refusal. Limiting the choice to `item.colours` is therefore the screen's job.
+**For the FE: offer only `item.colours`.** The server accepts any Medusa colour, not only the item's list (unless
+the VE2 gate restricts it), and it has no stale-item refusal. Limiting the choice to `item.colours` is therefore the
+screen's job.
 
 ### Undo: DELETE /config/v1/review/decide (the existing call)
 
-`{ "listings": <item.listings> }` clears each listing's statement, all or none. Responses:
-- `200 { "listings": [...], "cleared": [{"statements": <n>}, ...] }`. This always works before the next produce.
-- `409 { "error": ..., "blocked": [{source, scraped, products}] }` once a produce has applied the colour and live
-  products depend on it. Restate with PUT and another colour instead.
-- `400` for a malformed body.
+`{ "listings": <item.listings> }` clears each listing's statement, all or none (`server._delete_review_decide`):
+- `200 { "listings": [...], "cleared": [{"statements": <n>}, ...] }`.
+- `400`: the body is not an object, `listings` is malformed or empty, or a spelling folds to no key
+  (`check_clearable`).
+- `409 { "error": ..., "blocked": [{source, scraped, products}] }`: a produce applied the statement and live
+  products are bound by it. Restate with PUT and another colour instead.
+- `409 { "error": "cannot verify which live products depend on ... no produce output ..." }` (no `blocked`): a
+  produce applied the statement, but this host has no produce output to check against.
+
+A statement decided after the last applying produce on record has reached no product, so it is never blocked.
+With no applying produce on record, the produce output decides: products it shows bound block the undo.
 
 ## Notes
 - `combinations` is NOT a sync lane (dormant): it never appears in `/failures` and its `status.combination`

@@ -66,8 +66,9 @@ def _override_name(ref: ReferenceData, row: CanonicalRow, vocab: str) -> str | N
 def _several_colours(resolution: Resolution, resolver) -> Resolution:
     """The vendor's own colour text names a LIST: two or more distinct colours are the pack's multicolour value
     (stone 'Multicolor'), never the first one named. Without that value in the domain or its vocabulary the colour
-    is left unset, so reconcile treats the row as having no vendor colour (unconfirmed, never guessed). One colour
-    named twice ('White, white') is just that colour."""
+    is left unset and UNCONFIRMED: reconcile keeps a published listing on the first colour named (the colour it was
+    listed with) and queues it, a new one is held (rule 2). One colour named twice ('White, white') is just that
+    colour."""
     named = resolution.evidence.get("resolved") or []
     if len(named) < 2:
         return resolution
@@ -141,10 +142,10 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         setattr(row, f"{vocab}_confidence", _confidence_name(resolution.confidence))
         setattr(row, f"{vocab}_method", resolution.method)
 
-        if resolution.method == "multicolor_from_vendor":
+        if resolution.method in ("multicolor_from_vendor", "colour_unconfirmed"):
             row.add_flag(ReviewFlag(field=vocab, code=FlagCode.multicolour_from_vendor, raw_value=raw_value,
                                     best_guess=resolution.evidence["named"][0], confidence=Confidence.medium,
-                                    method="multicolor_from_vendor", src_url=row.src_url))
+                                    method=resolution.method, src_url=row.src_url))
         if is_multi:
             row.add_flag(
                 ReviewFlag(
@@ -159,7 +160,9 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             )
         # synonym_none is a clean resolution to "no value" (e.g. finish Other),
         # not an unresolved error, so it does not flag.
-        if attr_id is None and resolution.method not in ("synonym_none", "empty"):
+        # colour_unconfirmed: several colours named and no multicolour value to hold them; reconcile handles it (an
+        # attribute card proposing the vendor's list as a new colour value would invent a compound colour)
+        if attr_id is None and resolution.method not in ("synonym_none", "empty", "colour_unconfirmed"):
             row.add_flag(
                 ReviewFlag(
                     field=vocab,

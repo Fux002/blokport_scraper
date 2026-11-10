@@ -102,10 +102,12 @@ class Decisions:
                 known = colours.setdefault((_norm(target), _norm(stone_type)), [])
                 if colour not in known:
                     known.append(colour)
-                # ...and, stated by a vendor, the colour of every listing that vendor has of the variety: one
-                # decision per (vendor, variety), the latest one winning when two spellings disagree
-                group, decided = (src, _norm(target), _norm(stone_type)), r.get("decided_at") or ""
-                if src and decided >= listing_colours.get(group, ("", ""))[0]:
+                # ...and the colour of every listing the stating vendor has of the variety (a global statement's
+                # vendor is the one that asked: its card defined the spelling for everyone, mint or not yet in the
+                # ledger). One decision per (vendor, variety), the latest winning when two spellings disagree.
+                vendor, decided = src or _norm(r.get("asked_by")), r.get("decided_at") or ""
+                group = (vendor, _norm(target), _norm(stone_type))
+                if vendor and decided >= listing_colours.get(group, ("", ""))[0]:
                     listing_colours[group] = (decided, colour)
             if src:
                 bindings[(src, sp)] = (target, stone_type)

@@ -83,8 +83,9 @@ class DomainPack:
     name_code_pattern: str | None = None
     trailing_grade_letters: bool = False
     # The colour vocabulary's value for a product the vendor itself names in several colours ('Black and White'):
-    # stone 'Multicolor'. None = the domain has no such value, so such a colour stays unconfirmed (never one of the
-    # vendor's colours picked first). The backbone's colour list is never evidence of it.
+    # stone 'Multicolor'. None (or a value the colour vocabulary lacks) = such a colour is UNCONFIRMED: a published
+    # listing keeps the first colour named, the one it was listed with, and is queued; a new one is held (rule 2).
+    # The backbone's colour list is never evidence of it.
     multicolour_value: str | None = None
     # Classify a variety's colour from its product image with the stone-tuned CV palette (variety_color).
     # A domain whose tones that palette cannot read sets this false: colour then comes from the pack

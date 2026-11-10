@@ -103,11 +103,14 @@ def colour_cards(rows, ref) -> list[dict]:
         listings = sorted({(src, review_evidence(r)["scraped"]) for r in members if review_evidence(r)["scraped"]})
         skus = list(dict.fromkeys(sku_from(code, r.surrogate_key) for r in members))
         evidence = {**review_evidence(first), "image": _stone_photo(members)}
+        named = next((f.raw_value for r in members for f in r.review_flags
+                      if f.code == FlagCode.multicolour_from_vendor and f.method == "colour_unconfirmed"), None)
+        why = (f"Colour unconfirmed: {src} names several colours ('{named}') and there is no multicolour value"
+               if named else f"No vendor colour: {src} gives none and {variant} comes in {human_join(allowed)}")
         cards.append({**review_card(
             "colour_unconfirmed", variant,
-            f"No vendor colour: {src} gives none and {variant} comes in {human_join(allowed)}, "
-            f"so none is guessed. Pick this supplier's {variant} colour; it applies to all {len(skus)} listing(s). A "
-            f"listing already in the catalog keeps its colour until then; a new one waits.",
+            f"{why}, so none is guessed. Pick this supplier's {variant} colour; it applies to all {len(skus)} "
+            f"listing(s). A listing already in the catalog keeps its colour until then; a new one waits.",
             evidence, stone_type=stone_type),
             "ref_scope": src, "listings": [{"source": s, "scraped": sp} for s, sp in listings],
             "colours": colours, "skus": skus, "count": len(skus)})

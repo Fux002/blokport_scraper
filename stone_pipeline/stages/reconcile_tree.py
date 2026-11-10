@@ -71,16 +71,25 @@ def _fill_missing_colour(row: CanonicalRow, allowed: list[str], ref: ReferenceDa
     never guessed (the backbone's list is no evidence of which one this product is, nor of multicolour): the
     operator's colour statement for this vendor's listing decides; without one the colour is UNCONFIRMED. The row
     then carries the variety's first colour, the one an already-published listing carries today, so validate can
-    keep a published listing listed (loads never remove) while holding a new one, and curate queues it."""
-    if row.color_name or len(allowed) < 2:
+    keep a published listing listed (loads never remove) while holding a new one, and curate queues it.
+
+    A vendor that named several colours the pack cannot hold (no multicolour value: normalize left the colour unset)
+    is unconfirmed too, whatever the variety allows, and carries the first colour it named when the variety allows
+    it: the colour such a published listing was listed with."""
+    named = next((f.best_guess for f in row.review_flags
+                  if f.code == FlagCode.multicolour_from_vendor and f.method == "colour_unconfirmed"), None)
+    if row.color_name or (len(allowed) < 2 and named is None):
         _fill_missing_from_variety(row, "color", allowed, stats)
+        return
+    if not allowed:
         return
     stats.filled_from_variety += 1
     stated = ref.decisions.listing_colour(row.src_site or "", row.variation_name or "", row.type_name or "")
     if stated:
         row.color_name, row.color_confidence, row.color_method = stated, Confidence.high.name, "operator"
         return
-    row.color_name, row.color_confidence, row.color_method = allowed[0], Confidence.low.name, "colour_unconfirmed"
+    carried = next((a for a in allowed if proj.norm(a) == proj.norm(named or "")), allowed[0])
+    row.color_name, row.color_confidence, row.color_method = carried, Confidence.low.name, "colour_unconfirmed"
     row.add_flag(ReviewFlag(field="color", code=FlagCode.colour_unconfirmed, raw_value="",
                             best_guess=", ".join(allowed), confidence=Confidence.low,
                             method="colour_unconfirmed", src_url=row.src_url))

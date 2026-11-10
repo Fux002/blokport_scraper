@@ -304,7 +304,7 @@ def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: 
     meaning = _global_meaning(conn, spelling, stone_type, exists_as, alias_target, clean)
     if meaning and _norm(meaning[0]) == _norm(name) and _norm(meaning[1]) == _norm(stone_type):
         outcome["result"], outcome["level"] = "minted", "global"      # restates the global meaning: nothing new
-        if origin:                                                    # ...but the vendor's origin is recorded
+        if origin or color:                       # ...but the vendor's origin and its listings' colour are recorded
             _write_statement(conn, src, spelling, "is", name=name, stone_type=stone_type, color=color,
                              origin_iso=origin, widen=widen, asked_by=src)
         return outcome
