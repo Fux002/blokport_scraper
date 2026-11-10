@@ -38,8 +38,9 @@ def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, ed
     where `full` itself is not as shot (views.close_up), called only when a close-up is made. A logo or overlay left on
     the stone is the judge's finding (leftover_mark) on the result, which the hosted clean step removes from the photo;
     no step here looks for one. redo: the photo's stored result is worked on again: "recheck" (a whole slab made under an
-    older outline rule: unchanged, nothing drawn, when this version draws it the same) or "complete" (an open book made
-    before its halves had a slab: drawn in full); either way never a close-up instead (held with the reason)."""
+    older outline rule: unchanged, nothing drawn, when this version draws it the same), "complete" (an open book made
+    before its halves had a slab: drawn in full) or "restandardise" (a scoped run's listed photo: drawn in full, the
+    fix it is for may be one drawn_differently cannot see); never a close-up instead (held with the reason)."""
     rgb = layout.fit_working(full)
     if fmt in ("block", "tile"):
         made = scene.block(rgb, *models.cleaners) if fmt == "block" else scene.tile(rgb, models.lama, models.esr)

@@ -93,6 +93,13 @@ def checked_key(out, sha, rule=None):
 REDRAW = "redraw/"
 
 
+def judged_rules():
+    """The rules whose candidates the judge decides now (undecided, select.settle_one): the outline recheck's and a
+    scoped run's re-standardise (C.RESTANDARDISED), read when asked, so a rule's new folder name is seen at once. A
+    candidate under any other rule was drawn under an earlier one."""
+    return C.OUTLINE_CHECKED, C.RESTANDARDISED
+
+
 def candidate_prefix(out):
     """Where a recheck draws a result this version draws differently (a candidate) instead of over the result: a folder
     named as a run folder is, <sha>.<file> and judged/<sha>.json, so the judge reads it as it reads a result."""
@@ -131,6 +138,14 @@ def finished(client, out, sha):
         return True
     return (_exists(client, f"{out}{sha}.main.jpg") and not outdated(client, out, sha)
             and not older_outline(client, out, sha))
+
+
+def restandardise_due(client, out, sha):
+    """Whether a photo on a scoped run's re-standardise list (RESTANDARDISE_KEY) is still to be re-standardised: it has
+    a result, no note of C.RESTANDARDISED (written when its redraw is settled or gave no slab) and no complete candidate
+    waiting for the judge. So it is re-done once, and a run cut short before its candidate was complete re-does it."""
+    return (_exists(client, f"{out}{sha}.main.jpg") and not noted(client, out, sha, C.RESTANDARDISED)
+            and not pending(client, out, sha))
 
 
 def again(client, out, sha):
@@ -202,13 +217,13 @@ def clear_candidate(client, out, sha):
         client.delete_object(Bucket=S3_BUCKET, Key=key)
 
 
-def draw_candidate(client, out, sha, res):
+def draw_candidate(client, out, sha, res, rule=None):
     """A result this version draws differently written as a candidate (candidate_prefix), never over the result: every
     file encoded first, then written as a result's are, then its completion marker, last, naming its files and the rule
-    it was drawn under (C.OUTLINE_CHECKED)."""
+    it was drawn under (`rule`: a scoped run's re-standardise, else the current outline rule, read when called)."""
     files = _files(res)
     _put(client, candidate_prefix(out), sha, files)
-    marker = {"files": [[name, kind] for name, _, kind in files], "rule": C.OUTLINE_CHECKED}
+    marker = {"files": [[name, kind] for name, _, kind in files], "rule": rule or C.OUTLINE_CHECKED}
     client.put_object(Bucket=S3_BUCKET, Key=candidate_key(out, sha), ContentType="application/json",
                       Body=json.dumps(marker, sort_keys=True).encode())
 
@@ -227,7 +242,7 @@ def undecided(client, out, sha):
     """Whether the judge still decides this complete candidate: drawn under the current rule and not settled yet (no
     note of its rule). One drawn under an earlier rule is never judged: it is settled by its stored verdict alone."""
     rule = candidate_rule(client, out, sha)
-    return rule == C.OUTLINE_CHECKED and not noted(client, out, sha, rule)
+    return rule in judged_rules() and not noted(client, out, sha, rule)
 
 
 def promote(client, out, sha, rule):
@@ -267,13 +282,14 @@ def remove_candidate(client, out, sha):
 
 
 def rework(client, out, sha, res, how):
-    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both, a candidate cut short
-    before cleared first (clear_candidate):
+    """A stored result worked on again (how: again's "complete" or "recheck", or "restandardise": a scoped run's listed
+    photo, restandardise_due), one path for all, a candidate cut short before cleared first (clear_candidate):
       - drawn the same by this version (a recheck stops before drawing): only the note, {"changed": false};
       - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): tried;
-      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): a candidate
-        (draw_candidate), never over the result: the judge scores it as it scores a new result, and it is promoted or
-        discarded (stone_pipeline.photos.select.settle);
+      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner), or re-standardised
+        whatever the outline says (the fix it is for may be one drawn_differently cannot see): a candidate
+        (draw_candidate, under C.RESTANDARDISED for a re-standardise), never over the result: the judge scores it as
+        it scores a new result, and it is promoted or discarded (stone_pipeline.photos.select.settle);
       - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
         and its slab (the result complete), then the note {"changed": false}. Cut short, the close view comes off again
         while the slab is missing, so half of one is never published."""
@@ -285,6 +301,9 @@ def rework(client, out, sha, res, how):
         wanted = "open book" if how == "complete" else "whole slab"
         tried(client, out, sha, how, res.held or f"the re-run is a {res.kind}, no {wanted}")
         return "no slab"
+    if how == "restandardise":
+        draw_candidate(client, out, sha, res, C.RESTANDARDISED)
+        return "redrawn for the judge"
     if res.changed:
         draw_candidate(client, out, sha, res)
         return "redrawn for the judge"
@@ -303,10 +322,11 @@ def rework(client, out, sha, res, how):
 def tried(client, out, sha, how, reason):
     """Note that a result worked on again gave no slab, or failed, so it is never run again and stays as it is: a
     completion in noslab/<sha>.json, a recheck in its note ({"changed": false, "kept": why}: never noslab/ over a live
-    result). Never held/: the result is judged and may be published, and a hold would take it from every listing that
-    has it."""
-    if how == "recheck":
-        _note(client, out, sha, {"changed": False, "kept": reason})
+    result), a re-standardise in the note of its rule (C.RESTANDARDISED). Never held/: the result is judged and may be
+    published, and a hold would take it from every listing that has it."""
+    if how in ("recheck", "restandardise"):
+        rule = C.RESTANDARDISED if how == "restandardise" else None
+        _note(client, out, sha, {"changed": False, "kept": reason}, rule)
         return
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
                       Body=json.dumps({"reason": reason}, sort_keys=True).encode())
@@ -488,9 +508,10 @@ def scraped_keys(client, src):
     return sorted(keys)
 
 
-def listed_shas(client):
-    """The shas ONLY_KEY lists (an S3 JSON list of shas: a run of chosen photos), or None when it is not set."""
-    listed = os.environ.get("ONLY_KEY", "").strip()
+def listed_shas(client, name="ONLY_KEY"):
+    """The shas the S3 JSON list named by env `name` holds (ONLY_KEY: a slice of photos; RESTANDARDISE_KEY: those of
+    the slice to re-standardise, batch.submit), or None when it is not set."""
+    listed = os.environ.get(name, "").strip()
     return json.loads(_get(client, listed)) if listed else None
 
 
@@ -517,6 +538,7 @@ def main() -> int:
     out = run_prefix(src)
     photos = sheet_photos(client)
     sliced = _photo_keys(client, src, photos)
+    forced = set(listed_shas(client, "RESTANDARDISE_KEY") or ())   # a scoped run's photos to re-standardise once
     print(f"==> standardise {src}: {len(sliced)} photos, survey={survey}", flush=True)
     m = models.load("survey" if survey else "all")
     tally = collections.Counter()
@@ -528,7 +550,8 @@ def main() -> int:
         started = time.time()
         redo = None                                    # complete or recheck: a result there, worked on again
         try:
-            if not survey and finished(client, out, sha):
+            restandardise = not survey and sha in forced and restandardise_due(client, out, sha)
+            if not survey and not restandardise and finished(client, out, sha):
                 tally["already done"] += 1
                 storage_in_a_row = 0
                 continue
@@ -536,7 +559,7 @@ def main() -> int:
                 rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
-                redo = again(client, out, sha)
+                redo = "restandardise" if restandardise else again(client, out, sha)
                 source_key, cleaned, refused = start(client, out, key, sha)
                 if refused:
                     if redo:

@@ -163,7 +163,7 @@ def test_the_photo_process_s_clients(built, monkeypatch, tmp_path):
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")                    # what the GPU target reads before its first call
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "j")
     _drive(lambda: process.reap("R1"))
-    monkeypatch.setattr(process, "unconfigured", lambda close_only=False: [])
+    monkeypatch.setattr(process, "unconfigured", lambda close_only=False, scoped=False: [])
     monkeypatch.setattr(process, "stop_on_signal", lambda *spends: None)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLOSE_ONLY", raising=False)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLICKS_ONLY", raising=False)
