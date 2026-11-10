@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -287,8 +286,12 @@ def migrate_config(old_path: Path, new_path: Path, key_map: KeyMap, ledger_old_k
         return min(r[col] for k, r in rows.items() if key_map.new_key(k) == new)
 
     new_path.unlink(missing_ok=True)
-    shutil.copyfile(old_path, new_path)
     conn = sqlite3.connect(str(new_path))
+    old = sqlite3.connect(f"file:{old_path}?mode=ro", uri=True)
+    try:
+        old.backup(conn)    # a consistent copy: a store in WAL mode keeps recent pages in its -wal file, not the file
+    finally:
+        old.close()
     try:
         conn.execute("DELETE FROM retired_variation")
         conn.executemany("INSERT INTO retired_variation (key, created_at) VALUES (?, ?)",

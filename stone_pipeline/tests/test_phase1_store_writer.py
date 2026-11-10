@@ -164,13 +164,16 @@ def test_the_marker_s_old_keys_become_pair_ids():
 # --- config.db ------------------------------------------------------------------------------------------------------
 
 def _old_config(path, retired=(), protected=()):
-    with store._connect(path) as conn:                 # a real config.db (v12 tables), stamped back to 11
-        for key in retired:
-            conn.execute("INSERT INTO retired_variation (key, created_at) VALUES (?, ?)", (key, NOW))
-        for key in protected:
-            conn.execute("INSERT INTO protected_variation (key, decided_at) VALUES (?, ?)", (key, NOW))
-        conn.execute("INSERT INTO review_pending (kind, ref, payload, updated_at) VALUES ('mint', 'r', '{}', ?)", (NOW,))
-        conn.execute("PRAGMA user_version = 11")
+    conn = store._connect(path)                        # a real config.db (v12 tables), stamped back to 11
+    for key in retired:
+        conn.execute("INSERT INTO retired_variation (key, created_at) VALUES (?, ?)", (key, NOW))
+    for key in protected:
+        conn.execute("INSERT INTO protected_variation (key, decided_at) VALUES (?, ?)", (key, NOW))
+    conn.execute("INSERT INTO review_pending (kind, ref, payload, updated_at) VALUES ('mint', 'r', '{}', ?)", (NOW,))
+    conn.execute("PRAGMA user_version = 11")
+    conn.commit()
+    conn.execute("PRAGMA journal_mode = DELETE")       # one self-contained file, as the snapshot uploads it
+    conn.close()
     return path
 
 
