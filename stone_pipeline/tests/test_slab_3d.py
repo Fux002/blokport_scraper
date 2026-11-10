@@ -300,6 +300,19 @@ def test_a_size_outside_the_category_s_band_links_no_3d_and_is_reported_with_the
         ("size_out_of_band", 3.15, 0.2, {"width": "band 0.45 to 9"})]
 
 
+def test_the_outlines_are_read_in_parallel_under_the_settings_cap(monkeypatch):
+    from stone_pipeline.photos import publish as photo_publish
+    calls = []
+    real = photo_publish.pool_map
+
+    def pooled(workers, work, items):
+        calls.append((workers, list(items)))
+        return real(1, work, items)
+    monkeypatch.setattr(photo_publish, "pool_map", pooled)
+    _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 1260))
+    assert calls[0] == (C.CUTOUT_OUTLINE_READ_WORKERS, [("sentas", A, "t1+j1")])
+
+
 def test_a_misfit_is_reported_with_both_figures(monkeypatch):
     found = []
     _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 824), mismatches=found)
