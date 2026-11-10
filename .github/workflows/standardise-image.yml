@@ -1,0 +1,114 @@
+# STD-IMAGE-BUILD (table 348 section 6): build the standardise GPU image standardise-pin-<sha12> at a main sha, on
+# CodeBuild (infra/standardise_image.tf), never on a laptop. Dispatch only. The job checks the sha, starts ONE build
+# with it, waits, prints the log and the billed minutes (C5), stops the build if this job is cancelled or fails, and
+# reads the pushed digest back. The input reaches a step only through env, never interpolated into a script (C1).
+name: Standardise image
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "The full 40-character main commit sha to build standardise-pin-<sha12> from"
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC: the environment-scoped dispatch role
+  contents: read
+
+concurrency:
+  group: standardise-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: standardise-build   # deployment branches: main only; the dispatch role trusts only this environment
+    timeout-minutes: 75              # above the build's 60 plus its queue
+    env:
+      AWS_REGION: eu-west-1
+      PROJECT: standardise-image
+    steps:
+      - name: Check the sha
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ "${SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "refused: sha must be 40 lowercase hex characters"; exit 1; }
+          echo "sha $SHA"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.STANDARDISE_BUILD_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Start the build
+        id: start
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          ID=$(aws codebuild start-build --project-name "$PROJECT" \
+            --environment-variables-override "name=SOURCE_SHA,value=$SHA,type=PLAINTEXT" --query build.id --output text)
+          [[ "$ID" == "$PROJECT":* ]] || { echo "refused: start-build returned '$ID'"; exit 1; }
+          echo "build $ID"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the build
+        env:
+          ID: ${{ steps.start.outputs.id }}
+        run: |
+          set -euo pipefail
+          # Every read is checked: a failed one exits, it never reads as "still running".
+          while :; do
+            DONE=$(aws codebuild batch-get-builds --ids "$ID" --query 'builds[0].buildComplete' --output text)
+            [ "$DONE" = True ] && break
+            [ "$DONE" = False ] || { echo "refused: buildComplete read as '$DONE'"; exit 1; }
+            sleep 20
+          done
+
+      - name: Stop the build
+        if: (cancelled() || failure()) && steps.start.outputs.id != ''
+        env:
+          ID: ${{ steps.start.outputs.id }}
+        run: aws codebuild stop-build --id "$ID" --query build.buildStatus --output text
+
+      - name: Print the log
+        if: always() && steps.start.outputs.id != ''
+        env:
+          ID: ${{ steps.start.outputs.id }}
+        run: |
+          set -euo pipefail
+          GROUP=$(aws codebuild batch-get-builds --ids "$ID" --query 'builds[0].logs.groupName' --output text)
+          STREAM=$(aws codebuild batch-get-builds --ids "$ID" --query 'builds[0].logs.streamName' --output text)
+          [ -n "$GROUP" ] && [ "$GROUP" != None ] && [ -n "$STREAM" ] && [ "$STREAM" != None ] \
+            || { echo "refused: the build's log is '$GROUP' / '$STREAM'"; exit 1; }
+          TOKEN=""
+          : > build.log
+          while :; do
+            PAGE=$(aws logs get-log-events --log-group-name "$GROUP" --log-stream-name "$STREAM" --start-from-head \
+              ${TOKEN:+--next-token "$TOKEN"} --output json)
+            jq -r '.events[].message' <<<"$PAGE" | tee -a build.log
+            NEXT=$(jq -r '.nextForwardToken' <<<"$PAGE")
+            [ "$NEXT" = "$TOKEN" ] && break
+            TOKEN=$NEXT
+          done
+
+      - name: Result, billed minutes and the pushed digest
+        env:
+          ID: ${{ steps.start.outputs.id }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          BUILD=$(aws codebuild batch-get-builds --ids "$ID" \
+            --query 'builds[0].[buildStatus, environment.computeType, startTime, endTime]' --output text)
+          read -r STATUS COMPUTE START END <<<"$BUILD"
+          MINUTES=$(( ( $(date -d "$END" +%s) - $(date -d "$START" +%s) + 59 ) / 60 ))
+          echo "build $ID: $STATUS on $COMPUTE, $START to $END, $MINUTES billed minute(s)"
+          [ "$STATUS" = SUCCEEDED ] || { echo "refused: the build ended $STATUS"; exit 1; }
+          PRINTED=$(sed -n 's/^==> pushed .*(\(sha256:[0-9a-f]\{64\}\)).*$/\1/p' build.log)
+          [ -n "$PRINTED" ] || { echo "refused: the build log names no pushed digest"; exit 1; }
+          READ=$(aws ecr describe-images --repository-name blokport-scraper --image-ids imageTag="standardise-pin-${SHA:0:12}" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "pushed standardise-pin-${SHA:0:12}: build log $PRINTED, read back $READ"
+          [ "$READ" = "$PRINTED" ] || { echo "refused: the read-back digest differs from the build's"; exit 1; }

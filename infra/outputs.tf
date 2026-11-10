@@ -9,6 +9,11 @@ output "deploy_role_arn" {
   description = "Set as the repo secret AWS_DEPLOY_ROLE_ARN for the Deploy workflow."
 }
 
+output "standardise_image_dispatch_role_arn" {
+  value       = var.create_ecr ? aws_iam_role.std_build_dispatch[0].arn : null
+  description = "STD-IMAGE-BUILD (table 348): set as the secret STANDARDISE_BUILD_ROLE_ARN of the GitHub environment standardise-build."
+}
+
 # --- Dev (present only for a brand with a dev deployment; null for a prod-only brand) ---
 output "dev_task_definition_family" {
   value = local.dev_enabled ? module.scraper_dev[0].task_definition_family : null
