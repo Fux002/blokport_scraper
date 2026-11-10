@@ -19,15 +19,20 @@ leaf_attributes: [color, finish, quality]
 # -- it is env-specific and resolved at runtime from the env's attributes.csv. base_image "" = real photo.
 # default_form (slab) = the form a row falls back to when its format is unresolved, and the finish/dimension
 # fallback source. bulk_form (block) = the uncut/solid form -> drives is_block + the block-scale dim/freight
-# branch. tile mirrors slab (mirror_of). A non-stone pack declares its own roles (a material with no bulk
-# form simply sets bulk_form nowhere).
+# branch. A non-stone pack declares its own roles (a material with no bulk form simply sets bulk_form nowhere).
+# Finish sets (spec rev 8 D7): the default form's are its variety posts' finishes; every other category
+# declares `finishes` (block's 18) or `finishes_from` another category (tile: slab's). The products' finishes
+# are added each run (tree_build). One variety backbone for every category (backbone_file, spec section 3).
+backbone_file: backbone_varieties.json
 categories:
-  - {name: slab,  plural: slabs,  label: Slabs,  backbone_filename: backbone_slabs.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0017",    pcat_env_var: null, default_form: true,
+  - {name: slab,  plural: slabs,  label: Slabs,  shares_variety_vocab: true, fan_out: true, volume_per_kg: "0.0017",    pcat_env_var: null, default_form: true,
      base_image: "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg"}
-  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014348", pcat_env_var: null, bulk_form: true,
+  - {name: block, plural: blocks, label: Blocks, shares_variety_vocab: true, fan_out: true,
+     finishes: ["Brushed", "Chain Sawn & Squared", "Chain Sawn & Un-squared", "Diamond Wire Sawn & Squared", "Diamond Wire Sawn & Un-squared", "Drill, Split & Squared", "Drill, Split & Un-squared", "Flame Jet & Squared", "Flame Jet & Un-squared", "Flamed", "Honed", "Leathered", "Polished", "Raw", "Sandblasted", "Sawn Cut", "Water Jet Cut & Squared", "Water Jet Cut & Un-squared"],
+     volume_per_kg: "0.0014348", pcat_env_var: null, bulk_form: true,
      base_image: "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg"}
-  # tiles mirror slabs and use the block volume per kg
-  - {name: tile,  plural: tiles,  label: Tiles,  backbone_filename: backbone_tiles.json,  shares_variety_vocab: true, fan_out: true, mirror_of: slab, volume_per_kg: "0.0014348", pcat_env_var: BLOKPORT_CAT_TILES_PCAT,
+  # tiles take slab's finish set and use the block volume per kg
+  - {name: tile,  plural: tiles,  label: Tiles,  shares_variety_vocab: true, fan_out: true, finishes_from: slab, volume_per_kg: "0.0014348", pcat_env_var: BLOKPORT_CAT_TILES_PCAT,
      base_image: "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png"}
 
 # Type words too generic to disambiguate a variety on their own (was adapters/tokens.py _AMBIGUOUS_TYPE_WORDS).

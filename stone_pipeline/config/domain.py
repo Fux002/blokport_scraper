@@ -22,7 +22,7 @@ import yaml
 
 _DOMAINS_DIR = Path(__file__).parent / "domains"
 _DEFAULT_PACK = "stone"
-_REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
+_REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories", "backbone_file",
              "ambiguous_type_words", "generic_descriptors", "generic_material_word",
              "default_finishes", "fallback_color",
              "last_resort_finishes", "last_resort_quality", "block_finish",
@@ -49,9 +49,11 @@ class DomainPack:
     attributes: tuple[str, ...]
     disambiguator: str                 # the identity-defining attribute (drives the Key; never guessed)
     leaf_attributes: tuple[str, ...]   # attributes that grow the backbone leaf (all but the disambiguator)
-    # the category model: one dict per category (name/plural/label/backbone_filename/base_image/flags/...).
+    # the category model: one dict per category (name/plural/label/base_image/flags/finish set/...).
     # settings.py maps these to Category objects (the pack stays agnostic to that dataclass); pcat is env.
     categories: tuple[dict, ...]
+    # the ONE variety backbone every category reads (spec rev 8 section 3), under the pack's catalog_source
+    backbone_file: str
     ambiguous_type_words: frozenset[str]
     # words that, as the ONLY difference between two variety names, signal an alias not a distinct variety
     # (base + descriptor: 'Bardiglio Nuvolato' ~ '... Marble'). Per-domain: each pack supplies its own.
@@ -140,7 +142,9 @@ _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_w
 # The three stock states a supplier word can state; one word means one of them.
 _STOCK_WORD_LISTS = ("in_stock_words", "made_to_order_words", "out_of_stock_words")
 
-_CATEGORY_KEYS = ("name", "plural", "label", "backbone_filename", "base_image", "shares_variety_vocab", "fan_out")
+_CATEGORY_KEYS = ("name", "plural", "label", "base_image", "shares_variety_vocab", "fan_out")
+# the optional ones; any other key is refused (spec rev 8 D9: a leftover `mirror_of` fails loud, never ignored)
+_CATEGORY_OPTIONAL = ("volume_per_kg", "pcat_env_var", "default_form", "bulk_form", "finishes", "finishes_from")
 
 
 def _validate_shape(name: str, path: Path, data: dict) -> None:
@@ -162,6 +166,9 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         absent = [k for k in _CATEGORY_KEYS if k not in cat]
         if absent:
             bad(f"categories[{i}] ({cat.get('name', '?')}) is missing keys: {absent}")
+        unknown = sorted(set(cat) - set(_CATEGORY_KEYS) - set(_CATEGORY_OPTIONAL))
+        if unknown:
+            bad(f"categories[{i}] ({cat.get('name', '?')}) has unknown keys {unknown}")
     for fmt, dims in data["dimension_ranges"].items():
         for dim, vals in dims.items():
             if not (isinstance(vals, (list, tuple)) and len(vals) == 2
@@ -254,11 +261,24 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         bad(f"leaf_attributes {sorted(leaf - attrs)} are not in attributes {sorted(attrs)}")
     if data["disambiguator"] in leaf:
         bad(f"disambiguator {data['disambiguator']!r} must NOT be in leaf_attributes {sorted(leaf)}")
-    # V5: a category's mirror_of must name an existing category (a typo'd mirror silently mirrors nothing).
+    # V5 (spec rev 8 D7, D9): the default form's finishes are its variety posts'; every other category declares
+    # exactly one of `finishes` (a list) or `finishes_from` (another category that does not itself borrow).
     for cat in data["categories"]:
-        mo = cat.get("mirror_of")
-        if mo is not None and mo not in cat_names:
-            bad(f"category {cat['name']!r} mirror_of {mo!r} is not a declared category {sorted(cat_names)}")
+        has_own, source = "finishes" in cat, cat.get("finishes_from")
+        if cat.get("default_form"):
+            if has_own or source is not None:
+                bad(f"default form {cat['name']!r} takes its finishes from the variety posts: it declares neither "
+                    f"finishes nor finishes_from")
+            continue
+        if has_own == (source is not None):
+            bad(f"category {cat['name']!r} must declare exactly one of finishes or finishes_from")
+        if has_own and not (isinstance(cat["finishes"], list) and all(isinstance(f, str) for f in cat["finishes"])):
+            bad(f"category {cat['name']!r} finishes must be a list of finish names")
+        if source is not None:
+            target = next((c for c in data["categories"] if c["name"] == source), None)
+            if target is None or source == cat["name"] or target.get("finishes_from") is not None:
+                bad(f"category {cat['name']!r} finishes_from {source!r} must name another declared category that "
+                    f"does not itself use finishes_from ({sorted(cat_names)})")
     # V7 (F-5): the attributes must be ones the ROW SCHEMA carries, and the identity attribute must be the
     # one the pipeline implements by name. A declaration outside that is a row-schema change, refused here
     # instead of being silently ignored downstream.
@@ -294,6 +314,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         disambiguator=data["disambiguator"],
         leaf_attributes=tuple(data["leaf_attributes"]),
         categories=tuple(data["categories"]),
+        backbone_file=data["backbone_file"],
         ambiguous_type_words=frozenset(data["ambiguous_type_words"]),
         generic_descriptors=frozenset(data["generic_descriptors"]),
         generic_material_word=data["generic_material_word"],

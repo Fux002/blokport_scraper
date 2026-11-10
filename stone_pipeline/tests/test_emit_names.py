@@ -47,6 +47,6 @@ def test_a_union_filled_key_equals_the_key_of_its_cleaned_name():
     # W18: union-fill keys a missing-category row from the Name before emit cleans it; the one slug rule (W4)
     # and the identity property of the clean rules make that Key the cleaned Name's Key.
     from stone_pipeline.reference.loaders import field_kinds as fk
-    from stone_pipeline.stages.curate.keys import gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     for raw in ("São Gabriel", "Valle D’Aosta", "Black & Gold", "Nero  (Spain)"):
-        assert gen_key("tile", "Granite", raw) == gen_key("tile", "Granite", fk.display(fk.VARIATION_NAME, raw))
+        assert new_key("Granite", raw) == new_key("Granite", fk.display(fk.VARIATION_NAME, raw))

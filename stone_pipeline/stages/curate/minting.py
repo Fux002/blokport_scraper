@@ -1,18 +1,18 @@
-"""Minting: the last-resort creation of a genuinely NEW variety (phase 4) -- the import row per active
-category, its backbone post, and its image entry -- plus the backbone leaf suggestions (phase 5) and the
+"""Minting: the last-resort creation of a genuinely NEW variety (phase 4) -- its ONE variety row, its backbone
+post and an image item per category its products sit in -- plus the backbone leaf suggestions (phase 5) and the
 result counts. Every mint edge (type-less, already-exists, retired) is enforced here, at ONE point."""
 
 from __future__ import annotations
 
+from stone_pipeline.config.categories import active_categories
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.categories import category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.core.text import UnfoldableName, clean_alias_list, title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.reference.loaders import field_kinds, restricted_values
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
-from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, human_join, named_with_types,
                                                  review_card, review_evidence)
 from stone_pipeline.state.writeback import is_learned
@@ -42,8 +42,8 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
         return
     owner = (proj.norm(display), proj.norm(stone_type))
     if proj.norm(display) != proj.norm(clean) and not c.decisions.scope(row.src_site, name, clean):
-        # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
-        # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
+        # the scraped spelling rides onto the mint row as its own alias (owner[0] == norm(title)); for a
+        # variety that does not exist yet emit_alias_rows finds no existing row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
         c.alias_new.setdefault(owner, set()).add(clean)        # emit writes it by the alias rule (W3)
     if owner in c.minted_display:
@@ -54,24 +54,12 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
         title_case(attr_surface(row, "color")),
         (row.quality_name or c.last_resort_quality).strip() or c.last_resort_quality,
         title_case(attr_surface(row, "finish")), gap,
-        c.variety_branches.get(proj.norm(clean), set()),
+        c.variety_categories.get(proj.norm(clean), set()),
         review_evidence(row), name, row.src_site or "",
     ))
 
 
-# --- phase 4: emit genuinely-new variants (import row + backbone post + image entry) -----------------------
-def _union_cores(c: Curation) -> set[str]:
-    # A variety belongs to the STONE, not a format: if it exists in ANY active category it exists in all,
-    # because the emit's union-fill materializes the row for every category it is missing from. So the
-    # "already exists" set is the UNION of cores (type+name slug, branch-independent) across every category:
-    # curate never re-mints a variety any category already carries, and a sparse live export (a category
-    # Medusa has not fully populated) still counts its varieties via the categories that do carry them.
-    cores: set[str] = set()
-    for b in BRANCHES:
-        cores |= {core(v["Key"], b) for v in c.imports[b].varieties if v.get("Key")}
-    return cores
-
-
+# --- phase 4: emit genuinely-new varieties (variety row + backbone post + image items) ------------------
 def _observed_attributes(c: Curation) -> dict[tuple[str, str], dict[str, set]]:
     # Observed attributes per new variety: the UNION across EVERY product that maps to it, not just the one
     # row that triggered the mint. Otherwise a variety is born with one product's colour/finish/quality and
@@ -110,9 +98,11 @@ def _alias_display(text: str) -> str:
 
 
 def emit_new_variants(c: Curation, result: CurationResult) -> None:
-    # A variety is the same material in any format, so it is emitted into every ACTIVE category's import
-    # file (the backbone is identical across categories).
-    union_cores = _union_cores(c)
+    # A variety is the same material in any format: ONE record per (type, name), whatever category its
+    # products sit in. Its Key is the one rule (new_key), so a variety the existing index already carries under
+    # that Key is never minted twice.
+    existing_keys = {v["Key"] for v in c.existing.varieties}
+    active = {cat.name for cat in active_categories()}
     obs_union = _observed_attributes(c)
     pack = active_pack()
     # VE2 PR5: a restricted (archived/internal) stone type cannot be minted (it drives the Key, a frozen
@@ -130,11 +120,12 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
                 evidence, color=title_case(obs_color or ""),
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
-        # VE2 PR5: the restriction holds below apply ONLY to a variety that would ACTUALLY mint (at least one
-        # branch is new). An EXISTING variety re-enters emit_new_variants every produce (alias_and_backfill, a
-        # stored mint decision); holding or re-typing it would flood the queue and, by following the card, mint
-        # a DUPLICATE under a wrong type. So decide first whether any branch would mint.
-        would_mint = any(core(gen_key(b, stone_type, title), b) not in union_cores for b in active_branches())
+        # VE2 PR5: the restriction holds below apply ONLY to a variety that would ACTUALLY mint (it is new). An
+        # EXISTING variety re-enters emit_new_variants every produce (a stored mint decision); holding or
+        # re-typing it would flood the queue and, by following the card, mint a DUPLICATE under a wrong type.
+        # So decide first whether it would mint.
+        key = new_key(stone_type, title)
+        would_mint = key not in existing_keys
         # a restricted stone type holds through the SAME one review path (pending_confirm). The Key is the
         # variety's frozen identity, so a NEW variety must not be minted under an archived/internal type.
         if would_mint and proj.norm(stone_type) in restricted.get("type", set()):
@@ -144,12 +135,13 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
                 evidence, stone_type=stone_type, color=title_case(obs_color or ""),
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
-        # keep-retired-and-surface: a mint whose deterministic Key in ANY fan-out branch is RETIRED was
-        # deliberately retired; surface ONE un-retire decision and skip the whole variety (retirement is
-        # per-variety, so a retired stone is never resurrected in another format).
-        if any(gen_key(b, stone_type, title) in c.retired_keys for b in active_branches()):
+        # keep-retired-and-surface: a mint whose deterministic Key is RETIRED was deliberately retired; surface
+        # ONE un-retire decision and skip the variety (a retired stone is never resurrected).
+        if key in c.retired_keys:
             hold_retired(c, title, stone_type, obs_color, evidence)
             continue
+        if not would_mint:
+            continue  # the variety exists: nothing to emit
         # observed attributes and the seed colour are looked up by the SCRAPED identity (`name`, the cleaned
         # spelling), not the display title: for a renamed mint a title-keyed lookup would drop them.
         u = obs_union.get((proj.norm(stone_type), proj.norm(name)),
@@ -177,7 +169,7 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         dropped_quals = [x for x in qualities if x and proj.norm(x) in rq]
         colors = [x for x in colors if not (x and proj.norm(x) in rc)]
         qualities = [x for x in qualities if not (x and proj.norm(x) in rq)]
-        if would_mint and ((dropped_colors and not colors) or (dropped_quals and not qualities)):
+        if (dropped_colors and not colors) or (dropped_quals and not qualities):
             parts: list[str] = []
             if dropped_colors and not colors:
                 verb = "are" if len(dropped_colors) > 1 else "is"
@@ -196,58 +188,44 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
                 stone_type=stone_type,
                 nearest_existing=named_with_types(c, gap.nearest_existing) if gap else ""))
             continue
-        # A cross-branch sibling's variety already exists in another branch carrying the scraped spelling as
-        # an alias (alias_new): carry that SAME alias onto the new sibling so its product resolves in ONE
-        # upload. Match the FULL (name, type) owner: a same-name variety of another type must not inherit it.
-        sib_aliases, dropped = clean_alias_list(title, sorted({s for owner, sp in c.alias_new.items()
+        # The spellings recorded for THIS new variety's own (name, type) owner (alias_new): a renamed mint's
+        # scraped spelling rides on its row, so its product resolves in ONE upload. Match the FULL owner: a
+        # same-name variety of another type must not inherit it.
+        own_aliases, dropped = clean_alias_list(title, sorted({s for owner, sp in c.alias_new.items()
                                                        if owner == (proj.norm(title), proj.norm(stone_type))
                                                        for s in sp}), _alias_display)
         if dropped:
             log.warning("mint aliases dropped: no ASCII form", extra={"extra_fields": {"variant": title,
                                                                                        "dropped": dropped}})
-        for branch in active_branches():
-            key = gen_key(branch, stone_type, title)
-            if core(key, branch) in union_cores:
-                continue  # variety already exists in this branch; do not duplicate it
-            fname = image_filename(key)
-            product_backed = branch in observed  # a scraped product uses this branch
-            result.new_variants[branch].append({
-                "Key": key,
-                "Name": title,
-                # only link an image when a product uses this branch; fan-out copies stay imageless until a
-                # product adds them (lazy generation)
-                "Image": image_url(fname) if product_backed else "",
-                "Aliases": "|".join(sib_aliases),
-                "Volume per kg (m³/kg)": category(branch).volume_per_kg,
-                # gap diagnostics are absent for an operator-override mint (a matched row has no gap)
-                "_nearest_existing": (gap.nearest_existing or "") if gap else "",
-                "_nearest_score": (gap.nearest_score if gap.nearest_score is not None else "") if gap else "",
-                "_suggested_type": stone_type,
-                "_example_url": (gap.example_src_url or "") if gap else "",
-            })
-            result.backbone_new[branch].append({
-                "key": key,  # the clean, unique join between backbone and Medusa export
-                "variant": title,
-                "category": category(branch).label,
-                "stone_type": stone_type,
-                "color": colors,
-                "finishes": finishes,
-                "qualities": qualities,
-                "aliases": list(sib_aliases),
-                "image_file": fname,  # same name as the variant Image, for consistency
-                "exists": "no",
-                "in_csv": "yes",
-                "product_backed": product_backed,  # only generate images for product-backed
-                "merged_from": [],
-            })
-            if product_backed:      # no image generation for a fan-out copy with no product
-                result.images_to_generate.append({
-                    "image_filename": fname,
-                    "s3_url": image_url(fname),
-                    "variant": title,
-                    "category": category(branch).label,
-                    "status": "to_generate",
-                })
+        type_name = c.type_names[proj.norm(stone_type)]       # gated canonical above: the Medusa type NAME
+        # the categories its scraped products sit in (spec section 4, N3): the icons made for it, one per pair
+        categories = sorted(observed & active)
+        result.new_variants.append({
+            "Key": key,
+            "Name": title,
+            "Type": type_name,
+            "Aliases": "|".join(own_aliases),
+            # gap diagnostics are absent for an operator-override mint (a matched row has no gap)
+            "_nearest_existing": (gap.nearest_existing or "") if gap else "",
+            "_nearest_score": (gap.nearest_score if gap.nearest_score is not None else "") if gap else "",
+            "_suggested_type": stone_type,
+            "_example_url": (gap.example_src_url or "") if gap else "",
+        })
+        result.backbone_new.append({
+            "key": key,  # the clean, unique join between backbone and Medusa export
+            "variant": title,
+            "stone_type": type_name,
+            "color": colors,
+            "finishes": finishes,
+            "qualities": qualities,
+            "aliases": list(own_aliases),
+            "exists": "no",
+            "in_csv": "yes",
+            "categories": categories,
+            "merged_from": [],
+        })
+        result.images_to_generate += [{"key": key, "category": cat, "variant": title, "status": "to_generate"}
+                                      for cat in categories]
 
 
 # --- phase 5: backbone leaf suggestions (an existing variety sold in a not-yet-allowed value) -------------
@@ -283,10 +261,9 @@ def leaf_updates(rows: list[CanonicalRow], result: CurationResult) -> None:
 
 def finish(c: Curation, result: CurationResult) -> None:
     result.counts = {
-        "alias_additions": sum(len(v) for v in result.alias_additions.values()),
-        "confirmed_alias_additions": sum(1 for v in result.alias_additions.values()
-                                         for r in v if r.get("_status") == "confirmed"),
-        "new_variants": sum(len(v) for v in result.new_variants.values()),
+        "alias_additions": len(result.alias_additions),
+        "confirmed_alias_additions": sum(1 for r in result.alias_additions if r.get("_status") == "confirmed"),
+        "new_variants": len(result.new_variants),
         "distinct_new_varieties": len(c.new_variant_rows),
         "backbone_updates": len(result.backbone_updates),
         "images_to_generate": len(result.images_to_generate),
@@ -302,7 +279,7 @@ def finish(c: Curation, result: CurationResult) -> None:
     result.pending_confirm = c.pending_confirm
     # Defence in depth: the mint-emission HOLD makes a type-less variety impossible here; surface it LOUD if
     # a future change ever regresses, rather than shipping a type-less (bad-Key) variety to Medusa.
-    typeless = [p["variant"] for posts in result.backbone_new.values() for p in posts if not p.get("stone_type")]
+    typeless = [p["variant"] for p in result.backbone_new if not p.get("stone_type")]
     if typeless:
         log.error("type-less varieties reached the mint; should have been HELD for seed_type",
                   extra={"extra_fields": {"count": len(typeless), "sample": typeless[:5]}})

@@ -21,7 +21,6 @@ at all is reported in review/tree_uncovered_variations.csv.
 from __future__ import annotations
 
 import csv
-import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
 from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required
+from stone_pipeline.reference.loaders.backbone import read_posts
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
@@ -55,70 +55,46 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
 
 def _read_backbone(paths: list[Path]):
     for p in paths:
-        if not Path(p).exists():
-            continue
-        data = json.loads(Path(p).read_text(encoding="utf-8"))
-        for post in (data["posts"] if isinstance(data, dict) else data):
-            yield post
+        if Path(p).exists():
+            yield from read_posts(Path(p))
 
 
-def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
-    """Three lookups: by Key (primary join), by (category, type, name) and by (type, name), to recover
-    variations whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror slabs). A
-    variety's identity is (type, name): a same-name post, of the same category or another, lends its colours
-    ONLY when its type is the variation's own, so a same-name post of a different stone never does.
-
-    KNOWN, ACCEPTED STATE (not a bug, do not "clean up" blindly): the block backbone is ~97% KEYLESS
-    (~327/12160 keyed) while slab and tile are fully keyed. That is why the by-name lookups above exist and
-    why build_combinations recovers a block variation's colour/quality three other ways -- the name lookups
-    here, the same-(type,name) slab cross-form inheritance, and the operator leaf-decision overlay
-    (backbone_leaf_overlay). Net effect: the pipeline produces CORRECT output despite the keyless block
-    backbone; it is compensated in code, not left broken. A full re-key of backbone_blocks.json (to make
-    block join by Key like slab/tile) is deliberately NOT done as a file edit: block's Keys are what
-    Medusa's EXISTING block products are matched on, so re-keying orphans those products unless Medusa
-    re-imports them -- i.e. it is a coordinated migration (re-key + re-import + dev-verified), not a
-    correction. Until that migration happens, the compensation above is the intended handling. Verified
-    live (dev + prod) after PRs #438 (slab->block colour inheritance) and #440 (honour the leaf overlay)."""
+def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict]:
+    """Two lookups: by Key (the primary join) and by (type, name), the variety identity (phase 1: one post per
+    identity, so a post's colours are its variety's whatever the category)."""
     by_key: dict[str, dict] = {}
-    by_cat_name: dict[tuple, dict] = {}
     by_type_name: dict[tuple, dict] = {}
     for post in _read_backbone(paths):
-        if post.get("key"):
-            by_key[post["key"]] = post
+        by_key[post["key"]] = post
         name = match_key(post.get("variant") or "")   # canonical name key (accent/separator/punct-proof)
-        cat = (post.get("category") or "").strip().lower()
-        typ = match_key(post.get("stone_type") or "")
         if name:
-            by_cat_name.setdefault((cat, typ, name), post)
-            by_type_name.setdefault((typ, name), post)
-    return by_key, by_cat_name, by_type_name
+            by_type_name.setdefault((match_key(post.get("stone_type") or ""), name), post)
+    return by_key, by_type_name
 
 
 def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[str, list[str]]:
-    """Key-prefix -> EVERY finish the category supports (all distinct finishes in its
-    backbone, plus any its products use). Tiles mirror slabs."""
-    # EVERY finish the category supports (all distinct finishes in its backbone, plus
-    # any its products use) -- so each variation is priceable in any finish and a future
-    # product is far more likely to already match, no rebuild needed. Tiles mirror slabs.
-    cat_to_prefix = {v: k for k, v in _PREFIX_CATEGORY.items()}
+    """Category name -> the finish ids it supports (spec rev 8 D7): the default form's are every finish its
+    variety posts carry; another category's are its declared `finishes`, or the set of the category named by its
+    `finishes_from`. Any finish the category's products use this run is added. A declared finish the vocabulary
+    does not hold fails loud (it would otherwise silently price nothing)."""
     out: dict[str, set] = defaultdict(set)
+    default = default_form_name()
     for post in _read_backbone(paths):
-        prefix = cat_to_prefix.get((post.get("category") or "").strip().lower())
-        if prefix:
-            for f in post.get("finishes") or []:
-                fid = attr["finish"].get(match_key(f))
-                if fid:
-                    out[prefix].add(fid)
-    pcat_to_prefix = {attr["category"].get(_PREFIX_CATEGORY[p]): p for p in _PREFIX_CATEGORY}
-    for p in products.values():
-        prefix = pcat_to_prefix.get(p["category"])
-        if prefix:
-            out[prefix] |= p["finishes"]
-    # a mirror category inherits the finishes of the category it mirrors (stone: tile mirrors slab), per the
-    # pack's declared mirror_of -- so this is not a slab/tile hardcode.
+        for f in post.get("finishes") or []:
+            if fid := attr["finish"].get(match_key(f)):
+                out[default].add(fid)
     for c in CATEGORIES:
-        if c.mirror_of:
-            out[c.name] |= out[c.mirror_of]
+        unresolved = [f for f in c.finishes if match_key(f) not in attr["finish"]]
+        if unresolved:
+            raise ValueError(f"category {c.name!r} declares finishes the finish vocabulary does not hold: {unresolved}")
+        out[c.name] |= {attr["finish"][match_key(f)] for f in c.finishes}
+    pcat_to_name = {attr["category"].get(match_key(c.plural)): c.name for c in CATEGORIES}
+    for p in products.values():
+        if name := pcat_to_name.get(p["category"]):
+            out[name] |= p["finishes"]
+    for c in CATEGORIES:
+        if c.finishes_from:
+            out[c.name] |= out[c.finishes_from]
     return {k: sorted(v) for k, v in out.items()}
 
 
@@ -294,7 +270,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     assigned_types = assigned_types or {}
     exclude_ids = exclude_ids or set()
     retired_keys = retired_keys or set()
-    by_key, by_cat_name, by_type_name = _load_backbone(backbone_paths)
+    by_key, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     # VE2 PR5: the restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
     # in the expand phase (no status column), so the fan-out below is byte-identical until then.
@@ -414,7 +390,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         post = kpost
         if post is None and typ:
             tk = type_key.get(typ, "")
-            post = by_cat_name.get((prefix + "s", tk, nl)) or by_type_name.get((tk, nl))
+            post = by_type_name.get((tk, nl))
         if post:
             _t, c, q = combo(post)
             colors |= c
@@ -508,12 +484,8 @@ def write_combinations(combinations: set, path: Path) -> int:
 
 
 def _backbone_paths() -> list[Path]:
-    """Every category backbone + the per-run backbone_additions (new varieties)."""
-    paths = [c.backbone_path for c in CATEGORIES]
-    additions = SETTINGS.paths.backbone_additions_dir
-    if additions.exists():
-        paths += sorted(additions.glob("*.json"))
-    return paths
+    """The ONE variety backbone and the ONE additions file (curate's per-run new varieties), spec rev 8 section 3."""
+    return [SETTINGS.paths.backbone_json, SETTINGS.paths.backbone_additions_file]
 
 
 def _product_variation_ids(products_csv: Path) -> set[str]:

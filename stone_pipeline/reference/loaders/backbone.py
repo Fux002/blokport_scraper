@@ -13,7 +13,6 @@ from stone_pipeline.reference.loaders.common import env, norm
 @dataclass
 class BackboneVariety:
     variant: str
-    category: str
     stone_type: str
     colors: list[str]
     finishes: list[str]
@@ -99,7 +98,7 @@ class Backbone:
             if (variety_norm, type_norm) in matched or not type_norm:
                 continue                               # already grown above, or an unusable type-less key
             created = BackboneVariety(
-                variant=variety_norm.title(), category="", stone_type=type_norm.title(),
+                variant=variety_norm.title(), stone_type=type_norm.title(),
                 colors=list(dict.fromkeys(adds.get("color", []))),
                 finishes=list(dict.fromkeys(adds.get("finish", []))),
                 qualities=list(dict.fromkeys(adds.get("quality", []))), aliases=[])
@@ -124,6 +123,15 @@ class Backbone:
         return len(self.by_norm_name)
 
 
+def read_posts(path: Path) -> list[dict]:
+    """The posts of a backbone file ({"posts": [...]}) or an additions file (a bare list): the ONE reader every
+    backbone and additions read goes through. A post with no Key is HELD and skipped: an untyped addition has no
+    phase 1 Key (it never gets a guessed type), so it is listed in the file and never read as a variety."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    posts = doc.get("posts", []) if isinstance(doc, dict) else doc
+    return [post for post in posts if (post.get("key") or "").strip()]
+
+
 def load_backbone(path: Path | None = None) -> Backbone:
     path = Path(path or env().SETTINGS.paths.backbone_json)
     if not path.exists():
@@ -133,15 +141,12 @@ def load_backbone(path: Path | None = None) -> Backbone:
             "catalog_source/<pack>/ backbone JSON; a non-stone pack never falls back to stone's data. Add the "
             "pack's backbone file before running it.")
     backbone = Backbone()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    posts = data.get("posts", data if isinstance(data, list) else [])
-    for post in posts:
+    for post in read_posts(path):
         variant_name = (post.get("variant") or "").strip()
         if not variant_name:
             continue
         variety = BackboneVariety(
             variant=variant_name,
-            category=(post.get("category") or "").strip(),
             stone_type=(post.get("stone_type") or "").strip(),
             colors=[c for c in (post.get("color") or []) if c],
             finishes=[f for f in (post.get("finishes") or []) if f],

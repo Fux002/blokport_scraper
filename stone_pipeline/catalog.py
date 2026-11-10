@@ -32,7 +32,7 @@ from stone_pipeline.io import storage
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
-from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
+from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
 from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("catalog")
@@ -115,11 +115,6 @@ def run(outputs_root: Path | None = None) -> Path:
     from stone_pipeline.stages import decisions as _decisions
     _decisions.heal_drifted_membership(rows)
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
-    # Regenerate every mirror backbone (Tiles) from the CURRENT slab backbone before anything reads it:
-    # emit_catalog's tile mirror rows (below) and tree_build's combinations both consume the tile backbone,
-    # so rebuilding it here makes tiles a pure derivation of slabs that can never silently rot. (The manual
-    # build_tile_backbone step used to be forgotten, leaving polluted tiles inconsistent with cleaned slabs.)
-    build_tile_backbone.build()
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
@@ -134,9 +129,8 @@ def run(outputs_root: Path | None = None) -> Path:
     # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
     # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color
-    from stone_pipeline.config.categories import CATEGORIES
-    _additions = sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json"))
-    _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
+    _additions = [SETTINGS.paths.backbone_additions_file]   # this run's new varieties, coloured in place
+    _merged = [SETTINGS.paths.backbone_json]                # read-only: a new variety inherits a known colour
     product_images: dict[str, str] = {}                # variation_key -> its product photo (first wins)
     for r in rows:
         if r.variation_key and r.image_keys and r.variation_key not in product_images:
@@ -226,7 +220,7 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
     if checker is None or copier is None:
         return 0
     from stone_pipeline.adapters.tokens import explicit_type_word
-    from stone_pipeline.stages.curate import gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     copied = 0
     for r in csv.DictReader(dele.open(encoding="utf-8-sig")):
         old = (r.get("Key") or "").strip()
@@ -236,7 +230,7 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
         looked = ref.attributes.resolve_id("type", explicit_type_word(name) or name)
         if not looked:
             continue                                   # can't derive the correct type from the name
-        new = gen_key(old.split("_")[0], looked[0], name)
+        new = new_key(looked[0], name)
         if new != old and checker(old) and not checker(new) and copier(old, new):
             copied += 1
     if copied:
@@ -455,8 +449,8 @@ def write_variants_to_delete() -> int:
         if name and looks_code_shaped(name) == "bare_code":
             reason = "bare_code: supplier code/brand abbreviation, not a variety"
         elif name and loaders.is_mistyped_variant(key, name):
-            kt = key.split("_")[1] if key.count("_") >= 2 else "?"
-            reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
+            reason = (f"mistyped: name says '{explicit_type_word(name)}' but keyed as type "
+                      f"'{loaders.type_slug_from_key(key)}'")
         if reason:
             rows.append({"Key": key, "Name": name, "Id": r.id, "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"

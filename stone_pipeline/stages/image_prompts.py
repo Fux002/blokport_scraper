@@ -19,9 +19,10 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.categories import CATEGORIES, category_for_key
+from stone_pipeline.config.categories import category_for_key
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core import logfmt
+from stone_pipeline.reference.loaders.backbone import read_posts
 from stone_pipeline.reference.medusa_files import read_variants_export
 
 log = logfmt.get_logger("image_prompts")
@@ -53,17 +54,12 @@ def _write(items: list[dict], out_path: Path | None, mode: str) -> Path:
 
 
 def _backbone_types() -> dict[str, str]:
-    """Key -> stone_type from every backbone (full + new-variety additions)."""
+    """Key -> stone_type from the variety backbone and this run's additions (the one post reader skips a held,
+    key-less addition)."""
     ktype: dict[str, str] = {}
-    # each category's own backbone (pack-namespaced; one file per category, Keys category-prefixed so none repeats)
-    for f in (p for p in dict.fromkeys(c.backbone_path for c in CATEGORIES) if p.exists()):
-        data = json.loads(f.read_text(encoding="utf-8-sig"))
-        for p in (data.get("posts") if isinstance(data, dict) else data):
-            if p.get("key"):
-                ktype[p["key"]] = (p.get("stone_type") or "").strip()
-    for f in sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json")):
-        for p in json.loads(f.read_text(encoding="utf-8")):
-            if p.get("key"):
+    for f in (SETTINGS.paths.backbone_json, SETTINGS.paths.backbone_additions_file):
+        if f.exists():
+            for p in read_posts(f):
                 ktype.setdefault(p["key"], (p.get("stone_type") or "").strip())
     return ktype
 

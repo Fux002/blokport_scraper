@@ -16,7 +16,7 @@ import dataclasses
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, decisions, tree_build
-from stone_pipeline.stages.curate import BRANCHES, CurationResult
+from stone_pipeline.stages.curate import CurationResult
 from stone_pipeline.tests.test_tree_build import COL, _attrs, _backbone, _export, _for, _post, _products, _prow
 
 
@@ -66,9 +66,8 @@ def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch):
                                                                                 curate_delta_csv=stale)))
     monkeypatch.setattr(decisions, "write_backbone_leaf_pending", lambda *a, **k: 0)
     stale.write_text("Key,Name,Image,Aliases,Volume per kg (m³/kg)\r\nslab_marble_old_1,Old,,,\r\n", encoding="utf-8")
-    empty = CurationResult(alias_additions={b: [] for b in BRANCHES}, new_variants={b: [] for b in BRANCHES},
-                           backbone_new={b: [] for b in BRANCHES})
+    empty = CurationResult()
     curate.write_curation(empty, [])
     with stale.open(encoding="utf-8-sig", newline="") as h:
         rows = list(csv.reader(h))
-    assert rows == [["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]]
+    assert rows == [["Key", "Name", "Type", "Aliases"]]
