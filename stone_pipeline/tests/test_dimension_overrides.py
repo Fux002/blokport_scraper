@@ -207,3 +207,25 @@ def test_a_produce_stops_when_the_overrides_cannot_be_fetched(monkeypatch):
     with pytest.raises(SystemExit) as stop:
         produce._fetch_inputs()
     assert stop.value.code == 2
+
+
+# --- review fixes (Scraper's review of #608) ----------------------------------------------------------------------
+
+def test_an_override_outside_the_categorys_plausible_band_is_refused(ref, tmp_path):
+    # M1: an office "325" meant for 3.25 m is a 325 m slab. An override skips the unit correction (a person states
+    # metres), so the plausible band is its guard: outside it the row is refused, never published.
+    with pytest.raises(ValueError, match=r"length override '325'.*band"):
+        _derive(ref, _slab(), _file(tmp_path, f"polonine,620,length,325,{_SIGNED}"))
+
+
+def test_a_field_no_resolver_reads_is_refused_and_named(tmp_path):
+    # L1: a typo would load and never apply
+    with pytest.raises(ov.OverridesError, match=r"line 2.*lenght.*not a field"):
+        ov.load_overrides(_file(tmp_path, f"polonine,620,lenght,3.1,{_SIGNED}"))
+
+
+def test_every_field_a_resolver_reads_loads(tmp_path):
+    fields = sorted(ov.known_fields())
+    assert {"length", "width", "height", "variation_id", "format_value", "bundle_size", "title"} <= set(fields)
+    loaded = ov.load_overrides(_file(tmp_path, *(f"polonine,620,{f},1,{_SIGNED}" for f in fields)))
+    assert len(loaded) == len(fields)
