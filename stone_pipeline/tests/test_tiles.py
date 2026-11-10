@@ -1,15 +1,16 @@
 """Tiles are a category of the ONE variety record (phase 1: a variety is one record per (type, name), with no
-category of its own). A tile row resolves against the same varieties as a slab or block row, under the same id. While
-the tile category is not activated (no Medusa category id), a tile row is held in the gap queue and never resolved.
+category of its own). A tile row resolves against the same varieties as a slab or block row, under the same id, and
+matches the same way while the tile category is not activated: validate refuses it then (category_invalid, its pcat
+is no active one), so it never emits.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.core.schema import CanonicalRow, GapKind
+from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference import loaders
-from stone_pipeline.stages import match_variation, reconcile_tree
+from stone_pipeline.stages import match_variation, validate
 
 
 @pytest.fixture
@@ -24,32 +25,6 @@ def _deactivate_tiles(monkeypatch):
                         dataclasses.replace(categories._BY_NAME["tile"], pcat_id=""))
 
 
-def test_a_tile_row_is_held_while_the_tile_category_is_not_activated(ref, monkeypatch):
-    _deactivate_tiles(monkeypatch)  # category not wired up: tile held, never resolved
-    stage = match_variation.VariationStage.build(ref)
-    row = CanonicalRow(src_site="marenostone", surrogate_key="t1",
-                       format_value="Tile", variety_match_key="White Travertine",
-                       raw_name="White Travertine Tile", raw_type="Travertine")
-    stage.resolve_row(row)
-    assert row.variation_id is None  # never borrows a slab id
-    assert row.variation_method == "category_not_activated"
-    assert any(g.gap_kind == GapKind.missing_mirror_reference for g in row.tree_gaps)
-
-
-def test_tile_does_not_double_gap_in_reconcile(ref, monkeypatch):
-    _deactivate_tiles(monkeypatch)
-    stage = match_variation.VariationStage.build(ref)
-    row = CanonicalRow(src_site="marenostone", surrogate_key="t2",
-                       format_value="Tile", variety_match_key="Cream Marble",
-                       raw_name="Cream Marble Tile")
-    stage.resolve_row(row)
-    stats = reconcile_tree.ReconcileStats()
-    reconcile_tree.reconcile_row(row, ref, stats)
-    kinds = [g.gap_kind for g in row.tree_gaps]
-    assert GapKind.missing_mirror_reference in kinds
-    assert GapKind.missing_variation not in kinds  # not double-gapped
-
-
 def test_one_variety_has_one_id_in_every_category(ref):
     stage = match_variation.VariationStage.build(ref)
     rows = [CanonicalRow(src_site="polonine", surrogate_key=f"x{i}", format_value=fmt, variety_match_key="Arabescato",
@@ -60,3 +35,17 @@ def test_one_variety_has_one_id_in_every_category(ref):
     assert slab.variation_id and slab.variation_id == block.variation_id == tile.variation_id
     assert slab.variation_key == block.variation_key == tile.variation_key
     assert (slab.is_block, block.is_block, tile.is_block) == (False, True, False)
+
+
+def test_a_tile_row_of_an_inactive_category_matches_and_validate_refuses_it(ref, monkeypatch):
+    _deactivate_tiles(monkeypatch)                       # the tile category has no Medusa category id yet
+    stage = match_variation.VariationStage.build(ref)
+    slab = CanonicalRow(src_site="polonine", surrogate_key="s1", format_value="Slab", variety_match_key="Arabescato",
+                        raw_type="Marble", raw_color="White")
+    tile = CanonicalRow(src_site="polonine", surrogate_key="t1", format_value="Tile", variety_match_key="Arabescato",
+                        raw_type="Marble", raw_color="White", category_pcat_id="")
+    stage.resolve_row(slab)
+    stage.resolve_row(tile)
+    assert tile.variation_key == slab.variation_key      # no other category's id to borrow: it is the same variety
+    validate.validate_row(tile, source_code="pol")
+    assert "category_invalid" in {r.rule for r in tile.reject_reasons}

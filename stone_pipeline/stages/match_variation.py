@@ -217,24 +217,9 @@ class VariationStage:
 
         engine = self._engine(branch)
 
-        # A category that is not yet ACTIVATED (no Medusa pcat) and has no reference
-        # is held in the gap queue rather than borrowing another category's id. Once
-        # activated, it flows through normal matching against its (initially empty)
-        # reference, so every row gaps as missing_variation and mints a variant (each
-        # category's engine is isolated, so no other category's id is ever borrowed).
-        if cat and not cat.active and not engine.index.candidates:
-            row.variation_method = "category_not_activated"
-            row.add_gap(TreeGap(
-                src_site=row.src_site, surrogate_key=row.surrogate_key or "",
-                raw_name=row.raw_name or "",
-                normalized_name=proj.norm(row.variety_match_key or row.raw_name or ""),
-                suggested_type=row.raw_type, suggested_color=row.color_name or row.raw_color,
-                gap_kind=GapKind.missing_mirror_reference,
-                nearest_existing="(tile variation export not supplied)",
-                example_src_url=row.src_url,
-            ))
-            return
-
+        # A category that is not yet ACTIVATED (no Medusa pcat) matches like any other: every stone category shares
+        # the one variety table (phase 1), so there is no other category's id to borrow, and validate refuses the
+        # row (category_invalid) until its category is active.
         # override is the top strategy: a human-set variation_id always wins
         overrides = self.ref.overrides
         if overrides is not None:
