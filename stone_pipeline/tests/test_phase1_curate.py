@@ -129,8 +129,8 @@ def test_the_key_map_s_category_rank_is_the_pack_order():
 
 
 def test_the_committed_names_cleaner_refuses_a_clean_that_moves_a_key():
-    before = {ccn.SLAB_BACKBONE: json.dumps({"posts": [{"variant": "Alpine", "stone_type": "Granite"}]})}
-    after = {ccn.SLAB_BACKBONE: json.dumps({"posts": [{"variant": "Alpine Grey", "stone_type": "Granite"}]})}
+    before = {ccn.VARIETY_BACKBONE: json.dumps({"posts": [{"variant": "Alpine", "stone_type": "Granite"}]})}
+    after = {ccn.VARIETY_BACKBONE: json.dumps({"posts": [{"variant": "Alpine Grey", "stone_type": "Granite"}]})}
     ccn._check_keys_stay(before, before)
     with pytest.raises(ccn.Refused, match="1 Keys would move"):
         ccn._check_keys_stay(before, after)
