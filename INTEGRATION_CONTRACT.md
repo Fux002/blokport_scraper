@@ -172,6 +172,7 @@ Refusals (`{"error": "..."}`; nothing is stored). In the order the handler (`ser
 | code | when | extra keys |
 |---|---|---|
 | `400` | the body is not an object; `listings` is malformed; no listing given | |
+| `400` | a field has the wrong JSON type: `name`, `type`, `color`, `origin`, `source` or `scraped` is not a string, or `widen` is not `true`/`false` (`_str` / `_flag` raise `_BadRequest`, which dispatch maps to 400; the error names the field). Raised where the field is read, so a mistyped `color` comes after the `name`/`type` checks below | |
 | `400` | `name` or `type` is missing | |
 | `503` | the field kinds are not published yet (retry) | |
 | `400` | `name` has no ASCII form | |
