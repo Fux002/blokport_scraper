@@ -33,7 +33,7 @@ from stone_pipeline.core.text import (
 )
 from stone_pipeline.io import storage
 from stone_pipeline.reference.loaders import field_kinds, variants_status_required
-from stone_pipeline.reference.medusa_files import read_variants_export
+from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 
 log = logfmt.get_logger("emit_catalog")
 
@@ -75,7 +75,7 @@ def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
             "count": len(drops), "report": str(path)}})
 
 
-_COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+_COLS = VARIETY_FILE_COLUMNS
 
 
 def _s3_access_denied(exc) -> bool:
@@ -160,7 +160,6 @@ def _consolidate(rows: list[dict]) -> list[dict]:
             cur = {a.strip() for a in (target.get("Aliases") or "").split("|") if a.strip()}
             target["Aliases"] = "|".join(sorted((cur | new_aliases) - {""}
                                                 - {a for a in (cur | new_aliases) if a.casefold() == clean.casefold()}))
-            target["Image"] = target.get("Image") or r.get("Image") or ""
     return out
 
 
@@ -180,7 +179,7 @@ def _rows(path: Path) -> list[dict]:
     path = Path(path)
     if not path.exists():
         return []
-    return [dict(zip(_COLS, (v.key, v.name, v.image, "|".join(v.aliases), v.volume)))
+    return [dict(zip(_COLS, (v.key, v.name, v.type, "|".join(v.aliases))))
             for v in read_variants_export(path, require_status=variants_status_required(path)) if v.key]
 
 

@@ -22,11 +22,14 @@ ATTRIBUTE_COLUMNS = ("category", "value", "sourceid")
 _STATUS_COLUMNS = ("status", "internal")
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
-# Key and Name are the variation's identity, so they are required. Id, Image, Aliases and the volume are read
-# as empty when their column is absent, exactly as every reader before this one tolerated: the scraper's base
-# files (variants_export_base*.csv) carry no Id, and an export without Image or Aliases is still read.
-EXPORT_COLUMNS = ("Key", "Name")
-VOLUME_COLUMN = "Volume per kg (m³/kg)"
+# Key, Name and Type are the variation's identity (phase 1: a Key names one stone of one type, and Type is its
+# canonical type NAME), so they are required. Id and Aliases are read as empty when their column is absent: the
+# scraper's base files (variants_export_base*.csv) carry no Id. Image and Volume are gone (SC-4 2b): a variety's
+# icons are per (Key, category) pairs on S3, and the volume was never the scraper's.
+EXPORT_COLUMNS = ("Key", "Name", "Type")
+# The ONE column list of every variety file the scraper writes: the three published files (1_variants_full,
+# 1_variants_update, the base) and the curate delta. The backend's export is this plus Id, status and owner.
+VARIETY_FILE_COLUMNS = ["Key", "Name", "Type", "Aliases"]
 
 
 @dataclass(frozen=True)
@@ -75,9 +78,8 @@ class ExportVariation:
     key: str
     name: str
     id: str                   # empty in the Id-free base and for a variation Medusa has not minted yet
-    image: str
+    type: str                 # the canonical stone-type NAME (Medusa's attribute value), never the Key's slug
     aliases: tuple[str, ...]
-    volume: str
     status: str               # "active" | "archived"
 
     @property
@@ -100,9 +102,9 @@ def read_variants_export(src: Path | str, *, require_status: bool,
         if not any(cell.values()):
             continue
         out.append(ExportVariation(
-            cell["Key"], cell["Name"], cell.get("Id", ""), cell.get("Image", ""),
+            cell["Key"], cell["Name"], cell.get("Id", ""), cell["Type"],
             tuple(a.strip() for a in cell.get("Aliases", "").split("|") if a.strip()),
-            cell.get(VOLUME_COLUMN, ""), _status(row, fields, label, line)))
+            _status(row, fields, label, line)))
     return out
 
 
