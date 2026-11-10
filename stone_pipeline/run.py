@@ -238,6 +238,7 @@ def _write_diagnostics(manifest, layout) -> None:
         "funnel": _funnel(manifest.stage_metrics),
         "held": manifest.held,          # the "what was skipped and why" worklist (grouped by reject rule)
         "lots": manifest.lots,          # per lot: pieces loaded / sent / held
+        "photo_scale_mismatch": manifest.photo_scale_mismatch,   # each product refused its 3D slab, with both figures
         "stages": [
             {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
              "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
@@ -570,7 +571,8 @@ def finalize_rows(ctx: RunContext, resolved: Resolved,
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
     if mode.imports_products and (conflicts := images.link_standard(rows, validation.emit,
-                                                               image_pipeline=ctx.source_cfg.image_pipeline)) is not None:
+                                                               image_pipeline=ctx.source_cfg.image_pipeline,
+                                                               mismatches=manifest.photo_scale_mismatch)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks

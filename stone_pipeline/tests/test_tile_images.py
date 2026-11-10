@@ -78,6 +78,15 @@ def test_a_cut_out_not_at_the_slab_s_listed_proportions_is_never_used():
     assert tile_stone.from_cutout(_stone_rgba(780, 520), 2.4, 1.6).ppm == pytest.approx(325, rel=1e-3)
 
 
+def test_the_tile_stone_is_measured_by_its_outline_not_its_frame():
+    # one measure with the 3D slab's gate (cutout.outline_size): an irregular piece whose stone reaches only part of
+    # its frame is judged by the stone, never the frame
+    rgba = _stone_rgba(900, 500)                                        # frame 1.8:1
+    rgba[:, 720:, 3] = 0                                                # the stone: 720 x 500, 1.44:1
+    stone = tile_stone.from_cutout(rgba, 1.44, 1.0)
+    assert stone.ppm == pytest.approx(500, rel=2e-3)                    # the stone's px over the listed size
+
+
 def test_an_upright_cut_out_is_turned_so_x_runs_along_the_slab_s_length():
     stone = tile_stone.from_cutout(_stone_rgba(520, 780), 2.4, 1.6)
     assert stone.rgb.shape[:2] == (520, 780)
@@ -384,6 +393,9 @@ class _S3:
 
     def head_object(self, Bucket, Key):
         return {"ETag": self.objects[Key]["ETag"], "Metadata": self.objects[Key]["Metadata"]}
+
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys):
+        return {"KeyCount": min(MaxKeys, sum(k.startswith(Prefix) for k in self.objects))}
 
     def copy_object(self, Bucket, Key, CopySource, ContentType, MetadataDirective):
         self.written.append(("copy", Key))
@@ -695,7 +707,10 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
+    monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1200.0, 600.0))    # rendered at the tile's 0.6 x 0.3
     rows = [_row("rb-tile"), _row("tb-flamed")]
+    for row in rows:
+        row.length, row.width, row.height = 0.6, 0.3, 0.02
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
     images.run(rows, cfg=cfg)
     images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)

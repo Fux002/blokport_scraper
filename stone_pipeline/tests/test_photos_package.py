@@ -48,7 +48,7 @@ def test_deploy_holds_only_the_glue():
 def test_the_photo_process_is_the_photos_package():
     assert {p.stem for p in PHOTOS.glob("*.py")} == {
         "__init__", "process", "select", "publish", "decisions", "review", "batch", "source", "close", "retouch_job",
-        "diag", "edit_test", "mark_logo_step"}
+        "diag", "edit_test", "mark_logo_step", "cutout_meta"}
 
 
 def test_no_stone_pipeline_module_imports_deploy():
