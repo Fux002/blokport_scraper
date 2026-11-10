@@ -27,20 +27,10 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- supplier collection location;
-#                      v7: product.lot_code/lot_position -- the pieces of a lot;
-#                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
-#                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
-#                      v10: product.model_3d_key -- the lead slab's 3D cut-out;
-#                      v11: product.photo_ready -- the no-photo rule's decision;
-#                      v12: made to order -- inventory.qty nullable + made_to_order + last_synced_made_to_order,
-#                           product.made_to_order;
-#                      v13: the inventory lane's sync bookkeeping -- inventory.last_synced_reason/last_synced_lot_code
-#                           (the stock includes its reason) + sync_attempts/sync_error/retry_after/abandoned_at
-#                           (the failure wait and dead-letter);
-#                      v14: variation.archived -- the VE2 freeze, a pure mirror of the Medusa export's status
-#                           column (recomputed every produce). attribute.restricted is NOT kept here: PR4
-#                           decides restricted values from the files through the one reader, the single authority.
+SCHEMA_VERSION = 15  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+#                      variation_category_image, and branch/image_url/image_sha256/image_model/volume, the combination
+#                      table and product.bundle_size gone. No in-place migration below v15: the phase 1 store
+#                      migration (phase1.migrate_stores) writes v15 stores; an older ledger is refused (_apply_schema).
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -116,19 +106,6 @@ def payload_hash(parts: Sequence[Any]) -> str:
     return _ids.row_fingerprint([_canon(p) for p in parts])
 
 
-def combo_key(category: str, type_: str, variation_key: str,
-              color: str, finish: str, quality: str) -> str:
-    """Deterministic combination key over the full priceable tuple (design C1).
-
-    Category and type ARE dimensions, so they are in the key. Same inputs always
-    give the same key, so a combination is addressable and idempotent.
-    """
-    return "combo_" + _ids.row_fingerprint(
-        [_canon(category), _canon(type_), _canon(variation_key),
-         _canon(color), _canon(finish), _canon(quality)]
-    )
-
-
 def _canon(value: Any) -> str:
     """Stable string form for hashing: None becomes empty, everything else str()."""
     return "" if value is None else str(value)
@@ -188,117 +165,19 @@ class Ledger:
         return conn
 
     def _apply_schema(self) -> None:
-        # Apply the DDL once per database, not on every open (the sync server opens a
-        # connection per request). PRAGMA user_version makes a reopen a no-op; the
-        # schema is all CREATE ... IF NOT EXISTS, so a one-time apply is sufficient.
+        # Apply the DDL once per database, not on every open (the sync server opens a connection per request).
+        # PRAGMA user_version makes a reopen a no-op. A brand-new file (version 0) gets the schema; a ledger from
+        # before phase 1 (1 to 14) is REFUSED: its rows carry old Keys, and only the store migration may turn them
+        # into v15 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
         from_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if from_version >= SCHEMA_VERSION:
             return
+        if from_version > 0:
+            raise LedgerError(f"ledger schema {from_version} predates phase 1 (v{SCHEMA_VERSION}): run the store "
+                              "migration (RUN_MODE=phase1-migrate), never open it in place")
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
-        self._migrate(from_version)   # add columns to tables created before a field existed (CREATE IF NOT
-                                      # EXISTS never alters an existing table). Keeps ledger_meta in step.
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        self.conn.execute("UPDATE ledger_meta SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
         self.conn.commit()
-
-    def _migrate(self, from_version: int) -> None:
-        """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync dead-letter
-        fields; v2 -> v3 added inventory.reason, the delist marker; v3 -> v4 added removed.kind, the
-        product|variation discriminator -- the `removed` table itself is a CREATE IF NOT EXISTS in
-        schema.sql, applied by the re-run above). Fresh ledgers already have these from schema.sql, so
-        every branch here is a no-op on them. `retiring` needed no migration (already in the CHECK)."""
-        for table in ("variation", "product"):
-            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
-            if "sync_attempts" not in cols:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0")
-            if "sync_error" not in cols:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_error TEXT")
-            if "abandoned_at" not in cols:   # v5: a dead-letter the operator dropped (terminal, but auditable)
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN abandoned_at TEXT")
-            if "retry_after" not in cols:   # v9: the wait after a failed apply
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN retry_after TEXT")
-        # v14: the VE2 freeze mirror column (a pure function of the export; default 0 = active). No backfill:
-        # the mirror recomputes it from the files on the next produce.
-        variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
-        if "archived" not in variation_cols:
-            self.conn.execute("ALTER TABLE variation ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
-        inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
-        if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
-            self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
-        if "replaced_by_lot_code" not in inv_cols:   # v8: the lot a bundle was replaced by (its redirect target)
-            self.conn.execute("ALTER TABLE inventory ADD COLUMN replaced_by_lot_code TEXT")
-        if "made_to_order" not in inv_cols:   # v12: qty becomes nullable, which SQLite only does by a rebuild
-            self._rebuild_inventory_v12()     # from schema.sql's table, so it already has every later column
-            inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
-        # v13: no backfill on purpose. A synced row's last synced reason/lot is not known, so it stays NULL: a row whose
-        # reason or lot is set serves once (Blokport applies it idempotently), which also delivers a reason that an
-        # earlier ledger never sent; a row with neither matches NULL and serves nothing new.
-        for col, ddl in (("last_synced_reason", "TEXT"), ("last_synced_lot_code", "TEXT"),
-                         ("sync_attempts", "INTEGER NOT NULL DEFAULT 0"), ("sync_error", "TEXT"),
-                         ("retry_after", "TEXT"), ("abandoned_at", "TEXT")):
-            if col not in inv_cols:
-                self.conn.execute(f"ALTER TABLE inventory ADD COLUMN {col} {ddl}")
-        prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
-        if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
-            self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
-        if "collection_city" not in prod_cols:
-            self.conn.execute("ALTER TABLE product ADD COLUMN collection_city TEXT")
-        if "lot_code" not in prod_cols:   # v7: the pieces of a lot (null on every product outside one)
-            self.conn.execute("ALTER TABLE product ADD COLUMN lot_code TEXT")
-        if "lot_position" not in prod_cols:
-            self.conn.execute("ALTER TABLE product ADD COLUMN lot_position INTEGER")
-        if "model_3d_key" not in prod_cols:   # v10: the lead slab's 3D cut-out (null = no 3D)
-            self.conn.execute("ALTER TABLE product ADD COLUMN model_3d_key TEXT")
-        if "photo_ready" not in prod_cols:   # v11: the no-photo rule's decision
-            self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
-        if "made_to_order" not in prod_cols:   # v12: on sale with no count (read by Blokport at create)
-            self.conn.execute("ALTER TABLE product ADD COLUMN made_to_order INTEGER NOT NULL DEFAULT 0")
-        if from_version < 13:
-            # v13 reads "Medusa holds it" from last_synced (in_medusa_sql); before, a products export row was only
-            # 'synced' (seed_products and populate_discontinued wrote no last_synced). Keyed on the version: a 'synced'
-            # row without last_synced is exactly such a row (an ack always sets it).
-            self.conn.execute("UPDATE product SET last_synced = updated_at "
-                              "WHERE state = 'synced' AND last_synced IS NULL")
-        if from_version < 11:
-            # Before v11 the decision was kept only as the stock reason, so derive it from that. Keyed on the version,
-            # not on the ALTER: the ALTER commits on its own, so a crash before the version bump below leaves the
-            # column without its values, and this runs again on the next open (in one transaction with the bump).
-            self.conn.execute("UPDATE product SET photo_ready = CASE WHEN sku IN "
-                              "(SELECT sku FROM inventory WHERE reason = 'no_photo') THEN 0 ELSE 1 END")
-        removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
-        if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
-            self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")
-        if "abandoned_at" not in removed_cols:   # v5: a dead tombstone the operator dropped
-            self.conn.execute("ALTER TABLE removed ADD COLUMN abandoned_at TEXT")
-        if "retry_after" not in removed_cols:   # v9: the wait after a 'blocked' ack
-            self.conn.execute("ALTER TABLE removed ADD COLUMN retry_after TEXT")
-        # covering index for the serve order (products before variations, E1). Created HERE, not in
-        # schema.sql, because schema.sql runs BEFORE this ALTER on an old ledger, where an index on the
-        # not-yet-added `kind` column would fail. Idempotent, so fresh ledgers pick it up here too.
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_removed_serve_kind "
-                          "ON removed (state, kind, created_at, external_id)")
-        # the lot lookup that gates a bundle's replacement delta on its pieces (sync.ready_inventory); HERE for
-        # the same reason: on an old ledger product.lot_code only exists after the ALTER above
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_product_lot_code ON product (lot_code)")
-
-    def _rebuild_inventory_v12(self) -> None:
-        """The v12 inventory (schema.sql) from a v11 one, in one transaction (a crash leaves the v11 table): every
-        row keeps its stock and is counted (made_to_order 0); a synced row's last synced stock is its count, so the
-        migration serves nothing new."""
-        old = "inventory_v11"
-        self.conn.execute("SAVEPOINT inventory_v12")
-        self.conn.execute(f"ALTER TABLE inventory RENAME TO {old}")
-        # the table's one definition is schema.sql's statement (it ends at the first line-initial ');')
-        ddl = _SCHEMA_PATH.read_text(encoding="utf-8")
-        start = ddl.index("CREATE TABLE IF NOT EXISTS inventory (")
-        self.conn.execute(ddl[start:ddl.index("\n);", start) + 3])
-        self.conn.execute(
-            "INSERT INTO inventory (sku, qty, made_to_order, last_synced_qty, last_synced_made_to_order, reason, "
-            "replaced_by_lot_code, updated_at) SELECT sku, qty, 0, last_synced_qty, "
-            "CASE WHEN last_synced_qty IS NULL THEN NULL ELSE 0 END, reason, replaced_by_lot_code, updated_at "
-            f"FROM {old}")
-        self.conn.execute(f"DROP TABLE {old}")
-        self.conn.execute("RELEASE inventory_v12")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

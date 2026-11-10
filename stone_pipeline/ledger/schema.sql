@@ -13,20 +13,20 @@
 --      `ledger_meta` row holding the env + fingerprint, asserted by the DAL at every
 --      connection open. Same guarantee (a misrouted connection aborts), without an
 --      env column duplicated on every row. One DB per env makes per-row env moot.
---   2. `variation.image_url` stores the live TEXTURE url directly (the CSV Image
---      cell; empty when no texture exists), because a variant texture is
---      Key-addressed (`{Key}.png`), not content-hash addressed. `image_sha256` is
---      reserved for a future content-addressed texture lane. Scraped PHOTOS, which
---      are content-hash addressed, still derive their live url from `image.live_key`
---      (one source of truth for that lane) and link via `product.image_shas`.
---   3. `combination.category` and `combination.type` store the canonical NAMES (the
---      design calls the category dimension "category_pcat"). Names are re-seed safe;
---      the pcat id is resolved at the boundary. combo_key hashes the name tuple.
---   4. `gap.id` and `sync_run.id` are DAL-generated TEXT ids (ULID-style), not
+--   2. A variety's icons are per (variety, category) pair (PHASE-1-SPEC D3): the
+--      `variation_category_image` table holds each pair's S3 key and ETag, keyed by
+--      the category HANDLE (D11). Scraped PHOTOS, which are content-hash addressed,
+--      still derive their live url from `image.live_key`.
+--   3. `gap.id` and `sync_run.id` are DAL-generated TEXT ids (ULID-style), not
 --      auto-increment, to stay dialect-neutral.
 --
+-- v15 (phase 1): ONE variation row per (type, name), Key `{type slug}__{name slug}_{uuid}` with no category
+-- prefix; `branch`, `image_url`, `image_sha256`, `image_model` and `volume` are gone, as are the unused
+-- `combination` table and `product.bundle_size`. A ledger below v15 is not migrated here: the phase 1 store
+-- migration (phase1.migrate_stores) writes v15 stores, and the DAL refuses an older one.
+--
 -- payload_hash inputs are documented per table (design section 4 / M3). The DAL
--- computes payload_hash and combo_key with a stable canonical serialization so the
+-- computes payload_hash with a stable canonical serialization so the
 -- same desired state always hashes the same (determinism).
 
 PRAGMA foreign_keys = ON;   -- SQLite: enforce the FK declarations below.
@@ -50,22 +50,15 @@ CREATE TABLE IF NOT EXISTS ledger_meta (
 -- (Medusa external_id). A type or canonical-name correction is a NEW Key (a
 -- re-key, design section 5C), not an update of this row.
 --
--- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: category, type, name,
---   aliases, image_url) plus image_sha256 (a texture re-made at the same url). volume is not served, so
---   not hashed. fill_variation_types re-hashes the row when it fills the type.
+-- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: type, name, aliases and the
+--   variety's category images, each pair's S3 key and ETag). fill_variation_types re-hashes the row when it fills
+--   the type.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS variation (
-    key           TEXT PRIMARY KEY,                    -- {branch}_{slug(type)}_{slug(name)}_{uuid5}
-    -- the branch set mirrors the active domain pack's category names (stone: slab/block/tile). A different
-    -- product pack must widen/regenerate this CHECK before its first ledger write (config/domains/<pack>.yaml).
-    branch        TEXT NOT NULL CHECK (branch IN ('slab', 'block', 'tile')),
-    type          TEXT NOT NULL,                       -- canonical stone type name
+    key           TEXT PRIMARY KEY,                    -- {slug(type)}__{slug(name)}_{uuid5} (phase1.variety_key)
+    type          TEXT NOT NULL,                       -- canonical type name
     name          TEXT NOT NULL,                       -- canonical variety name
     aliases       TEXT,                                -- JSON array of strings
-    image_url     TEXT,                                -- live texture url (the CSV Image cell); empty if none
-    image_sha256  TEXT,                                -- reserved: content-hash if texture is ever content-addressed
-    image_model   TEXT,                                -- generator of the current texture, null if none
-    volume        TEXT,                                -- "Volume per kg (m3/kg)", kept as text for exactness
     medusa_id     TEXT,                                -- null until synced
     -- 1 when this variation is in the produced 1_variants_full set (the catalog
     -- output), 0 for export-only rows kept for ids/FK (junk, consolidated-away).
@@ -89,7 +82,20 @@ CREATE TABLE IF NOT EXISTS variation (
     updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_variation_serve ON variation (state, created_at, key);
-CREATE INDEX IF NOT EXISTS idx_variation_branch ON variation (branch);
+
+-- ---------------------------------------------------------------------------
+-- variation_category_image: a variety's icon per (variety, category) pair (PHASE-1-SPEC D3, section 4). The
+-- category is its HANDLE (the pack's plural, D11), like the product rows; s3_key is the full object key in the
+-- env's staging bucket, `{ENV_SEGMENT}/variations/{key}/{category name}.png`; etag is the object's ETag, so a
+-- re-made icon at the same key re-serves its variety (both are in the variation payload hash).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS variation_category_image (
+    key              TEXT NOT NULL REFERENCES variation (key),
+    category_handle  TEXT NOT NULL,
+    s3_key           TEXT NOT NULL,
+    etag             TEXT NOT NULL,
+    PRIMARY KEY (key, category_handle)
+);
 
 -- ---------------------------------------------------------------------------
 -- attribute: the controlled vocabulary. Existing values are refreshed from
@@ -112,33 +118,6 @@ CREATE TABLE IF NOT EXISTS attribute (
 );
 CREATE INDEX IF NOT EXISTS idx_attribute_serve ON attribute (state, created_at, category, value);
 
--- ---------------------------------------------------------------------------
--- combination: a priceable tuple. category and type ARE dimensions (design C1),
--- so combo_key hashes the full tuple and they are stored explicitly. Matches
--- 2_valid_combinations.csv (product_category_id, type_id, variation_id, finish_id,
--- color_id, quality_id), resolved to ids by name at the boundary.
---
--- combo_key = hash(category, type, variation_key, color, finish, quality)
--- payload_hash covers the same tuple (a combination has no other content).
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS combination (
-    combo_key      TEXT PRIMARY KEY,
-    category       TEXT NOT NULL,                       -- canonical category name (design "category_pcat")
-    type           TEXT NOT NULL,                       -- canonical type name
-    variation_key  TEXT NOT NULL REFERENCES variation (key),
-    color          TEXT NOT NULL,
-    finish         TEXT NOT NULL,
-    quality        TEXT NOT NULL,
-    medusa_id      TEXT,                                -- null until synced
-    payload_hash   TEXT,
-    state          TEXT NOT NULL DEFAULT 'pending'
-                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
-    last_synced    TEXT,
-    created_at     TEXT NOT NULL,
-    updated_at     TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_combination_serve ON combination (state, created_at, combo_key);
-CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_key);
 
 -- ---------------------------------------------------------------------------
 -- product: a supplier's concrete offering, keyed by SKU ({source_code}-{surrogate}
@@ -201,7 +180,6 @@ CREATE TABLE IF NOT EXISTS product (
     visibility           TEXT,                          -- null -> render the config constant
     discountable         TEXT,                          -- null -> render the config constant
     sold_in_bundle       INTEGER,                       -- 0/1
-    bundle_size          INTEGER,
     inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
     made_to_order        INTEGER NOT NULL DEFAULT 0,    -- 1: on sale with no count (a free-size shape)
     lot_code             TEXT,                          -- shared by every piece of a lot; null = not in a lot
@@ -221,6 +199,7 @@ CREATE TABLE IF NOT EXISTS product (
 CREATE INDEX IF NOT EXISTS idx_product_serve ON product (state, created_at, sku);
 CREATE INDEX IF NOT EXISTS idx_product_variation ON product (variation_key);
 CREATE INDEX IF NOT EXISTS idx_product_source ON product (source);
+CREATE INDEX IF NOT EXISTS idx_product_lot_code ON product (lot_code);
 
 -- ---------------------------------------------------------------------------
 -- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order, reason, replaced_by_lot_code)
@@ -323,6 +302,7 @@ CREATE TABLE IF NOT EXISTS removed (
 -- serve scan by state; ready_removed adds the product-before-variation order in the query (E1) so
 -- this index does not reference `kind` (it is added by migrate AFTER schema.sql runs on old ledgers).
 CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, external_id);
+CREATE INDEX IF NOT EXISTS idx_removed_serve_kind ON removed (state, kind, created_at, external_id);
 
 -- ---------------------------------------------------------------------------
 -- sync_run: the audit ledger, one row per reconcile pass. `counts` is a JSON blob

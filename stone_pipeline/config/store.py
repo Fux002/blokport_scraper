@@ -65,26 +65,37 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class ConfigStoreError(RuntimeError):
+    """A config.db this code will not open (one from before phase 1): nothing is read or written."""
+
+
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 11    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+SCHEMA_VERSION = 12    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
 #                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
 #                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
 #                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted);
-#                        11: backbone_leaf_decision.decided_by (operator | produce)
+#                        11: backbone_leaf_decision.decided_by (operator | produce);
+#                        12: phase 1 (PHASE-1-SPEC rev 8): retired and protected Keys are new variety Keys. The
+#                            tables are unchanged, so the version alone tells a migrated store from an old one:
+#                            ONLY the phase 1 store migration (phase1.migrate_stores) stamps 12, and a store at
+#                            1 to 11 is refused here (report 18 N3).
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
-    """Per-connection setup: row access + pragmas every time, the schema work ONCE per database. A database
-    below SCHEMA_VERSION gets the base DDL (if brand new) and every migration step, then the stamp; a stamped
-    one runs nothing but the pragmas (the admin API connects per request, decisions_store per call)."""
+    """Per-connection setup: row access + pragmas every time, the schema work ONCE per database. A brand-new database
+    (version 0) gets the base DDL and every step, then the stamp; a stamped one runs nothing but the pragmas (the admin
+    API connects per request, decisions_store per call). A database from before phase 1 (1 to 11) is REFUSED: its Keys
+    are old Keys, and only the phase 1 store migration may turn them into new ones."""
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
     conn.execute("PRAGMA busy_timeout=5000")  # ThreadingHTTPServer: two concurrent admin writes wait, not 500
     version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if 0 < version < SCHEMA_VERSION:
+        raise ConfigStoreError(f"config.db schema {version} predates phase 1 ({SCHEMA_VERSION}): run the store "
+                               "migration (RUN_MODE=phase1-migrate), never open it in place")
     if version < SCHEMA_VERSION:
-        if version < 1:
-            conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA)
         _migrate(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
