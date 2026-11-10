@@ -147,15 +147,15 @@ def test_retired_keys_are_durable_in_config_db(tmp_path, monkeypatch):
     # retired variety never re-mints after a restart. Round-trip + idempotent add + un-retire remove.
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     assert store.load_retired() == set()
-    store.add_retired("slab_marble_x_1")
-    store.add_retired("slab_marble_x_1")               # idempotent
-    store.add_retired("block_granite_y_2")
-    assert store.load_retired() == {"slab_marble_x_1", "block_granite_y_2"}
-    store.remove_retired("slab_marble_x_1")            # un-retire
-    assert store.load_retired() == {"block_granite_y_2"}
+    store.add_retired("marble__x_1")
+    store.add_retired("marble__x_1")               # idempotent
+    store.add_retired("granite__y_2")
+    assert store.load_retired() == {"marble__x_1", "granite__y_2"}
+    store.remove_retired("marble__x_1")            # un-retire
+    assert store.load_retired() == {"granite__y_2"}
     # decisions.load_retired is the produce-side reader and must return the same durable set
     from stone_pipeline.stages import decisions
-    assert decisions.load_retired() == {"block_granite_y_2"}
+    assert decisions.load_retired() == {"granite__y_2"}
 
 
 def test_retired_is_empty_without_a_store(tmp_path, monkeypatch):

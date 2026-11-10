@@ -202,26 +202,26 @@ def _export(tmp_path, text: str, encoding: str = "utf-8") -> Path:
 def test_export_without_a_status_column_reads_every_row_active(tmp_path):
     p = _export(tmp_path, _EXPORT + "v1,slab_marble_a_1,A,Marble,A1|A2\n")
     assert read_variants_export(p, require_status=False) == [
-        ExportVariation("slab_marble_a_1", "A", "v1", "Marble", ("A1", "A2"), "active")]
+        ExportVariation("marble__a_1", "A", "v1", "Marble", ("A1", "A2"), "active")]
 
 
 def test_export_new_shape_carries_status(tmp_path):
     p = _export(tmp_path, "Id,Key,Name,Type,Aliases,status\nv1,slab_a_1,A,Marble,,active\nv2,slab_b_1,B,Marble,,Archived\n")
     got = read_variants_export(p, require_status=True)
-    assert [(v.key, v.status, v.archived) for v in got] == [("slab_a_1", "active", False), ("slab_b_1", "archived", True)]
+    assert [(v.key, v.status, v.archived) for v in got] == [("a__1", "active", False), ("b__1", "archived", True)]
 
 
 def test_export_reordered_and_extra_columns_parse_by_header_name(tmp_path):
     p = _export(tmp_path, " status ,Extra,Aliases, Type , Name ,Key,Id\nactive,x, a | |b ,Marble,A,slab_a_1,v1\n")
     assert read_variants_export(p, require_status=True) == [
-        ExportVariation("slab_a_1", "A", "v1", "Marble", ("a", "b"), "active")]
+        ExportVariation("a__1", "A", "v1", "Marble", ("a", "b"), "active")]
 
 
 def test_export_optional_columns_read_empty_when_absent(tmp_path):
     # the Id-free base shape, and an export without Aliases: Id and Aliases read empty
     base = _export(tmp_path, "Key,Name,Type\nslab_a_1,A,Marble\n")
     assert read_variants_export(base, require_status=False) == [
-        ExportVariation("slab_a_1", "A", "", "Marble", (), "active")]
+        ExportVariation("a__1", "A", "", "Marble", (), "active")]
 
 
 @pytest.mark.parametrize("header", ["Id,Key,Type,Aliases", "Id,Name,Type,Aliases", "Id,Key,Name,Aliases", ""])
@@ -247,14 +247,14 @@ def test_export_require_status_without_the_column_raises(tmp_path):
 def test_export_blank_rows_skipped_and_half_rows_kept(tmp_path):
     p = _export(tmp_path, _EXPORT + ",,,,\n\n,slab_a_1,A,Marble,\nv2,,B,Marble,\n")
     assert [(v.id, v.key, v.name) for v in read_variants_export(p, require_status=False)] == [
-        ("", "slab_a_1", "A"), ("v2", "", "B")]
+        ("", "a__1", "A"), ("v2", "", "B")]
 
 
 def test_export_bom_and_text_form(tmp_path):
     body = _EXPORT + "v1,slab_a_1,A,Marble,\r\n"
     from_file = read_variants_export(_export(tmp_path, body, encoding="utf-8-sig"), require_status=False)
     assert from_file == read_variants_export("\ufeff" + body, require_status=False)
-    assert [v.key for v in from_file] == ["slab_a_1"]
+    assert [v.key for v in from_file] == ["a__1"]
 
 
 def test_export_text_form_errors_name_the_file_it_came_from(tmp_path):
@@ -274,9 +274,10 @@ def test_the_loader_names_the_base_file_in_an_error(tmp_path):
 
 def test_own_variants_keeps_the_status_column_whole(tmp_path):
     from stone_pipeline.io.medusa_inputs import own_variants
-    p = _export(tmp_path, "Id,Key,Name,Type,status\nv1,slab_a_1,A,Marble,archived\nv9,np-cattle-1,Cow,Cattle,active\n")
+    p = _export(tmp_path, "Id,Key,Name,Type,status,owner\nv1,marble__a_1,A,Marble,archived,scraper\n"
+                          "v9,np-cattle-1,Cow,Cattle,active,\n")
     assert own_variants(p) == 1
-    assert p.read_text(encoding="utf-8") == "Id,Key,Name,Type,status\nv1,slab_a_1,A,Marble,archived\n"
+    assert p.read_text(encoding="utf-8") == "Id,Key,Name,Type,status,owner\nv1,marble__a_1,A,Marble,archived,scraper\n"
     assert read_variants_export(p, require_status=True)[0].archived
 
 

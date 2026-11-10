@@ -65,7 +65,7 @@ def test_tile_resolves_when_tile_variants_supplied(ref):
     _clear_tile_reference(ref)
     tid = "01TILEWHITETRAVERTINE00000"
     ref.variants["tile"].by_id[tid] = Variant(
-        variation_id=tid, key="tile_travertine_white_travertine",
+        variation_id=tid, key="travertine__white_travertine_00000000-0000-0000-0000-000000000000",
         name="White Travertine", aliases=[])
     stage = match_variation.VariationStage.build(ref)
     row = CanonicalRow(src_site="marenostone", surrogate_key="t3",
@@ -76,7 +76,8 @@ def test_tile_resolves_when_tile_variants_supplied(ref):
     assert row.is_block is False
 
 
-def test_slab_and_block_branches_unaffected(ref):
+def test_a_slab_and_a_block_of_one_variety_bind_the_same_variation(ref):
+    # phase 1: a variety is ONE record per (type, name), whatever the format; the category is the product's
     stage = match_variation.VariationStage.build(ref)
     slab = CanonicalRow(src_site="polonine", surrogate_key="s1", format_value="Slab",
                         variety_match_key="Arabescato", raw_type="Marble", raw_color="White")
@@ -84,4 +85,5 @@ def test_slab_and_block_branches_unaffected(ref):
                          variety_match_key="Arabescato", raw_type="Marble", raw_color="White")
     stage.resolve_row(slab)
     stage.resolve_row(block)
-    assert slab.variation_id and slab.variation_id != block.variation_id  # different id per format
+    assert slab.variation_id and slab.variation_id == block.variation_id
+    assert slab.variation_key == block.variation_key
