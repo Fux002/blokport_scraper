@@ -297,7 +297,8 @@ def read_scope(s3, key):
 
 def scoped(listings, scope):
     """The listings a run works on: every one (no scope, today's run), or the scope's, in its order. ScopeRefused naming
-    every SKU the sheet does not have."""
+    every SKU the sheet does not have, and every SKU with its format whose listing gets no 3D cut-out (only a
+    C.CUTOUT_FORMAT listing does; a block is paid for and gets none, and blocks get no 3D)."""
     if scope is None:
         return listings
     by_sku = {}
@@ -305,7 +306,10 @@ def scoped(listings, scope):
         by_sku.setdefault(l["sku"], []).append(l)
     if unknown := [sku for sku in scope.skus if sku not in by_sku]:
         raise ScopeRefused(f"the scope names listings the sheet does not have: {', '.join(unknown)}")
-    return [l for sku in scope.skus for l in by_sku[sku]]
+    work = [l for sku in scope.skus for l in by_sku[sku]]
+    if no_cutout := list(dict.fromkeys(f"{l['sku']} ({l['format']})" for l in work if l["format"] != C.CUTOUT_FORMAT)):
+        raise ScopeRefused(f"the scope names listings that get no 3D cut-out: {', '.join(no_cutout)}")
+    return work
 
 
 def restandardise_items(scope, listings, rounds):
