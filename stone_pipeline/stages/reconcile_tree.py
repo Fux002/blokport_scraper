@@ -168,11 +168,11 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     bound_type, type_from_key = _bound_type(row)
     _apply_type(row, bound_type, ref, stats, from_key=type_from_key)
 
-    # Membership record: the backbone variety of this name AND the bound type, for its colour/finish/
-    # quality sets. A foreign same-name record of a DIFFERENT type is never used -- it would validate
-    # against the wrong stone's sets. Absent (base<->backbone drift): keep the pinned type, flag the
-    # missing record, do not fabricate membership.
-    variety = ref.backbone.lookup(row.variation_name or "", stone_type=bound_type)
+    # Membership record: the variety's OWN post (the one carrying its Key), else the backbone variety of
+    # this name AND the bound type, for its colour/finish/quality sets. A foreign same-name record of a
+    # DIFFERENT type is never used -- it would validate against the wrong stone's sets. Absent
+    # (base<->backbone drift): keep the pinned type, flag the missing record, do not fabricate membership.
+    variety = ref.backbone.variety_of(row.variation_key, row.variation_name or "", stone_type=bound_type)
     if variety is None:
         row.add_flag(
             ReviewFlag(

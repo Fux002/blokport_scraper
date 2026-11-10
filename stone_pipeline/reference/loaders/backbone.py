@@ -27,6 +27,14 @@ class Backbone:
     # by stone_type (section 5A blocking).
     by_norm_name: dict[str, list[BackboneVariety]] = field(default_factory=dict)
     by_norm_alias: dict[str, list[BackboneVariety]] = field(default_factory=dict)
+    # phase 1: every post carries its variety's Key, so a variety's own post is found by Key, never by a name
+    # another post may also carry as an alias
+    by_key: dict[str, BackboneVariety] = field(default_factory=dict)
+
+    def variety_of(self, key: str | None, name: str, stone_type: str | None = None) -> Optional[BackboneVariety]:
+        """The variety's own post: the one carrying its Key; the name (then alias) lookup only for a variety with no
+        keyed post. File order never decides which post a variety reads."""
+        return self.by_key.get(key or "") or self.lookup(name, stone_type=stone_type)
 
     def lookup_all(self, name: str) -> list[BackboneVariety]:
         key = norm(name)
@@ -159,6 +167,8 @@ def load_backbone(path: Path | None = None) -> Backbone:
             aliases=list(post.get("aliases") or []),
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
+        if key := (post.get("key") or "").strip():
+            backbone.by_key[key] = variety
         for alias in variety.aliases:
             # an alias that folds to an empty key (a non-Latin script only) is no usable name: under ""
             # it would pool every such variety into one bucket
