@@ -1,5 +1,6 @@
 """SC-4 (plan SC-3-SC-4-PLAN.md section 2d): the phase 1 stores' versions. A brand-new ledger is created at v15 (one
-variation row per (type, name), no branch, the per-category icon table, no combination table, no bundle_size); a
+variation row per (type, name), no branch, the per-category icon table, no combination table; product.bundle_size
+stays, render-only, plan rev 2.3); a
 ledger from before phase 1 is refused, never migrated in place. A brand-new config.db is stamped 12; one at 1 to 11 is
 refused (only the phase 1 store migration stamps 12)."""
 from __future__ import annotations
@@ -22,7 +23,7 @@ def test_a_new_ledger_is_v15_one_row_per_variety_with_its_category_icons(tmp_pat
         variation = _columns(lg.conn, "variation")
         assert not variation & {"branch", "image_url", "image_sha256", "image_model", "volume"}
         assert _columns(lg.conn, "variation_category_image") == {"key", "category_handle", "s3_key", "etag"}
-        assert "bundle_size" not in _columns(lg.conn, "product")
+        assert "bundle_size" in _columns(lg.conn, "product")      # render-only (the import template's column)
         tables = {r[0] for r in lg.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert "combination" not in tables
 

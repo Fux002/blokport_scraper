@@ -489,7 +489,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
                 # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
-                # variation content (name/aliases/image/volume) from the freshly-clean base -- upserts
+                # variation content (type/name/aliases) from the freshly-clean base -- upserts
                 # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
                 # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
                 try:

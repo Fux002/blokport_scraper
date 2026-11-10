@@ -155,12 +155,12 @@ def _ledger_product(source_code: str) -> None:
     from stone_pipeline.ledger.db import Ledger, now_iso
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": "slab_v1", "branch": "slab", "type": "Marble", "name": "x",
-                                "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": None, "in_full": 1, "payload_hash": "",
+        lg.upsert("variation", {"key": "marble__v1", "type": "Marble", "name": "x",
+                                "aliases": "[]",
+                                "medusa_id": None, "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
-        lg.upsert("product", {"sku": f"{source_code.upper()}-1", "source": source_code, "variation_key": "slab_v1",
+        lg.upsert("product", {"sku": f"{source_code.upper()}-1", "source": source_code, "variation_key": "marble__v1",
                               "medusa_id": "PID", "state": "synced", "created_at": now, "updated_at": now},
                   pk=("sku",))
 
@@ -255,7 +255,7 @@ _DECIDE = {"source": "varsha", "scraped": "Bonsai", "name": "Bonsai", "type": "G
     ("POST", ["reset"], {"hard": "false"}, "hard"),
     ("POST", ["reset"], {"pristine": 1}, "pristine"),
     ("POST", ["variations", "unmint"], {"all_minted": "yes"}, "all_minted"),
-    ("POST", ["variations", "slab_x", "retire"], {"force": "true"}, "force"),
+    ("POST", ["variations", "marble__x", "retire"], {"force": "true"}, "force"),
     ("PUT", ["review", "decide"], {**_DECIDE, "source": 5}, "source"),
     ("PUT", ["review", "decide"], {**_DECIDE, "scraped": [5]}, "scraped"),
     ("PUT", ["review", "decide"], {**_DECIDE, "name": 5}, "name"),

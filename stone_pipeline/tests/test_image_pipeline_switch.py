@@ -158,7 +158,7 @@ def _rule_on(monkeypatch):
         SETTINGS, images=dataclasses.replace(SETTINGS.images, require_standard_photo=True)))
 
 
-KEY = "slab_marble_carrara_0001"
+KEY = "marble__carrara_0001"
 
 
 @pytest.fixture
@@ -170,8 +170,8 @@ def ledger(tmp_path, monkeypatch):
     with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
         lg.upsert("variation", {
-            "key": KEY, "branch": "slab", "type": "Marble", "name": "Carrara", "aliases": "[]",
-            "image_url": f"https://bucket/variations/{KEY}.png", "volume": "", "medusa_id": "V1",
+            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": "[]",
+            "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
     return path

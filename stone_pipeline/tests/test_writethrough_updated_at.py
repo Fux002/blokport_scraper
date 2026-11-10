@@ -19,7 +19,7 @@ from stone_pipeline.ledger.sync import reap_stale_syncing
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS
 
-KEY = "slab_marble_arabescato_1124daeb"
+KEY = "marble__arabescato_1124daeb"
 DEAD = "2000-01-01T00:00:00+00:00"   # older than any lease
 
 
@@ -43,9 +43,9 @@ def _row(title="Arabescato Polished Slab"):
 
 def _seed_variation(ledger):
     now = now_iso()
-    ledger.upsert("variation", {"key": KEY, "branch": "slab", "type": "Marble", "name": "Arabescato",
-                                "aliases": "[]", "image_url": "", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "V1", "in_full": 1,
+    ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Arabescato",
+                                "aliases": "[]",
+                                "medusa_id": "V1", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
 

@@ -50,6 +50,12 @@ class Category:
         """Live once its Medusa category id exists."""
         return bool(self.pcat_id)
 
+    @property
+    def handle(self) -> str:
+        """The category's immutable Medusa HANDLE, the one identifier the sync wire and the ledger carry (PHASE-1-SPEC
+        D11): the pack's plural, never the renameable label."""
+        return self.plural
+
 
 # DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod
 # Medusa assign different ids), so it must come from the env's own download, never a hardcoded
@@ -108,6 +114,11 @@ def category(name: str) -> "Category | None":
     # silently falling through to the slab default.
     key = (name or "").strip().casefold()
     return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
+
+
+def category_by_handle(handle: str) -> "Category | None":
+    """The category whose handle (D11) is exactly `handle`, or None."""
+    return next((c for c in _BY_NAME.values() if c.handle == handle), None)
 
 
 def category_for_key(key: str) -> "Category | None":
