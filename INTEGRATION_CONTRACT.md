@@ -178,6 +178,9 @@ Refusals (`{"error": "..."}`; nothing is stored):
 There is no stale-item refusal. Deciding an item the last produce already dropped still stores the statement
 (`200`), which then applies on the next produce.
 
+**For the FE: offer only `item.colours`.** The server accepts any Medusa colour, not only the item's list, and it
+has no stale-item refusal. Limiting the choice to `item.colours` is therefore the screen's job.
+
 ### Undo: DELETE /config/v1/review/decide (the existing call)
 
 `{ "listings": <item.listings> }` clears each listing's statement, all or none. Responses:

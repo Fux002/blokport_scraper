@@ -141,6 +141,10 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         setattr(row, f"{vocab}_confidence", _confidence_name(resolution.confidence))
         setattr(row, f"{vocab}_method", resolution.method)
 
+        if resolution.method == "multicolor_from_vendor":
+            row.add_flag(ReviewFlag(field=vocab, code=FlagCode.multicolour_from_vendor, raw_value=raw_value,
+                                    best_guess=resolution.evidence["named"][0], confidence=Confidence.medium,
+                                    method="multicolor_from_vendor", src_url=row.src_url))
         if is_multi:
             row.add_flag(
                 ReviewFlag(

@@ -165,7 +165,7 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     _fill_missing_from_variety(row, "quality", variety.qualities, stats)
 
     # 2. membership with snapping for the low-trust attributes
-    ok = True
+    ok = not _pend_multicolour_leaf(row, variety.colors, stats)
     if not _reconcile_attribute(row, "color", variety.colors, ref, stats, snappable=False):
         ok = False
     if not _reconcile_attribute(row, "finish", variety.finishes, ref, stats, snappable=True):
@@ -267,6 +267,12 @@ def _reconcile_attribute(
             return True
 
     # genuine miss: the variety lacks this finish/colour -> missing_leaf_child
+    _add_leaf_gap(row, vocab, chosen, allowed, stats)
+    return False
+
+
+def _add_leaf_gap(row: CanonicalRow, vocab: str, value: str, allowed: list[str], stats: ReconcileStats) -> None:
+    """The variety lacks `value` for `vocab`: a missing_leaf_child gap, which curate raises as a leaf suggestion."""
     stats.missing_leaf += 1
     row.add_gap(
         TreeGap(
@@ -275,15 +281,36 @@ def _reconcile_attribute(
             raw_name=row.raw_name or "",
             normalized_name=proj.norm(row.variation_name or ""),
             suggested_type=row.type_name,
-            suggested_color=row.color_name if vocab == "color" else None,
-            suggested_finish=row.finish_name if vocab == "finish" else None,
-            suggested_quality=row.quality_name if vocab == "quality" else None,
+            suggested_color=value if vocab == "color" else None,
+            suggested_finish=value if vocab == "finish" else None,
+            suggested_quality=value if vocab == "quality" else None,
             gap_kind=GapKind.missing_leaf_child,
             nearest_existing=", ".join(allowed[:5]),
             example_src_url=row.src_url,
         )
     )
-    return False
+
+
+def _pend_multicolour_leaf(row: CanonicalRow, allowed: list[str], stats: ReconcileStats) -> bool:
+    """A vendor's several colours (rule 1, multicolour) on a variety that does not allow the multicolour value yet.
+    The leaf gap is raised as for any missing colour (curate suggests adding it), and the row carries the colour such
+    a listing carried before rule 1, the first one named, when the variety allows it: validate then keeps a PUBLISHED
+    listing listed and updating on it (never frozen behind an approval), while a new one is held on the gap. Once
+    the leaf is approved the row is the multicolour value. True when the gap was raised."""
+    if row.color_method != "multicolor_from_vendor" or not row.color_name:
+        return False
+    by_norm = {proj.norm(a): a for a in allowed}
+    named = next((f.best_guess for f in row.review_flags if f.code == FlagCode.multicolour_from_vendor), None)
+    if proj.norm(row.color_name) in by_norm or proj.norm(named or "") not in by_norm:
+        return False                     # allowed already, or nothing allowed to carry: the usual membership check
+    multicolour = row.color_name
+    _add_leaf_gap(row, "color", multicolour, allowed, stats)
+    row.color_name, row.color_confidence = by_norm[proj.norm(named)], Confidence.medium.name
+    row.color_method = "multicolour_leaf_pending"
+    row.add_flag(ReviewFlag(field="color", code=FlagCode.multicolour_leaf_pending, raw_value=row.color_name,
+                            best_guess=multicolour, confidence=Confidence.medium,
+                            method="multicolour_leaf_pending", src_url=row.src_url))
+    return True
 
 
 def _finalize_ids(row: CanonicalRow, ref: ReferenceData) -> None:

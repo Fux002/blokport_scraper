@@ -67,6 +67,46 @@ def test_one_colour_named_twice_is_not_multicolor(ref):
     assert row.color_name == "White"
 
 
+# --- rule 1 on a variety that does not allow Multicolor yet: the leaf-growth path, a published listing never frozen --
+
+def _vendor_listed(ref, variety, raw_color, **kw):
+    """A row as the pipeline builds it: normalize reads the vendor's colour, the matcher binds the variety, then
+    reconcile checks it against the variety's colours."""
+    row = CanonicalRow(src_site="polonine", surrogate_key="742", raw_color=raw_color)
+    normalize.normalize_row(row, normalize.AttributeResolvers.build(ref), ref)
+    for field, value in dict(variation_id="vid", variation_name=variety.variant, variety_match_key=variety.variant,
+                             type_name=variety.stone_type, finish_name=variety.finishes[0],
+                             quality_name=variety.qualities[0], **kw).items():
+        setattr(row, field, value)
+    return _reconcile(ref, row)
+
+
+def _multicolour_gap(row) -> bool:
+    return any(g.suggested_color == "Multicolor" for g in row.tree_gaps)
+
+
+def test_a_published_multicolour_listing_keeps_its_colour_and_updating_while_the_leaf_waits(ref, patagonia):
+    assert "Multicolor" not in patagonia.colors and "Black" in patagonia.colors
+    row = _vendor_listed(ref, patagonia, "Black and White")
+    validate.validate_row(row, source_code="pol", published=frozenset({"POL-742"}))
+    assert not [r for r in row.reject_reasons if r.rule in ("tree_gap", "colour_unconfirmed")]   # never held on it
+    assert (row.color_name, row.color_method) == ("Black", "multicolour_leaf_pending") and row.color_id
+    assert _multicolour_gap(row)                                     # ...and curate still suggests the leaf
+
+
+def test_a_new_multicolour_listing_is_held_on_the_leaf_gap_as_usual(ref, patagonia):
+    row = _vendor_listed(ref, patagonia, "Black and White")
+    validate.validate_row(row, source_code="pol", published=frozenset())
+    assert any(r.rule == "tree_gap" for r in row.reject_reasons) and _multicolour_gap(row)
+
+
+def test_once_the_leaf_is_approved_the_listing_is_multicolor(ref):
+    allows = next(v for vs in ref.backbone.by_norm_name.values() for v in vs
+                  if "Multicolor" in v.colors and len(v.colors) > 1 and v.finishes and v.qualities)
+    row = _vendor_listed(ref, allows, "Black and White")
+    assert (row.color_name, row.color_method) == ("Multicolor", "multicolor_from_vendor") and not row.tree_gaps
+
+
 # --- rule 2: no vendor colour, a variety sold in several -------------------------------------------------------------
 
 def test_no_colour_and_a_multi_colour_variety_is_unconfirmed(ref, patagonia):

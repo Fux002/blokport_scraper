@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from stone_pipeline.config.categories import active_categories
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
 from stone_pipeline.reference.loaders.common import norm
 from stone_pipeline.stages.product_state import sku_from
@@ -125,10 +125,11 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
                  acked: dict[str, set[tuple[str, str]]] | None = None,
                  category_labels: dict[str, str] | None = None,
                  source_code: str, published: frozenset[str] = frozenset()) -> None:
+    listed = sku_from(source_code, row.surrogate_key) in published
     for id_field in REQUIRED_ID_FIELDS:
         if not getattr(row, id_field, None):
             row.add_reject(RejectReason(rule="required_id_null", detail=id_field))
-    if row.tree_gaps:
+    if row.tree_gaps and not (listed and _only_a_pending_multicolour_leaf(row)):
         kinds = ",".join(sorted({str(g.gap_kind) for g in row.tree_gaps}))
         row.add_reject(RejectReason(rule="tree_gap", detail=kinds))
     # a row may only emit under an ACTIVE category's pcat (registry); a category
@@ -189,8 +190,7 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
     # NEW listing: it is held until the operator states the colour. A listing Medusa already has (its SKU in
     # `published`, the known-products export) stays listed with the colour it carries (loads never remove);
     # its colour_unconfirmed flag keeps it in the operator's queue.
-    if (any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags)
-            and sku_from(source_code, row.surrogate_key) not in published):
+    if any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags) and not listed:
         row.add_reject(RejectReason(rule="colour_unconfirmed", detail=row.color_name or ""))
     # VE2 value_frozen: a resolved attribute value that is RESTRICTED (archived or internal in attributes.csv,
     # per restricted_values) is HELD -- it is NEVER re-resolved to a nearby active value -- UNLESS Medusa already
@@ -205,6 +205,17 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
         for category, name in _frozen_value_pairs(row, category_labels or {}):
             if name and norm(name) in frozen.get(category, ()) and (category, norm(name)) not in exempt:
                 row.add_reject(RejectReason(rule="value_frozen", detail=f"{category}={name}"))
+
+
+def _only_a_pending_multicolour_leaf(row: CanonicalRow) -> bool:
+    """Every tree gap of the row is the multicolour colour leaf reconcile raised while the row carries the colour
+    it was listed with (FlagCode.multicolour_leaf_pending): a PUBLISHED listing keeps listing and updating on that
+    colour (stock included) while the leaf waits for approval; it is never frozen behind an approval."""
+    pending = {norm(f.best_guess) for f in row.review_flags
+               if f.code == FlagCode.multicolour_leaf_pending and f.best_guess}
+    return bool(pending) and all(
+        g.gap_kind == GapKind.missing_leaf_child and norm(g.suggested_color or "") in pending
+        and not (g.suggested_finish or g.suggested_quality) for g in row.tree_gaps)
 
 
 def _archived_variation_keys() -> set[str]:
