@@ -26,28 +26,13 @@ from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import load_backbone
 from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.stages import curate, match_variation
-from stone_pipeline.stages.curate import ImportFile
 from stone_pipeline.stages.curate.context import CurationResult
 from stone_pipeline.stages.curate.minting import leaf_updates
 from stone_pipeline.state import writeback as wb
+from stone_pipeline.tests._existing_index import existing_index
 from stone_pipeline.tests.test_origin_aware_matching import _stage
 
-GRANITE_KEY, MARBLE_KEY = "slab_granite_aqua_blue_G", "slab_marble_aqua_blue_M"
-
-
-def _imports(varieties) -> dict[str, ImportFile]:
-    branches = {}
-    for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None)
-        if b == "slab":
-            for key, name, aliases in varieties:
-                v = {"Key": key, "Name": name, "Image": "", "Aliases": aliases, "Volume": "",
-                     "type": proj.norm(loaders.type_slug_from_key(key))}
-                imp.varieties.append(v)
-                imp.by_name_type[(proj.norm(name), v["type"])] = v
-                imp.by_name[proj.norm(name)] = v
-        branches[b] = imp
-    return branches
+GRANITE_KEY, MARBLE_KEY = "granite__aqua_blue_G", "marble__aqua_blue_M"
 
 
 @pytest.fixture(scope="module")
@@ -63,15 +48,15 @@ def ref():
     "override",
 ])
 def test_curate_proposes_an_alias_exactly_when_the_writeback_would_learn_it(monkeypatch, ref, method):
-    monkeypatch.setattr(curate, "load_all_existing",
-                        lambda: _imports([("slab_marble_bianco_carrara_C", "Bianco Carrara", "")]))
+    monkeypatch.setattr(curate, "load_existing",
+                        lambda: existing_index(("marble__bianco_carrara_C", "Bianco Carrara", "")))
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Bianco Carara", raw_type="Marble",
-                       type_name="Marble", variation_id="C", variation_key="slab_marble_bianco_carrara_C",
+                       type_name="Marble", variation_id="C", variation_key="marble__bianco_carrara_C",
                        variation_name="Bianco Carrara", variation_method=method)
     res = curate.build_curation([row], ref)
-    proposed = [a["Key"] for a in res.alias_additions["slab"] if a["_status"] == "confirmed"]
-    assert proposed == (["slab_marble_bianco_carrara_C"] if wb.is_learned(method) else [])
+    proposed = [a["Key"] for a in res.alias_additions if a["_status"] == "confirmed"]
+    assert proposed == (["marble__bianco_carrara_C"] if wb.is_learned(method) else [])
 
 
 # --- near_meta is (name, type) ---------------------------------------------------------------------------
@@ -105,8 +90,8 @@ def _gapped(raw_type: str, nearest_key: str) -> CanonicalRow:
 
 
 def _aqua(monkeypatch):
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _imports(
-        [(GRANITE_KEY, "Aqua Blue", "Aqua Blue Granite"), (MARBLE_KEY, "Aqua Blue", "Aqua Blue Marble")]))
+    monkeypatch.setattr(curate, "load_existing", lambda: existing_index(
+        (GRANITE_KEY, "Aqua Blue", "Aqua Blue Granite"), (MARBLE_KEY, "Aqua Blue", "Aqua Blue Marble")))
     monkeypatch.setattr(curate, "_alias_model", lambda: (AliasResolver(), _aqua_meta()))
 
 
@@ -114,14 +99,14 @@ def test_a_typed_near_alias_lands_on_the_nearest_candidates_own_type(monkeypatch
     assert AliasResolver().decide("Aqua Bleu", "", [], "Aqua Blue", "", []).verdict == "alias"
     _aqua(monkeypatch)
     res = curate.build_curation([_gapped("Granite", GRANITE_KEY)], ref)
-    assert [a["Key"] for a in res.alias_additions["slab"] if a["_status"] == "confirmed"] == [GRANITE_KEY]
+    assert [a["Key"] for a in res.alias_additions if a["_status"] == "confirmed"] == [GRANITE_KEY]
 
 
 def test_a_type_less_near_alias_of_a_multi_type_name_is_held(monkeypatch, ref):
     _aqua(monkeypatch)
     res = curate.build_curation([_gapped("", GRANITE_KEY)], ref)
-    assert not res.alias_additions["slab"], "a type-less row must never be confirmed onto one of the types"
-    assert not any(res.new_variants[b] for b in res.new_variants)
+    assert not res.alias_additions, "a type-less row must never be confirmed onto one of the types"
+    assert not res.new_variants
     card = next(p for p in res.pending_confirm if p["variant"] == "Aqua Bleu")
     assert card["kind"] == "similar"
 
@@ -132,14 +117,14 @@ def test_the_gap_carries_the_nearest_candidates_key():
     base = _stage().ref
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(base), "variants": {"slab": SimpleNamespace(
-            by_id={"a": SimpleNamespace(key="slab_granite_kashmir_golda_1")})}}),
+            by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1")})}}),
         engines={"slab": VariationEngine(idx, auto_accept=92, review_floor=84)}, writeback=wb.WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Blue",
                        raw_type="Granite", raw_format="Slab")
     stage.resolve_row(row)
     gap = next(g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation)
-    assert gap.nearest_existing == "Kashmir Golda" and gap.nearest_key == "slab_granite_kashmir_golda_1"
+    assert gap.nearest_existing == "Kashmir Golda" and gap.nearest_key == "granite__kashmir_golda_1"
 
 
 # --- leaf suggestions are per (variety, type) ------------------------------------------------------------

@@ -44,8 +44,7 @@ def test_provenance_names_the_file_the_matcher_actually_read():
     assert ref.versions["variants_export"] == loaders.content_hash(used)
 
 
-def test_curate_reads_the_existing_variety_file_once_for_every_branch(count_opens):
-    imports = curate.load_all_existing()
+def test_curate_reads_the_existing_variety_file_once(count_opens):
+    existing = curate.load_existing()
     assert count_opens["n"] == 1
-    assert set(imports) == set(curate.BRANCHES)
-    assert imports["slab"].by_name_type and imports["block"].by_name_type
+    assert existing.by_name_type

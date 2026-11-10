@@ -248,26 +248,26 @@ def write_backbone_leaf_pending(pending: list[dict]) -> int:
     return len(rows)
 
 
-def write_minted_membership(backbone_new: dict[str, list[dict]]) -> int:
+def write_minted_membership(backbone_new: list[dict]) -> int:
     """Persist each variety minted THIS run with its own colour/finish/quality, as durable approved leaf
     decisions (config.db), so its backbone membership survives past this produce. The backbone_additions
     FILE stays per-run (the texture queue reads it to find new-this-run varieties); durability lives in the
-    overlay, which apply_leaf_overlay turns into a created record. Deduped across branches (one variety, one
-    membership). No new value is guessed: only the mint's own observed/seed attributes."""
+    overlay, which apply_leaf_overlay turns into a created record. One post per variety; a repeated
+    (variety, type, attribute, value) is written once. No new value is guessed: only the mint's own observed/seed
+    attributes."""
     _attr = {"color": "color", "finishes": "finish", "qualities": "quality"}   # post key -> leaf attribute
     seen: set[tuple[str, str, str, str]] = set()
     membership: list[tuple[str, str, str, str]] = []
-    for posts in backbone_new.values():
-        for p in posts:
-            variety, stone_type = p.get("variant", ""), p.get("stone_type", "")
-            if not (variety and stone_type):
-                continue
-            for post_key, attribute in _attr.items():
-                for value in p.get(post_key) or []:
-                    k = (_norm(variety), _norm(stone_type), attribute, _norm(value))
-                    if k not in seen:
-                        seen.add(k)
-                        membership.append((variety, stone_type, attribute, value))
+    for p in backbone_new:
+        variety, stone_type = p.get("variant", ""), p.get("stone_type", "")
+        if not (variety and stone_type):
+            continue
+        for post_key, attribute in _attr.items():
+            for value in p.get(post_key) or []:
+                k = (_norm(variety), _norm(stone_type), attribute, _norm(value))
+                if k not in seen:
+                    seen.add(k)
+                    membership.append((variety, stone_type, attribute, value))
     return decisions_store.record_minted_membership(membership)
 
 

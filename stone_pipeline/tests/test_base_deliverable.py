@@ -119,7 +119,6 @@ def test_the_catalog_copies_the_base_after_the_sync_settles_it(tmp_path, monkeyp
     monkeypatch.setattr(catalog.curate, "run", lambda rows, ref: types.SimpleNamespace(counts={}))
     monkeypatch.setattr("stone_pipeline.stages.decisions.heal_drifted_membership", noop)
     monkeypatch.setattr(catalog, "collect_products", lambda root: {})
-    monkeypatch.setattr(catalog.build_tile_backbone, "build", noop)
     monkeypatch.setattr(catalog.emit_catalog, "build", noop)
     monkeypatch.setattr(catalog, "collect_inventory", lambda root: 0)
     monkeypatch.setattr(catalog, "collect_discontinued", lambda root: 0)
