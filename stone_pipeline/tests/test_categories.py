@@ -8,7 +8,7 @@ import json
 
 from stone_pipeline.config import categories
 from stone_pipeline.core.schema import CanonicalRow, GapKind
-from stone_pipeline.stages import curate, image_prompts
+from stone_pipeline.stages import image_prompts
 
 
 def _accessory() -> categories.Category:
@@ -22,12 +22,6 @@ def test_one_entry_adds_a_category(monkeypatch):
     monkeypatch.setitem(categories._BY_NAME, "accessory", _accessory())
     assert categories.category("accessory").label == "Accessories"
     assert categories.category_for_key("accessory_sink_x_uuid").name == "accessory"
-
-
-def test_standalone_not_in_fanout(monkeypatch):
-    # fan_out=False: a new stone variety is never created as an accessory
-    monkeypatch.setitem(categories._BY_NAME, "accessory", _accessory())
-    assert "accessory" not in curate.active_branches()
 
 
 def test_standalone_not_texture_generated(tmp_path, monkeypatch):

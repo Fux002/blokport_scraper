@@ -9,9 +9,11 @@ import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.config.decisions_model import Decisions
+from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 from stone_pipeline.tests import _decision_views as views
+from stone_pipeline.tests._existing_index import existing_index
 
 
 @pytest.fixture(scope="module")
@@ -20,14 +22,11 @@ def ref():
 
 
 def test_key_is_deterministic_and_matches_format():
-    k1 = curate.gen_key("slab", "Marble", "Foo Bar")
-    k2 = curate.gen_key("slab", "Marble", "Foo Bar")
-    assert k1 == k2  # deterministic (uuid5), stable across runs
-    assert k1.startswith("slab_marble_foo_bar_")
+    k1 = new_key("Marble", "Foo Bar")
+    assert k1 == new_key("Marble", "Foo Bar")  # deterministic (uuid5), stable across runs
+    assert k1.startswith("marble__foo_bar_")
     # structurally a uuid suffix (5 hyphen-separated groups)
     assert len(k1.rsplit("_", 1)[1].split("-")) == 5
-    # block variant of the same material gets a different prefix, same name slug
-    assert curate.gen_key("block", "Marble", "Foo Bar").startswith("block_marble_foo_bar_")
 
 
 def test_alias_addition_preserves_and_augments(ref):
@@ -35,25 +34,22 @@ def test_alias_addition_preserves_and_augments(ref):
     # matched variety's stable Key ('Alpine' exists as BOTH Granite and Marble, so the Key -- its type is
     # the authority -- is what disambiguates which one the spelling attaches to). Use a spelling not already
     # on the live variant, so the test asserts the ADD path, not an idempotent no-op.
-    alpine_granite = curate.load_existing("slab").by_name_type[("alpine", "granite")]
+    alpine_granite = curate.load_existing().by_name_type[("alpine", "granite")]
     row = CanonicalRow(src_site="polonine", surrogate_key="1",
                        variety_match_key="Alpine Qx9", variation_id="x",
                        variation_key=alpine_granite["Key"], variation_name="Alpine",
                        variation_method="fuzzy")
     result = curate.build_curation([row], ref)
-    slab = result.alias_additions["slab"]
-    assert slab, "expected an alias addition for Alpine"
-    entry = next(e for e in slab if e["Key"] == alpine_granite["Key"])
+    assert result.alias_additions, "expected an alias addition for Alpine"
+    entry = next(e for e in result.alias_additions if e["Key"] == alpine_granite["Key"])
     assert "Alpine Qx9" in entry["_added"]
     assert entry["_status"] == "confirmed"
     # existing aliases are preserved (not overwritten)
     assert "|" in entry["Aliases"] and len(entry["Aliases"]) > len("ALPINE")
     # the spelling attaches to the Granite Alpine (matched Key), never the same-named Marble one
     assert entry["Key"] == alpine_granite["Key"]
-    # Image is re-linked to the clean deterministic {Key}.png (blank if the variant has none),
-    # never the export's internal/blank value
-    expect = curate.image_url(curate.image_filename(alpine_granite["Key"])) if (alpine_granite.get("Image") or "").strip() else ""
-    assert entry["Image"] == expect
+    # the row carries the variety's own canonical type name (the variety files' Type column)
+    assert entry["Type"] == alpine_granite["Type"]
 
 
 def test_exact_match_is_not_proposed_as_alias(ref):
@@ -61,63 +57,53 @@ def test_exact_match_is_not_proposed_as_alias(ref):
                        variety_match_key="Arabescato", variation_id="x",
                        variation_name="Arabescato", variation_method="exact")
     result = curate.build_curation([row], ref)
-    assert all(e["Name"] != "Arabescato" for e in result.alias_additions["slab"])
+    assert all(e["Name"] != "Arabescato" for e in result.alias_additions)
 
 
-def test_new_variant_emitted_for_active_categories(ref, monkeypatch):
+def _novel_row(fmt: str = "slab"):
+    r = CanonicalRow(src_site="polonine", surrogate_key="3", variety_match_key="Totally Novel Xyz", raw_type="Granite",
+                     format_value=fmt)
+    r.add_gap(TreeGap(src_site="polonine", surrogate_key="3", raw_name="Totally Novel Xyz",
+                      gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
+    return r
+
+
+def test_new_variant_emitted_once_with_an_image_for_its_products_category(ref, monkeypatch):
     from stone_pipeline.stages import decisions
-
-    def _row():
-        r = CanonicalRow(src_site="polonine", surrogate_key="3",
-                         variety_match_key="Totally Novel Xyz", raw_type="Granite")
-        r.add_gap(TreeGap(src_site="polonine", surrogate_key="3", raw_name="Totally Novel Xyz",
-                          gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
-        return r
 
     # 'every new variety is reviewed': a genuinely-new TYPED variety HOLDS for review, never auto-minted.
     monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)
-    held = curate.build_curation([_row()], ref)
+    held = curate.build_curation([_novel_row()], ref)
     assert any(p["variant"] == "Totally Novel Xyz" for p in held.pending_confirm), "new variety must hold"
-    assert not held.new_variants["slab"], "must not auto-mint before confirmation"
+    assert not held.new_variants, "must not auto-mint before confirmation"
 
-    # once the operator confirms it, the NEXT produce mints it into every active category (emit unchanged).
+    # once the operator confirms it, the NEXT produce mints it: ONE variety row and ONE backbone post, whatever
+    # its categories, and an image item for the category its product sits in (a slab) only.
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "totally novel xyz"): {"action": "mint"}}))
-    result = curate.build_curation([_row()], ref)
-    # variant created in EVERY active category (uniform catalog): slab, block, tile.
-    keys = {}
-    for branch in ("slab", "block", "tile"):
-        rows = [r for r in result.new_variants[branch] if r["Name"] == "Totally Novel Xyz"]
-        assert len(rows) == 1, f"expected new variant in {branch}"
-        out = rows[0]
-        keys[branch] = out["Key"]
-        # only the product-backed branch (slab) carries an image link; block/tile fan-out blank
-        assert out["Image"].endswith(f"{out['Key']}.png") if branch == "slab" else out["Image"] == ""
-        assert "Volume per kg (m³/kg)" in out
-        post = next(p for p in result.backbone_new[branch] if p["variant"] == "Totally Novel Xyz")
-        assert post["image_file"] == f"{out['Key']}.png"
-        assert post["key"] == out["Key"]  # backbone joins to export by this Key
-    # the product was observed as a SLAB, so only slab is product-backed and gets an
-    # image; the block/tile fan-out copies have no product -> no image generated (no cost).
-    posts = {b: next(p for p in result.backbone_new[b] if p["variant"] == "Totally Novel Xyz")
-             for b in ("slab", "block", "tile")}
-    assert posts["slab"]["product_backed"] is True
-    assert posts["block"]["product_backed"] is False
-    assert posts["tile"]["product_backed"] is False
-    gen = {i["image_filename"] for i in result.images_to_generate}
-    assert f"{keys['slab']}.png" in gen           # product-backed -> image
-    assert f"{keys['block']}.png" not in gen       # fan-out, no product -> no image
-    assert f"{keys['tile']}.png" not in gen        # fan-out, no product -> no image
+    result = curate.build_curation([_novel_row()], ref)
+    [out] = [r for r in result.new_variants if r["Name"] == "Totally Novel Xyz"]
+    assert out["Key"] == new_key("Granite", "Totally Novel Xyz") and out["Type"] == "Granite"
+    assert "Image" not in out and "Volume per kg (m³/kg)" not in out
+    [post] = [p for p in result.backbone_new if p["variant"] == "Totally Novel Xyz"]
+    assert post["key"] == out["Key"]  # backbone joins to export by this Key
+    assert post["categories"] == ["slab"]
+    assert [(i["key"], i["category"]) for i in result.images_to_generate] == [(out["Key"], "slab")]
 
 
-def test_active_branches_gates_tiles_on_config(monkeypatch):
+def test_an_inactive_category_gets_no_image(ref, monkeypatch):
     import dataclasses
     from stone_pipeline.config import categories
-    assert curate.active_branches() == ("slab", "block", "tile")  # tiles active (dev pcat set)
-    # clearing the Medusa category id deactivates the category, no code change
+    from stone_pipeline.stages import decisions
+    # clearing the Medusa category id deactivates the category, no code change: a tile product's new variety
+    # still mints its one row, but no icon is made for the inactive tile category
     tile = dataclasses.replace(categories._BY_NAME["tile"], pcat_id="")
     monkeypatch.setitem(categories._BY_NAME, "tile", tile)
-    assert curate.active_branches() == ("slab", "block")
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "totally novel xyz"): {"action": "mint"}}))
+    result = curate.build_curation([_novel_row("tile")], ref)
+    assert [r["Name"] for r in result.new_variants] == ["Totally Novel Xyz"]
+    assert result.backbone_new[0]["categories"] == [] and result.images_to_generate == []
 
 
 def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch):
@@ -132,9 +118,9 @@ def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch
                         gap_kind=GapKind.missing_variation, nearest_existing=nearest, nearest_score=82.0))
     result = curate.build_curation([row], ref)
     # not proposed as a new variant
-    assert all(r["Name"] != "Suppliers Rebrand Xyz" for r in result.new_variants["slab"])
+    assert all(r["Name"] != "Suppliers Rebrand Xyz" for r in result.new_variants)
     # proposed as an alias of the nearest existing variety, needs_review
-    target = next(r for r in result.alias_additions["slab"] if r["Name"] == nearest)
+    target = next(r for r in result.alias_additions if r["Name"] == nearest)
     assert "Suppliers Rebrand Xyz" in target["_added"]
     assert target["_status"] == "needs_review"
 
@@ -155,19 +141,19 @@ def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, mon
     held = curate.build_curation([_row()], ref)
     p = next(p for p in held.pending_confirm if p["variant"] == "Nebula Quartz Prime")
     assert p["stone_type"] == "Quartzite" and "New variety" in p["reason"]
-    assert not held.new_variants["slab"]
+    assert not held.new_variants
 
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "nebula quartz prime"): {"action": "mint"}}))
     minted = curate.build_curation([_row()], ref)
-    assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants["slab"])
+    assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants)
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in minted.pending_confirm)
 
     # a reject is ONE statement: it answers 'no' and it is the never-propose-again memory
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "nebula quartz prime"): {"action": "reject"}}))
     rejected = curate.build_curation([_row()], ref)
-    assert not rejected.new_variants["slab"], "a 'no' must not mint"
+    assert not rejected.new_variants, "a 'no' must not mint"
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"
 
 
@@ -198,7 +184,7 @@ def test_review_card_image_falls_back_to_a_sibling_row_of_the_same_variety(ref, 
     assert p2["image"] == "", "no photo anywhere -> card stays empty, never fabricated"
 
 
-def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
+def test_new_variant_emits_one_backbone_entry(ref, monkeypatch):
     from stone_pipeline.stages import decisions
 
     def _row():
@@ -209,18 +195,17 @@ def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
                           gap_kind=GapKind.missing_variation, nearest_score=30.0))
         return r
 
-    # unconfirmed new variety holds; once confirmed it mints its per-category backbone entry (below).
+    # once confirmed it mints ONE backbone entry for the variety
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "brand new stone"): {"action": "mint"}}))
     result = curate.build_curation([_row()], ref)
-    for branch, cat in (("slab", "Slabs"), ("block", "Blocks"), ("tile", "Tiles")):
-        post = next(p for p in result.backbone_new[branch] if p["variant"] == "Brand New Stone")
-        assert post["category"] == cat
-        assert post["stone_type"] == "Granite"
-        assert post["color"] == ["Blue"]
-        assert "Polished" in post["finishes"]
-        assert post["qualities"] == ["A"]
-        assert post["key"]  # the deterministic join key; Medusa assigns the Id on import
+    [post] = [p for p in result.backbone_new if p["variant"] == "Brand New Stone"]
+    assert "category" not in post
+    assert post["stone_type"] == "Granite"
+    assert post["color"] == ["Blue"]
+    assert "Polished" in post["finishes"]
+    assert post["qualities"] == ["A"]
+    assert post["key"]  # the deterministic join key; Medusa assigns the Id on import
 
 
 def test_backbone_update_flags_missing_value_with_verdict(ref):
@@ -322,7 +307,7 @@ def test_code_like_name_flagged_not_minted(ref):
     row.add_gap(TreeGap(src_site="varsha", surrogate_key="z1", raw_name="Z Astoria",
                         gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
     result = curate.build_curation([row], ref)
-    assert not any(r["Name"] == "Z Astoria" for b in result.new_variants.values() for r in b)
+    assert not any(r["Name"] == "Z Astoria" for r in result.new_variants)
     assert any(s["raw_name"] == "Z Astoria" for s in result.suspicious_names)
     assert result.counts["suspicious_names"] >= 1
 
@@ -356,33 +341,22 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     held = next(p for p in res.pending_confirm if p["variant"] == "Karur Special White")
     assert held["reason"] == ("No stone type detected. Assign the correct type to mint it. "
                               "A variety cannot exist without a type.")
-    assert not any(r["Name"] == "Karur Special White" for b in res.new_variants.values() for r in b)
+    assert not any(r["Name"] == "Karur Special White" for r in res.new_variants)
 
     views.mint("Karur Special White", stone_type="Granite")
     res2 = curate.build_curation([typeless()], ref)
-    posts = [p for b in ("slab", "block", "tile")
-             for p in res2.backbone_new[b] if p["variant"] == "Karur Special White"]
+    posts = [p for p in res2.backbone_new if p["variant"] == "Karur Special White"]
     assert posts and all(p["stone_type"] == "Granite" for p in posts)   # minted with the assigned type
-    assert all("granite" in p["key"] for p in posts)                    # and a typed Key slug
+    assert all(p["key"].startswith("granite__") for p in posts)          # and a typed Key slug
     assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
 
 
 def _inject_existing(monkeypatch, *entries):
-    """Populate curate's existing-variety index with (name, type) varieties across every branch. The index
-    normally comes from variants_export (Id-bearing, ABSENT locally), so without this the multi-type BUG6
-    path never executes and a test would pass through an unrelated branch (false confidence)."""
-    from stone_pipeline.matching import projections as proj
-
-    def load(branch):
-        imp = curate.ImportFile(branch=branch, path=None)
-        for name, typ in entries:
-            key = f"{branch}_{proj.norm(typ)}_{proj.norm(name).replace(' ', '_')}_x"
-            v = {"Key": key, "Name": name, "Image": "", "Aliases": "", "Volume": "", "type": proj.norm(typ)}
-            imp.varieties.append(v)
-            imp.by_name_type[(proj.norm(name), proj.norm(typ))] = v
-            imp.by_name[proj.norm(name)] = v
-        return imp
-    monkeypatch.setattr(curate, "load_all_existing", lambda: {b: load(b) for b in curate.BRANCHES})
+    """Populate curate's existing-variety index with (name, type) varieties. The index normally comes from
+    variants_export (Id-bearing, ABSENT locally), so without this the multi-type BUG6 path never executes and a
+    test would pass through an unrelated path (false confidence)."""
+    monkeypatch.setattr(curate, "load_existing",
+                        lambda: existing_index(*((new_key(typ, name), name, "") for name, typ in entries)))
 
 
 def _ocean_blue(raw_type):
@@ -398,7 +372,7 @@ def test_new_type_on_existing_multitype_name_holds_not_mint(ref, monkeypatch):
     _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
     res = curate.build_curation([_ocean_blue("Onyx")], ref)
     assert any(p["variant"] == "Ocean Blue" for p in res.pending_confirm)         # held for confirmation
-    assert not any("onyx" in row["Key"] for b in res.new_variants.values() for row in b
+    assert not any("onyx" in row["Key"] for row in res.new_variants
                    if row["Name"] == "Ocean Blue")                                 # NOT silently minted
 
 
@@ -406,14 +380,13 @@ def test_confirmed_new_type_mints_not_absorbed_into_a_same_name_sibling(ref, mon
     # The absorption bug behind "I can only mint it as a preset type": a CONFIRMED new type on an existing
     # multi-type name fell through to the fuzzy aliaser, which (nearest = the same name under a different
     # type) aliased it onto that sibling instead of minting ('Jasper Green Dolomite' -> 'Jasper Green
-    # Marble'). With the operator's mint decision it must MINT the new type in every category instead.
+    # Marble'). With the operator's mint decision it must MINT the new type instead.
     _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
     views.mint("Ocean Blue")
     res = curate.build_curation([_ocean_blue("Onyx")], ref)
-    minted = {rw["Key"].split("_", 1)[0] for b in res.new_variants.values() for rw in b
-              if rw["Name"] == "Ocean Blue" and "onyx" in rw["Key"]}
-    assert minted == {"slab", "block", "tile"}, \
-        "a confirmed new type must MINT in every category, not be absorbed into a same-name sibling"
+    minted = [rw["Key"] for rw in res.new_variants if rw["Name"] == "Ocean Blue"]
+    assert minted == [new_key("Onyx", "Ocean Blue")], \
+        "a confirmed new type must MINT, not be absorbed into a same-name sibling"
 
 
 def test_non_canonical_type_holds_instead_of_minting_a_malformed_variety(ref):
@@ -427,7 +400,7 @@ def test_non_canonical_type_holds_instead_of_minting_a_malformed_variety(ref):
                       gap_kind=GapKind.missing_variation, nearest_existing="", nearest_score=0.0))
     res = curate.build_curation([r], ref)
     assert any(p["variant"] == "Weird Novel Stone" for p in res.pending_confirm)   # held, asked for a type
-    minted = [row["Key"] for b in res.new_variants.values() for row in b]
+    minted = [row["Key"] for row in res.new_variants]
     assert not any("weird_novel_stone" in k for k in minted), f"minted under a non-canonical type: {minted}"
     assert not any("notarealtype" in k for k in minted), f"garbage type slug reached a Key: {minted}"
 
@@ -457,13 +430,8 @@ def test_new_type_card_names_the_owner_when_the_match_is_an_alias(ref, monkeypat
     # prod 2026-09-16: Zucchi lists 'Crystal Absolut' typed Crystal. No variety of that name exists; the name
     # is an ALIAS on the Onyx 'Absolut'. The card said "'Crystal Absolut' already exists as Onyx", which the
     # operator could not find anywhere. The card must name the owner and say it is an alias.
-    def load(branch):
-        imp = curate.ImportFile(branch=branch, path=None)
-        v = {"Key": f"{branch}_onyx_absolut_x", "Name": "Absolut", "Image": "", "Aliases": "Crystal Absolut",
-             "Volume": "", "type": "onyx"}
-        imp.varieties.append(v); imp.by_name_type[("absolut", "onyx")] = v; imp.by_name["absolut"] = v
-        return imp
-    monkeypatch.setattr(curate, "load_all_existing", lambda: {b: load(b) for b in curate.BRANCHES})
+    monkeypatch.setattr(curate, "load_existing",
+                        lambda: existing_index(("onyx__absolut_x", "Absolut", "Crystal Absolut")))
     r = CanonicalRow(src_site="zucchi", surrogate_key="ca", variety_match_key="Crystal Absolut", raw_type="Crystal")
     r.add_gap(TreeGap(src_site="zucchi", surrogate_key="ca", raw_name="Crystal Absolut",
                       gap_kind=GapKind.missing_variation, nearest_existing="Absolut", nearest_score=60.0))

@@ -183,7 +183,7 @@ def _mk_row(name, color, sk="s1"):
 
 
 def _posts(res, slug):
-    return [p for b in ("slab", "block", "tile") for p in res.backbone_new[b] if slug in p["key"]]
+    return [p for p in res.backbone_new if slug in p["key"]]
 
 
 def test_mint_with_a_restricted_type_holds(ref, monkeypatch):
@@ -201,7 +201,7 @@ def test_an_existing_variety_of_a_restricted_type_gives_no_card_or_mint(ref, mon
     # emit_new_variants every produce); a card there would flood the queue and following it would mint a
     # duplicate under a wrong type. Use a real existing variety + its own type, so would_mint is False.
     from stone_pipeline.stages.curate import existing as cur_existing
-    v = next(iter(cur_existing.load_all_existing()["slab"].varieties))
+    v = next(iter(cur_existing.load_existing().varieties))
     name, ntype = v["Name"], v["type"]                       # ntype is the normalized type slug
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"type": {ntype}})
     views.mint(name, stone_type=ntype.title())               # a stored mint decision for an EXISTING variety
@@ -252,46 +252,20 @@ def test_decision_audit_suppresses_the_mint_gap_only_for_a_ve2_hold():
 def test_a_gapped_scrape_aliasing_to_an_archived_variety_is_held(ref, monkeypatch):
     # fix 1 (round 2): the alias to an archived variety never serves, so curate surfaces an archived_variety
     # card (the alias row is still recorded). No card when the owner is active.
-    v = next(iter(cur_existing.load_all_existing()["slab"].varieties))
+    v = next(iter(cur_existing.load_existing().varieties))
     name, ntype = v["Name"], v["type"]
     active = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
     assert not any(p.get("kind") == "archived_variety" for p in active.pending_confirm)   # owner active -> no card
 
-    real = cur_existing.load_all_existing()
-    for imp in real.values():
-        for e in imp.varieties:
-            if e["Name"] == name and e["type"] == ntype:
-                e["archived"] = True
-        imp.by_name_type.clear(); imp.by_name.clear()
-        for e in imp.varieties:
-            imp.by_name_type[(proj.norm(e["Name"]), e["type"])] = e
-            imp.by_name[proj.norm(e["Name"])] = e
-    monkeypatch.setattr(curate, "load_all_existing", lambda: real)
+    real = cur_existing.load_existing()
+    for e in real.varieties:
+        if e["Name"] == name and e["type"] == ntype:
+            e["archived"] = True
+    monkeypatch.setattr(curate, "load_existing", lambda: real)
     held = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)
     card = next((p for p in held.pending_confirm if p.get("kind") == "archived_variety"), None)
     assert card is not None                                  # owner archived -> held
     assert card["stone_type"]                                # carries the owner's type (its own name|type ref)
-
-
-def test_an_archived_block_key_does_not_flag_a_slab_listing(ref, monkeypatch):
-    # fix 2: the archived check is the ROW'S OWN branch. An archived BLOCK Key must not flag a SLAB listing
-    # (whose "mint as new" would create a duplicate) -- only the slab variety's own archived state matters.
-    name = ntype = None
-    real = cur_existing.load_all_existing()
-    for e in real["slab"].varieties:                        # a variety present in both slab and block
-        if (proj.norm(e["Name"]), e["type"]) in real["block"].by_name_type:
-            name, ntype = e["Name"], e["type"]
-            break
-    if name is None:
-        import pytest as _pytest
-        _pytest.skip("no variety present in both slab and block")
-    for e in real["block"].varieties:                       # flip ONLY the block Key archived
-        if e["Name"] == name and e["type"] == ntype:
-            e["archived"] = True
-    real["block"].by_name_type[(proj.norm(name), ntype)]["archived"] = True
-    monkeypatch.setattr(curate, "load_all_existing", lambda: real)
-    res = curate.build_curation([_scrape(name, raw_type=ntype.title())], ref)   # a SLAB listing (default branch)
-    assert not any(p.get("kind") == "archived_variety" for p in res.pending_confirm)
 
 
 def test_a_global_mint_is_held_by_any_vendors_ve2_card():
@@ -391,16 +365,16 @@ def test_render_dump_attributes_writes_status_and_internal(tmp_path):
 # --- review follow-up pins (PR7): the behaviours PR5 shipped, now covered directly -------------------------
 
 def test_the_curate_index_reads_the_archived_flag_from_the_export(tmp_path, monkeypatch):
-    # LOW (PR5): load_all_existing must populate each variety's `archived` from the export STATUS column, not
+    # LOW (PR5): load_existing must populate each variety's `archived` from the export STATUS column, not
     # only when a test sets it on the index by hand (existing.py line "archived": r.archived).
     p = tmp_path / "variants_export.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)", "status"])
-        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "", "", "", "archived"])
-        w.writerow(["v2", "slab_marble_statuario_1", "Statuario", "", "", "", "active"])
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases", "status"])
+        w.writerow(["v1", "marble__carrara_1", "Carrara", "Marble", "", "archived"])
+        w.writerow(["v2", "marble__statuario_1", "Statuario", "Marble", "", "active"])
     monkeypatch.setattr(cur_existing, "existing_varieties_file", lambda: p)
-    slab = cur_existing.load_all_existing()["slab"]
+    slab = cur_existing.load_existing()
     assert slab.by_name_type[(proj.norm("Carrara"), "marble")]["archived"] is True
     assert slab.by_name_type[(proj.norm("Statuario"), "marble")]["archived"] is False
 
