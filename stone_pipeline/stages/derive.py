@@ -288,8 +288,9 @@ def _order_faces(row: CanonicalRow, length: float | None, width: float | None, m
     after the unit correction (a unit-less '203' meant as 2.03 m would otherwise sort as the longer) and after an
     override (an override is ordered too). On a swap the provenance follows the values: each face's method label and
     the flags this step raised (from `first_flag`) trade names, and the swap is recorded as `faces:ordered`. A face
-    that is None (held for retry) leaves nothing to order."""
-    if length is None or width is None or width <= length:
+    that is None (held for retry) leaves nothing to order, and neither does a face that is not positive: a parsed 0 is
+    a data error, kept where the vendor put it so validate rejects it, never moved."""
+    if length is None or width is None or length <= 0 or width <= 0 or width <= length:
         return length, width
     for i, method in enumerate(methods):
         name, _, how = method.partition(":")

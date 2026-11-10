@@ -87,3 +87,10 @@ def test_the_unit_correction_comes_before_the_order(ref):
     assert (row.length, row.width) == (2.5, 2.03)
     assert "width:cm_to_m" in _methods(row) and "faces:ordered" not in _methods(row)
     assert [f.field for f in row.review_flags if f.code == FlagCode.dimension_unit_corrected] == ["width"]
+
+
+def test_a_zero_face_is_never_ordered(ref):
+    # a parsed 0 is a data error: it stays where the vendor put it, so validate rejects it (never swapped into width)
+    row = _derive(ref, _slab(raw_dimensions="length=0m;height=1.97m"))
+    assert (row.length, row.width) == (0.0, 1.97)
+    assert "faces:ordered" not in _methods(row)
