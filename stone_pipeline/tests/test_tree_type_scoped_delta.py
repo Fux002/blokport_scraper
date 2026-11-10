@@ -71,4 +71,4 @@ def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch):
     curate.write_curation(empty, [])
     with stale.open(encoding="utf-8-sig", newline="") as h:
         rows = list(csv.reader(h))
-    assert rows == [["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]]
+    assert rows == [["Key", "Name", "Type", "Aliases"]]
