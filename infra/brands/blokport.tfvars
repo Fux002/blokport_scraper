@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
 # image also carries its pin tag (prod-<sha12> / prod-gpu-<sha12>), which the ECR lifecycle keeps (DEPLOY.md).
-prod_image_tag     = "c11507910ec28039d3acd55a4b3c115157320da6"     # full review wave A (#530-#548: sync lanes/acks/manifest, control plane, matcher type-first, photos click/isolation, infra pins/rolls), D7 base deliverable (#545), VE2 archived/internal dormant (#549-#553)
+prod_image_tag     = "eea91c517a8bd6b8ade261376ca8024c2b995782"     # the PROD CANDIDATE (#614 merge): #604 #605 #606 #608 #611 #612 #614 #616 on the old Keys; PROD_3D_RUN_PLAN_v2
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
@@ -62,7 +62,7 @@ dev_require_standard_photo = true
 # month's budget, hosted calls and GPU together, is the owner's: prod 400 USD for November's combined pass, dev 100 USD
 # (2026-11-05).
 dev_standardise_image_tag  = "standardise-pin-809b0b3e2806"
-prod_standardise_image_tag = "standardise-pin-423d02f59c1d"
+prod_standardise_image_tag = "standardise-pin-eea91c517a8b"
 dev_standardise_auto       = true
 prod_standardise_auto      = true
 # The automatic clean-up of marks (FAL) stays off in both until the owner switches it on (owner 2026-11-02); a photo the
