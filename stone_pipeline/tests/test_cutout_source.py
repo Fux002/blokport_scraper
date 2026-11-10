@@ -220,7 +220,8 @@ def test_the_meta_only_republish_touches_only_its_scope():
     # L1: every refreshed outline re-serves its product once (standard_version), so a run names what it refreshes
     from stone_pipeline.photos import cutout_meta
     s3, _, meta_key, _ = _published(record={"index": 0, "of": 1})
-    assert cutout_meta.republish(s3, scope=frozenset({B})) == dict.fromkeys(cutout_meta.OUTCOMES, 0) and s3.puts == []
+    assert cutout_meta.republish(s3, scope=frozenset({"c" * 64})) == dict.fromkeys(cutout_meta.OUTCOMES, 0)
+    assert s3.puts == []
     assert cutout_meta.republish(s3, scope=frozenset({A}))["added"] == 1 and [p[0] for p in s3.puts] == [meta_key]
 
 

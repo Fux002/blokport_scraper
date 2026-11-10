@@ -265,12 +265,13 @@ def _publish_cutout(client, slab, slab_key, etag, scraped):
     """Make and write one photo's 3D slab, its meta saying what it is made from (slab_source; scraped = {sha: scraped
     key} of its source). The outline goes first and comes back last, so a pair cut short never looks complete. A slab
     that is not one (ValueError) is reported and that photo's 3D slab removed: that product simply has no 3D, the run
-    goes on."""
+    goes on. What it is made from is read first, before anything is removed: a run record that cannot be read raises
+    and the published 3D slab stays as it is (it says nothing about the slab)."""
+    made_of = slab_source(client, slab_key, scraped)
     webp_key, meta_key = cutout_keys(slab)
     client.delete_object(Bucket=S3_BUCKET, Key=meta_key)
     try:
-        webp, meta = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read(),
-                                 **slab_source(client, slab_key, scraped))
+        webp, meta = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read(), **made_of)
     except ValueError as exc:
         print(f"   NO 3D {slab[0]}/{slab[1][:12]}: {exc}", flush=True)
         client.delete_object(Bucket=S3_BUCKET, Key=webp_key)
