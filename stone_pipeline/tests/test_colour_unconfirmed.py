@@ -107,6 +107,36 @@ def test_once_the_leaf_is_approved_the_listing_is_multicolor(ref):
     assert (row.color_name, row.color_method) == ("Multicolor", "multicolor_from_vendor") and not row.tree_gaps
 
 
+# --- rule 1 without a multicolour value (review L2): unconfirmed, never a guessed live colour ---------------------
+
+@pytest.fixture
+def no_multicolour(monkeypatch):
+    import dataclasses
+    real = normalize.active_pack
+    monkeypatch.setattr(normalize, "active_pack", lambda: dataclasses.replace(real(), multicolour_value=None))
+
+
+def test_without_a_multicolour_value_a_published_listing_keeps_its_first_named_colour(ref, patagonia, no_multicolour):
+    row = _vendor_listed(ref, patagonia, "Black and White")
+    assert (row.color_name, row.color_method) == ("Black", "colour_unconfirmed") and _unconfirmed(row)
+    assert not any(f.code == FlagCode.attr_unresolved and f.field == "color" for f in row.review_flags)
+    validate.validate_row(row, source_code="pol", published=frozenset({"POL-742"}))
+    assert not any(r.rule == "colour_unconfirmed" for r in row.reject_reasons)
+
+
+def test_without_a_multicolour_value_a_new_listing_is_held(ref, patagonia, no_multicolour):
+    row = _vendor_listed(ref, patagonia, "Black and White")
+    validate.validate_row(row, source_code="pol", published=frozenset())
+    assert any(r.rule == "colour_unconfirmed" for r in row.reject_reasons)
+
+
+def test_without_a_multicolour_value_even_a_single_colour_variety_is_unconfirmed(ref, no_multicolour):
+    single = next(v for vs in ref.backbone.by_norm_name.values() for v in vs
+                  if len(v.colors) == 1 and v.finishes and v.qualities)
+    row = _vendor_listed(ref, single, "Black and White")
+    assert row.color_method == "colour_unconfirmed" and _unconfirmed(row)
+
+
 # --- rule 2: no vendor colour, a variety sold in several -------------------------------------------------------------
 
 def test_no_colour_and_a_multi_colour_variety_is_unconfirmed(ref, patagonia):
@@ -154,6 +184,21 @@ def test_the_latest_decision_on_any_spelling_of_the_variety_wins(ref, patagonia)
                             ("varsha", "Patagonia", "Beige", "2026-11-10T10:00:00"))
     row = _reconcile(ref, _row(patagonia, variety_match_key="Patagonia Leather"))   # a spelling never decided
     assert (row.color_name, row.color_method) == ("Beige", "operator")
+
+
+def test_a_colour_decided_on_a_variety_not_yet_in_the_ledger_is_kept_for_the_vendor(tmp_path, monkeypatch):
+    # review L1: the variety is not in the ledger yet, so the decide takes the mint path. The first vendor's word
+    # defines the spelling for everyone (a GLOBAL statement); a second vendor's restates that meaning (nothing new for
+    # the variety). Each vendor's colour must still reach its own listings.
+    from stone_pipeline.config import decisions_store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    lookups = dict(exists_as=lambda name, stone_type: False, alias_target=lambda name, stone_type: None)
+    decisions_store.decide_all([("varsha", "Nova Blue")], "Nova Blue", "Quartzite", "Blue",
+                               clean=lambda spelling, stone_type: spelling, **lookups)
+    decisions_store.decide_all([("sentas", "Nova Blue")], "Nova Blue", "Quartzite", "Green",
+                               clean=lambda spelling, stone_type: spelling, **lookups)
+    decided = decisions_store.load_decisions(rows=decisions_store.statement_rows(), **lookups)
+    assert [decided.listing_colour(v, "Nova Blue", "Quartzite") for v in ("varsha", "sentas")] == ["Blue", "Green"]
 
 
 # --- the operator's item: ONE per (source, variety), in the existing review queue ---------------------------------
