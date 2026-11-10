@@ -734,3 +734,63 @@ def test_handle_is_namespaced_and_stable(ref, cfg):
     derive.derive_handle(row, cfg)
     assert row.handle == row.slug
     assert row.handle.endswith("-pol-620")
+
+
+def test_a_title_is_built_from_parts_written_by_their_fields():
+    # W10: each part by its own field, then the whole by the title's (identifier) rule. On BlokPort every part
+    # is a name, so a title reads as before; an accent never reaches a title.
+    row = _slab_row(variation_name="Brown St Laurent", finish_name="Polished", type_name="Marble")
+    derive.derive_title(row)
+    assert row.title == "Brown St Laurent Polished Marble"
+    row = _slab_row(variation_name=None, raw_name="Crème Slab 黑")
+    derive.derive_title(row)
+    assert (row.title, row.title_method) == ("", "raw_name_unfoldable")
+    row = _slab_row(variation_name=None, raw_name="Crème Slab")
+    derive.derive_title(row)
+    assert row.title == "Creme Slab"
+
+
+@pytest.mark.parametrize("text, kept", [
+    ("This granite is quarried in Brazil and is suitable for kitchen worktops and floors.", True),
+    ("Black granite slab, polished, for the kitchen and the bath of the house.", True),
+    ("HOLD FOR SAHIL BHAIYA <br /> do not sell to anyone else please thanks", False),
+    ("Granito de color gris con vetas blancas, ideal para encimeras y suelos interiores.", False),
+    ("A marble with &amp; veins that runs through the whole of the slab surface.", False),
+])
+def test_a_description_passes_only_as_english_prose(text, kept):
+    # W11 (owner O3): a supplier description passes when it is plain English prose; HTML, another language or
+    # an internal note falls back to the generated description.
+    row = _slab_row(raw_description=text)
+    derive.derive_description(row)
+    assert (row.description_method == "passthrough") is kept, row.description
+
+
+def test_a_passed_description_is_normalised_not_reworded():
+    row = _slab_row(raw_description="This granite is\r\nquarried in Brazil​ and is used in the kitchen.")
+    derive.derive_description(row)
+    assert row.description == "This granite is\nquarried in Brazil and is used in the kitchen."
+
+
+def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_form(ref):
+    # W24: the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
+    from types import SimpleNamespace
+    from stone_pipeline.core.text import UnfoldableName
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="São Francisco")
+    assert derive.collection_location(ref, cfg) == ("BR", "Sao Francisco")
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="黑")
+    with pytest.raises(UnfoldableName):
+        derive.collection_location(ref, cfg)
+
+
+def test_overrides_pass_their_fields_rules(ref):
+    # W22: an override is cleaned by its field's rule; a description override that is not English prose fails
+    # the row loudly (the row guard dead-letters it), never silently replaced.
+    from types import SimpleNamespace
+    values = {"title": "São X Polished", "origin_city": "São Paulo"}
+    over = SimpleNamespace(overrides=SimpleNamespace(get=lambda site, key, f: values.get(f)))
+    row = _slab_row()
+    derive._apply_overrides(row, over)
+    assert (row.title, row.origin_city) == ("Sao X Polished", "Sao Paulo")
+    values = {"description": "HOLD FOR SAHIL BHAIYA <br /> do not sell"}
+    with pytest.raises(ValueError):
+        derive._apply_overrides(_slab_row(), over)

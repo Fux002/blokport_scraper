@@ -24,6 +24,7 @@ updated_at); everything else is deterministic. The digests are compared with GOL
 C2 split of run_source; a mismatch names every output that changed.
 
 Regenerate (only for an INTENDED output change): RUN_SOURCE_GOLDEN=rewrite pytest stone_pipeline/tests/test_run_source_golden.py
+(on CI: dispatch the "Golden rewrite" workflow with the branch, download its artifact, review the diff, commit it)
 Any other value is refused, and a rewrite always fails the run, so a regenerated golden is never a silent pass."""
 
 from __future__ import annotations

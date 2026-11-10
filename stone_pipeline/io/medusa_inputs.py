@@ -160,6 +160,29 @@ def fetch_attributes(client=None, target=None) -> bool:
         tmp.unlink(missing_ok=True)
 
 
+# fetched and validated only by fetch_field_kinds, so the map has one fetch path (skipped by the bulk fetch_all)
+FIELD_KINDS_NAME = "field-kinds.json"
+
+
+def fetch_field_kinds(client=None, target=None) -> None:
+    """Fetch field-kinds.json, the backend's map of name and identifier fields, validate it, and swap it in.
+    Unlike fetch_attributes it RAISES on any failure: no name is written on a guessed kind, so a produce stops
+    (exit 2) and the config server's name routes answer 503 until a valid map arrives. `target` overrides the
+    destination for tests."""
+    from stone_pipeline.reference.loaders import field_kinds
+    key = f"{ENV_SEGMENT}/scraper/from_medusa/{FIELD_KINDS_NAME}"
+    target = Path(target or SETTINGS.paths.field_kinds_json)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _incoming(target)
+    try:
+        client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
+        client.download_file(S3_BUCKET, key, str(tmp))
+        field_kinds.parse(tmp.read_bytes(), key)   # validates brand + every required field before the swap
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def fetch_all() -> int:
     """Every input of this environment's from_medusa/ fetched from S3 (the produce's first step; deploy/fetch_inputs is
     an operator's manual run of it), each through the thin-copy guard, the reader check and an atomic replace: 0."""
@@ -173,7 +196,7 @@ def fetch_all() -> int:
         for obj in page.get("Contents", []):
             key = obj["Key"]
             name = key[len(prefix):]
-            if not name:  # the prefix "folder" placeholder
+            if not name or name == FIELD_KINDS_NAME:  # the prefix "folder" placeholder; the map's own fetch path
                 continue
             target = dest / name
             # guard against a key with '..' segments resolving outside dest (path traversal)

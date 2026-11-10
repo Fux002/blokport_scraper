@@ -10,8 +10,8 @@ varieties that already existed. Same input, two answers. Now one file, and a mis
 from __future__ import annotations
 
 import csv
+import dataclasses
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -29,18 +29,23 @@ def _write(path: Path, name: str, with_id: bool) -> None:
         w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Aliases": "Alpine Granite"})
 
 
-def _paths(tmp_path: Path) -> SimpleNamespace:
-    # the real paths (attributes etc. still resolve), with only the two existing-variety files redirected
-    return SimpleNamespace(**{**vars(loaders.SETTINGS.paths),
-                              "export_file": tmp_path / "variants_export.csv",
-                              "variants_export_base_csv": tmp_path / "variants_export_base.csv"})
+def _paths(tmp_path: Path):
+    # the real paths, with only the two existing-variety files redirected. dataclasses.replace keeps the derived
+    # properties (export_file, synonyms_dir, ...) that a copy of vars() would drop: a callee reading one then
+    # failed whenever its cache was cold, i.e. when this file ran alone
+    return dataclasses.replace(loaders.SETTINGS.paths, variants_export_csv=tmp_path / "variants_export.csv",
+                               variants_export_base_csv=tmp_path / "variants_export_base.csv")
+
+
+def _settings(paths):
+    return dataclasses.replace(loaders.SETTINGS, paths=paths)
 
 
 def test_live_export_wins_when_present(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     _write(paths.export_file, "Alpine Live", with_id=True)
     _write(paths.variants_export_base_csv, "Alpine Base", with_id=False)
-    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
+    monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.export_file
     assert curate.load_existing("slab").by_name_type[("alpine live", "granite")]["Key"] == KEY
 
@@ -48,7 +53,7 @@ def test_live_export_wins_when_present(tmp_path, monkeypatch):
 def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     _write(paths.variants_export_base_csv, "Alpine", with_id=False)
-    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
+    monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.variants_export_base_csv
     # curate's existing index is populated from the base: the alias surface resolves to its owner
     imp = curate.load_existing("slab")
@@ -59,7 +64,7 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
 
 
 def test_neither_file_is_a_hard_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=_paths(tmp_path)))
+    monkeypatch.setattr(loaders, "SETTINGS", _settings(_paths(tmp_path)))
     with pytest.raises(FileNotFoundError, match="variants_export.csv"):
         loaders.existing_varieties_file()
     with pytest.raises(FileNotFoundError, match="variants_export_base.csv"):
