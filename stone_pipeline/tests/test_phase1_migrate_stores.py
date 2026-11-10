@@ -39,7 +39,8 @@ def _survivors():
 
 
 def _variation(key, medusa_id=None, state="synced", **extra):
-    return {"key": key, "medusa_id": medusa_id, "state": state, "abandoned_at": None, "archived": 0, **extra}
+    return {"key": key, "medusa_id": medusa_id, "state": state, "abandoned_at": None, "archived": 0, "aliases": None,
+            "in_full": 1, **extra}
 
 
 # --- the two maps -----------------------------------------------------------------------------------------------------
@@ -69,6 +70,15 @@ def test_an_identity_s_copies_collapse_to_its_survivor_copy_under_the_new_key_se
     survivor = plan.rows[NEW]
     assert survivor["key"] == NEW and survivor["medusa_id"] == "var_B" and survivor["state"] == "dirty"
     assert plan.collapsed == {NEW: [SLAB, BLOCK, TILE]}
+
+
+def test_the_survivor_row_carries_every_copy_s_aliases_slab_casing_first_and_the_widest_in_full():
+    rows = [_variation(SLAB, "var_A", aliases=json.dumps(["Bianco Carrara", "Carrara C"]), in_full=0),
+            _variation(BLOCK, "var_B", aliases=json.dumps(["carrara c", "Statuario"]), in_full=0),
+            _variation(TILE, None, "pending", aliases=None, in_full=1)]
+    survivor = ms.plan_variations(rows, _key_map(), _survivors()).rows[NEW]
+    assert json.loads(survivor["aliases"]) == ["Bianco Carrara", "Carrara C", "Statuario"]   # union, slab casing wins
+    assert survivor["in_full"] == 1 and survivor["medusa_id"] == "var_B"
 
 
 def test_a_ghost_with_no_medusa_record_becomes_one_pending_row_from_its_first_copy_by_rank():
