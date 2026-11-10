@@ -53,12 +53,9 @@ def _largest(mask: np.ndarray) -> np.ndarray:
     return (labels == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
 
 
-def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarray, np.ndarray]:
-    """(the object inside box [x0, y0, x1, y1] (or the one object at a point (x, y)) with holes filled and
-    attachments trimmed, SAM's own mask: what it counted as stone; the holes are where labels and clips sit).
-    emb = embed(model, rgb). widest: SAM's
-    largest proposal instead of its most confident one (with straps in front, the confident one is the part
-    between the straps, the largest the whole slab; in a close-up, the whole frame of stone)."""
+def proposals(model, rgb: np.ndarray, box, emb) -> tuple[np.ndarray, np.ndarray]:
+    """(SAM's proposals for the object inside box [x0, y0, x1, y1] (or at a point (x, y)) as 0/1 masks at the photo's
+    size, one per proposal; the IoU it predicts for each). emb = embed(model, rgb)."""
     import torch
     sam, proc, device = model
     if len(box) == 2:
@@ -71,8 +68,18 @@ def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarra
         out = sam(image_embeddings=emb, **prompt)
     masks = proc.image_processor.post_process_masks(out.pred_masks.float().cpu(), raw["original_sizes"],
                                                     raw["reshaped_input_sizes"])[0][0]
-    pick = int(masks.flatten(1).sum(1).argmax()) if widest else int(out.iou_scores.cpu()[0][0].argmax())
-    raw_mask = _largest(masks[pick].numpy().astype(np.uint8))
+    return masks.numpy().astype(np.uint8), out.iou_scores.float().cpu()[0][0].numpy()
+
+
+def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarray, np.ndarray]:
+    """(the object inside box [x0, y0, x1, y1] (or the one object at a point (x, y)) with holes filled and
+    attachments trimmed, SAM's own mask: what it counted as stone; the holes are where labels and clips sit).
+    emb = embed(model, rgb). widest: SAM's
+    largest proposal instead of its most confident one (with straps in front, the confident one is the part
+    between the straps, the largest the whole slab; in a close-up, the whole frame of stone)."""
+    masks, scores = proposals(model, rgb, box, emb)
+    pick = int(masks.reshape(len(masks), -1).sum(1).argmax()) if widest else int(scores.argmax())
+    raw_mask = _largest(masks[pick])
     contours, _ = cv2.findContours(raw_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     mask = cv2.drawContours(np.zeros_like(raw_mask), contours, -1, 1, -1)   # the slab, holes filled
     k = max(3, int(C.TRIM_SHARE * min(mask.shape)))

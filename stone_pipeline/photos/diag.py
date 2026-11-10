@@ -2,7 +2,10 @@
 REAL outline step (outline.find_slabs) runs with its inner steps observed, never re-implemented, and what they saw is
 written under <env>/standardise-test/diag/ and nowhere else: <sha>.json (the detector's boxes, the outline's corners, the
 photo edges it runs into, each end's joint profile with its strongest joints and the trim taken, the neighbours, the
-reason), <sha>.mask.png (the slab mask the corners were fitted to) and <sha>.overlay.jpg. Only the survey models load.
+reason, SAM's proposals for every box it was prompted with), <sha>.mask.png (the slab mask the corners were fitted to),
+<sha>.raw.png (what SAM counted as stone for the slab's box, before holes are filled), <sha>.straps.png (the straps
+taken out of it), <sha>.proposal-<n>.png (each of SAM's proposals for the slab's box) and <sha>.overlay.jpg. Only the
+survey models load.
 Env: SRC; ONLY_KEY = the S3 key of a JSON list of shas (as stone_pipeline.photos.source); DIAG_TAG (optional) writes under
 diag/<DIAG_TAG>/ instead; RUN_TAG (optional) reads that run's retouched copy of a photo when it has one, as its
 standardise job did.
@@ -31,7 +34,7 @@ from stone_pipeline.standardise import marks, models, outline, photo
 # The inner steps of find_slabs whose calls are recorded: (module, name). find_slabs looks each up at call time.
 _OBSERVED = ((outline, "detect"), (outline, "_straps"), (marks, "four_corners"), (outline, "frame_sides"),
              (outline, "_along"), (outline, "_ends"), (outline, "_neighbours"), (outline, "_partner"),
-             (outline, "_outline_whole"))
+             (outline, "_outline_whole"), (marks, "proposals"), (marks, "slab_mask"))
 _ENDS_AXES = (("top", "bottom"), ("left", "right"))     # _along trims the rows first, then the columns
 
 
@@ -77,13 +80,38 @@ def _end(i, args, out):
             "profile": np.round(np.asarray(score, np.float64), 2).tolist()}
 
 
+def _proposal(args, out):
+    masks, scores = out
+    return {"box": [round(float(v), 1) for v in args[2]], "scores": [round(float(v), 4) for v in scores],
+            "areas": [int(m.sum()) for m in masks]}
+
+
+def _slab_images(calls, box):
+    """({name: mask}, picked) of what SAM saw for the slab's own box (the box the strap step was given): the straps taken
+    out (straps), its stone (raw), each of its proposals (proposal-<n>); picked = which proposal that stone is the largest
+    piece of. ({}, None) when no slab was detected. The slab's box is prompted once; strap and neighbour probes prompt
+    other boxes."""
+    if box is None:
+        return {}, None
+    images = {"straps": calls["_straps"][0][1]}
+    found = next((out[0] for args, out in calls["proposals"] if list(args[2]) == list(box)), [])
+    images.update({f"proposal-{n}": m for n, m in enumerate(found)})
+    raw = next((out[1] for args, out in calls["slab_mask"] if list(args[2]) == list(box)), None)
+    if raw is None:
+        return images, None
+    images["raw"] = raw
+    return images, next((n for n, m in enumerate(found) if np.array_equal(marks._largest(m), raw)), None)
+
+
 def diagnose(seg, det, rgb, size):
-    """(record, mask): what find_slabs saw on rgb (the JSON record) and the slab mask its corners were fitted to (None
-    when no slab was detected). size = the product's (length, width) in metres or None, for the steep-shot check."""
+    """(record, images): what find_slabs saw on rgb (the JSON record) and its masks by name: "mask" the slab mask its
+    corners were fitted to, plus _slab_images ({} when no slab was detected). size = the product's (length, width) in
+    metres or None, for the steep-shot check."""
     with observed() as calls:
         quads, _, _, _, reason = outline.find_slabs(seg, det, rgb)
     fitted = calls["four_corners"][0] if calls["four_corners"] else None    # the first fit is the slab's; later ones probe neighbours
     straps = calls["_straps"][0] if calls["_straps"] else None
+    images, picked = _slab_images(calls, None if straps is None else straps[0][3])
     record = {
         "shape": list(rgb.shape[:2]), "size": list(size) if size else None, "reason": reason,
         "kind": {0: "", 1: "slab", 2: "open book"}[len(quads)],
@@ -101,10 +129,14 @@ def diagnose(seg, det, rgb, size):
         "outline_whole": [bool(out) for _, out in calls["_outline_whole"]],
         "quads": [_corners(q) for q in quads],
         "steep": [outline.steep_aspect(q, size) for q in quads],
+        "proposals": [_proposal(args, out) for args, out in calls["proposals"]],
+        "picked": picked,
         "settings": {k: getattr(C, k) for k in ("JOINT_EDGE", "SLIVER_MAX", "SEAM_MIN_END", "FRAME_EDGE", "FRAME_TOUCH",
                                                  "EXTEND_MAX")},
     }
-    return record, None if fitted is None else fitted[0][0]
+    if fitted is not None:
+        images["mask"] = fitted[0][0]
+    return record, images
 
 
 def _line(inv, size, share, columns):
@@ -172,13 +204,14 @@ def diag_prefix():
     return f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{C.DIAG_DIR}/{tag + '/' if tag else ''}"
 
 
-def write(client, sha, record, rgb, mask):
-    """The photo's three diagnostic files under diag_prefix(); the mask only when a slab was detected."""
+def write(client, sha, record, rgb, images):
+    """The photo's diagnostic files under diag_prefix(): the record, each of its masks (diagnose) and the overlay."""
     out = f"{diag_prefix()}{sha}"
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}.json", Body=json.dumps(record, sort_keys=True).encode(), ContentType="application/json")
-    if mask is not None:
-        client.put_object(Bucket=S3_BUCKET, Key=f"{out}.mask.png", Body=_png(mask), ContentType="image/png")
-    client.put_object(Bucket=S3_BUCKET, Key=f"{out}.overlay.jpg", Body=source._encode(overlay(rgb, record, mask)), ContentType="image/jpeg")
+    for name, mask in sorted(images.items()):
+        client.put_object(Bucket=S3_BUCKET, Key=f"{out}.{name}.png", Body=_png(mask), ContentType="image/png")
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}.overlay.jpg", Body=source._encode(overlay(rgb, record, images.get("mask"))),
+                      ContentType="image/jpeg")
 
 
 def main() -> int:
@@ -202,9 +235,9 @@ def main() -> int:
             rgb = photo.decode(source._get(client, read))
             info = sheet.get(sha, {})
             size = tuple(info["size"]) if info.get("size") else None
-            record, mask = diagnose(m.seg, m.det, rgb, size)
+            record, images = diagnose(m.seg, m.det, rgb, size)
             record.update(sha=sha, photo=read, retouch_refused=refused)
-            write(client, sha, record, rgb, mask)
+            write(client, sha, record, rgb, images)
             print(f"   {sha[:12]} {record['reason'] or record['kind']}", flush=True)
         except Exception as exc:                       # one bad photo never stops the others; the job still fails at the end
             failed.append(sha)
