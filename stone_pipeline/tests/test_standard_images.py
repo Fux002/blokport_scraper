@@ -175,11 +175,12 @@ def test_a_run_reads_its_environment_s_current_categories_before_its_product_she
     calls = []
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)
     monkeypatch.setattr(categories, "refresh_category_pcats", lambda: calls.append("refresh"))
-    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or b"{}")
-    monkeypatch.setattr(src.index, "build", lambda text, photos: calls.append("index") or {})
+    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or
+                        (b"[]" if key.endswith(src.C.DEFAULTED_FILE) else b"{}"))
+    monkeypatch.setattr(src.index, "build", lambda text, photos, defaulted: calls.append("index") or {})
     assert src.sheet_photos(object()) == {}
     assert calls == ["fetch", "refresh", f"{settings.ENV_SEGMENT}/{src.C.SHEET_KEY}",        # prod has no committed export
-                     f"{settings.ENV_SEGMENT}/{src.C.PHOTOS_KEY}", "index"]
+                     f"{settings.ENV_SEGMENT}/{src.C.PHOTOS_KEY}", f"{settings.ENV_SEGMENT}/{src.C.DEFAULTED_KEY}", "index"]
 
 
 def _slab_category(monkeypatch, pcat="pcat_S"):
