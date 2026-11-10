@@ -29,14 +29,16 @@ from stone_pipeline.config.categories import CATEGORIES, default_form_name
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
-from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required
+from stone_pipeline.reference.loaders import attributes_status_required, type_slug_from_key, variants_status_required
 from stone_pipeline.reference.loaders.backbone import read_posts
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
 
-# category name -> plural group key, derived from the pack-built category registry (was hardcoded).
-_PREFIX_CATEGORY = {c.name: c.plural for c in CATEGORIES}
+# The categories a variety is priced in: every one a new variety fans out to (phase 1: a variety is ONE record per
+# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle (plural), the
+# value attributes.csv lists its pcat under.
+_FAN_OUT_CATEGORIES = {c.name: c.plural for c in CATEGORIES if c.fan_out}
 COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
                        "finish_id", "color_id", "quality_id")
 
@@ -233,15 +235,10 @@ def _write_uncovered(uncovered: list[dict], path: Path) -> None:
 
 
 def _key_type(key: str, attr: dict) -> str | None:
-    """The type id carried by the Key itself (branch_<type>_<name>_<uuid>, longest slug match), the same
-    authority reconcile pins the product's type to. None when the Key carries no known type: a type is then
-    the Key-matched backbone post's or the operator's, never a word guessed out of the Name."""
-    parts = key.split("_")[1:-1]  # drop branch prefix and trailing uuid
-    for i in range(len(parts), 0, -1):
-        tid = attr["type"].get(match_key(" ".join(parts[:i])))
-        if tid:
-            return tid
-    return None
+    """The type id the Key itself carries: its type slug (the one parser, phase1.variety_key), the same authority
+    reconcile pins the product's type to. None when the slug is no known type: a type is then the Key-matched
+    backbone post's or the operator's, never a word guessed out of the Name."""
+    return attr["type"].get(match_key(type_slug_from_key(key).replace("_", " ")))
 
 
 def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: list[Path],
@@ -289,7 +286,10 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if cids or qids:
             overlay_ids[(vnorm, tnorm)] = (cids, qids)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
-    cat_pcat = {p: attr["category"].get(match_key(c)) for p, c in _PREFIX_CATEGORY.items()}
+    cat_pcat = {name: attr["category"].get(match_key(handle)) for name, handle in _FAN_OUT_CATEGORIES.items()}
+    if unpriced := sorted(name for name, pcat in cat_pcat.items() if not pcat):
+        log.warning("fan-out categories with no category id in attributes.csv get no combinations",
+                    extra={"extra_fields": {"categories": unpriced}})
     type_key = {tid: k for k, tid in attr["type"].items()}              # type id -> the post's type key
 
     def combo(post) -> tuple:  # (type, colours, quals) from a backbone post, as ids
@@ -319,7 +319,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                     extra={"extra_fields": {"count": malformed, "export": str(export_csv)}})
 
     def variation_type(key: str, nl: str):
-        """TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
+        """TYPE authority: the variation's own Key type slug, else its OWN backbone post's
         type (KEY match only -- a name-only post can be a different stone), else a user-assigned type."""
         kpost = by_key.get(key)
         return _key_type(key, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
@@ -334,21 +334,6 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             d = variety.setdefault((typ, nl), {"colors": set(), "quals": set()})
             d["colors"] |= p["colors"]
             d["quals"] |= p["quals"]
-
-    # Default-form (slab) colour/quality by (type, variety-name), for cross-form inheritance below. Keyed
-    # to each default-form EXPORT row's own resolved post (by KEY), not the post's name: the block backbone
-    # is keyless and its post names have drifted from the export, so slab (100% keyed) is the only place a
-    # variety's canonical colour/quality is reliably reachable by the clean export name.
-    _default_prefix = default_form_name()
-    df_cq: dict[tuple, dict] = {}
-    for key, vid, name in export_rows:
-        if key.split("_", 1)[0] == _default_prefix:
-            p = by_key.get(key)
-            if p:
-                t, c, q = combo(p)
-                d = df_cq.setdefault((t, match_key(name)), {"colors": set(), "quals": set()})
-                d["colors"] |= c
-                d["quals"] |= q
 
     combinations: set = set()
 
@@ -366,14 +351,12 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                     combinations.add((cat, typ, vid, f, c, q))
         return True
 
-    row_meta: list[tuple] = []        # (key, vid, name, prefix), classified AFTER the assignable filter
+    row_meta: list[tuple] = []        # (key, vid, name), classified AFTER the assignable filter
     premissing: dict[str, str] = {}   # vid -> missing diagnostic when the fan-out produced nothing even pre-filter
     for key, vid, name in export_rows:
-        prefix = key.split("_", 1)[0]
-        nl = match_key(name)   # canonical: joins by_cat_name/variety/assigned_types keyed the same
+        nl = match_key(name)   # canonical: joins by_type_name/variety/assigned_types keyed the same
         # UNION every source's colours/qualities for the widest valid set (max match): the variety's
-        # backbone, the scraped product, and a same-(type, variety) product in another category.
-        # Finishes = every finish the category supports.
+        # backbone post and its scraped products in every category.
         # The variation's TYPE is intrinsic to the variation (its Key), NOT what a product asserted. A
         # product mis-bound across a name collision or base<->backbone drift must never inject its own type
         # as a valid combination for THIS variation -- that shipped cross-type products the gate can't
@@ -384,14 +367,11 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if prod := products.get(vid):
             colors |= prod["colors"]
             quals |= prod["quals"]
-        kpost = by_key.get(key)                                          # the variation's OWN backbone post
         typ = variation_type(key, nl)
-        # colour/quality sources, all the SAME variety (type, name): its own post, else the same-category post
-        # of its name and type, else a same-name post of another category with its type
-        post = kpost
+        # its own post by Key, else the post of its (type, name): one post per variety (phase 1)
+        post = by_key.get(key)
         if post is None and typ:
-            tk = type_key.get(typ, "")
-            post = by_type_name.get((tk, nl))
+            post = by_type_name.get((type_key.get(typ, ""), nl))
         if post:
             _t, c, q = combo(post)
             colors |= c
@@ -407,24 +387,15 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if typ and (ov := overlay_ids.get((nl, type_key.get(typ, "")))):
             colors |= ov[0]
             quals |= ov[1]
-        # Cross-form inheritance: a non-default-form variation (block/tile) that documents no colour or
-        # quality of its OWN inherits it from the SAME (type, variety) default-form (slab) export row -- the
-        # canonical variety vocabulary. Type-matched (never a same-name different stone) and fills ONLY an
-        # empty dimension, so a form with its own value is never widened (that would change existing
-        # combinations). This is why block, whose backbone is keyless and drifted, is priceable from slab.
-        if prefix != _default_prefix and (not colors or not quals):
-            if df := df_cq.get((typ, nl)):
-                if not colors:
-                    colors |= df["colors"]
-                if not quals:
-                    quals |= df["quals"]
         # No colour/quality default: a variation nothing describes is UNCOVERED (the review file asks the
         # operator), never priced under the catalogue's most common colour.
-        finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
-        row_meta.append((key, vid, name, prefix))
-        if not add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
-            missing = [n for n, v in (("type", typ), ("finish", finishes), ("colour", colors), ("quality", quals))
-                       if not v]
+        row_meta.append((key, vid, name))
+        priced = False
+        for cat_name, pcat in sorted(cat_pcat.items()):
+            finishes = cat_finishes.get(cat_name, []) or ([_raw_finish] if _raw_finish else [])
+            priced |= add(pcat, typ, vid, finishes, colors, quals)
+        if not priced:
+            missing = [n for n, v in (("type", typ), ("colour", colors), ("quality", quals)) if not v]
             premissing[vid] = "+".join(missing)
 
     # VE2 PR5: fan out only to ASSIGNABLE values. Drop a fan-out tuple carrying a restricted attribute id
@@ -451,7 +422,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     covered = 0
     frozen_count = 0
     uncovered: list[dict] = []
-    for key, vid, name, prefix in row_meta:
+    for key, vid, name in row_meta:
         if vid in covered_vids:
             covered += 1
         elif key in archived_keys:
@@ -459,7 +430,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         else:
             # dormant: a vid with a pre-filter diagnostic keeps it (even the empty '' main writes when only the
             # category pcat was missing); "restricted" is only for a vid dropped BY the filter (not pre-filter).
-            uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix,
+            uncovered.append({"Key": key, "Id": vid, "Name": name,
                               "missing": premissing[vid] if vid in premissing else "restricted"})
     stats = {"covered": covered, "uncovered": len(uncovered), "frozen": frozen_count,
              "combination_rows": len(combinations),

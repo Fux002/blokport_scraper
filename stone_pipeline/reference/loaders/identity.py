@@ -54,11 +54,10 @@ def pristine_seed_keys() -> frozenset:
     return frozenset()
 
 
-def collapse_to_survivors(rows, seed_keys=None, key_col="Key", name_col="Name",
-                          alias_col="Aliases", image_col="Image"):
+def collapse_to_survivors(rows, seed_keys=None, key_col="Key", name_col="Name", alias_col="Aliases"):
     """Collapse every `variety_identity` group in `rows` to ONE survivor: fold the losers' name + aliases
-    into the survivor (nothing searchable lost) and inherit a loser's image when the survivor has none,
-    then drop the losers. Order-preserving on survivors. This is the load-bearing dedup -- run on the
+    into the survivor (nothing searchable lost), then drop the losers. A variety's icons are its own (Key,
+    category) pairs on S3, never a row cell, so nothing else moves. Order-preserving on survivors. This is the load-bearing dedup -- run on the
     emitted variant set it makes the whole catalog a fixed point, so a duplicate can never ship regardless
     of a dirty base or a stale live export."""
     seed_keys = env().pristine_seed_keys() if seed_keys is None else seed_keys
@@ -83,8 +82,6 @@ def collapse_to_survivors(rows, seed_keys=None, key_col="Key", name_col="Name",
                 if a and a.casefold() != own and a.casefold() not in seen:
                     aliases.append(a)
                     seen.add(a.casefold())
-            if not (keep.get(image_col) or "").strip() and (r.get(image_col) or "").strip():
-                keep[image_col] = r[image_col]
         keep[alias_col] = "|".join(aliases)
         survivors[keep_key] = keep
     out, emitted = [], set()

@@ -13,9 +13,8 @@ from stone_pipeline.stages import image_prompts
 
 def _accessory() -> categories.Category:
     return categories.Category(
-        "accessory", "accessories", "Accessories", "pcat_ACC_X",
-        "accessories_backbone.json", base_image="",
-        shares_variety_vocab=False, fan_out=False, mirror_of=None)
+        "accessory", "accessories", "Accessories", "pcat_ACC_X", base_image="",
+        shares_variety_vocab=False, fan_out=False)
 
 
 def test_one_entry_adds_a_category(monkeypatch):
@@ -27,13 +26,12 @@ def test_one_entry_adds_a_category(monkeypatch):
 def test_standalone_not_texture_generated(tmp_path, monkeypatch):
     # base_image="": accessories use real photos via the inbox, not generation
     monkeypatch.setitem(categories._BY_NAME, "accessory", _accessory())
-    d = tmp_path / "backbone_additions"
-    d.mkdir(parents=True)
-    (d / "accessory.json").write_text(json.dumps([
-        {"key": "accessory_sink_stone_sink_abc", "variant": "Stone Sink",
-         "stone_type": "Sink", "product_backed": True}]), encoding="utf-8")
+    additions = tmp_path / "varieties.json"     # a new variety whose products sit in the accessory category
+    additions.write_text(json.dumps([
+        {"key": "sink__stone_sink_abc", "variant": "Stone Sink", "stone_type": "Sink",
+         "categories": ["accessory"]}]), encoding="utf-8")
     out = tmp_path / "prompts.json"
-    image_prompts.build(additions_dir=d, out_path=out)
+    image_prompts.build(additions_file=additions, out_path=out)
     assert json.loads(out.read_text()) == []  # no base image -> no prompt
 
 

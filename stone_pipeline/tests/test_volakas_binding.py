@@ -26,8 +26,7 @@ def engines():
     backbone, origin_map, t = load_backbone(), load_origin_map(), SETTINGS.thresholds
     out = {}
     for form in FORMS:
-        table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv", form,
-                              key_prefix=f"{form}_")
+        table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv")   # one table, every form
         index = build_variation_index(table, backbone, origin_map)
         out[form] = (VariationEngine(index, t.variation_auto_accept, t.variation_review_floor), table)
     return out
@@ -37,7 +36,7 @@ def engines():
 def test_an_iranian_volakas_marble_binds_volocas(engines, form):
     eng, table = engines[form]
     m = eng.match("Volakas Marble", block_type="Marble", block_origin="IR")
-    assert m.cid is not None and table.by_id[m.cid].key.startswith(f"{form}_marble_volocas_")
+    assert m.cid is not None and table.by_id[m.cid].key.startswith("marble__volocas_")
 
 
 @pytest.mark.parametrize("form", FORMS)

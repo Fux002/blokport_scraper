@@ -383,8 +383,8 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
 
     result, code = lifecycle.unmint_variation("granite__crystal_white_a")       # ONE Key in...
     assert code == 200
-    assert sorted(captured["retired"]) == ["granite__crystal_white_b",           # ...ALL three siblings out
-                                          "granite__crystal_white_a", "granite__crystal_white_c"]
+    assert sorted(captured["retired"]) == ["granite__crystal_white_a",           # ...ALL three siblings out
+                                          "granite__crystal_white_b", "granite__crystal_white_c"]
     assert captured["reason"] == "variation_unminted"
     assert result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["mint_decisions_cleared"] == 1                                      # cleared ONCE per variety
@@ -464,7 +464,7 @@ def test_list_minted_variations_groups_non_base_keys(monkeypatch):
     assert result["variety_count"] == 2 and result["key_count"] == 3
     assert {v["variety"] for v in result["minted"]} == {"Ocean Blue", "Lumiere"}
     ob = next(v for v in result["minted"] if v["variety"] == "Ocean Blue")
-    assert sorted(ob["keys"]) == ["quartzite__ocean_blue_b", "quartzite__ocean_blue_a"]
+    assert sorted(ob["keys"]) == ["quartzite__ocean_blue_a", "quartzite__ocean_blue_b"]
 
 
 def test_list_minted_variations_refuses_without_a_committed_base(monkeypatch):

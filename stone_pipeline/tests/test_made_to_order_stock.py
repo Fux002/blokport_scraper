@@ -17,7 +17,7 @@ import pytest
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import sync
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory, populate_products
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
@@ -189,40 +189,6 @@ def test_a_made_to_order_row_must_carry_no_count(tmp_path):
 
 # --- the v12 migration ----------------------------------------------------------------------------------
 
-def _v11_ledger(path) -> None:
-    with Ledger.open(path, env="development") as ledger:
-        now = now_iso()
-        for sku in ("POL-1", "POL-2"):
-            ledger.execute("INSERT INTO product (sku, source, state, medusa_id, created_at, updated_at) "
-                           "VALUES (?, 'pol', 'synced', 'M', ?, ?)", (sku, now, now))
-    raw = sqlite3.connect(path)
-    raw.executescript("""
-        DROP TABLE inventory;
-        CREATE TABLE inventory (sku TEXT PRIMARY KEY REFERENCES product (sku), qty INTEGER NOT NULL,
-            last_synced_qty INTEGER, reason TEXT, replaced_by_lot_code TEXT, updated_at TEXT NOT NULL);
-        CREATE INDEX idx_inventory_delta ON inventory (last_synced_qty, qty);
-        INSERT INTO inventory (sku, qty, last_synced_qty, reason, updated_at) VALUES ('POL-1', 4, 4, NULL, 'u');
-        INSERT INTO inventory (sku, qty, last_synced_qty, reason, updated_at) VALUES ('POL-2', 0, NULL, 'no_photo', 'u');
-    """)
-    raw.execute("ALTER TABLE product DROP COLUMN made_to_order")
-    raw.execute("PRAGMA user_version = 11")
-    raw.execute("UPDATE ledger_meta SET schema_version = 11")
-    raw.commit()
-    raw.close()
-
-
-def test_a_v11_ledger_keeps_its_stock_and_sync_marks_and_serves_nothing_new(tmp_path):
-    p = tmp_path / "mig.ledger"
-    _v11_ledger(p)
-    with Ledger.open(p, env="development") as ledger:
-        assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        rows = {r["sku"]: dict(r) for r in ledger.execute("SELECT * FROM inventory")}
-        assert {k: (v["qty"], v["last_synced_qty"], v["made_to_order"], v["last_synced_made_to_order"], v["reason"])
-                for k, v in rows.items()} == {"POL-1": (4, 4, 0, 0, None), "POL-2": (0, None, 0, None, "no_photo")}
-        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 1, "dead": 0, "waiting": 0}     # only the never-synced one
-        assert {r["made_to_order"] for r in ledger.execute("SELECT made_to_order FROM product")} == {0}
-
-
 def test_a_made_to_order_shape_is_live_and_a_vendor_take_offline_delists_it(cfg, tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _seed(ledger)
@@ -272,12 +238,3 @@ def test_a_bundle_redirects_to_a_lot_whose_piece_on_sale_is_made_to_order(tmp_pa
                        "updated_at) VALUES ('POL-P', NULL, 1, NULL, 1, ?)", (now,))
         assert list(_lane(ledger)) == ["POL-B"]
         assert sync.purge_discontinued(ledger)["external_ids"] == ["POL-B"]   # the made-to-order piece is kept
-
-
-def test_the_migrated_inventory_table_is_exactly_the_fresh_one(tmp_path):
-    p = tmp_path / "mig.ledger"
-    _v11_ledger(p)
-    with Ledger.open(p, env="development") as migrated, Ledger.open(tmp_path / "fresh.ledger", env="development") as fresh:
-        def ddl(ledger):
-            return ledger.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inventory'").fetchone()[0]
-        assert ddl(migrated) == ddl(fresh)

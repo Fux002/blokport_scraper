@@ -1,9 +1,9 @@
 """Stage 4: resolve variation (section 7 Stage 4, engine in section 5A).
 
-Category scoped: the branch (a registry category name) selects that category's
-variant index (ref.variants[name], from the ONE combined export), because the same
-variety has a different variation id per category. One engine per category, built
-from the registry. Standalone categories (not stone varieties) route to their own
+One engine per registry category (ref.variants[name]); since phase 1 every category
+that shares the stone-variety vocabulary indexes the SAME varieties (a variety is one
+record per (type, name), with no category), so the engine a row uses changes nothing
+about which variety it can bind. Standalone categories (not stone varieties) route to their own
 matcher via STANDALONE_MATCHERS instead. The matcher blocks on category, then type
 and colour; the input is variety_match_key; aliases participate in every tier.
 
@@ -114,9 +114,9 @@ class VariationStage:
     def build(cls, ref: ReferenceData, writeback: WriteBack | None = None,
               writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> "VariationStage":
         thresholds = SETTINGS.thresholds
-        # Stick to the category: each branch matches only against its OWN variants
-        # (no cross-category borrowing). One engine per registry category; a new
-        # category gets its engine automatically from ref.variants.
+        # One engine per registry category; a new category gets its engine automatically from ref.variants.
+        # Every stone-vocabulary category's table is the same varieties (phase 1), so each engine binds the
+        # same Keys.
         persisted = load_alias_writeback(writeback_path)  # confirmed spellings -> exact hits
         auto, floor = thresholds.variation_auto_accept, thresholds.variation_review_floor
         engines: dict[str, VariationEngine] = {}

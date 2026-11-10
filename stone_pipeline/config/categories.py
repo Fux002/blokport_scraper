@@ -121,11 +121,6 @@ def category_by_handle(handle: str) -> "Category | None":
     return next((c for c in _BY_NAME.values() if c.handle == handle), None)
 
 
-def category_for_key(key: str) -> "Category | None":
-    """The category a variant Key belongs to, by its prefix (slab_..., tile_...)."""
-    return _BY_NAME.get((key or "").split("_", 1)[0].casefold())
-
-
 def default_form_name() -> str:
     """The category a row falls back to when its format is unresolved (also the finish/dimension fallback
     source). Declared by the pack's `default_form: true`; fail loud if the pack declares none (a pack that
