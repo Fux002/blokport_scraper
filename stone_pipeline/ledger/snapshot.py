@@ -64,20 +64,34 @@ def _s3():
     return storage.aws_client("s3", config=storage.FAIL_FAST)
 
 
+# The phase 1 store generation (PHASE-1-SPEC rev 8 step 5, N4): migrated stores live under NEW keys, never over the
+# old ones, so an image from before phase 1 can only ever read the old stores. One marker in every durable store key.
+STORE_GENERATION = ".v2"
+
+
+class MigrationPending(RuntimeError):
+    """A store's old snapshot exists but its phase 1 copy does not: the store migration has not run on this stack."""
+
+
+def _legacy_key(key: str) -> str | None:
+    """The pre-phase-1 key of a durable store key (its generation marker removed), or None for a key without one."""
+    return key.replace(STORE_GENERATION + ".", ".", 1) if STORE_GENERATION + "." in key else None
+
+
 def snapshot_key(env: str = ENV_NAME) -> str:
     """S3 key for the ledger snapshot. Keyed by ENV_NAME (development|production), NOT ENV_SEGMENT (dev|prod):
     this is DURABLE state, so it lives under the durable-state prefix (development/scraper/...), a sibling of --
     NOT inside -- the regenerable data plane (dev/scraper/{from_medusa,to_upload}). See settings ENV_SEGMENT/
     ENV_NAME for the boundary."""
-    return f"{env}/scraper/ledger/{env}.db"
+    return f"{env}/scraper/ledger/{env}{STORE_GENERATION}.db"
 
 
 def config_key(env: str = ENV_NAME) -> str:
     """S3 key for the config-store snapshot, under the same DURABLE-state prefix as the ledger (ENV_NAME, e.g.
-    development/scraper/config/config.db). config.db holds the source lifecycle (pause/delist/enabled) + the
+    development/scraper/config/config.v2.db). config.db holds the source lifecycle (pause/delist/enabled) + the
     operator overlay, which are ephemeral on the task's /app disk -- snapshot it the same way as the ledger so a
     redeploy does not silently re-seed every source back to active or lose curation decisions."""
-    return f"{env}/scraper/config/config.db"
+    return f"{env}/scraper/config/config{STORE_GENERATION}.db"
 
 
 def _consistent_copy(src: Path, dest: Path) -> None:
@@ -125,6 +139,25 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None, f
                 tmp_path.unlink(missing_ok=True)
 
 
+def _refuse_an_unmigrated_store(key: str) -> None:
+    """The phase 1 boot guard, for a store whose `key` has no snapshot: refuse when its pre-phase-1 key HAS one. A
+    fresh store there would be served and uploaded as if real (and an empty write-back saved over the learned
+    aliases). Any error but absence on the old key fails loud, every store alike, since a throttle says nothing
+    about whether the old store exists. A brand-new stack (neither key) falls through to the fresh start."""
+    legacy = _legacy_key(key)
+    if legacy is None:
+        return
+    try:
+        _s3().head_object(Bucket=S3_BUCKET, Key=legacy)
+    except Exception as exc:
+        if storage.s3_error_is_missing(exc):
+            return
+        log.exception("presence check of a pre-phase-1 store FAILED; failing loud", extra={"extra_fields": {"key": legacy}})
+        raise
+    raise MigrationPending(f"{legacy} exists but {key} does not: the phase 1 store migration has not run on this "
+                           "stack (run RUN_MODE=phase1-migrate, plan SC-3-SC-4-PLAN.md section 4)")
+
+
 def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None,
             required: bool = False) -> bool:
     """Restore a single file from its latest S3 snapshot into `ledger_path` (the ledger by default; `key`
@@ -147,6 +180,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         _s3().head_object(Bucket=S3_BUCKET, Key=key)   # 404 / NoSuchKey: there is no snapshot yet
     except Exception as exc:
         if storage.s3_error_is_missing(exc):
+            _refuse_an_unmigrated_store(key)
             log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
             return False                   # genuine absence -> fresh start, never a crash-loop
         # anything else (throttle, permission, endpoint) says nothing about absence: the snapshot may exist,
@@ -332,7 +366,8 @@ def state_writeback_key(env: str = ENV_NAME) -> str:
     """S3 key for the learned-alias write-back, under the DURABLE-state prefix (ENV_NAME) beside the ledger
     and config.db, NOT the regenerable data plane."""
     from stone_pipeline.state.writeback import ALIAS_WRITEBACK
-    return f"{env}/scraper/state/{ALIAS_WRITEBACK}"
+    stem, suffix = ALIAS_WRITEBACK.rsplit(".", 1)
+    return f"{env}/scraper/state/{stem}{STORE_GENERATION}.{suffix}"
 
 
 def _writeback_path(env: str = ENV_NAME) -> Path:
