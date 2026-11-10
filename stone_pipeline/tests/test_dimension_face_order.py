@@ -77,3 +77,12 @@ def test_a_face_whose_fetch_failed_is_never_ordered(ref):
     row = _derive(ref, _slab(raw_dimensions="length=203cm", fetch_failed_fields=["width"]))
     assert row.width is None and row.length == 2.03
     assert "faces:ordered" not in _methods(row)
+
+
+def test_the_unit_correction_comes_before_the_order(ref):
+    # review L1: a unit-less '203' is centimetres read as metres; corrected to 2.03 m it is still the longer face, so
+    # there is no swap, and the correction's label and flag stay on length
+    row = _derive(ref, _slab(raw_dimensions="length=203;height=1.8"))
+    assert (row.length, row.width) == (2.03, 1.8)
+    assert "length:cm_to_m" in _methods(row) and "faces:ordered" not in _methods(row)
+    assert [f.field for f in row.review_flags if f.code == FlagCode.dimension_unit_corrected] == ["length"]
