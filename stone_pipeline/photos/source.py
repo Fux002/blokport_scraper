@@ -143,12 +143,12 @@ def again(client, out, sha):
 
 def _files(res):
     """[(name, bytes, content type)] of a result's files, every one encoded before anything is written: for a whole slab,
-    which of the slabs found it is (slab.json: slab_record_key) and then the slab, marking a whole slab; its views, main
-    last (main means the photo is complete)."""
+    which of the slabs found it is and what it is made from (slab.json: slab_record_key; photo.Result.source) and then
+    the slab, marking a whole slab; its views, main last (main means the photo is complete)."""
     files = []
     if res.slab:
-        files = [("slab.json", json.dumps({"index": res.chosen[0], "of": res.chosen[1]}, sort_keys=True).encode(),
-                  "application/json"),
+        record = {"index": res.chosen[0], "of": res.chosen[1], **res.source}
+        files = [("slab.json", json.dumps(record, sort_keys=True).encode(), "application/json"),
                  ("slab.png", _slab_png(res.slab), "image/png")]
     return files + [(f"{name}.jpg", _encode(img), "image/jpeg")
                     for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main")]

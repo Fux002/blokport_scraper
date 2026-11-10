@@ -385,6 +385,9 @@ class _S3:
     def head_object(self, Bucket, Key):
         return {"ETag": self.objects[Key]["ETag"], "Metadata": self.objects[Key]["Metadata"]}
 
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys):
+        return {"KeyCount": min(MaxKeys, sum(k.startswith(Prefix) for k in self.objects))}
+
     def copy_object(self, Bucket, Key, CopySource, ContentType, MetadataDirective):
         self.written.append(("copy", Key))
         self.objects[Key] = dict(self.objects[CopySource["Key"]])
