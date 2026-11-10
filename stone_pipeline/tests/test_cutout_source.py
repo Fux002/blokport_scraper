@@ -200,3 +200,43 @@ def test_the_meta_only_republish_leaves_a_3d_slab_publish_will_make_again_and_on
     assert cutout_meta.republish(s3)["outdated"] == 1 and s3.puts == []
     s3, _, _, _ = _published(record={"index": 0, "of": 1}, photo=False)       # the photo its run started from is gone
     assert cutout_meta.republish(s3)["unchanged"] == 1 and s3.puts == []
+
+
+# -- review of #604 (Scraper clean, 2026-11-10) --------------------------------------------------------------------
+
+def test_a_corrupt_run_record_fails_loud_and_keeps_the_3d_slab():
+    # M1: an unreadable <sha>.slab.json is not "no slab": it must never delete the product's 3D slab
+    import pytest
+    from stone_pipeline.photos import publish as pub
+    s3 = _S3({SLAB: _png(300, 200), f"{RUN}{A}.slab.json": b"{not json"})
+    webp_key, meta_key = pub.cutout_keys(("sentas", A))
+    s3.objects[webp_key], s3.objects[meta_key] = (b"old webp", {}), (b"{}", {"made-from": "x"})
+    with pytest.raises(ValueError):
+        pub._publish_cutout(s3, ("sentas", A), SLAB, '"e1"', {})
+    assert s3.objects[webp_key] == (b"old webp", {}) and s3.objects[meta_key] == (b"{}", {"made-from": "x"})
+
+
+def test_the_meta_only_republish_touches_only_its_scope():
+    # L1: every refreshed outline re-serves its product once (standard_version), so a run names what it refreshes
+    from stone_pipeline.photos import cutout_meta
+    s3, _, meta_key, _ = _published(record={"index": 0, "of": 1})
+    assert cutout_meta.republish(s3, scope=frozenset({B})) == dict.fromkeys(cutout_meta.OUTCOMES, 0) and s3.puts == []
+    assert cutout_meta.republish(s3, scope=frozenset({A}))["added"] == 1 and [p[0] for p in s3.puts] == [meta_key]
+
+
+def test_the_meta_only_republish_needs_a_scope_and_never_all_on_dev(monkeypatch):
+    import pytest
+    from stone_pipeline.photos import cutout_meta
+    monkeypatch.setattr(cutout_meta, "IS_PRODUCTION", False)
+    for value in ("", "  ", "all"):
+        monkeypatch.setenv("CUTOUT_META_SCOPE", value)
+        with pytest.raises(SystemExit):
+            cutout_meta.scope_from_env()
+    monkeypatch.setenv("CUTOUT_META_SCOPE", f"{A}, {B}")
+    assert cutout_meta.scope_from_env() == frozenset({A, B})
+    monkeypatch.setattr(cutout_meta, "IS_PRODUCTION", True)
+    monkeypatch.setenv("CUTOUT_META_SCOPE", "all")
+    assert cutout_meta.scope_from_env() is None
+    monkeypatch.setenv("CUTOUT_META_SCOPE", "")
+    with pytest.raises(SystemExit):
+        cutout_meta.scope_from_env()
