@@ -306,13 +306,10 @@ def _straps(seg, det, rgb, box, emb):
 def _without_straps(mask, straps):
     """The slab's outline with the straps taken out: the convex hull of every slab piece beside and between
     them (the straps also stick out above the slab, which would spoil the outline)."""
-    pieces = (mask > 0) & (straps == 0)
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(pieces.astype(np.uint8))
-    keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= C.STRAP_PIECE_MIN * pieces.sum()]
-    if not keep:
+    kept = proto._pieces(((mask > 0) & (straps == 0)).astype(np.uint8))
+    if not kept.any():
         return np.zeros_like(mask)
-    pts = cv2.findNonZero(np.isin(labels, keep).astype(np.uint8))
-    return cv2.fillConvexPoly(np.zeros_like(mask), cv2.convexHull(pts), 1)
+    return cv2.fillConvexPoly(np.zeros_like(mask), cv2.convexHull(cv2.findNonZero(kept)), 1)
 
 
 def find_slabs(seg, det, rgb):
@@ -350,4 +347,15 @@ def find_slabs(seg, det, rgb):
     # The detector may box a slab and the separate slab beside it as one (sen-39212b82): the neighbour explains its box.
     if not _outline_whole(box, quads + [q2 for _, q2, _, _ in beside]):
         return [], None, None, straps, "the slab continues past the outline (only part of it found)"
+    if _quad_fill(m, quads) < C.QUAD_FILL_MIN:
+        return [], None, None, straps, "not a rectangular slab (a cut corner: its fitted corners lie off the stone)"
     return quads, m, raw, straps, ""
+
+
+def _quad_fill(mask, quads):
+    """The share of the fitted slab(s) that is stone: four_corners extends the four longest edges, so a corner cut on a
+    long edge gets a corner invented off the stone (MAR-P/10/05, std-2b: 6% of the quad is wall)."""
+    fitted = np.zeros_like(mask)
+    for q in quads:
+        cv2.fillConvexPoly(fitted, q.astype(np.int32), 1)
+    return float(((fitted > 0) & (mask > 0)).sum()) / max(1, int((fitted > 0).sum()))

@@ -140,9 +140,10 @@ def _proposal(prompt):
 
 def _slab_images(calls, prompts, box):
     """({name: mask}, picked) of what SAM saw for the slab's own box (the box the strap step was given): the straps taken
-    out (straps), its stone (raw), each of its proposals (proposal-<n>); picked = which proposal that stone is the largest
-    piece of. ({}, None) when no slab was detected. The slab's box is prompted once; strap and neighbour probes prompt
-    other boxes. Only here are the slab's proposals converted (the outline step keeps just the one it picks)."""
+    out (straps), its stone (raw), each of its proposals (proposal-<n>); picked = which proposal that stone came from
+    (its largest piece, or the widest's pieces). ({}, None) when no slab was detected. The slab's box is prompted once;
+    strap and neighbour probes prompt other boxes. Only here are the slab's proposals converted (the outline step keeps
+    just the one it picks)."""
     if box is None:
         return {}, None
     target = [float(v) for v in box]
@@ -153,7 +154,8 @@ def _slab_images(calls, prompts, box):
     if raw is None:
         return images, None
     images["raw"] = raw
-    return images, next((n for n, m in enumerate(found) if np.array_equal(marks._largest(m), raw)), None)
+    return images, next((n for n, m in enumerate(found) if any(np.array_equal(keep(m), raw)
+                                                         for keep in (marks._largest, marks._pieces))), None)
 
 
 def diagnose(seg, det, rgb, size):
