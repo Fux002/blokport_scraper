@@ -281,6 +281,18 @@ def test_a_defaulted_thickness_alone_keeps_the_3d(monkeypatch):
     assert row.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
 
 
+def test_a_size_outside_the_category_s_band_links_no_3d_and_is_reported_with_the_band(monkeypatch):
+    # prod POL-648: a thickness in the width field (3.15 x 0.20); the cut-out happens to be at those proportions
+    row = _slab_row(3.15, 0.2)
+    row.add_flag(ReviewFlag(field="width", code=FlagCode.dimension_out_of_range, raw_value="0.2",
+                            confidence=Confidence.low, method="range_check", detail="band 0.45 to 9"))
+    found = []
+    _link(monkeypatch, row, _meta(1905, 121), mismatches=found)              # 15.74:1, fits 15.75:1
+    assert row.model_3d_key is None
+    assert [(f["reason"], f["length_m"], f["width_m"], f["band"]) for f in found] == [
+        ("size_out_of_band", 3.15, 0.2, {"width": "band 0.45 to 9"})]
+
+
 def test_a_misfit_is_reported_with_both_figures(monkeypatch):
     found = []
     _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 824), mismatches=found)
