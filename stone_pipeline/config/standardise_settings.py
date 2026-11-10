@@ -48,6 +48,12 @@ class STANDARDISE:
     SIDE_RATIO_MAX = 2.5           # opposite sides may differ by this factor (a slab shot at an angle): steeper leaves the far
                                    # end too soft to show (19ab0177 at 3.1; 2.4 still sharp, adeebb0f)
     SIDE_RATIO_MEASURED = 1.35     # up to this the sides measure the slab's proportions; steeper, its real size does
+    # A keystone (top and bottom differ: the camera tipped up or down at the standing slab) shortens the slab's height at
+    # a far smaller side ratio than a turn shortens its width. Measured 2026-11-10 on the dev diag set's fitted quads: all
+    # 12 keystones from 1.12 came out too wide (+0.8% to +12.4%: POL-736 1.18 +12.4%, POL-649 1.19 +7.0%); below it the
+    # error has either sign (the outline's own noise). From this, a keystone is squared at its real size. DEV-DERIVED
+    # (39 quads): the owner-confirmed prod re-run's corner records confirm the break point, or this moves to theirs.
+    SIDE_RATIO_KEYSTONE = 1.12
     ASPECT_TOLERANCE = 0.10        # the real proportions may be this much narrower than a foreshortened photo shows
     OCR_CLUSTER = 1.5              # words within this many word-heights of each other form one mark
     OCR_LINE_GAP = 3.0             # a word on a surely-read word's text line, within this many word-heights, joins it
@@ -233,6 +239,11 @@ class STANDARDISE:
     # and its GPU job read the listing's photos from here.
     PHOTOS_FILE = "standardise_photo_list.json"      # outside 3_products_*: no importer glob or source name meets it
     PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
+    # The listings whose length or width the produce filled from the pack's defaults (a sorted JSON list of handles),
+    # written from the photo list's own rows beside it: the sheet carries such a size as if real, and a photo is never
+    # squared to a guessed size (outline.steep_aspect holds it).
+    DEFAULTED_FILE = "standardise_defaulted_sizes.json"
+    DEFAULTED_KEY = "scraper/to_upload/" + DEFAULTED_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
