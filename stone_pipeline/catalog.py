@@ -458,7 +458,7 @@ def write_variants_to_delete() -> int:
             kt = key.split("_")[1] if key.count("_") >= 2 else "?"
             reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
         if reason:
-            rows.append({"Key": key, "Name": name, "Id": r.id, "Image": r.image, "reason": reason})
+            rows.append({"Key": key, "Name": name, "Id": r.id, "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     # Preserve a previously-flagged variant that auto-detection can't re-derive (e.g. a single-token
     # name like 'Sodalita' that isn't an explicit type word) AS LONG AS it is still in the export.
@@ -471,11 +471,10 @@ def write_variants_to_delete() -> int:
                 src = by_key[pk]
                 rows.append({"Key": pk, "Name": src.name or (prev.get("Name") or "").strip(),
                              "Id": src.id or (prev.get("Id") or "").strip(),
-                             "Image": src.image or (prev.get("Image") or "").strip(),
                              "reason": prev.get("reason") or "flagged for deletion"})
     out.parent.mkdir(parents=True, exist_ok=True)
     # operator-opened delete list carrying scraped Names -> sanitize against formula injection + atomic.
-    csvio.write_dicts(out, ["Key", "Name", "Id", "Image", "reason"],
+    csvio.write_dicts(out, ["Key", "Name", "Id", "reason"],
                       sorted(rows, key=lambda r: r["Key"]), sanitize=True)
     if rows:
         log.warning("junk variants in the export -- delete in Medusa + S3",

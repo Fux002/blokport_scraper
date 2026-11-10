@@ -11,13 +11,13 @@ from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQU
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.medusa_files import read_variants_export
+from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 from stone_pipeline.stages.curate.context import CurationResult
 from stone_pipeline.stages.curate.keys import BRANCHES
 
 log = logfmt.get_logger("curate")
 
-_IMPORT_COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+_IMPORT_COLS = VARIETY_FILE_COLUMNS
 
 
 def _write_csv(path: Path, cols: list[str], rows: list[dict], sanitize: bool = True) -> None:
@@ -50,23 +50,22 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
         bp.parent.mkdir(parents=True, exist_ok=True)
         bp.write_text(json.dumps(result.backbone_new[branch], indent=2, ensure_ascii=False),
                       encoding="utf-8")
-    # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias and
-    # no new image is just upsert noise (the mint guard can miss a duplicate-name generic). Keep the
-    # update file to the genuine delta -- new variants + real alias/image changes only.
-    exp_idx: dict[str, tuple[set, str]] = {}
+    # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias is just upsert
+    # noise (the mint guard can miss a duplicate-name generic). Keep the update file to the genuine delta: new
+    # variants and real alias changes only (a variety file carries no image since SC-4 2b).
+    exp_idx: dict[str, set] = {}
     ef = SETTINGS.paths.export_file
     if ef.exists():
         for r in read_variants_export(ef, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
             if r.key:
-                exp_idx[r.key] = ({proj.norm(a) for a in r.aliases}, r.image)
+                exp_idx[r.key] = {proj.norm(a) for a in r.aliases}
 
     def _is_real_delta(row: dict) -> bool:
         e = exp_idx.get(row["Key"])
         if e is None:
             return True                                    # genuinely new variant (key not in export)
         cur = {proj.norm(a) for a in (row.get("Aliases") or "").split("|") if a.strip()}
-        img = (row.get("Image") or "").strip()
-        return bool(cur - e[0]) or (bool(img) and img != e[1])   # new alias OR new image
+        return bool(cur - e)                                # a new alias
 
     # never offer a variant that is flagged for deletion (mis-typed/junk) for (re)loading
     _del = SETTINGS.paths.review_dir / "variants_to_delete.csv"
