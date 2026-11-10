@@ -326,6 +326,17 @@ def restandardise_items(scope, listings, rounds):
     return frozenset(items)
 
 
+def scope_rounds(s3, scope, listings):
+    """[(run tag, {source: Round})] of what the run tag holds of the scope's photos to re-standardise alone
+    (select.Round of a few photos), per source of the scope's `listings`: what restandardise_items checks, read before
+    the run's housekeeping so a refused scope does nothing."""
+    by_source = {}
+    for l in listings:
+        by_source.setdefault(l["source"], set()).update(sha for sha in l["photos"] if sha in scope.restandardise)
+    return [(C.RUN_TAG, {src: select.Round(s3, C.RUN_TAG, src, sorted(shas))
+                         for src, shas in sorted(by_source.items())})]
+
+
 def restandardise_kept(s3, items, run_folder):
     """[{source, sha, why}] of the re-standardised photos whose result was kept as it was (their note under
     C.RESTANDARDISED: the judge failed the redraw, or the re-run gave no whole slab), sorted: the 3D gate still blocks
@@ -753,18 +764,19 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     if scope_key and (close_only or clicks_only):
         raise ValueError("a scoped run is neither close-only nor clicks-only")
     root = f"{ROOT}{C.CLEAN_TAG}/"
+    sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
+    listings = photo_listings(sheet, photos)
+    # A scope is read and checked before anything else is done, so one that is refused leaves everything as it was.
+    scope = read_scope(s3, scope_key) if scope_key else None
+    work = scoped(listings, scope)
+    restandardise = restandardise_items(scope, work, scope_rounds(s3, scope, work)) if scope else frozenset()
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
     # No job writes now: a promotion cut short is finished, a frozen listing's too (decided before, only completed: a
     # half-written published photo would be worse; frozen means no new decision, see settle).
     if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
-    sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
-    listings = photo_listings(sheet, photos)
-    scope = read_scope(s3, scope_key) if scope_key else None
-    work = scoped(listings, scope)
     decisions = read_decisions(s3, root, listings)
-    restandardise = restandardise_items(scope, work, decisions.rounds) if scope else frozenset()
     frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
