@@ -1541,3 +1541,88 @@ def test_a_close_up_shows_only_part_of_a_slab_so_it_has_no_3d_and_no_close_view(
     res, closed = _standardised(monkeypatch, None, kind_found=[_slab(80, 100)])
     assert res.kind == "close-up" and res.slab == () and closed == []
     assert set(res.images) == {"main", "white"}
+
+
+# --- 2b: what SAM's proposals give as the slab, and a slab whose corner is cut (std-2b diag, 2026-11-10) --------------
+def _proposals_strapped(h=960, w=1280):
+    """POL-473's shape (99892dbb, std-2b): SAM's widest proposal for a strapped slab is the whole slab in three pieces,
+    the straps cutting it (its left 66k, middle 515k and right 81k px); the most confident is the middle alone."""
+    left, middle, right = (np.zeros((h, w), np.uint8) for _ in range(3))
+    cv2.fillPoly(left, [np.int32([(80, 250), (300, 250), (140, 850), (80, 850)])], 1)
+    cv2.fillPoly(middle, [np.int32([(350, 245), (930, 245), (1130, 910), (150, 910)])], 1)
+    cv2.fillPoly(right, [np.int32([(970, 240), (1200, 240), (1200, 870), (1160, 870)])], 1)
+    speck = np.zeros((h, w), np.uint8); speck[100:110, 600:610] = 1      # a fleck of the warehouse: no slab piece
+    whole = left | middle | right
+    return np.stack([middle, whole | speck, middle]), np.float32([0.999, 0.995, 0.989]), left, middle, right
+
+
+def test_the_widest_proposal_is_the_whole_slab_every_piece_of_it_not_the_largest_alone():
+    masks, scores, left, middle, right = _proposals_strapped()
+    mask, raw = marks.stone_from_proposals(masks, scores, widest=True)
+    assert np.array_equal(raw, left | middle | right)                    # the speck (0.01% of it) is no slab piece
+    assert all((mask & piece).sum() >= 0.95 * piece.sum() for piece in (left, middle, right))
+
+
+def test_the_most_confident_proposal_is_still_its_largest_piece():
+    masks, scores, _, middle, _ = _proposals_strapped()
+    mask, raw = marks.stone_from_proposals(masks, scores, widest=False)
+    assert np.array_equal(raw, middle)
+
+
+def test_a_close_up_split_by_a_crack_keeps_both_sides_of_its_stone():
+    # closeup.py prompts the whole frame with widest: a crack (or a dark vein SAM leaves out) across a close-up splits its
+    # stone, and both sides are the stone; only a sliver below STRAP_PIECE_MIN of it (the shelf's edge) is not
+    h, w = 1000, 1500
+    top, bottom, sliver = (np.zeros((h, w), np.uint8) for _ in range(3))
+    top[0:480, :] = 1
+    bottom[500:990, :] = 1
+    sliver[995:1000, 0:200] = 1
+    masks = np.stack([top, top | bottom | sliver, bottom])
+    _, raw = marks.stone_from_proposals(masks, np.float32([0.9, 0.8, 0.7]), widest=True)
+    assert np.array_equal(raw, top | bottom)                             # before: the top alone, the bottom half lost
+
+
+def test_a_strapped_slab_cut_in_three_by_its_straps_is_found_whole(monkeypatch):
+    from stone_pipeline.standardise import marks as proto
+    masks, scores, left, middle, right = _proposals_strapped()
+    rgb = np.full((960, 1280, 3), 90, np.uint8)
+    whole = left | middle | right
+    rgb[whole > 0] = _stone(960, 1280, seed=3, base=170, var=1)[whole > 0]
+    strap = np.zeros((960, 1280), np.uint8)
+    cv2.fillPoly(strap, [np.int32([(300, 140), (390, 140), (150, 914), (110, 914)])], 1)   # only the LEFT strap found
+    box = (80.0, 231.0, 1207.0, 910.0)
+    monkeypatch.setattr(outline, "detect", lambda det, img, prompt=None, threshold=None: [] if prompt else [(*box, 0.6)])
+    monkeypatch.setattr(outline, "_straps", lambda seg, det, img, b, emb: strap)
+    monkeypatch.setattr(proto, "embed", lambda seg, img: None)
+    monkeypatch.setattr(proto, "slab_mask", lambda seg, img, b, emb, widest=False:
+                        proto.stone_from_proposals(masks, scores, widest) if tuple(b) == box else (np.zeros_like(strap),) * 2)
+    quads, _, _, _, reason = outline.find_slabs(None, None, rgb)
+    assert reason == "" and len(quads) == 1
+    assert quads[0][:, 0].min() < 100 and quads[0][:, 0].max() > 1180   # both side pieces in: before, the middle only
+
+
+def _cut_corner(monkeypatch, top_left_x):
+    """MAR-P/10/05's shape (38d21a8a, std-2b): a slab whose top-right corner is cut on a long diagonal and whose top-left
+    is a short rough edge. SAM's mask is the slab alone; four_corners extends the four longest edges and invents a
+    top-left corner off the stone, the further the longer the short edge (top_left_x: where it meets the diagonal)."""
+    from stone_pipeline.standardise import marks as proto
+    h, w = 1500, 2000
+    slab = cv2.fillPoly(np.zeros((h, w), np.uint8), [np.int32([(310, 450), (top_left_x, 230), (1670, 420), (1900, 1200),
+                                                              (310, 1185)])], 1)
+    rgb = np.full((h, w, 3), 90, np.uint8)
+    rgb[slab > 0] = _stone(h, w, seed=3, base=170, var=1)[slab > 0]
+    monkeypatch.setattr(outline, "detect", lambda det, img, prompt=None, threshold=None: [] if prompt else
+                        [(300.0, 220.0, 1910.0, 1210.0, 0.6)])
+    monkeypatch.setattr(proto, "embed", lambda seg, img: None)
+    monkeypatch.setattr(proto, "slab_mask", lambda seg, img, b, emb, widest=False: (slab.copy(), slab.copy()))
+    return outline.find_slabs(None, None, rgb)
+
+
+def test_a_slab_whose_corner_is_cut_is_not_squared_to_a_corner_off_the_stone(monkeypatch):
+    quads, _, _, _, reason = _cut_corner(monkeypatch, top_left_x=850)    # the fitted quad 7% off the stone
+    assert quads == [] and "not a rectangular slab" in reason
+
+
+def test_a_slab_with_a_small_chip_off_a_corner_is_still_squared(monkeypatch):
+    quads, _, _, _, reason = _cut_corner(monkeypatch, top_left_x=550)    # 2.4% off the stone, as a chip
+    assert reason == "" and len(quads) == 1
