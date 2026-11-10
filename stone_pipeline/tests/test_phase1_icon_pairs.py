@@ -14,6 +14,7 @@ Every pair path is built and parsed through io.variety_icons, never by hand.
 
 from __future__ import annotations
 
+import csv
 import json
 
 import pytest
@@ -36,7 +37,7 @@ def test_a_pair_id_is_the_icon_path_without_its_prefix_and_suffix():
     assert variety_icons.icon_key(_K, "block") == f"{variety_icons.VARIATIONS_PREFIX}{_K}/block.png"
     key, cat = variety_icons.pair_of(f"{_K}/tile")
     assert (key, cat.name) == (_K, "tile")
-    for bad in (_K, f"{_K}/tiles", f"slab_granite_x/slab"):
+    for bad in (_K, f"{_K}/tiles", "slab_granite_x/slab"):
         with pytest.raises(ValueError):
             variety_icons.pair_of(bad)
 
@@ -116,6 +117,8 @@ class _Client:
 
 
 def test_a_generated_pair_uploads_to_its_icon_key(tmp_path, monkeypatch):
+    import types
+    monkeypatch.setattr(pvi, "SETTINGS", types.SimpleNamespace(s3=types.SimpleNamespace(dry_run=False, bucket="b")))
     monkeypatch.setattr(pvi, "DEBG_OUTPUT_DIR", tmp_path)
     (tmp_path / _K).mkdir()
     (tmp_path / _K / "block.png").write_bytes(b"png")
@@ -153,3 +156,23 @@ def test_a_re_typed_varietys_icons_move_pair_by_pair(monkeypatch):
                                        copier=lambda old_key, new_key: copied.append((old_key, new_key)) or True)
     assert copied == [(variety_icons.icon_key(_K, "block"), variety_icons.icon_key(new, "block"))]
     assert moved == 1                                                               # the slab icon is already there
+
+
+def test_the_intake_renames_an_inbox_image_to_its_pair(tmp_path, monkeypatch):
+    # the inbox folder names the category; an old-style name ({branch}_rb_<id>_<type>_<name>) or the bare Key joins
+    # the variety; the copy lands as renamed/{Key}/{category}.png, and a product-backed pair with no icon is reported
+    from stone_pipeline.stages import image_intake
+    export = tmp_path / "variants_export.csv"
+    export.write_text(f"Id,Key,Name,Aliases,status,Type,owner\nvar_1,{_K},Absolute Black,,active,Granite,scraper\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(image_intake, "_variant_files", lambda: [export])
+    monkeypatch.setattr(image_intake, "_existing_icons", lambda: {f"{_K}/slab"})
+    monkeypatch.setattr(image_intake, "product_backed_pairs", lambda: {(_K, "slab"), (_K, "block"), (_K, "tile")})
+    (tmp_path / "inbox" / "blocks").mkdir(parents=True)
+    (tmp_path / "inbox" / "blocks" / "block_rb_7_granite_absolute_black.png").write_bytes(b"png")
+    res = image_intake.run(inbox_root=tmp_path / "inbox", output_dir=tmp_path / "renamed",
+                           reports_dir=tmp_path / "reports")
+    assert (tmp_path / "renamed" / _K / "block.png").read_bytes() == b"png" and res["renamed"] == 1
+    with (tmp_path / "reports" / "images_to_generate.csv").open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [(r["Key"], r["category"]) for r in rows] == [(_K, "tile")]     # slab is on S3, block came in
