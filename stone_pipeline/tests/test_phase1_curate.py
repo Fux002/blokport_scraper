@@ -4,8 +4,13 @@ never a copy per category. The Key is the one rule (phase1.variety_key.new_key) 
 (type, variant) stays one atomic identity, so one name under two types is two varieties. No em dashes."""
 from __future__ import annotations
 
+import ast
+import csv
+import importlib
+import importlib.util
 import json
 import types
+from pathlib import Path
 
 import pytest
 
@@ -129,3 +134,46 @@ def test_the_committed_names_cleaner_refuses_a_clean_that_moves_a_key():
     ccn._check_keys_stay(before, before)
     with pytest.raises(ccn.Refused, match="1 Keys would move"):
         ccn._check_keys_stay(before, after)
+
+
+def test_the_junk_list_names_a_mistyped_variety_s_type_from_its_key(tmp_path, monkeypatch):
+    from stone_pipeline import catalog
+    export = tmp_path / "variants_export.csv"
+    key = variety_key.new_key("Onyx", "Azul White Quartzite")
+    export.write_text(f"Id,Key,Name,Type,Aliases,status\nv1,{key},Azul White Quartzite,Onyx,,active\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(catalog, "SETTINGS", types.SimpleNamespace(
+        paths=types.SimpleNamespace(export_file=export, review_dir=tmp_path / "review")))
+    assert catalog.write_variants_to_delete() == 1
+    [row] = list(csv.DictReader((tmp_path / "review" / "variants_to_delete.csv").open(encoding="utf-8-sig")))
+    assert row["reason"] == "mistyped: name says 'Quartzite' but keyed as type 'onyx'"
+
+
+CURATE = "stone_pipeline.stages.curate"
+
+
+def _curate_imports():
+    """(file:line, module, name) of every import from the curate package, at any depth and inside functions too
+    (a function-level import fails only when that function runs, so importing the module never shows it)."""
+    root = Path(__file__).resolve().parents[2]
+    for path in sorted(p for d in ("stone_pipeline", "scrapers", "deploy") for p in (root / d).rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            where = f"{path.relative_to(root)}:{getattr(node, 'lineno', 0)}"
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(CURATE):
+                yield from ((where, node.module, a.name) for a in node.names)
+            elif isinstance(node, ast.Import):
+                yield from ((where, a.name, None) for a in node.names if a.name.startswith(CURATE))
+
+
+
+def test_every_import_from_curate_names_something_curate_has():
+    missing = []
+    for where, module, name in _curate_imports():
+        try:
+            mod = importlib.import_module(module)
+        except ModuleNotFoundError:
+            missing.append(f"{where} {module}")
+            continue
+        if name and not hasattr(mod, name) and importlib.util.find_spec(f"{module}.{name}") is None:
+            missing.append(f"{where} {module}.{name}")
+    assert missing == []
