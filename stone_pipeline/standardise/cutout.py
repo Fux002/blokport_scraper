@@ -8,13 +8,20 @@ import numpy as np
 
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
+# What a 3D slab's pixels are made from, additive meta keys (Mas, 2026-11-10; the contract's parser allows extra keys).
+# Exact, for a slab its run recorded (layout.source_of): the stone's long side in real pixels before the layout enlarged
+# it, and whether it did. Only a bound, for one published before that was recorded: the long side of the photo its run
+# started from. A value that cannot be determined is absent, never false or 0.
+SOURCE_LONG_PX, UPSCALED, SOURCE_LONG_PX_MAX = "source_long_px", "upscaled", "source_long_px_max"
 
-def make(slab_png: bytes) -> tuple[bytes, bytes]:
-    """(the WebP cut-out, its meta JSON). Raises ValueError on a slab that cannot be one: no alpha, no stone, unreadable."""
+
+def make(slab_png: bytes, **extra) -> tuple[bytes, bytes]:
+    """(the WebP cut-out, its meta JSON); `extra` adds keys to the meta (what it is made from: SOURCE_LONG_PX ...).
+    Raises ValueError on a slab that cannot be one: no alpha, no stone, unreadable."""
     bgra = cv2.imdecode(np.frombuffer(slab_png, np.uint8), cv2.IMREAD_UNCHANGED)
     if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
         raise ValueError("the slab is not an RGBA image")
-    return encode(bgra)
+    return encode(bgra, **extra)
 
 
 def encode(bgra: np.ndarray, **extra) -> tuple[bytes, bytes]:

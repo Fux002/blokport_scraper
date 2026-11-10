@@ -136,11 +136,18 @@ def test_a_new_cut_out_version_makes_every_3d_slab_again(monkeypatch):
 
 
 class _Recorder:
+    """The run folder holds only the slab (no record, no photo: its meta gains nothing); records what is written."""
     def __init__(self, body):
         self.body, self.calls = body, []
 
     def get_object(self, Bucket, Key):
+        if Key != "v2/a.slab.png":
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": type("B", (), {"read": lambda _s: self.body})()}
+
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys):
+        return {"KeyCount": 0}
 
     def put_object(self, Bucket, Key, Body, ContentType, Metadata=None):
         self.calls.append(("put", Key, Metadata))
@@ -154,7 +161,7 @@ def test_a_3d_slab_is_written_outline_out_first_and_back_last_with_what_it_was_m
     s = ("sentas", A)
     webp, meta = pub.cutout_keys(s)
     client = _Recorder(_slab_png(300, 200, _rect(300, 200)))
-    assert pub._publish_cutout(client, s, "v2/a.slab.png", '"e1"')
+    assert pub._publish_cutout(client, s, "v2/a.slab.png", '"e1"', {})
     assert client.calls == [("delete", meta, None), ("put", webp, None),
                             ("put", meta, {"made-from": pub.made_from("v2/a.slab.png", '"e1"')})]
 
@@ -163,7 +170,7 @@ def test_a_slab_that_is_not_one_loses_its_old_3d_slab_and_the_run_goes_on():
     from stone_pipeline.photos import publish as pub
     s = ("sentas", A)
     client = _Recorder(b"not an image")
-    assert not pub._publish_cutout(client, s, "v2/a.slab.png", '"e1"')
+    assert not pub._publish_cutout(client, s, "v2/a.slab.png", '"e1"', {})
     assert client.calls == [("delete", k, None) for k in reversed(pub.cutout_keys(s))]
 
 

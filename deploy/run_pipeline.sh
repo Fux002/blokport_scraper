@@ -32,7 +32,10 @@ case "$RUN_MODE" in
   generate-textures)
     echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
+  cutout-meta)
+    echo "==> add what each published 3D slab is made from to its outline (the outline only; the cut-out untouched)"
+    exec python -m stone_pipeline.photos.cutout_meta ;;
   *)
-    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures)" >&2
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures | cutout-meta)" >&2
     exit 2 ;;
 esac
