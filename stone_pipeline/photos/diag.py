@@ -141,8 +141,9 @@ def _proposal(prompt):
 def _slab_images(calls, prompts, box):
     """({name: mask}, picked) of what SAM saw for the slab's own box (the box the strap step was given): the straps taken
     out (straps), its stone (raw), each of its proposals (proposal-<n>); picked = which proposal that stone came from
-    (its largest piece, or the widest's pieces). ({}, None) when no slab was detected. The slab's box is prompted once; strap and neighbour probes prompt
-    other boxes. Only here are the slab's proposals converted (the outline step keeps just the one it picks)."""
+    (its largest piece, or the widest's pieces). ({}, None) when no slab was detected. The slab's box is prompted once;
+    strap and neighbour probes prompt other boxes. Only here are the slab's proposals converted (the outline step keeps
+    just the one it picks)."""
     if box is None:
         return {}, None
     target = [float(v) for v in box]
