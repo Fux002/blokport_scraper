@@ -92,6 +92,15 @@ def _build_suggester(index):
     return SemanticSuggester(names, cids, embedder)
 
 
+
+def _block_colour(row: CanonicalRow) -> str:
+    """The colour the matcher narrows candidates by. A vendor that names several colours is the pack's multicolour
+    value as an ATTRIBUTE (normalize, rule 1), but that value is no evidence of which variety the listing is: the
+    colours the vendor named are, and the first one is what the matcher always narrowed by. So identity stays as it
+    was; only the attribute changed."""
+    named = next((f.best_guess for f in row.review_flags if f.code == FlagCode.multicolour_from_vendor), None)
+    return named or row.color_name or row.raw_color or ""
+
 @dataclass
 class VariationStage:
     """Holds the per-branch engines and indexes for a run, so alias write-back
@@ -271,7 +280,7 @@ class VariationStage:
             self._gap(row, VariationMatch(None, None, Confidence.none, "no_variety", 0.0, []))
             return
 
-        block_color = row.color_name or row.raw_color or ""
+        block_color = _block_colour(row)
         # block by the CORRECTED canonical type (type_name), not the raw scrape tag -- candidate
         # block_type is the canonical variety.stone_type, so the raw tag mis-blocks (a mis-tagged
         # 'Azul White Quartzite' under an Onyx tag, or a name-corrected type).
@@ -371,7 +380,7 @@ class VariationStage:
         candidate_name = strip_format(row.raw_name or "")
         if not candidate_name:
             return False
-        block_color = row.color_name or row.raw_color or ""
+        block_color = _block_colour(row)
         match = engine.match(candidate_name, block_type=row.type_name or row.raw_type or "", block_color=block_color,
                              block_origin=origin_evidence(row, self.source_cfg, self.ref))
         # Name identity is the real safety check, not the match tier: when the matched

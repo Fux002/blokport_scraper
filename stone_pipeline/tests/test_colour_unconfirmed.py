@@ -60,6 +60,15 @@ def test_a_vendor_text_naming_two_colours_is_multicolor(ref):
     assert not any(f.code == FlagCode.multi_value and f.field == "color" for f in row.review_flags)
 
 
+def test_the_matcher_still_narrows_by_the_colours_the_vendor_named(ref):
+    # Multicolor is the ATTRIBUTE; which variety the listing is stays decided by the vendor's own colours, as before
+    # (the golden's polonine 542, Spider Black Quartzite 'Black and White', lost its variety when Multicolor blocked)
+    from stone_pipeline.stages import match_variation
+    row = CanonicalRow(src_site="polonine", surrogate_key="542", raw_color="Black and White")
+    normalize.normalize_row(row, normalize.AttributeResolvers.build(ref), ref)
+    assert row.color_name == "Multicolor" and match_variation._block_colour(row) == "Black"
+
+
 def test_one_colour_named_twice_is_not_multicolor(ref):
     resolvers = normalize.AttributeResolvers.build(ref)
     row = CanonicalRow(src_site="polonine", surrogate_key="743", raw_color="White, white")
