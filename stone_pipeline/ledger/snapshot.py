@@ -152,7 +152,8 @@ def _refuse_an_unmigrated_store(key: str) -> None:
     except Exception as exc:
         if storage.s3_error_is_missing(exc):
             return
-        log.exception("presence check of a pre-phase-1 store FAILED; failing loud", extra={"extra_fields": {"key": legacy}})
+        log.exception("presence check of a pre-phase-1 store FAILED; failing loud",
+                      extra={"extra_fields": {"key": legacy}})
         raise
     raise MigrationPending(f"{legacy} exists but {key} does not: the phase 1 store migration has not run on this "
                            "stack (run RUN_MODE=phase1-migrate, plan SC-3-SC-4-PLAN.md section 4)")
