@@ -186,3 +186,17 @@ def test_the_run_s_cap_binds_both_budgets_whatever_the_months_say():
     assert gpu.left() == pytest.approx(0.4) and clean.left() == pytest.approx(0.4)
     gpu.settle(0.6, 0.1)                                                           # settled to what it cost
     clean.reserve(0.6)
+
+
+def test_a_refused_scope_does_nothing_at_all(monkeypatch):
+    # review L1: the scope is checked before any housekeeping, so a refused one leaves the GPU leftovers and any half
+    # settled recheck exactly as they were
+    done = []
+    monkeypatch.setattr(process.gpu, "clear_leftovers", lambda batch, run_id: done.append("clear_leftovers") or [])
+    monkeypatch.setattr(process.select, "finish", lambda s3, tags: done.append("finish") or 0)
+    monkeypatch.setattr(process, "sheet_and_photos", lambda s3: ("sheet", {}))
+    monkeypatch.setattr(process, "photo_listings", lambda sheet, photos: LISTINGS)
+    with pytest.raises(process.ScopeRefused, match="SEN-9"):
+        process.process(_scope_file(["SEN-9"]), None, select.Spend(10.0), None, "R1", 0.0, lambda m: None,
+                        scope_key=SCOPE_KEY)
+    assert done == []
