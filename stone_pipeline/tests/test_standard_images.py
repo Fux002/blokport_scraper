@@ -193,7 +193,7 @@ def test_the_product_index_follows_the_categories_refreshed_from_the_export(monk
     from stone_pipeline.standardise import index
     _slab_category(monkeypatch, "pcat_PROD_SLABS")                                        # the id prod's export carries
     sheet = "Product Handle,Product Category 1,Product Length,Product Width\nh,pcat_PROD_SLABS,3.0,1.8\n"
-    assert index.build(sheet, {"h": [("sentas", A)]})[A]["format"] == "slab"
+    assert index.build(sheet, {"h": [("sentas", A)]}, frozenset())[A]["format"] == "slab"
 
 
 def test_listings_take_each_product_s_own_photos_in_its_order_from_the_photo_list(monkeypatch):
@@ -218,7 +218,7 @@ def test_a_published_listing_keeps_all_its_own_photos_whatever_the_sheet_shows(m
     photos = {"one": [("sentas", A), ("sentas", B)]}
     assert index.listings(sheet, photos) == [
         {"key": "one", "sku": "SEN-1", "source": "sentas", "stone": ("v1", "f1"), "format": "slab", "photos": [A, B]}]
-    assert set(index.build(sheet, photos)) == {A, B}                                      # the GPU job sees both
+    assert set(index.build(sheet, photos, frozenset())) == {A, B}                                      # the GPU job sees both
 
 
 def test_a_photo_several_listings_show_is_their_stone_s_or_a_conflict():

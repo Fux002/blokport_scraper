@@ -704,13 +704,13 @@ def _active_slab(monkeypatch):
 
 
 def test_the_index_links_a_photo_to_its_first_product(_active_slab):
-    photos = index.build(SHEET, PHOTOS)
+    photos = index.build(SHEET, PHOTOS, frozenset())
     assert photos["a" * 64]["key"] == "one" and photos["a" * 64]["size"] == (3.0, 2.0) and photos["b" * 64]["format"] == "slab"
 
 
 def test_an_unknown_category_fails_loud(_active_slab):
     with pytest.raises(ValueError, match="unknown product category"):
-        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"), PHOTOS)
+        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"), PHOTOS, frozenset())
 
 
 def _whole(shape=(800, 1200)):

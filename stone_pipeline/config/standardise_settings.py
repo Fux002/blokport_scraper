@@ -239,6 +239,11 @@ class STANDARDISE:
     # and its GPU job read the listing's photos from here.
     PHOTOS_FILE = "standardise_photo_list.json"      # outside 3_products_*: no importer glob or source name meets it
     PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
+    # The listings whose length or width the produce filled from the pack's defaults (a sorted JSON list of handles),
+    # written from the photo list's own rows beside it: the sheet carries such a size as if real, and a photo is never
+    # squared to a guessed size (outline.steep_aspect holds it).
+    DEFAULTED_FILE = "standardise_defaulted_sizes.json"
+    DEFAULTED_KEY = "scraper/to_upload/" + DEFAULTED_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
