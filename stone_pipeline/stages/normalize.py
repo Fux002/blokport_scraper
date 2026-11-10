@@ -24,7 +24,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VocabResolver
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds
 
 log = logfmt.get_logger("normalize")
 
@@ -85,7 +85,10 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         if forced:
             looked = ref.attributes.resolve_id(vocab, forced)
             setattr(row, f"{vocab}_id", looked[1] if looked else None)
-            setattr(row, f"{vocab}_name", forced)
+            # a resolved override carries the vocabulary's canonical spelling; an unresolved one its field's
+            # clean form (UnfoldableName raises into the row guard: loud and isolated, never stored half-folded)
+            setattr(row, f"{vocab}_name", looked[0] if looked
+                    else field_kinds.clean(field_kinds.ATTRIBUTE_FIELDS[vocab], forced))
             setattr(row, f"{vocab}_method", "override")
             if looked:
                 setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.high))

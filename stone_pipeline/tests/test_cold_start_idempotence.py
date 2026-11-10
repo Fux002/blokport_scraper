@@ -101,11 +101,14 @@ def test_alias_normalization_is_idempotent():
     # first pass; a second pass must be a no-op, or the base never reaches a fixed point.
     name = "Grey Emperador"
     raw = ["Gray Emperador, Emperador Grey", "(Silver Emperador)", "GREY EMPEROR", "Grey Emperador"]
-    once = clean_alias_list(name, raw)
-    twice = clean_alias_list(name, once)
+    from functools import partial
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
+    once, _ = clean_alias_list(name, raw, clean)
+    twice, _ = clean_alias_list(name, once, clean)
     assert once == twice, f"clean_alias_list is not idempotent: {once} -> {twice}"
     # a second pass over an already-clean list changes nothing
-    assert clean_alias_list(name, twice) == twice
+    assert clean_alias_list(name, twice, clean) == (twice, [])
 
 
 def test_title_case_is_idempotent():

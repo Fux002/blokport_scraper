@@ -124,20 +124,6 @@ class Backbone:
         return len(self.by_norm_name)
 
 
-def _split_aliases(raw_aliases: list) -> list[str]:
-    """Backbone aliases are a list of strings, some containing comma-joined
-    surface forms (e.g. 'Preto Agata, Agate Black'). Flatten into single forms."""
-    out: list[str] = []
-    for entry in raw_aliases or []:
-        if not isinstance(entry, str):
-            continue
-        for piece in entry.split(","):
-            piece = piece.strip()
-            if piece:
-                out.append(piece)
-    return out
-
-
 def load_backbone(path: Path | None = None) -> Backbone:
     path = Path(path or env().SETTINGS.paths.backbone_json)
     if not path.exists():
@@ -160,7 +146,8 @@ def load_backbone(path: Path | None = None) -> Backbone:
             colors=[c for c in (post.get("color") or []) if c],
             finishes=[f for f in (post.get("finishes") or []) if f],
             qualities=[q for q in (post.get("qualities") or []) if q],
-            aliases=_split_aliases(post.get("aliases") or []),
+            # one alias per entry, as the writers' alias rule committed it (clean_alias_list)
+            aliases=list(post.get("aliases") or []),
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
         for alias in variety.aliases:
