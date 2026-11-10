@@ -66,7 +66,7 @@ def test_tile_resolves_when_tile_variants_supplied(ref):
     tid = "01TILEWHITETRAVERTINE00000"
     ref.variants["tile"].by_id[tid] = Variant(
         variation_id=tid, key="tile_travertine_white_travertine",
-        name="White Travertine", image="", aliases=[])
+        name="White Travertine", aliases=[])
     stage = match_variation.VariationStage.build(ref)
     row = CanonicalRow(src_site="marenostone", surrogate_key="t3",
                        format_value="Tile", variety_match_key="White Travertine",
