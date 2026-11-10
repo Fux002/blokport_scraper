@@ -194,10 +194,10 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
     """Category uniformity by UNION: a variety belongs to the STONE, not a format, so every variety present
     in ANY active fan-out category must exist in ALL of them -- no category is a master. Collect the union
     of varieties (identified by (type, clean name)) across every fan-out category, then for each fan-out
-    category emit the rows it is MISSING, with a deterministic gen_key and the variety's Name/Aliases.
+    category emit the rows it is MISSING, with a deterministic new_key and the variety's Name/Aliases.
 
     Presence is tested by (type, name), NOT by Key: the base carries LEGACY uuid4 keys (from the original
-    Medusa export) while gen_key mints uuid5, so a Key match would treat every existing variety as missing
+    Medusa export) while new_key mints uuid5, so a Key match would treat every existing variety as missing
     and duplicate all of them under a second key. Checking the identity means an existing variety -- under
     any key form -- is left untouched (additive; images preserved) and only a genuinely-absent category
     gets a fresh row. This makes the base a fixed point (every category is carried forward) and means a
@@ -205,7 +205,7 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
     first time it emits, with no code change (the future-category requirement). Derived from the CLEANED
     base rows, never the raw backbone, so cleaned names/aliases are what propagate."""
     from stone_pipeline.reference.loaders import type_slug_from_key
-    from stone_pipeline.stages.curate import gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.matching import projections as proj
     # Read the RUNTIME registry (active_categories), never the frozen CATEGORIES tuple: a category's
     # active flag depends on its Medusa pcat, which is refreshed from the on-disk export after import
@@ -236,7 +236,7 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
         for ident, (ts, disp, aliases) in varieties.items():
             if ident in present[br]:
                 continue                          # category already carries this variety (any key form)
-            mk = gen_key(br, ts, disp)
+            mk = new_key(ts, disp)
             if mk in by_key:                      # a row with this exact key already exists in the input
                 skipped.setdefault(ident, []).append((br, "key_already_in_by_key"))
                 continue
@@ -261,7 +261,7 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
         for b in fanout:
             if b in present_in:
                 continue
-            mk = gen_key(b, ts, disp)
+            mk = new_key(ts, disp)
             if mk in out:
                 miss[b] = "filled_AND_in_by_key(discarded)" if mk in by_key else "filled"
             elif mk in by_key:
