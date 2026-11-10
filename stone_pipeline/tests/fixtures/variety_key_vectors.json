@@ -98,10 +98,20 @@
     {
       "group": "mint",
       "type": "Onyx",
+      "name": "Black and Gold",
+      "slug_type": "onyx",
+      "slug_name": "black_and_gold",
+      "key": "onyx__black_and_gold_7ba24325-92b3-553e-8510-1f9357497447",
+      "problem": null,
+      "parsed_type": "onyx"
+    },
+    {
+      "group": "mint",
+      "type": "Onyx",
       "name": "Black & Gold",
       "slug_type": "onyx",
-      "slug_name": "black_gold",
-      "key": "onyx__black_gold_ff8a465c-926d-5d42-a6d8-58f169d99074",
+      "slug_name": "black_and_gold",
+      "key": "onyx__black_and_gold_7ba24325-92b3-553e-8510-1f9357497447",
       "problem": null,
       "parsed_type": "onyx"
     },

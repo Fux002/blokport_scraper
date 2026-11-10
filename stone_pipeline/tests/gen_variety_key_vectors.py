@@ -11,7 +11,7 @@ deterministic, so the file is stable. Run from the repo root:
 Three case groups:
   mint   {type,name} minted to a Key; problem null, parsed_type = the type slug. Covers the shapes easy to
          get wrong: a multi-word type, a type slug that is a prefix of another, an accented name, a bracketed
-         name, an ampersand (the slug does NOT read '&' as 'and', unlike the match key).
+         name, an ampersand (the slug reads '&' as 'and', as the match key does: owner D1).
   parse  a literal valid Key; problem null, parsed_type the type before the first `__` (multi-underscore
          type slugs round-trip).
   refuse a literal malformed Key; the varietyKeyProblem value and parsed_type null.
@@ -37,7 +37,8 @@ _MINT = [
     # RAW input, NOT a canonical identity: new_key does not strip brackets; the migration applies
     # split_bracket_alias upstream, so the real identity is "G562" with "Maple Red" as an alias (see header).
     ("Granite", "G562 (Maple Red)"),
-    ("Onyx", "Black & Gold"),                     # '&' is NOT read as 'and' by the slug (unlike match_key)
+    ("Onyx", "Black and Gold"),                   # D1: '&' reads 'and' ...
+    ("Onyx", "Black & Gold"),                     # ... so this is the SAME Key as the line above
     ("Quartzite", "Taj Mahal"),                   # two words
     ("Limestone", "Crème Brûlée"), # multiple accents
 ]
