@@ -45,3 +45,17 @@ def icon_pair(s3_key: str) -> tuple[str, Category] | None:
     if cat is None or variety_key_problem(key) is not None:
         return None
     return key, cat
+
+
+def pair_id(key: str, category_name: str) -> str:
+    """A pair's id: its icon's path under the variations prefix without ".png" (`{Key}/{category name}`). The texture
+    queue names an item by it, and the best-model marker (`_refreshed.json`) lists it. Refuses as icon_key does."""
+    return icon_key(key, category_name)[len(VARIATIONS_PREFIX):-len(_SUFFIX)]
+
+
+def pair_of(pid: str) -> tuple[str, Category]:
+    """(Key, category) of a pair id; ValueError for anything that is not one (a bare Key, a non-category name)."""
+    pair = icon_pair(f"{VARIATIONS_PREFIX}{pid}{_SUFFIX}")
+    if pair is None:
+        raise ValueError(f"variety icon: {pid!r} is not a pair id ({{Key}}/{{category name}})")
+    return pair
