@@ -54,8 +54,8 @@ CSV_COLUMNS = ("old_key", "new_key", "category_rank", "type_name")
 
 # The real run reads a PRIVATE frozen-snapshot copy, never a live store. The snapshot root holds one folder
 # per env (<root>/<env>/...), each with the stores named below; this is the repeatable "every store" proof
-# (one config block, not a scattered list of paths). A store missing from the snapshot is skipped and the run
-# prints what it read. The S3 base copies sit beside the committed base (the spec's source row names both).
+# (one config block, not a scattered list of paths). A store missing from the snapshot aborts the run, naming the env
+# and the store (MissingStore). The S3 base copies sit beside the committed base (the spec's source row names both).
 SNAPSHOT_STORES = {
     "ledger_db": ("ledger.db",),
     "config_db": ("config.db",),
