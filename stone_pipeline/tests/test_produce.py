@@ -226,6 +226,8 @@ def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_developm
     monkeypatch.setattr(fetch_inputs, "fetch_all", _boom)
     # the field-kinds fetch succeeds here, so the only exit is the export fetch's own (its failure: test_field_kinds)
     monkeypatch.setattr(fetch_inputs, "fetch_field_kinds", lambda: None)
+    # and so does the overrides fetch (its failure is fatal on every env: test_dimension_overrides)
+    monkeypatch.setattr(fetch_inputs, "fetch_overrides", lambda: False)
     monkeypatch.setattr(categories, "refresh_category_pcats", lambda: None)
     monkeypatch.setattr(produce, "IS_PRODUCTION", True, raising=False)
     with pytest.raises(SystemExit):
