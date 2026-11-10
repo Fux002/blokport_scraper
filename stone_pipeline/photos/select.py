@@ -33,7 +33,7 @@ import httpx
 from botocore.exceptions import ClientError
 
 from stone_pipeline.photos.publish import MISSING, chosen_prefix, excluded, pool_map
-from stone_pipeline.photos.source import (JUDGED_RULES, LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard,
+from stone_pipeline.photos.source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, judged_rules,
                                        noted, promote, remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
@@ -1066,7 +1066,7 @@ def settle_one(client, cands, src, sha):
         remove_candidate(client, out, sha)
         return True
     found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
-    if rule in JUDGED_RULES and (found is None or not judge.current(found)):
+    if rule in judged_rules() and (found is None or not judge.current(found)):
         return False
     if found is not None and judge.passed(found):
         promote(client, out, sha, rule)

@@ -91,9 +91,13 @@ def checked_key(out, sha, rule=None):
 
 
 REDRAW = "redraw/"
-# The rules whose candidates the judge decides now (undecided, select.settle_one): the outline recheck's and a scoped
-# run's re-standardise (C.RESTANDARDISED). A candidate under any other rule was drawn under an earlier one.
-JUDGED_RULES = (C.OUTLINE_CHECKED, C.RESTANDARDISED)
+
+
+def judged_rules():
+    """The rules whose candidates the judge decides now (undecided, select.settle_one): the outline recheck's and a
+    scoped run's re-standardise (C.RESTANDARDISED), read when asked, so a rule's new folder name is seen at once. A
+    candidate under any other rule was drawn under an earlier one."""
+    return C.OUTLINE_CHECKED, C.RESTANDARDISED
 
 
 def candidate_prefix(out):
@@ -213,13 +217,13 @@ def clear_candidate(client, out, sha):
         client.delete_object(Bucket=S3_BUCKET, Key=key)
 
 
-def draw_candidate(client, out, sha, res, rule=C.OUTLINE_CHECKED):
+def draw_candidate(client, out, sha, res, rule=None):
     """A result this version draws differently written as a candidate (candidate_prefix), never over the result: every
     file encoded first, then written as a result's are, then its completion marker, last, naming its files and the rule
-    it was drawn under (`rule`: the outline recheck's, or a scoped run's re-standardise)."""
+    it was drawn under (`rule`: a scoped run's re-standardise, else the current outline rule, read when called)."""
     files = _files(res)
     _put(client, candidate_prefix(out), sha, files)
-    marker = {"files": [[name, kind] for name, _, kind in files], "rule": rule}
+    marker = {"files": [[name, kind] for name, _, kind in files], "rule": rule or C.OUTLINE_CHECKED}
     client.put_object(Bucket=S3_BUCKET, Key=candidate_key(out, sha), ContentType="application/json",
                       Body=json.dumps(marker, sort_keys=True).encode())
 
@@ -238,7 +242,7 @@ def undecided(client, out, sha):
     """Whether the judge still decides this complete candidate: drawn under the current rule and not settled yet (no
     note of its rule). One drawn under an earlier rule is never judged: it is settled by its stored verdict alone."""
     rule = candidate_rule(client, out, sha)
-    return rule in JUDGED_RULES and not noted(client, out, sha, rule)
+    return rule in judged_rules() and not noted(client, out, sha, rule)
 
 
 def promote(client, out, sha, rule):
