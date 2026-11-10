@@ -78,6 +78,7 @@ finish_phrase_default: "a natural lime surface"
 # Name-cleaning: lime has no granite-style code convention, so no code pattern and no trailing-grade strip
 # unless Calcport's naming needs them.
 name_code_pattern: null
+multicolour_value: null
 trailing_grade_letters: false
 
 # The stone-tuned CV colour palette cannot read lime tones -> texture-colour classification OFF; colour comes

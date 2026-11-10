@@ -16,6 +16,7 @@ from stone_pipeline.stages.curate.context import CurationResult, new_curation
 from stone_pipeline.stages.curate.existing import load_existing
 from stone_pipeline.stages.curate.minting import emit_new_variants, finish, leaf_updates
 from stone_pipeline.stages.curate.output import write_curation
+from stone_pipeline.stages.curate.review import colour_cards
 
 log = logfmt.get_logger("curate")
 
@@ -30,6 +31,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData,
     collect_matched_aliases(c)
     observe_categories_and_images(c)
     classify(c)
+    c.pending_confirm.extend(colour_cards(rows, ref))
     drop_confirmed_from_review(c)
     result = CurationResult()
     emit_alias_rows(c, result)
