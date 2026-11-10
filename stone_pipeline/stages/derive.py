@@ -279,6 +279,29 @@ def _dimension(row: CanonicalRow, field: str, scraped: float | None, default: fl
     return value
 
 
+_FACE_SWAP = {"length": "width", "width": "length"}
+
+
+def _order_faces(row: CanonicalRow, length: float | None, width: float | None, methods: list[str],
+                 first_flag: int) -> tuple[float | None, float | None]:
+    """The flat-dims convention (height = thickness): length is the LONGER plan face, width the shorter. Applied once,
+    after the unit correction (a unit-less '203' meant as 2.03 m would otherwise sort as the longer) and after an
+    override (an override is ordered too). On a swap the provenance follows the values: each face's method label and
+    the flags this step raised (from `first_flag`) trade names, and the swap is recorded as `faces:ordered`. A face
+    that is None (held for retry) leaves nothing to order, and neither does a face that is not positive: a parsed 0 is
+    a data error, kept where the vendor put it so validate rejects it, never moved."""
+    if length is None or width is None or length <= 0 or width <= 0 or width <= length:
+        return length, width
+    for i, method in enumerate(methods):
+        name, _, how = method.partition(":")
+        if name in _FACE_SWAP:
+            methods[i] = f"{_FACE_SWAP[name]}:{how}"
+    for flag in row.review_flags[first_flag:]:
+        flag.field = _FACE_SWAP.get(flag.field, flag.field)
+    methods.append("faces:ordered")
+    return width, length
+
+
 def _plausible_band(lo: float, hi: float) -> tuple[float, float]:
     """The plausible band around a pack range (lo, hi): the ONE tolerance the unit correction and the
     out-of-range check share, so they can never disagree."""
@@ -312,6 +335,7 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
     category = dimension_category(row)
+    first_flag = len(row.review_flags)             # the flags this step raises (_order_faces relabels only those)
     defaults = active_pack().dimension_defaults[category]
 
     faces: dict[str, float] = {}
@@ -354,6 +378,7 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
             row.add_flag(ReviewFlag(field=_name, code=FlagCode.dimension_unit_corrected,
                                     best_guess=f"{_val}m (read as centimetres)",
                                     confidence=Confidence.medium, method="cm_to_m", src_url=row.src_url))
+    length, width = _order_faces(row, length, width, methods, first_flag)
 
     weight, weight_method = _derive_weight(row, ref, length, width, height)
     methods.append(weight_method)
