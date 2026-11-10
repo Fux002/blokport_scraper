@@ -350,4 +350,15 @@ def find_slabs(seg, det, rgb):
     # The detector may box a slab and the separate slab beside it as one (sen-39212b82): the neighbour explains its box.
     if not _outline_whole(box, quads + [q2 for _, q2, _, _ in beside]):
         return [], None, None, straps, "the slab continues past the outline (only part of it found)"
+    if _quad_fill(m, quads) < C.QUAD_FILL_MIN:
+        return [], None, None, straps, "not a rectangular slab (a cut corner: its fitted corners lie off the stone)"
     return quads, m, raw, straps, ""
+
+
+def _quad_fill(mask, quads):
+    """The share of the fitted slab(s) that is stone: four_corners extends the four longest edges, so a corner cut on a
+    long edge gets a corner invented off the stone (MAR-P/10/05, std-2b: 6% of the quad is wall)."""
+    fitted = np.zeros_like(mask)
+    for q in quads:
+        cv2.fillConvexPoly(fitted, q.astype(np.int32), 1)
+    return float(((fitted > 0) & (mask > 0)).sum()) / max(1, int((fitted > 0).sum()))

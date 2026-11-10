@@ -33,6 +33,11 @@ class STANDARDISE:
     QUAD_EPS = (0.01, 0.02, 0.03)  # hull simplification ladder (share of the perimeter), finest first: a chipped
                                    # corner fits at the finest, a rough natural edge needs a coarser one
     EDGE_COVER_MIN = 0.85          # the four longest edges must be this share of the outline: a rectangle slab
+    # The fitted slab must be at least this share stone: below it a corner was cut, not chipped, and four_corners'
+    # extended edges put a corner off the stone (MAR-P/10/05 0.937). Measured 2026-11-10 on the dev diag set: every kept
+    # slab 0.965 or more (chipped corners 0.965-0.99, 39 quads). DEV-DERIVED: the owner-confirmed prod re-run's outline
+    # records confirm the bar, or it moves to theirs.
+    QUAD_FILL_MIN = 0.95
     MAX_TILT_DEG = 35              # a corner fit implying more tilt than this is a misfit: clean-up only
     FLAT_SIGMA = 0.18              # illumination blur, share of the slab's long side
     FLAT_STRENGTH = 0.7            # 0 = no flat-field, 1 = full
