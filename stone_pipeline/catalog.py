@@ -450,8 +450,8 @@ def write_variants_to_delete() -> int:
         if name and looks_code_shaped(name) == "bare_code":
             reason = "bare_code: supplier code/brand abbreviation, not a variety"
         elif name and loaders.is_mistyped_variant(key, name):
-            kt = key.split("_")[1] if key.count("_") >= 2 else "?"
-            reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
+            reason = (f"mistyped: name says '{explicit_type_word(name)}' but keyed as type "
+                      f"'{loaders.type_slug_from_key(key)}'")
         if reason:
             rows.append({"Key": key, "Name": name, "Id": r.id, "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
