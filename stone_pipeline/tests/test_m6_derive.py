@@ -803,6 +803,7 @@ def test_a_size_outside_the_category_s_band_is_flagged_with_the_band(ref):
     row = _slab_row(raw_dimensions="length=3.00m;height=19.75m")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    lo, hi = derive._plausible_band(*derive.active_pack().dimension_ranges[derive.dimension_category(row)]["width"])
-    flag = next(f for f in row.review_flags if f.code == FlagCode.dimension_out_of_range and f.field == "width")
-    assert (flag.raw_value, flag.detail) == ("19.75", f"band {lo:g} to {hi:g}")
+    # the longer plan face is the length (flat-dims, #611), so the typo is the length's
+    lo, hi = derive._plausible_band(*derive.active_pack().dimension_ranges[derive.dimension_category(row)]["length"])
+    flag = next(f for f in row.review_flags if f.code == FlagCode.dimension_out_of_range)
+    assert (flag.field, flag.raw_value, flag.detail) == ("length", "19.75", f"band {lo:g} to {hi:g}")
