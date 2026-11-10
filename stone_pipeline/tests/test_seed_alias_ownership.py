@@ -43,7 +43,7 @@ def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
                                   "from_medusa/production/variants_export_base.csv"])
 def test_base_pietra_gray_spellings_belong_to_pietra_grey(path):
     with open(ROOT / path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["Key"].split("_")[1] == TYPE.lower()]
+        rows = [r for r in csv.DictReader(f) if r["Type"] == TYPE]          # the base's own type column
     _assert_owned_by_pietra_grey([(r["Name"], set(filter(None, r["Aliases"].split("|")))) for r in rows])
 
 
@@ -73,5 +73,5 @@ def test_backbone_volakas_spellings_left_spider_red_for_volocas(path):
                                   "from_medusa/production/variants_export_base.csv"])
 def test_base_volakas_spellings_left_spider_red_for_volocas(path):
     with open(ROOT / path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["Key"].split("_")[1] == TYPE.lower()]
+        rows = [r for r in csv.DictReader(f) if r["Type"] == TYPE]          # the base's own type column
     _assert_volakas_moved([(r["Name"], set(filter(None, r["Aliases"].split("|")))) for r in rows])
