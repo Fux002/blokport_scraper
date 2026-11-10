@@ -303,6 +303,14 @@ resource "aws_ecs_task_definition" "this" {
         { name = "SCRAPER_STANDARDISE_GPU_VCPUS", value = tostring(var.standardise_gpu_vcpus) },
         { name = "SCRAPER_STANDARDISE_IDLE_GPU_VCPUS", value = tostring(var.standardise_idle_gpu_vcpus) },
         ],
+        # A scoped photos run (its scope and its own cap), passed only while set, so an env without one keeps its
+        # task definition unchanged.
+        var.standardise_scope_key == "" ? [] : [
+          { name = "SCRAPER_STANDARDISE_SCOPE_KEY", value = var.standardise_scope_key },
+        ],
+        var.standardise_run_cap_usd == "" ? [] : [
+          { name = "SCRAPER_STANDARDISE_RUN_CAP_USD", value = var.standardise_run_cap_usd },
+        ],
         # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
         # env default (on in production), so an env that does not pass it keeps its task definition unchanged.
         var.require_standard_photo == null ? [] : [
