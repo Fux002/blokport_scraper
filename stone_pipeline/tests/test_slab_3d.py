@@ -274,6 +274,13 @@ def test_a_size_filled_from_the_pack_s_defaults_links_no_3d_even_when_it_happens
     assert row.model_3d_key is None
 
 
+def test_a_defaulted_thickness_alone_keeps_the_3d(monkeypatch):
+    # dev: 19 of 20 defaulted sizes are Sentas lot pieces with only the thickness filled; the gate judges L:W only
+    row = _slab_row(2.3, 1.5, defaulted=("height",))
+    _link(monkeypatch, row, _meta(1905, 1260))
+    assert row.model_3d_key == f"{BASE}/standard/cutout/sentas/{A}.webp"
+
+
 def test_a_misfit_is_reported_with_both_figures(monkeypatch):
     found = []
     _link(monkeypatch, _slab_row(2.3, 1.5), _meta(1905, 824), mismatches=found)
