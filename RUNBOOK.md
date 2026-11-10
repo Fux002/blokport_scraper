@@ -78,20 +78,6 @@ backbone_additions/      per run: the new varieties + value changes to apply to 
 ports.csv + missing_variants.csv + image_model.csv
 ```
 
-### Manual overrides: a value the office has confirmed (on S3, never on a task)
-The office drops ONE file at `s3://<staging bucket>/<ENV_NAME>/scraper/state/manual_overrides.csv`
-(`<ENV_NAME>` is `development` or `production`). Every produce fetches it fresh; no file there means no overrides.
-```
-src_site,surrogate_key,field,value,confirmed_by,confirmed_at,source
-polonine,620,length,3.1,fons,2026-11-10,https://vendor.example/p/620
-```
-- `field` is a canonical field: `length`, `width`, `height` (metres; `height` is the thickness, `width` the short
-  face), `bundle_size`, `origin_country_code`, `title`, `color_name`, `variation_id`, ...
-- `confirmed_by`, `confirmed_at` (an ISO date) and `source` (a vendor URL, a card, "office") are REQUIRED on every
-  entry, and the value cannot be blank: an unsigned or blank entry stops the produce, naming its line.
-- An override holds until you remove its line. When the vendor's own value later differs, the review list shows both
-  (`dimension_override_differs`); when it equals the override, the list says the override is redundant: remove it.
-
 ### `review/`  — decide before uploading (never uploaded)
 ```
 variants_update_triage.csv  alias-vs-new, with nearest match + score
