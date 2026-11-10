@@ -71,6 +71,9 @@ within `PHOTO_ASPECT_TOLERANCE_PCT` (5, inclusive) of the product's length:width
 the tile stone uses too, measured as Blokport's renders measure it). Otherwise the product keeps its photos with no 3D,
 and it is listed with both figures under `photo_scale_mismatch` in its source's diagnostics (`stages.json`, served by
 `GET /config/v1/diagnostics/{source}`). An outline that cannot be read fails the source's produce, never a silent no-3D.
+A lot piece carries a 3D slab only from its own photo (Mas, 2026-11-10): one shown from its lot's shared (bundle) photo,
+because its own photo failed the judge or is not worked yet, gets none and is listed there as `lot_shared_photo` with
+the judge's reason ("own photo failed: <kind>: <where>"), until its own photo passes through the usual repair path.
 
 A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
 (in this run, or as the listing's choice from an earlier one, picked again as "kept"), only the listing's whole results

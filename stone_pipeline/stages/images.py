@@ -27,6 +27,7 @@ import hashlib
 import json
 import re
 from stone_pipeline.core import env
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -219,8 +220,8 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     source's; `image_pipeline` is its switch as the produce loaded it (one value for the whole run). Off: every product
     keeps its hosted scraped photos (standard_photo stays None; populate never hides it), and the photo list and the
     conflict set are made as for any source (the photo process refuses a source on the sheet without them). A product
-    carries its lead's 3D slab only at its own measured size (_scale_misfit); each emitted product refused one is added
-    to `mismatches` (the source's diagnostics, photo_scale_mismatch) when given."""
+    carries its lead's 3D slab only from its own photo and at its own measured size (_no_3d); each emitted product
+    refused one is added to `mismatches` (the source's diagnostics, photo_scale_mismatch) when given."""
     cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
     removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
@@ -233,6 +234,7 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     removed, assigned = removed or set(), assigned or {}
     skus = _skus(rows) if removed or conflicts else {}
     outlines: dict[tuple[str, str, str], tuple[float, float]] = {}
+    shared = _lot_shared(rows)
     misfits: list[tuple[CanonicalRow, dict]] = []
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
@@ -244,7 +246,7 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(seen, lead) if _is_3d_format(row) else None
-            if row.model_3d_key and (misfit := _scale_misfit(row, lead, seen, outlines)) is not None:
+            if row.model_3d_key and (misfit := _no_3d(row, lead, seen, outlines, shared)) is not None:
                 row.model_3d_key = None
                 misfits.append((row, misfit))
             row.standard_version = standard_version(seen, lead, with_3d=bool(row.model_3d_key))
@@ -257,13 +259,19 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     return None if views is None else by_source
 
 
-def _scale_misfit(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
-                  outlines: dict[tuple[str, str, str], tuple[float, float]]) -> Optional[dict]:
-    """None when a product may carry its lead's 3D slab: its length and width measured (not filled from the pack's
-    defaults) and the cut-out at their proportions (cutout.aspect_misfit, the one rule Blokport's renders measure too:
-    the cut-out's width is the listing's length). Else why not, with both figures (a photo_scale_mismatch row of the
-    source's diagnostics). outlines: each outline's px size by (source, sha, ETag), read once a run."""
+def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
+           outlines: dict[tuple[str, str, str], tuple[float, float]],
+           shared: dict[str, set[str]]) -> Optional[dict]:
+    """None when a product may carry its lead's 3D slab: a lot piece shown from its own photo, never its lot's shared
+    one (Mas: no 3D until its own photo passes), and its length and width measured (not filled from the pack's
+    defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule Blokport's renders measure too:
+    the cut-out's width is the listing's length). Else why not (a photo_scale_mismatch row of the source's
+    diagnostics): the judge's reason for a lot piece, both figures for a size. outlines: each outline's px size by
+    (source, sha, ETag), read once a run; shared: the lots' shared photos (_lot_shared)."""
     _, src, sha = lead
+    if sha in shared.get(row.lot_code or "", ()):
+        return {"listing": row.handle, "reason": "lot_shared_photo", "lead": sha,
+                "why": _own_photo_state(row, shared[row.lot_code])}
     where = (src, sha, seen[imagestore.CUTOUT_SUBDIR][sha])
     if where not in outlines:
         outlines[where] = _outline_size(src, sha)
@@ -279,6 +287,53 @@ def _scale_misfit(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]]
         return {**found, "reason": "size_defaulted"}
     if cutout.aspect_misfit(w_px, h_px, row.length, row.width) is not None:
         return {**found, "reason": "photo_scale_mismatch"}
+    return None
+
+
+def _lot_shared(rows: list[CanonicalRow]) -> dict[str, set[str]]:
+    """{lot code: the photos two or more of its pieces show}: the lot's shared (bundle) photos. Each piece shows its own
+    photos first, then the bundle's, never another piece's own (stages.lots._split), so a piece's other photos are its
+    own. A lot of one piece has none: its photos cannot be told apart and count as its own."""
+    shows: dict[str, Counter] = {}
+    for row in rows:
+        if row.lot_code:
+            shows.setdefault(row.lot_code, Counter()).update({sha for _, sha in _shown(row)})
+    return {lot: {sha for sha, n in seen.items() if n > 1} for lot, seen in shows.items()}
+
+
+def _own_photo_state(row: CanonicalRow, shared: set[str]) -> str:
+    """Why a lot piece is not shown from its own photo (its first photo not shared in its lot): the judge's reason when
+    it failed, as the photo process's latest run of it recorded (the clean run's, else the standardiser run's)."""
+    own = next(((src, sha) for src, sha in _shown(row) if sha not in shared), None)
+    if own is None:
+        return "no own photo"
+    record = _judged(*own)
+    if record is None:
+        return "own photo not judged"
+    if record.get("verdict") != "fail":
+        return f"own photo {record.get('verdict')}"
+    return "own photo failed: " + "; ".join(f"{p.get('kind')}: {p.get('where')}" for p in record.get("problems") or [])
+
+
+def _judged(src: str, sha: str) -> Optional[dict]:
+    """The judge's record of one photo in the clean run, else in the standardiser run (CLEAN_TAG, RUN_TAG); None when
+    neither judged it. Any other failure to read it raises: the produce fails loud for the source."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    from stone_pipeline.photos.source import round_prefix
+    for tag in (STANDARDISE.CLEAN_TAG, STANDARDISE.RUN_TAG):
+        key = f"{round_prefix(tag, src)}judged/{sha}.json"
+        try:
+            record = json.loads(_get_object(key))
+        except ClientError as exc:
+            if storage.s3_error_is_missing(exc):
+                continue
+            raise RuntimeError(f"the judge's record {key} cannot be read: {exc}") from exc
+        except (BotoCoreError, ValueError) as exc:          # ValueError: not JSON
+            raise RuntimeError(f"the judge's record {key} cannot be read: {exc}") from exc
+        if not isinstance(record, dict):
+            raise RuntimeError(f"the judge's record {key} is not a JSON object")
+        return record
     return None
 
 

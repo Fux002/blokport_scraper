@@ -204,7 +204,8 @@ from 0 to 1 measured from the cut-out's top-left, `edge_color` = the sawn edge's
 `image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. A
 product shown by an open book (two bookmatched slabs) carries one of its two slabs, each a whole slab. It is
 `null` for a product with no 3D (a block, a close-up, a product without a standardised photo, or one whose slab
-photo is not at its own measured `length`:`width` within 5%, the scraper's `PHOTO_ASPECT_TOLERANCE_PCT`):
+photo is not at its own measured `length`:`width` within 5%, the scraper's `PHOTO_ASPECT_TOLERANCE_PCT`, or a lot
+piece shown from its lot's shared photo rather than its own):
 remove `metadata.model_3d` then. Both files are named after the source photo, like the standardised views.
 A **tile** product's `model_3d` is one tile rendered from its variety's slab stone, the same two files: the cut-out's
 horizontal axis is the product's `length`, its aspect `length`:`width`, 2048 px on its long side (the real stone
