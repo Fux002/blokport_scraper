@@ -22,7 +22,7 @@ from stone_pipeline.config.categories import CATEGORIES, category
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.phase1 import rewrite_committed
 from stone_pipeline.phase1.migrate_stores import read_key_map
-from stone_pipeline.phase1.variety_key import new_key, variety_key_problem
+from stone_pipeline.phase1.variety_key import variety_key_problem
 from stone_pipeline.reference.loaders import backbone as backbone_loader
 from stone_pipeline.stages import tree_build
 
@@ -39,7 +39,8 @@ BLOCK_FINISHES = ["Brushed", "Chain Sawn & Squared", "Chain Sawn & Un-squared", 
 
 
 def _posts(path):
-    return json.loads(path.read_text(encoding="utf-8"))["posts"]
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    return doc["posts"] if isinstance(doc, dict) else doc      # a backbone is {"posts": [...]}, additions a list
 
 
 # --- the committed data ---------------------------------------------------------------------------------------------
@@ -60,14 +61,10 @@ def test_every_post_is_one_identity_on_its_phase1_key():
     assert [p["key"] for p in posts if set(p) != POST_FIELDS] == []
 
 
-def test_every_post_maps_through_the_key_map_or_is_the_one_named_mint():
-    # the map is not in CI: the rewrite refuses any other post when it runs, and this pins what it wrote
-    posts = _posts(VARIETIES)
-    minted = {new_key(t, n): (t, n) for t, n in rewrite_committed.MINTED_POSTS}
-    assert rewrite_committed.MINTED_POSTS == (("Granite", "Tiger Skin Yellow and White"),)
-    assert {(p["stone_type"], p["variant"]) for p in posts if p["key"] in minted} == set(minted.values())
-    mapped = sorted(p["key"] for p in posts if p["key"] not in minted)
-    assert hashlib.sha256("\n".join(mapped).encode()).hexdigest() == rewrite_committed.MAPPED_BACKBONE_KEYS_SHA256
+def test_every_post_maps_through_the_key_map():
+    # the map is not in CI: the rewrite refuses any post the map does not carry when it runs (nothing is minted),
+    # and this pins the Keys it wrote
+    assert rewrite_committed.mapped_keys_sha256(_posts(VARIETIES)) == rewrite_committed.MAPPED_BACKBONE_KEYS_SHA256
 
 
 def test_the_committed_additions_are_one_file_keyed_or_held():
@@ -84,7 +81,7 @@ def test_the_committed_additions_are_one_file_keyed_or_held():
 _K = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666"
 _MAP = ("old_key,new_key,category_rank,type_name\n"
         f"slab_granite_absolute_black_a,{_K},0,Granite\n"
-        f"block_granite_absolute_black_noir_b,{_K},1,Granite\n"
+        f"block_granite_absolute_black_b,{_K},1,Granite\n"
         f"tile_granite_absolute_black_c,{_K},2,Granite\n").encode()
 
 
@@ -112,14 +109,7 @@ def test_an_identitys_three_posts_merge_into_one(key_map):
                     "aliases": ["Shanxi Black", "Nero Assoluto", "Tile Black"], "merged_from": []}
 
 
-def test_a_keyless_block_post_joins_by_its_old_key_middle(key_map):
-    slab = _post(key="slab_granite_absolute_black_a")
-    block = _post(variant="Absolute Black Noir", category="Blocks")   # SC-1 merged it: only its old Key's middle joins
-    (post,) = rewrite_committed.merge_backbones([slab], [block], [], key_map)
-    assert post["key"] == _K and "Absolute Black Noir" in post["aliases"]
-
-
-def test_a_post_outside_the_map_and_the_mint_list_refuses(key_map):
+def test_a_post_the_map_does_not_carry_refuses(key_map):
     with pytest.raises(rewrite_committed.UnmappedKey, match="Kashmir White"):
         rewrite_committed.merge_backbones([], [_post(variant="Kashmir White", category="Blocks")], [], key_map)
 
@@ -167,8 +157,8 @@ def test_a_declared_finish_that_does_not_resolve_fails_loud(monkeypatch):
 
 def test_a_held_additions_post_is_skipped_by_the_one_reader(tmp_path):
     path = tmp_path / "varieties.json"
-    path.write_text(json.dumps({"posts": [
+    path.write_text(json.dumps([
         {"key": "", "variant": "Avocatus", "stone_type": "", "categories": ["slab"]},
-        {"key": _K, "variant": "Absolute Black", "stone_type": "Granite", "categories": ["slab"]}]}),
+        {"key": _K, "variant": "Absolute Black", "stone_type": "Granite", "categories": ["slab"]}]),
         encoding="utf-8")
     assert [p["variant"] for p in backbone_loader.read_posts(path)] == ["Absolute Black"]
