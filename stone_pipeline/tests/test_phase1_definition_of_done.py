@@ -18,8 +18,9 @@ FORBIDDEN = {
     "category_for_key": re.compile(r"\bcategory_for_key\b"),
     "mirror_of": re.compile(r"\bmirror_of\b"),
     "_branch_of": re.compile(r"\b_branch_of\b"),
-    "Key prefix split": re.compile(r"""split\(\s*["']_["']\s*,\s*1\s*\)\s*\[\s*0\s*\]"""),
-    "Key type slice": re.compile(r"""split\(\s*["']_["']\s*\)\s*\[\s*1\s*:\s*-1\s*\]"""),
+    # `\bsplit`: an rsplit("_", 1)[0] strips a Key's trailing uuid, which is no category read
+    "Key prefix split": re.compile(r"""\bsplit\(\s*["']_["']\s*,\s*1\s*\)\s*\[\s*0\s*\]"""),
+    "Key type slice": re.compile(r"""\bsplit\(\s*["']_["']\s*\)\s*\[\s*1\s*:\s*-1\s*\]"""),
     # a Key-shaped literal: the prefix, word segments, and a uuid start or a numeric suffix ('slab_marble_x_1',
     # 'tile_onyx_white_3f2a9c1b-...'); a field name like 'slab_count' is not one
     "prefixed Key literal": re.compile(r"""["'](?:slab|block|tile)_(?:[a-z0-9]+_)+(?:[0-9a-f]{8}-|\d+["'])"""),

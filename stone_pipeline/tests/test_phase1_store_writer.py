@@ -293,9 +293,11 @@ def test_the_real_run_writes_the_v2_stores_and_never_an_old_store_key(tmp_path):
     assert s3.objects[migrate_run.STORES["outputs"][0]] == []               # wiped
     marker = migrate_run.STORES["refreshed"][0]
     assert json.loads(s3.objects[marker][-1][1]) == [f"{NEW}/slab"]
-    # L2: a re-run after the in-place objects are restored by version (the marker; outputs stays wiped) finds the
-    # `.v2` stores unchanged and the icon pair already there
-    s3.add(marker, json.dumps([OLD_SLAB]).encode())
+    # L2: a re-run after the in-place objects are restored by version (the marker and both base copies; outputs
+    # stays wiped) finds the `.v2` stores unchanged and the icon pair already there
+    for name in ("refreshed", "base_from_medusa", "base_to_upload"):
+        key = migrate_run.STORES[name][0]
+        s3.add(key, dict(s3.objects[key])[inputs["stores"][name]["version_id"]])
     again = migrate_run.run(s3, {**inputs, "stores": {**inputs["stores"], "outputs": {"version_id": None}}},
                             write=True)
     assert all(again["written"][n]["unchanged"] for n in migrate_run.NEW_STORES)

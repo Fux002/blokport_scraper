@@ -79,7 +79,7 @@ def test_restricted_finish_drops_from_fanout_but_stays_for_an_emitted_product(tm
     prod = _products(tmp_path, [_prow(vid="v1", fin="f_hon", col="c_white", qual="q_a")])
     attrs = _attrs_status(tmp_path, archived=[("finish", "Honed")])
     combos, stats, _ = tree_build.build_combinations(exp, attrs, [bb], prod)
-    v1 = _for(combos, "v1")
+    v1 = _for(combos, "v1", "cat_slab")
     assert ("cat_slab", "t_marble", "v1", "f_hon", "c_white", "q_a") in v1   # kept: the emitted product tuple
     assert ("cat_slab", "t_marble", "v1", "f_hon", "c_grey", "q_a") not in v1  # fan-out Honed dropped
     assert {c[FIN] for c in v1 if c[COL] == "c_grey"} == {"f_pol"}            # grey priceable only in Polished
