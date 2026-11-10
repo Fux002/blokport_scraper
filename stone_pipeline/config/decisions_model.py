@@ -61,6 +61,7 @@ class Decisions:
     vendor_origins: dict[tuple[str, str, str], str] = field(default_factory=dict)  # (vendor, name, type) -> ISO
     widened: dict[tuple[str, str, str], str] = field(default_factory=dict)         # the ones the operator widened
     colours: dict[tuple[str, str], list[str]] = field(default_factory=dict)         # (name, type) -> documented colours
+    listing_colours: dict[Key, str] = field(default_factory=dict)   # (vendor, spelling) -> the colour its listings ARE
 
     @classmethod
     def empty(cls) -> "Decisions":
@@ -78,6 +79,7 @@ class Decisions:
         origins: dict[tuple[str, str, str], str] = {}
         widened: dict[tuple[str, str, str], str] = {}
         colours: dict[tuple[str, str], list[str]] = {}
+        listing_colours: dict[Key, str] = {}
         for r in rows:
             src, sp = _norm(r["source"]), _norm(r["spelling_norm"])
             display = r.get("spelling") or r["spelling_norm"]
@@ -99,6 +101,8 @@ class Decisions:
                 known = colours.setdefault((_norm(target), _norm(stone_type)), [])
                 if colour not in known:
                     known.append(colour)
+                if src:
+                    listing_colours[(src, sp)] = colour
             if src:
                 bindings[(src, sp)] = (target, stone_type)
                 if iso:
@@ -116,7 +120,7 @@ class Decisions:
                 name=(r.get("name") or None), stone_type=stone_type or None, color=r.get("color") or None,
                 origin_iso=iso, widen=widen, asked_by=r.get("asked_by") or "")
         return cls(statements=statements, bindings=bindings, vendor_origins=origins, widened=widened,
-                   colours=colours)
+                   colours=colours, listing_colours=listing_colours)
 
     @classmethod
     def from_legacy(cls, actions: dict, scoped: dict | None = None, origins: dict | None = None,
@@ -202,6 +206,15 @@ class Decisions:
     def seed_types(self) -> dict[Key, str]:
         """(vendor, spelling) -> operator stone type, for every mint statement that set one."""
         return {k: s.stone_type for k, s in self.statements.items() if s.is_mint and s.stone_type}
+
+    def listing_colour(self, source: str, spelling: str, clean: str | None = None) -> str | None:
+        """The colour the operator stated for this vendor's listing (its scraped spelling, else its variety), bound
+        and minted statements alike. Vendor level only: a listing's colour is that vendor's product, so one
+        vendor's word never colours another vendor's listings of the same variety."""
+        for level, s in self._keys(source, spelling, clean):
+            if level and (colour := self.listing_colours.get((level, s))):
+                return colour
+        return None
 
     def colour_leaves(self) -> dict[tuple[str, str], dict[str, list[str]]]:
         """(norm name, norm type) -> {"color": [...]}: every colour an operator stated for a variety, in the

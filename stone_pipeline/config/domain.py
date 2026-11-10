@@ -82,6 +82,10 @@ class DomainPack:
     # review (stone: 'Rosal C' -> 'Rosal'). A pack that omits both never mangles a name on these rules.
     name_code_pattern: str | None = None
     trailing_grade_letters: bool = False
+    # The colour vocabulary's value for a product the vendor itself names in several colours ('Black and White'):
+    # stone 'Multicolor'. None = the domain has no such value, so such a colour stays unconfirmed (never one of the
+    # vendor's colours picked first). The backbone's colour list is never evidence of it.
+    multicolour_value: str | None = None
     # Classify a variety's colour from its product image with the stone-tuned CV palette (variety_color).
     # A domain whose tones that palette cannot read sets this false: colour then comes from the pack
     # fallback_color / the Medusa-supplied value, and its CLASSIFIABLE_COLORS need not exist in Medusa.
@@ -305,6 +309,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         default_density=float(data["default_density"]),
         name_code_pattern=data.get("name_code_pattern"),
         trailing_grade_letters=bool(data.get("trailing_grade_letters", False)),
+        multicolour_value=data.get("multicolour_value"),
         classify_texture_color=bool(data.get("classify_texture_color", True)),
         product_form_words=frozenset(str(w).strip().lower() for w in (data.get("product_form_words") or [])
                                      if str(w).strip()),

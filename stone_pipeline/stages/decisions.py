@@ -91,7 +91,9 @@ def write_confirm_file(pending: list[dict]) -> int:
     # one card per IDENTITY (name, type): the same name under two stone types is two varieties, so two
     # cards, each carrying only its own listings (a statement on one must never re-type the other's vendor).
     # The ref is `<norm name>|<norm type>` for a typed card and the bare name for a type-less one; the
-    # reject PUT keys the reject on the name part, so a card ref and a bare name both work there.
+    # reject PUT keys the reject on the name part, so a card ref and a bare name both work there. A card that
+    # is one vendor's own question (`ref_scope`, a colour hold) adds `|<norm vendor>`, so it never merges with
+    # another vendor's card of the same variety.
     by_ref: dict[str, dict] = {}
     for row in pending:
         name = _norm(row.get("variant", ""))
@@ -99,6 +101,8 @@ def write_confirm_file(pending: list[dict]) -> int:
             continue
         stone_type = _norm(row.get("stone_type", "") or "")
         ref = f"{name}|{stone_type}" if stone_type else name
+        if (scope := _norm(row.get("ref_scope", "") or "")):
+            ref = f"{name}|{stone_type}|{scope}"
         card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
         if row.get("scraped") and row.get("src"):
             listing = {"source": row["src"], "scraped": row["scraped"]}

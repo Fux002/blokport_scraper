@@ -86,23 +86,14 @@ def test_unknown_value_flags_and_does_not_guess(ref):
     assert any(f.code == FlagCode.attr_unresolved and f.field == "color" for f in row.review_flags)
 
 
-def test_multi_value_takes_first_and_flags(ref):
+def test_a_colour_list_is_multicolor_never_its_first(ref):
+    # a list separator naming two colours is the pack's multicolour value, never the first one named (Mas,
+    # 10 Nov; 'Black and White' is test_colour_unconfirmed), and it carries no multi_value flag: nothing was dropped
     resolvers = normalize.AttributeResolvers.build(ref)
     row = CanonicalRow(src_site="polonine", raw_color="Black | White")   # genuine separator
     normalize.normalize_row(row, resolvers, ref)
-    assert row.color_name == "Black"
-    assert any(f.code == FlagCode.multi_value for f in row.review_flags)
-
-
-def test_compound_and_value_ships_via_first_conjunct(ref):
-    # ' and ' is NOT a primary separator (so a single descriptor that resolves WHOLE stays whole), but
-    # 'Black and White' isn't a vocab colour, so it falls back to the first resolvable conjunct ('Black')
-    # + a multi_value flag -- the product SHIPS instead of being hard-rejected for a null colour id.
-    resolvers = normalize.AttributeResolvers.build(ref)
-    row = CanonicalRow(src_site="polonine", raw_color="Black and White")
-    normalize.normalize_row(row, resolvers, ref)
-    assert row.color_name == "Black"
-    assert any(f.code == FlagCode.multi_value for f in row.review_flags)
+    assert row.color_name == "Multicolor" and row.color_method == "multicolor_from_vendor"
+    assert not any(f.code == FlagCode.multi_value for f in row.review_flags)
 
 
 def test_vocab_fuzzy_floor_rejects_low_score():

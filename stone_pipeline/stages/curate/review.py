@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 
+from stone_pipeline.core.schema import FlagCode
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
 
@@ -61,13 +62,39 @@ def review_card(kind: str, variant: str, reason: str, evidence: dict, *, stone_t
     """One shape for every review-queue card (variants_to_confirm) so the operator queue is uniform no
     matter which hold path built it, and no arm can silently omit a column. `kind` names WHY the card exists
     (new, similar, collision, no_type, new_type, code, retired; the origin queue adds origin; the VE2 freeze
-    adds archived_type, archived_value and archived_variety -- see ARCHIVED_AND_INTERNAL.md):
+    adds archived_type, archived_value and archived_variety -- see ARCHIVED_AND_INTERNAL.md; a guessed colour
+    adds colour_unconfirmed):
     it explains, it never limits what the operator may state. `evidence` is review_evidence()
     (src/scraped/src_url/image/description); its keys never collide with the card fields, so the spread is
     additive."""
     return {"confirm": "", "kind": kind, "variant": variant, "reason": reason, "stone_type": stone_type,
             "color": color, "nearest_existing": nearest_existing, "score": score,
             "model_prob": model_prob, **evidence}
+
+
+def colour_cards(rows) -> list[dict]:
+    """The colour_unconfirmed holds (reconcile: no vendor colour, a variety sold in several). ONE card per
+    (vendor, variety, type): `ref_scope` keeps one vendor's card apart from another's of the same variety (a
+    vendor's colour is its own product's), and each scraped spelling behind it rides along as a listing, so the
+    ONE statement the operator makes on it (the variety, its type, the colour) colours every listing of it."""
+    cards: dict[tuple[str, str, str, str], dict] = {}
+    for row in rows:
+        flag = next((f for f in row.review_flags if f.code == FlagCode.colour_unconfirmed), None)
+        if flag is None:
+            continue
+        evidence = review_evidence(row)
+        key = (proj.norm(row.src_site), proj.norm(row.variation_name), proj.norm(row.type_name),
+               proj.norm(evidence["scraped"]))
+        if key in cards:
+            continue
+        variant = row.variation_name or ""
+        cards[key] = {**review_card(
+            "colour_unconfirmed", variant,
+            f"{evidence['src']} gives no colour and {variant} comes in {flag.best_guess}, so none is guessed. "
+            f"State this supplier's {variant} colour: one decision covers all its listings. A listing already "
+            f"in the catalog keeps its colour until then; a new one waits.",
+            evidence, stone_type=row.type_name or ""), "ref_scope": row.src_site or ""}
+    return list(cards.values())
 
 
 def human_join(items: list[str]) -> str:

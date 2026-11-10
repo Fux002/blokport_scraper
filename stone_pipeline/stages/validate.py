@@ -4,7 +4,8 @@ Reject a row on any hard failure: a required attribute id null (type, colour,
 finish, quality), variation_id null, an unresolved leaf (a tree gap present),
 category not the branch's valid category, handle or slug not globally unique, a
 lot whose pieces disagree (identity, position or quantity; the whole lot is held), a
-missing owner (company_id / sales_channel_id, required at all times), or no image
+missing owner (company_id / sales_channel_id, required at all times), a NEW listing
+whose colour is unconfirmed (an already-published one stays listed), or no image
 when images are required by config. Soft issues (review flags, no hard failure) emit
 or hold per the emit_on_review switch.
 
@@ -123,7 +124,7 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
                  frozen: dict[str, set[str]] | None = None,
                  acked: dict[str, set[tuple[str, str]]] | None = None,
                  category_labels: dict[str, str] | None = None,
-                 source_code: str) -> None:
+                 source_code: str, published: frozenset[str] = frozenset()) -> None:
     for id_field in REQUIRED_ID_FIELDS:
         if not getattr(row, id_field, None):
             row.add_reject(RejectReason(rule="required_id_null", detail=id_field))
@@ -184,6 +185,13 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
     # has no count by definition (derive decided it), so it is determined.
     if row.inventory_quantity is None and not row.made_to_order:
         row.add_reject(RejectReason(rule="stock_undetermined", detail="inventory"))
+    # A colour reconcile could not confirm (no vendor colour, a variety sold in several) is never guessed into a
+    # NEW listing: it is held until the operator states the colour. A listing Medusa already has (its SKU in
+    # `published`, the known-products export) stays listed with the colour it carries (loads never remove);
+    # its colour_unconfirmed flag keeps it in the operator's queue.
+    if (any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags)
+            and sku_from(source_code, row.surrogate_key) not in published):
+        row.add_reject(RejectReason(rule="colour_unconfirmed", detail=row.color_name or ""))
     # VE2 value_frozen: a resolved attribute value that is RESTRICTED (archived or internal in attributes.csv,
     # per restricted_values) is HELD -- it is NEVER re-resolved to a nearby active value -- UNLESS Medusa already
     # imported THIS product (same SKU, acked) carrying it (ledger/existing.acked_products). An empty `frozen`
@@ -248,13 +256,15 @@ def _frozen_and_acked(source_code: str) -> tuple[dict[str, set[str]], dict[str, 
 
 
 def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False,
-        *, source_code: str) -> ValidationResult:
+        *, source_code: str, published: frozenset[str]) -> ValidationResult:
+    """`published`: the SKUs Medusa already lists (the known-products export), which keep their listing when a
+    rule added after they listed would hold a new one (colour_unconfirmed)."""
     result = ValidationResult()
     handles: dict[str, str] = {}
     frozen, acked, category_labels = _frozen_and_acked(source_code)
     for row in rows:
         validate_row(row, require_images=require_images, frozen=frozen, acked=acked,
-                     category_labels=category_labels, source_code=source_code)
+                     category_labels=category_labels, source_code=source_code, published=published)
         # global uniqueness of handle/slug after namespacing (system bug if not)
         if row.handle:
             if row.handle in handles and handles[row.handle] != row.surrogate_key:

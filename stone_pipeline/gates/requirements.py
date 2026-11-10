@@ -131,6 +131,15 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Stock could not be determined", kind="decision",
                 recovery="The scrape carries no stock signal. Fix the adapter to read it, or set the stock. "
                          "Lists on the next produce.", stage="Derive"),
+    Requirement("colour_unconfirmed", "a confirmed colour: the vendor's own, the variety's only one, or the "
+                                      "operator's statement for the vendor's listing",
+                "raw colour -> normalize (two or more named colours are Multicolor); none and a variety sold in "
+                "several -> the operator's colour statement; else held when NEW (a published listing stays listed "
+                "with its colour and is queued)",
+                title="Colour not confirmed (the variety comes in several)", kind="decision",
+                recovery="The supplier gives no colour and the variety is sold in several, so none is guessed. "
+                         "State the colour on the card in Review (one decision covers every listing of this "
+                         "variety from this supplier). Lists on the next produce.", stage="Reconcile"),
     Requirement("value_frozen", "no resolved attribute value OR variety is archived or internal, unless Medusa "
                                 "already holds this product with it",
                 "restricted_values (attributes.csv status/internal) + the archived variety Keys (variants_export "

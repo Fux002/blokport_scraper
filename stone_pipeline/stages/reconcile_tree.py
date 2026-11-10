@@ -66,6 +66,27 @@ def _fill_missing_from_variety(
                                 src_url=row.src_url))
 
 
+def _fill_missing_colour(row: CanonicalRow, allowed: list[str], ref: ReferenceData, stats: ReconcileStats) -> None:
+    """Colour when the scrape gave none. ONE allowed colour is the variety's colour (as for quality). SEVERAL are
+    never guessed (the backbone's list is no evidence of which one this product is, nor of multicolour): the
+    operator's colour statement for this vendor's listing decides; without one the colour is UNCONFIRMED. The row
+    then carries the variety's first colour, the one an already-published listing carries today, so validate can
+    keep a published listing listed (loads never remove) while holding a new one, and curate queues it."""
+    if row.color_name or len(allowed) < 2:
+        _fill_missing_from_variety(row, "color", allowed, stats)
+        return
+    stats.filled_from_variety += 1
+    stated = ref.decisions.listing_colour(row.src_site or "", row.variety_match_key or row.raw_name or "",
+                                          row.variation_name)
+    if stated:
+        row.color_name, row.color_confidence, row.color_method = stated, Confidence.high.name, "operator"
+        return
+    row.color_name, row.color_confidence, row.color_method = allowed[0], Confidence.low.name, "colour_unconfirmed"
+    row.add_flag(ReviewFlag(field="color", code=FlagCode.colour_unconfirmed, raw_value="",
+                            best_guess=", ".join(allowed), confidence=Confidence.low,
+                            method="colour_unconfirmed", src_url=row.src_url))
+
+
 def _nearest_allowed(value: str, allowed: list[str]) -> tuple[str | None, float]:
     best, best_score = None, 0.0
     nv = proj.norm(value)
@@ -141,7 +162,7 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
 
     # 1b. fill colour/quality from the variety when the scrape omitted them (the
     # variety is the authority; this recovers sources with no colour column)
-    _fill_missing_from_variety(row, "color", variety.colors, stats)
+    _fill_missing_colour(row, variety.colors, ref, stats)
     _fill_missing_from_variety(row, "quality", variety.qualities, stats)
 
     # 2. membership with snapping for the low-trust attributes

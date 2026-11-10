@@ -85,6 +85,10 @@ class FlagCode(str, Enum):
     weight_derived = "weight_derived"
     attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"
+    # a variety sold in several colours, no colour from the vendor and none stated by the operator for (source,
+    # variety): the colour is UNCONFIRMED. A new listing is held (validate); a published one keeps the colour it has
+    # and is queued (curate's colour_unconfirmed card), so an operator states it once for the vendor's variety.
+    colour_unconfirmed = "colour_unconfirmed"
     type_overridden_by_variety = "type_overridden_by_variety"
     attr_from_variety = "attr_from_variety"
     noncanonical_attr_casing = "noncanonical_attr_casing"
