@@ -68,7 +68,7 @@ def test_identity_beats_alias_among_same_type_candidates():
 
 @pytest.fixture(scope="module")
 def slab_engine():
-    table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv", "slab", key_prefix="slab_")
+    table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv")
     index = build_variation_index(table, load_backbone(), load_origin_map())
     return _engine(index), table
 
@@ -86,7 +86,7 @@ def test_seed_anatolia_black_marble_is_a_held_collision_never_nero_marquina(slab
 def test_seed_anatolia_black_granite_still_binds_its_name_owner(slab_engine):
     eng, table = slab_engine
     m = eng.match("Anatolia Black", block_type="Granite")
-    assert m.cid is not None and table.by_id[m.cid].key.startswith("slab_granite_anatolia_black_")
+    assert m.cid is not None and table.by_id[m.cid].key.startswith("granite__anatolia_black_")
 
 
 # --- 2. a fuzzy tie between two different stones goes to review -----------------------------------------

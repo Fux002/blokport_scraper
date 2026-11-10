@@ -1,5 +1,7 @@
-"""The existing-variety file (variants_export.csv, else the Id-free base): one table per category, indexed by
-variation id, with junk / deleted / retired / dup-loser rows excluded by the same survivor rule emit uses."""
+"""The existing-variety file (variants_export.csv, else the Id-free base): ONE table of varieties (phase 1: a
+variety is one record per (type, name) and has no category), indexed by variation id, with junk / deleted / retired /
+dup-loser rows excluded by the same survivor rule emit uses. Every category that shares the stone-variety vocabulary
+matches against this one table. A Key of the old prefixed form is refused (the one parser, phase1.variety_key)."""
 
 from __future__ import annotations
 
@@ -28,7 +30,6 @@ class Variant:
 
 @dataclass
 class VariantTable:
-    branch: str  # 'slab' or 'block'
     by_id: dict[str, Variant] = field(default_factory=dict)
 
     def all_ids(self) -> list[str]:
@@ -48,8 +49,9 @@ def _delete_keys() -> set[str]:
 
 @dataclass
 class ExistingVariants:
-    """The existing-variety file read ONCE: one table per branch (split by Key prefix), the file it came
-    from and the content hash of the bytes actually read (the provenance the manifest records)."""
+    """The existing-variety file read ONCE: the ONE variety table under each category that shares the
+    stone-variety vocabulary (the same object for each), the file it came from and the content hash of the bytes
+    actually read (the provenance the manifest records)."""
     tables: dict[str, VariantTable]
     source: Path
     content_hash: str
@@ -70,39 +72,33 @@ def _read_variant_records(path: Path) -> tuple[list[ExportVariation], str]:
     return records, hashlib.sha256(data).hexdigest()[:16]
 
 
-def load_existing_variants(path: Path, branches: list[str]) -> ExistingVariants:
-    """Every branch's variants table from ONE read of the combined file: a row goes to the table whose
-    branch is its Key's leading token. Retired/deleted/bare-code/dup-loser exclusion is computed once over
-    the whole file, so every branch applies the same survivor rule."""
+def load_existing_variants(path: Path, categories: list[str]) -> ExistingVariants:
+    """The one variety table from ONE read of the file, under each of `categories`: a variety belongs to the stone,
+    not a format, so every category's engine matches against every variety, under the same Key and id."""
     path = Path(path)
     if not path.exists():
         log.warning(f"variants file absent: {path}")
-        return ExistingVariants({b: VariantTable(branch=b) for b in branches}, path, "absent")
-    records, sha = _read_variant_records(path)
-    tables = {b: VariantTable(branch=b) for b in branches}
-
-    def _table_for(key: str) -> VariantTable | None:
-        return tables.get(key.split("_", 1)[0].casefold())
-    _fill_tables(records, _table_for)
-    return ExistingVariants(tables, path, sha)
+        table, sha = VariantTable(), "absent"
+    else:
+        records, sha = _read_variant_records(path)
+        table = _table(records)
+    return ExistingVariants({c: table for c in categories}, path, sha)
 
 
-def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> VariantTable:
-    """One branch's variants table. key_prefix filters rows by their Key's leading token; None takes every
-    row (a single-branch file). load_all uses load_existing_variants (one read for every branch)."""
-    table = VariantTable(branch=branch)
+def load_variants(path: Path) -> VariantTable:
+    """The one variety table of a file (an absent file is an empty table)."""
     path = Path(path)
     if not path.exists():
-        log.warning(f"variants file absent for branch {branch}: {path}")
-        return table
+        log.warning(f"variants file absent: {path}")
+        return VariantTable()
     records, _ = _read_variant_records(path)
-    prefix = (key_prefix or "").casefold()
-    _fill_tables(records, lambda key: table if key.casefold().startswith(prefix) else None)
-    return table
+    return _table(records)
 
 
-def _fill_tables(records: list[ExportVariation], table_for) -> None:
-    """Index each eligible record into the table `table_for(key)` picks (None = not this table)."""
+def _table(records: list[ExportVariation]) -> VariantTable:
+    """The table of every eligible record. A Key the one parser refuses (an old prefixed Key) raises in the
+    identity grouping below, never read as some category's."""
+    table = VariantTable()
     # CRITICAL: a RETIRED variety must not be a resolution target here either. The matcher stamps a
     # product's variation_key from THIS reference (built off the lagging Medusa export, which still lists a
     # retired-but-not-yet-deleted variety), and the catalog-side surface exclusion runs too late to undo
@@ -147,10 +143,8 @@ def _fill_tables(records: list[ExportVariation], table_for) -> None:
         # the name here: a variety is matchable by its assigned type, never hidden on a name-vs-type guess.
         if looks_code_shaped(name) == "bare_code" or key in delete_keys:
             continue
-        table = table_for(key)
-        if table is None:
-            continue
         table.by_id[vid] = Variant(
             variation_id=vid, key=key, name=name, aliases=list(record.aliases),
             archived=record.archived,
         )
+    return table

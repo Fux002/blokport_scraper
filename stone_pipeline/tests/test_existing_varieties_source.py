@@ -18,15 +18,15 @@ import pytest
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 
-KEY = "slab_granite_alpine_00000000-0000-0000-0000-000000000001"
+KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
 def _write(path: Path, name: str, with_id: bool) -> None:
-    fields = (["Id"] if with_id else []) + ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+    fields = (["Id"] if with_id else []) + ["Key", "Name", "Type", "Aliases"]
     with path.open("w", newline="", encoding="utf-8") as h:
         w = csv.DictWriter(h, fieldnames=fields)
         w.writeheader()
-        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Aliases": "Alpine Granite"})
+        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Type": "Granite", "Aliases": "Alpine Granite"})
 
 
 def _paths(tmp_path: Path):
@@ -59,7 +59,7 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
     imp = curate.load_existing("slab")
     assert imp.by_name_type[("alpine", "granite")]["Aliases"] == "Alpine Granite"
     # the matcher's table reads the same file
-    table = loaders.load_variants(loaders.existing_varieties_file(), "slab", key_prefix="slab")
+    table = loaders.load_variants(loaders.existing_varieties_file())
     assert [v.key for v in table.by_id.values()] == [KEY]
 
 

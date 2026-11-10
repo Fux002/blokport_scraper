@@ -14,9 +14,9 @@ _UUID = "aaaaaaaa-0000-0000-0000-000000000000"
 
 
 def test_block_type_is_the_key_type_slug_not_the_backbone_display_form():
-    key = f"slab_granite_verde_ubatuba_{_UUID}"          # Key slug: granite
-    vt = VariantTable(branch="slab")
-    vt.by_id["v1"] = Variant(variation_id="v1", key=key, name="Verde Ubatuba", image="", aliases=[])
+    key = f"granite__verde_ubatuba_{_UUID}"              # Key slug: granite
+    vt = VariantTable()
+    vt.by_id["v1"] = Variant(variation_id="v1", key=key, name="Verde Ubatuba", aliases=[])
     bb = Backbone()
     bb.by_norm_name[_norm("Verde Ubatuba")] = [           # backbone DISPLAY form: 'Granite'
         BackboneVariety(variant="Verde Ubatuba", category="slab", stone_type="Granite",
@@ -27,8 +27,8 @@ def test_block_type_is_the_key_type_slug_not_the_backbone_display_form():
 
 
 def test_block_type_falls_to_key_when_backbone_lacks_the_variety():
-    key = f"slab_quartzite_no_backbone_{_UUID}"
-    vt = VariantTable(branch="slab")
-    vt.by_id["v2"] = Variant(variation_id="v2", key=key, name="No Backbone", image="", aliases=[])
+    key = f"quartzite__no_backbone_{_UUID}"
+    vt = VariantTable()
+    vt.by_id["v2"] = Variant(variation_id="v2", key=key, name="No Backbone", aliases=[])
     idx = build_variation_index(vt, Backbone())          # empty backbone -> block_type from the Key
     assert idx.candidates["v2"].block_type == proj.norm("quartzite")
