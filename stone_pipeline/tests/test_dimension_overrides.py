@@ -11,8 +11,11 @@ review flag naming both) and never silently taken either way: the override holds
 from __future__ import annotations
 
 import pytest
+from botocore.exceptions import ClientError
 
+from stone_pipeline.config.settings import ENV_NAME
 from stone_pipeline.core.schema import CanonicalRow, FlagCode
+from stone_pipeline.io import medusa_inputs
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import derive
 from stone_pipeline.state import overrides as ov
@@ -128,13 +131,79 @@ def test_a_differing_vendor_value_is_reported_and_the_override_kept(ref, tmp_pat
     assert [(f.field, f.raw_value, f.best_guess) for f in differs] == [("length", "3.2", "3.1")]
 
 
-def test_an_equal_vendor_value_is_not_reported(ref, tmp_path):
+def test_an_equal_vendor_value_reports_the_override_redundant(ref, tmp_path):
+    # grade 3: the exception's premise (the vendor is wrong or silent) stopped holding, so the run says remove it
     row = _derive(ref, _slab(raw_dimensions="length=310cm;height=160cm", raw_thickness="2cm"),
                   _file(tmp_path, f"polonine,620,length,3.1,{_SIGNED}"))
     assert not [f for f in row.review_flags if f.code == FlagCode.dimension_override_differs]
+    redundant = [f for f in row.review_flags if f.code == FlagCode.dimension_override_redundant]
+    assert [(f.field, f.raw_value) for f in redundant] == [("length", "3.1")]
+    assert "remove" in redundant[0].best_guess
 
 
 def test_a_non_positive_or_unparseable_dimension_override_raises(ref, tmp_path):
     for bad in ("0", "-1", "3.1m"):
         with pytest.raises(ValueError, match="length"):
             _derive(ref, _slab(), _file(tmp_path, f"polonine,620,length,{bad},{_SIGNED}"))
+
+
+# --- the durable home: S3 is the authority, fetched fresh on every produce -----------------------------------------
+
+class _FakeS3:
+    """download_file writes `body`, or raises the S3 error `code` (404 = absent)."""
+    def __init__(self, body: str | None = None, code: str | None = None):
+        self.body, self.code, self.keys = body, code, []
+
+    def download_file(self, bucket, key, filename):
+        self.keys.append(key)
+        if self.code:
+            raise ClientError({"Error": {"Code": self.code, "Message": self.code}}, "GetObject")
+        with open(filename, "w", encoding="utf-8") as handle:
+            handle.write(self.body)
+
+
+def test_the_overrides_live_under_the_durable_state_prefix():
+    assert medusa_inputs.OVERRIDES_KEY == f"{ENV_NAME}/scraper/state/manual_overrides.csv"
+
+
+def test_the_fetch_replaces_the_local_file_with_the_s3_copy(tmp_path):
+    target = tmp_path / "manual_overrides.csv"
+    target.write_text("stale", encoding="utf-8")
+    body = _HEADER + f"polonine,620,length,3.1,{_SIGNED}\n"
+    client = _FakeS3(body)
+    assert medusa_inputs.fetch_overrides(client=client, target=target) is True
+    assert target.read_text(encoding="utf-8") == body and client.keys == [medusa_inputs.OVERRIDES_KEY]
+
+
+def test_no_file_on_s3_is_no_overrides_and_drops_a_stale_local_copy(tmp_path):
+    target = tmp_path / "manual_overrides.csv"
+    target.write_text(_HEADER + f"polonine,620,length,3.1,{_SIGNED}\n", encoding="utf-8")
+    assert medusa_inputs.fetch_overrides(client=_FakeS3(code="NoSuchKey"), target=target) is False
+    assert not target.exists() and len(ov.load_overrides(target)) == 0
+
+
+def test_a_fetch_error_fails_loud_and_keeps_the_local_file(tmp_path):
+    target = tmp_path / "manual_overrides.csv"
+    target.write_text("kept", encoding="utf-8")
+    with pytest.raises(ClientError):
+        medusa_inputs.fetch_overrides(client=_FakeS3(code="AccessDenied"), target=target)
+    assert target.read_text(encoding="utf-8") == "kept"
+
+
+def test_a_malformed_s3_copy_is_refused_before_the_swap(tmp_path):
+    target = tmp_path / "manual_overrides.csv"
+    target.write_text("kept", encoding="utf-8")
+    with pytest.raises(ov.OverridesError):
+        medusa_inputs.fetch_overrides(client=_FakeS3("src_site,surrogate_key,field,value\npolonine,620,length,3.1\n"),
+                                      target=target)
+    assert target.read_text(encoding="utf-8") == "kept"
+
+
+def test_a_produce_stops_when_the_overrides_cannot_be_fetched(monkeypatch):
+    from stone_pipeline import produce
+    monkeypatch.setattr(medusa_inputs, "fetch_all", lambda: 0)
+    monkeypatch.setattr(medusa_inputs, "fetch_field_kinds", lambda: None)
+    monkeypatch.setattr(medusa_inputs, "fetch_overrides", lambda: (_ for _ in ()).throw(RuntimeError("denied")))
+    with pytest.raises(SystemExit) as stop:
+        produce._fetch_inputs()
+    assert stop.value.code == 2

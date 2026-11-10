@@ -19,10 +19,10 @@ from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.categories import category_for_key
-from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, SETTINGS,
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS,
                                             THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED)
 from stone_pipeline.core import logfmt
-from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client, s3_error_is_missing
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("deploy.fetch_inputs")
@@ -179,6 +179,38 @@ def fetch_field_kinds(client=None, target=None) -> None:
         client.download_file(S3_BUCKET, key, str(tmp))
         field_kinds.parse(tmp.read_bytes(), key)   # validates brand + every required field before the swap
         os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+# The operator's manual overrides (state/overrides.py), under the DURABLE-state prefix beside the ledger and config.db
+# snapshots (ledger/snapshot.py): the office drops the file here; S3 is its authority, a task never uploads it.
+OVERRIDES_KEY = f"{ENV_NAME}/scraper/state/manual_overrides.csv"
+
+
+def fetch_overrides(client=None, target=None) -> bool:
+    """Fetch the manual overrides fresh, validate every entry (load_overrides) and swap the file in: True. No file on
+    S3 means no overrides, as before the file had a home: the local copy is removed and False returned. Any other
+    failure (a fetch error, a malformed copy) RAISES with the local file untouched, so a produce stops (exit 2)
+    rather than run on overrides nobody can vouch for. `target` overrides the destination for tests."""
+    from stone_pipeline.state.overrides import load_overrides
+    target = Path(target or SETTINGS.paths.overrides_csv)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _incoming(target)
+    try:
+        client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
+        try:
+            client.download_file(S3_BUCKET, OVERRIDES_KEY, str(tmp))
+        except ClientError as exc:
+            if not s3_error_is_missing(exc):
+                raise
+            target.unlink(missing_ok=True)
+            print(f"   (no {OVERRIDES_KEY}: no manual overrides)")
+            return False
+        n = len(load_overrides(tmp))           # refuses an unsigned or malformed entry before the swap
+        os.replace(tmp, target)
+        print(f"   {OVERRIDES_KEY}: {n} override(s)")
+        return True
     finally:
         tmp.unlink(missing_ok=True)
 

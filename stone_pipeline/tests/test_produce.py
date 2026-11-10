@@ -131,6 +131,7 @@ def test_fetch_inputs_failure_is_best_effort(monkeypatch):
     monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_all", boom, raising=False)
     # the field-kinds fetch is fatal on every env (test_field_kinds); this test is about the export fetch only
     monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_field_kinds", lambda: None)
+    monkeypatch.setattr("stone_pipeline.io.medusa_inputs.fetch_overrides", lambda: False)   # fatal too (its own test)
     # call the real _fetch_inputs (not the stub) to prove it swallows the error
     p._fetch_inputs()   # must not raise
 

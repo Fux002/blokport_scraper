@@ -77,6 +77,11 @@ class FlagCode(str, Enum):
     # transient: a required dimension's FETCH failed (recoverable, e.g. HTTP 429) -> the row is HELD for
     # retry, NOT defaulted. The twin of no_image, the deliberate counterpart to dimension_defaulted.
     dimension_unavailable = "dimension_unavailable"
+    # an operator override (state/overrides.py) set a dimension, and the vendor's own scraped value DIFFERS from it:
+    # both are reported (raw_value the vendor's, best_guess the override's) and the override is kept until removed
+    dimension_override_differs = "dimension_override_differs"
+    # the vendor's scraped value now EQUALS the override: it is redundant, so the operator can remove it (grade 3)
+    dimension_override_redundant = "dimension_override_redundant"
     weight_derived = "weight_derived"
     attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"
