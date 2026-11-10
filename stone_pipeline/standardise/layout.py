@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from stone_pipeline.standardise import cutout
 from stone_pipeline.standardise import outline as openbook
 from stone_pipeline.standardise import marks as proto
 from stone_pipeline.standardise import studio
@@ -275,6 +276,15 @@ def drawn_outlines(alphas):
 def drawn_alphas(slabs):
     """The flat slabs' outlines exactly as enlarged draws them (drawn_outlines), made from the flat slabs alone."""
     return drawn_outlines([f.alpha for f in slabs])
+
+
+def source_of(slabs, i):
+    """What the 3D slab of flat slab i (flat_slabs) is made from, as enlarged draws it: the long side, in the work
+    copy's pixels, of its stone before any enlargement (an open book's seam trimmed as enlarged trims it), and whether
+    the layout enlarges it (the upscaler's detail then sits on those pixels). The run records it beside the slab
+    (photos.source) and publish carries it into the 3D slab's meta (cutout.SOURCE_LONG_PX, cutout.UPSCALED)."""
+    alphas = [f.alpha for f in slabs]
+    return {cutout.SOURCE_LONG_PX: max(_trim_seam(alphas)[i].shape), cutout.UPSCALED: _drawn_factor(alphas) > 1}
 
 
 def enlarged(slabs, esr):

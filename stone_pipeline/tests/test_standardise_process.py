@@ -537,7 +537,7 @@ def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
     pools = []
     real = pub.ThreadPoolExecutor
     monkeypatch.setattr(pub, "ThreadPoolExecutor", lambda n: pools.append(n) or real(n))
-    monkeypatch.setattr(pub, "_publish_cutout", lambda client, s, key, etag: True)
+    monkeypatch.setattr(pub, "_publish_cutout", lambda client, s, key, etag, scraped: True)
     assert pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held=frozenset())["made_3d"] == 1
     assert C.CUTOUT_WORKERS in pools and C.CUTOUT_WORKERS <= 4
 

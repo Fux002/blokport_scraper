@@ -57,8 +57,9 @@ bucket. Images land at `s3://<staging>/<env>/products/improved/<source>/<hash>.j
 and the product CSV links to that full https URL. See `config/settings.py` +
 `DEV_PROD_PIPELINE.md`. A produce is started from the admin's Run (`POST /config/v1/run` on the sync
 service). The ad-hoc task definition (`blokport-scraper-<env>`) runs `deploy/run_pipeline.sh`, which needs a
-`RUN_MODE` (unset exits 2); none of its modes runs on the `:core` image that task uses (they need the GPU
-images' torch and models and run as AWS Batch jobs), so it is not a way to produce.
+`RUN_MODE` (unset exits 2); none of its modes produces. Its one mode for the `:core` image that task uses is
+`cutout-meta` (the meta-only republish of the published 3D slabs' outlines, `stone_pipeline.photos.cutout_meta`, once
+per environment on its owner's word); the others need the GPU images' torch and models and run as AWS Batch jobs.
 
 ## Sequencing guarantee: images are ready before products load
 The image re-host runs **synchronously inside the produce, before the product CSV exists**, so a product

@@ -16,6 +16,7 @@ class Result:
     images: dict = field(default_factory=dict)         # name -> RGB array at the canvas size
     slab: tuple = ()                                   # (squared RGB, alpha) of one whole slab: what a 3D viewer needs
     chosen: tuple = ()                                 # (which, of how many) slabs found `slab` is: what its close-up is of
+    source: dict = field(default_factory=dict)         # what `slab` is made from (layout.source_of); {} without one
     changed: bool = False                              # a whole slab this version draws differently from the rule
                                                        # before OUTLINE_CHECKED (layout.drawn_differently)
     unchanged: bool = False                            # a recheck found it drawn the same: nothing drawn
@@ -69,6 +70,7 @@ def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, ed
         images["studio"] = studio.place(slabs)
     i = whole_index([a for _, a in slabs], kind)
     whole, chosen = ((), ()) if i is None else (slabs[i], (i, len(slabs)))
+    made_from = {} if i is None else layout.source_of(flats, i)
     if extra_views and whole:
         try:
             up = views.close_up(flats[i], full, edits() if edits else None)   # the same slab, at the photo's own pixels
@@ -76,7 +78,7 @@ def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, ed
             up = None
         if up is not None:
             images["close"] = up
-    return Result(kind=kind, images=images, slab=whole, chosen=chosen, changed=changed)
+    return Result(kind=kind, images=images, slab=whole, chosen=chosen, source=made_from, changed=changed)
 
 
 def whole_index(alphas, kind):

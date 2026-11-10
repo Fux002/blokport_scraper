@@ -21,6 +21,7 @@ its content, the listing's size or finish, or TILE_RENDER_VERSION. A tile listin
 from __future__ import annotations
 
 import functools
+import io
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -28,10 +29,12 @@ from pathlib import Path
 
 import cv2
 from botocore.exceptions import BotoCoreError, ClientError
+from PIL import Image, UnidentifiedImageError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.photos import source
 from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "config" / "standardise_exclude.txt"
@@ -220,14 +223,54 @@ def _stamp(client, slab, published):
     return client.head_object(Bucket=S3_BUCKET, Key=meta_key)["Metadata"].get(_MADE_FROM)
 
 
-def _publish_cutout(client, slab, slab_key, etag):
-    """Make and write one photo's 3D slab. The outline goes first and comes back last, so a pair cut short never looks
-    complete. A slab that is not one (ValueError) is reported and that photo's 3D slab removed: that product simply has
-    no 3D, the run goes on."""
+def _read(client, key):
+    """The object's bytes, None when there is none (any other storage error is raised as it is)."""
+    try:
+        return client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            return None
+        raise
+
+
+def scraped_shas(client, src):
+    """{sha: scraped key} of a source's scraped photos (source.scraped_keys): how slab_source finds a run's scraped one."""
+    return {imagestore.sha_from_url(k): k for k in source.scraped_keys(client, src)}
+
+
+def slab_source(client, slab_key, scraped):
+    """What the 3D slab made from slab_key (<run><sha>.slab.png) is made from, the keys its meta adds (cutout.make):
+    what the run recorded beside the slab (source.slab_record_key: layout.source_of, exact); for a run that recorded
+    none (made before that), only the bound SOURCE_LONG_PX_MAX, the long side of the photo the run started from
+    (source.start: its retouched, cleaned or scraped copy): no slab in it holds more real pixels. {} when that photo is
+    gone or unreadable: absent, never guessed. scraped = {sha: scraped key} of the slab's source."""
+    out, name = slab_key.rsplit("/", 1)
+    sha = name.split(".")[0]
+    record = _read(client, source.slab_record_key(f"{out}/", sha))
+    recorded = {k: v for k, v in json.loads(record or "{}").items() if k in (cutout.SOURCE_LONG_PX, cutout.UPSCALED)}
+    if recorded:
+        return recorded
+    started, _, _ = source.start(client, f"{out}/", scraped.get(sha), sha)
+    photo = _read(client, started) if started else None
+    if photo is None:
+        return {}
+    try:
+        return {cutout.SOURCE_LONG_PX_MAX: max(Image.open(io.BytesIO(photo)).size)}
+    except UnidentifiedImageError:
+        print(f"   NO SOURCE SIZE {slab_key}: {started} is no image", flush=True)
+        return {}
+
+
+def _publish_cutout(client, slab, slab_key, etag, scraped):
+    """Make and write one photo's 3D slab, its meta saying what it is made from (slab_source; scraped = {sha: scraped
+    key} of its source). The outline goes first and comes back last, so a pair cut short never looks complete. A slab
+    that is not one (ValueError) is reported and that photo's 3D slab removed: that product simply has no 3D, the run
+    goes on."""
     webp_key, meta_key = cutout_keys(slab)
     client.delete_object(Bucket=S3_BUCKET, Key=meta_key)
     try:
-        webp, meta = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read())
+        webp, meta = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read(),
+                                 **slab_source(client, slab_key, scraped))
     except ValueError as exc:
         print(f"   NO 3D {slab[0]}/{slab[1][:12]}: {exc}", flush=True)
         client.delete_object(Bucket=S3_BUCKET, Key=webp_key)
@@ -510,7 +553,9 @@ def publish(client, root, sheet, photos, say=print, *, assigned, held):
     pool_map(C.STORE_WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
     # each cut-out holds a full-size slab in memory
-    made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
+    scraped = {src: scraped_shas(client, src) for src in sorted({s[0] for s in remake})}
+    made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]], scraped[s[0]]),
+                           remake))
     slab_3d = {k for s in todo for k in cutout_keys(s)}
     cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
