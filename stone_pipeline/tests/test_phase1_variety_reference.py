@@ -49,3 +49,12 @@ def test_an_old_prefixed_key_is_refused(tmp_path, monkeypatch):
     base = _base(tmp_path / "variants_export_base.csv", [["slab_marble_xanadu_1a2b", "Xanadu", "Marble", ""]])
     with pytest.raises(ValueError, match="variety Key"):
         loaders.load_variants(base)
+
+
+@pytest.mark.parametrize("name", ["Mgt", "Xanadu"])   # a bare-code name, and a retired row (below)
+def test_a_prefixed_key_is_refused_on_every_row_even_one_the_matcher_skips(tmp_path, monkeypatch, name):
+    _isolated(monkeypatch)
+    monkeypatch.setattr("stone_pipeline.stages.decisions.load_retired", lambda: {"slab_marble_xanadu_1a2b"})
+    base = _base(tmp_path / "variants_export_base.csv", [["slab_marble_xanadu_1a2b", name, "Marble", ""]])
+    with pytest.raises(ValueError, match="variety Key"):
+        loaders.load_variants(base)
