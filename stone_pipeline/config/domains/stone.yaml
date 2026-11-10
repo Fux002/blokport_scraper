@@ -553,6 +553,8 @@ finish_phrase_default: "a refined natural surface"
 # Wendeng-z'), collapsed to the base variety in cleaning and flagged in review; a Roman 'I' is kept distinct.
 # Validated on the stone backbone (no variety ends in a lone non-'I' letter). A non-stone pack sets its own.
 name_code_pattern: '[Gg]\d+[A-Za-z]?'
+# the colour of a product the vendor names in several colours (config/domain.py multicolour_value)
+multicolour_value: Multicolor
 trailing_grade_letters: true
 
 # Classify a variety's colour from its hosted product image with the stone-tuned CV palette

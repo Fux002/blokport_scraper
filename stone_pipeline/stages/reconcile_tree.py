@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from rapidfuzz import fuzz
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.stages._rowguard import isolate_rows
@@ -66,6 +67,35 @@ def _fill_missing_from_variety(
                                 src_url=row.src_url))
 
 
+def _fill_missing_colour(row: CanonicalRow, allowed: list[str], ref: ReferenceData, stats: ReconcileStats) -> None:
+    """Colour when the scrape gave none. ONE allowed colour is the variety's colour (as for quality). SEVERAL are
+    never guessed (the backbone's list is no evidence of which one this product is, nor of multicolour): the
+    operator's colour statement for this vendor's listing decides; without one the colour is UNCONFIRMED. The row
+    then carries the variety's first colour, the one an already-published listing carries today, so validate can
+    keep a published listing listed (loads never remove) while holding a new one, and curate queues it.
+
+    A vendor that named several colours the pack cannot hold (no multicolour value: _apply_vendor_colour_list left it unset)
+    is unconfirmed too, whatever the variety allows, and carries the first colour it named when the variety allows
+    it: the colour such a published listing was listed with."""
+    named = next((f.best_guess for f in row.review_flags if f.code == FlagCode.multicolour_from_vendor), None) \
+        if row.color_method == "colour_unconfirmed" else None
+    if row.color_name or (len(allowed) < 2 and named is None):
+        _fill_missing_from_variety(row, "color", allowed, stats)
+        return
+    if not allowed:
+        return
+    stats.filled_from_variety += 1
+    stated = ref.decisions.listing_colour(row.src_site or "", row.variation_name or "", row.type_name or "")
+    if stated:
+        row.color_name, row.color_confidence, row.color_method = stated, Confidence.high.name, "operator"
+        return
+    carried = next((a for a in allowed if proj.norm(a) == proj.norm(named or "")), allowed[0])
+    row.color_name, row.color_confidence, row.color_method = carried, Confidence.low.name, "colour_unconfirmed"
+    row.add_flag(ReviewFlag(field="color", code=FlagCode.colour_unconfirmed, raw_value="",
+                            best_guess=", ".join(allowed), confidence=Confidence.low,
+                            method="colour_unconfirmed", src_url=row.src_url))
+
+
 def _nearest_allowed(value: str, allowed: list[str]) -> tuple[str | None, float]:
     best, best_score = None, 0.0
     nv = proj.norm(value)
@@ -83,7 +113,25 @@ def _map_id(ref: ReferenceData, vocab: str, name: str | None) -> str | None:
     return looked[1] if looked else None
 
 
+def _apply_vendor_colour_list(row: CanonicalRow, ref: ReferenceData) -> None:
+    """Rule 1: a vendor colour text naming two or more distinct colours (normalize's multicolour_from_vendor flag) is
+    the pack's multicolour value, never the first one named. Applied here, AFTER the matcher, which narrowed by the
+    vendor's own first colour as it always has. Without that value in the pack or the colour vocabulary the colour is
+    UNCONFIRMED: _fill_missing_colour keeps a published listing on the first colour named and queues it."""
+    if not any(f.code == FlagCode.multicolour_from_vendor for f in row.review_flags):
+        return
+    value = active_pack().multicolour_value
+    looked = ref.attributes.resolve_id("color", value) if value else None
+    if looked:
+        row.color_name, row.color_id = looked
+        row.color_confidence, row.color_method = Confidence.medium.name, "multicolor_from_vendor"
+    else:
+        row.color_name, row.color_id = None, None
+        row.color_confidence, row.color_method = Confidence.none.name, "colour_unconfirmed"
+
+
 def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) -> None:
+    _apply_vendor_colour_list(row, ref)
     # A null variation cannot be validated; ensure it is in the gap queue and stop.
     if not row.variation_id:
         # rows already held distinctly in Stage 4 (no category reference yet, or a
@@ -141,11 +189,11 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
 
     # 1b. fill colour/quality from the variety when the scrape omitted them (the
     # variety is the authority; this recovers sources with no colour column)
-    _fill_missing_from_variety(row, "color", variety.colors, stats)
+    _fill_missing_colour(row, variety.colors, ref, stats)
     _fill_missing_from_variety(row, "quality", variety.qualities, stats)
 
     # 2. membership with snapping for the low-trust attributes
-    ok = True
+    ok = not _pend_multicolour_leaf(row, variety.colors, stats)
     if not _reconcile_attribute(row, "color", variety.colors, ref, stats, snappable=False):
         ok = False
     if not _reconcile_attribute(row, "finish", variety.finishes, ref, stats, snappable=True):
@@ -247,6 +295,12 @@ def _reconcile_attribute(
             return True
 
     # genuine miss: the variety lacks this finish/colour -> missing_leaf_child
+    _add_leaf_gap(row, vocab, chosen, allowed, stats)
+    return False
+
+
+def _add_leaf_gap(row: CanonicalRow, vocab: str, value: str, allowed: list[str], stats: ReconcileStats) -> None:
+    """The variety lacks `value` for `vocab`: a missing_leaf_child gap, which curate raises as a leaf suggestion."""
     stats.missing_leaf += 1
     row.add_gap(
         TreeGap(
@@ -255,15 +309,36 @@ def _reconcile_attribute(
             raw_name=row.raw_name or "",
             normalized_name=proj.norm(row.variation_name or ""),
             suggested_type=row.type_name,
-            suggested_color=row.color_name if vocab == "color" else None,
-            suggested_finish=row.finish_name if vocab == "finish" else None,
-            suggested_quality=row.quality_name if vocab == "quality" else None,
+            suggested_color=value if vocab == "color" else None,
+            suggested_finish=value if vocab == "finish" else None,
+            suggested_quality=value if vocab == "quality" else None,
             gap_kind=GapKind.missing_leaf_child,
             nearest_existing=", ".join(allowed[:5]),
             example_src_url=row.src_url,
         )
     )
-    return False
+
+
+def _pend_multicolour_leaf(row: CanonicalRow, allowed: list[str], stats: ReconcileStats) -> bool:
+    """A vendor's several colours (rule 1, multicolour) on a variety that does not allow the multicolour value yet.
+    The leaf gap is raised as for any missing colour (curate suggests adding it), and the row carries the colour such
+    a listing carried before rule 1, the first one named, when the variety allows it: validate then keeps a PUBLISHED
+    listing listed and updating on it (never frozen behind an approval), while a new one is held on the gap. Once
+    the leaf is approved the row is the multicolour value. True when the gap was raised."""
+    if row.color_method != "multicolor_from_vendor" or not row.color_name:
+        return False
+    by_norm = {proj.norm(a): a for a in allowed}
+    named = next((f.best_guess for f in row.review_flags if f.code == FlagCode.multicolour_from_vendor), None)
+    if proj.norm(row.color_name) in by_norm or proj.norm(named or "") not in by_norm:
+        return False                     # allowed already, or nothing allowed to carry: the usual membership check
+    multicolour = row.color_name
+    _add_leaf_gap(row, "color", multicolour, allowed, stats)
+    row.color_name, row.color_confidence = by_norm[proj.norm(named)], Confidence.medium.name
+    row.color_method = "multicolour_leaf_pending"
+    row.add_flag(ReviewFlag(field="color", code=FlagCode.multicolour_leaf_pending, raw_value=row.color_name,
+                            best_guess=multicolour, confidence=Confidence.medium,
+                            method="multicolour_leaf_pending", src_url=row.src_url))
+    return True
 
 
 def _finalize_ids(row: CanonicalRow, ref: ReferenceData) -> None:
