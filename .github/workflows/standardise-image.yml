@@ -24,7 +24,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     environment: standardise-build   # deployment branches: main only; the dispatch role trusts only this environment
-    timeout-minutes: 75              # above the build's 60 plus its queue
+    timeout-minutes: 95              # the build's queued_timeout 30 + build_timeout 60, plus 5 for start and read-back
     env:
       AWS_REGION: eu-west-1
       PROJECT: standardise-image
