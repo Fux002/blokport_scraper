@@ -49,11 +49,10 @@ def _minting(*spellings: str) -> Decisions:
     return Decisions.from_legacy({("", s): {"action": "mint"} for s in spellings})
 
 
-def test_the_curate_key_is_the_one_rule_and_names_no_category():
-    key = curate.gen_key("Dolomite Marble", "Calacatta Gold")
-    assert key == variety_key.new_key("Dolomite Marble", "Calacatta Gold")
-    assert type_slug_from_key(key) == "dolomite_marble"          # the type is the Key's type slug, whole
-    for gone in ("BRANCHES", "active_branches", "core", "image_filename", "image_url", "load_all_existing"):
+def test_curate_mints_under_the_one_key_rule_and_names_no_category():
+    # the Key rule lives once, in phase1.variety_key: curate keeps no Key helper, branch list or image name
+    assert type_slug_from_key(variety_key.new_key("Dolomite Marble", "Calacatta Gold")) == "dolomite_marble"
+    for gone in ("BRANCHES", "active_branches", "gen_key", "image_filename", "image_url", "load_all_existing"):
         assert not hasattr(curate, gone), gone
 
 

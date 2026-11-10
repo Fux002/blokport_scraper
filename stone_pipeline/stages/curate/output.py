@@ -13,7 +13,6 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 from stone_pipeline.stages.curate.context import CurationResult
-from stone_pipeline.stages.curate.keys import BRANCHES
 
 log = logfmt.get_logger("curate")
 
@@ -34,22 +33,15 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     Both upload files (to_upload/1_variants_full.csv and 1_variants_update.csv) are produced by emit_catalog."""
     p = SETTINGS.paths
     additions = p.backbone_additions_dir
-    upload_rows: list[dict] = []
-    needs_review: list[dict] = []
-    triage: list[dict] = []
-    for branch in BRANCHES:
-        confirmed = [r for r in result.alias_additions[branch] if r.get("_status") == "confirmed"]
-        upload_rows += confirmed + result.new_variants[branch]
-        needs_review += [r for r in result.alias_additions[branch] if r.get("_status") != "confirmed"]
-        triage += result.new_variants[branch]
-        # backbone deltas: the new varieties to append to catalog_source/backbone_*.json. ALWAYS
-        # (over)write -- including an empty list -- so a variety that is no longer minted this run
-        # (resolved, held, or now code-detected like 'Mgt Onyx') can never PERSIST as a stale
-        # addition from a prior run (which would keep feeding the image queue + tree).
-        bp = additions / f"{branch}.json"
-        bp.parent.mkdir(parents=True, exist_ok=True)
-        bp.write_text(json.dumps(result.backbone_new[branch], indent=2, ensure_ascii=False),
-                      encoding="utf-8")
+    upload_rows = [r for r in result.alias_additions if r.get("_status") == "confirmed"] + result.new_variants
+    needs_review = [r for r in result.alias_additions if r.get("_status") != "confirmed"]
+    # the backbone delta: this run's new varieties, one post each. ALWAYS (over)written, an empty list
+    # included, so a variety that is no longer minted this run (resolved, held, or now code-detected like
+    # 'Mgt Onyx') can never PERSIST as a stale addition from a prior run (which would keep feeding the image
+    # queue + tree).
+    p.backbone_additions_file.parent.mkdir(parents=True, exist_ok=True)
+    p.backbone_additions_file.write_text(json.dumps(result.backbone_new, indent=2, ensure_ascii=False),
+                                         encoding="utf-8")
     # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias is just upsert
     # noise (the mint guard can miss a duplicate-name generic). Keep the update file to the genuine delta: new
     # variants and real alias changes only (a variety file carries no image since SC-4 2b).

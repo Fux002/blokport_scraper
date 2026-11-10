@@ -20,7 +20,9 @@ from functools import partial
 from pathlib import Path
 
 from stone_pipeline.core.text import clean_alias_list
+from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.reference.loaders import field_kinds as fk
+from stone_pipeline.reference.loaders.identity import type_slug_from_key
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "stone_pipeline" / "tests" / "fixtures" / "field-kinds.json"
@@ -74,11 +76,10 @@ def _write_csv(header: list[str], rows: list[dict], like: str) -> str:
 def clean_base(text: str) -> str:
     from stone_pipeline.stages import emit_catalog
     header, rows = _read_csv(text)
-    seen: dict[tuple[str, str, str], str] = {}
+    seen: dict[tuple[str, str], str] = {}
     for row in rows:
         emit_catalog._write_names(row)              # emit's own rule: raises for a Name with no ASCII form
-        branch, _, rest = row["Key"].partition("_")
-        ident = (branch, rest.split("_", 1)[0], row["Name"].casefold())
+        ident = (type_slug_from_key(row["Key"]), row["Name"].casefold())   # a variety: (type, name), no category
         if ident in seen and seen[ident] != row["Key"]:
             raise Refused(f"{row['Key']} and {seen[ident]} would share the cleaned Name {row['Name']!r}")
         seen[ident] = row["Key"]
@@ -117,14 +118,13 @@ def clean_backbone(text: str) -> str:
 
 
 def _check_keys_stay(before: dict[str, str], after: dict[str, str]) -> None:
-    """No Key moves: every slab variant's deterministic tile Key is the same before and after cleaning (the tile
-    backbone mirrors the slab one). Compared before/after, so a tile post already missing on main is not counted."""
-    from stone_pipeline.stages.curate.keys import gen_key
+    """No Key moves: every slab variant's deterministic Key (the one rule, over its type and name) is the same
+    before and after cleaning. Compared before/after, so a post already missing on main is not counted."""
     old, new = (json.loads(t[SLAB_BACKBONE])["posts"] for t in (before, after))
     moved = [o["variant"] for o, n in zip(old, new)
-             if gen_key("tile", o["stone_type"], o["variant"]) != gen_key("tile", n["stone_type"], n["variant"])]
+             if new_key(o["stone_type"], o["variant"]) != new_key(n["stone_type"], n["variant"])]
     if moved:
-        raise Refused(f"{len(moved)} tile Keys would move, first {moved[:5]}")
+        raise Refused(f"{len(moved)} Keys would move, first {moved[:5]}")
 
 
 def plan() -> dict[str, str]:

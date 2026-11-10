@@ -11,11 +11,11 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
 
 - `backbone_slabs.json`, `backbone_blocks.json`, `backbone_tiles.json` — per-category
   "backbone": the allowed combinations (which colour/finish/quality each variety may
-  be sold as), each post carrying its `key`. Tiles MIRROR slabs (rebuild with
-  `python -m stone_pipeline.stages.build_tile_backbone`).
+  be sold as), each post carrying its `key`. Tiles MIRROR slabs.
 
 - `backbone_additions/` — PRODUCED each catalog run: the new varieties to append to
-  the backbones above (`slab.json` / `block.json` / `tile.json`) plus
+  the backbones above (`varieties.json`, one post per (type, name) with the `categories` its
+  products sit in) plus
   `backbone_value_updates.csv` (existing varieties missing a colour/finish). Apply
   these to the backbones before building the tree.
 

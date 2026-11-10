@@ -32,7 +32,7 @@ from stone_pipeline.io import storage
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
-from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
+from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
 from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("catalog")
@@ -115,11 +115,6 @@ def run(outputs_root: Path | None = None) -> Path:
     from stone_pipeline.stages import decisions as _decisions
     _decisions.heal_drifted_membership(rows)
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
-    # Regenerate every mirror backbone (Tiles) from the CURRENT slab backbone before anything reads it:
-    # emit_catalog's tile mirror rows (below) and tree_build's combinations both consume the tile backbone,
-    # so rebuilding it here makes tiles a pure derivation of slabs that can never silently rot. (The manual
-    # build_tile_backbone step used to be forgotten, leaving polluted tiles inconsistent with cleaned slabs.)
-    build_tile_backbone.build()
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
@@ -226,7 +221,7 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
     if checker is None or copier is None:
         return 0
     from stone_pipeline.adapters.tokens import explicit_type_word
-    from stone_pipeline.stages.curate import gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     copied = 0
     for r in csv.DictReader(dele.open(encoding="utf-8-sig")):
         old = (r.get("Key") or "").strip()
@@ -236,7 +231,7 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
         looked = ref.attributes.resolve_id("type", explicit_type_word(name) or name)
         if not looked:
             continue                                   # can't derive the correct type from the name
-        new = gen_key(old.split("_")[0], looked[0], name)
+        new = new_key(looked[0], name)
         if new != old and checker(old) and not checker(new) and copier(old, new):
             copied += 1
     if copied:

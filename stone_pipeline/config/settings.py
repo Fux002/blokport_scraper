@@ -368,6 +368,11 @@ class Paths:
         return _pack_namespaced(self.catalog_source_dir) / "backbone_additions"
 
     @property
+    def backbone_additions_file(self) -> Path:
+        # curate's per-run delta: one post per new (type, name) variety, whatever its categories (phase 1)
+        return self.backbone_additions_dir / "varieties.json"
+
+    @property
     def origin_map_csv(self) -> Path:
         # per-variety origin, PACK-NAMESPACED via catalog_source/<pack>/ (stone stays flat). A non-stone pack
         # reads its OWN origin_map or none -- never stone's, so wood/lime origins can't silently resolve to a
