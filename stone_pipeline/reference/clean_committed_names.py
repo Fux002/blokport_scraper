@@ -27,17 +27,15 @@ from stone_pipeline.reference.loaders.identity import type_slug_from_key
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "stone_pipeline" / "tests" / "fixtures" / "field-kinds.json"
 BASES = ["from_medusa/development/variants_export_base.csv", "from_medusa/production/variants_export_base.csv"]
-BACKBONES = ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-             "catalog_source/backbone_tiles.json", "catalog_source/backbone_additions/slab.json",
-             "catalog_source/backbone_additions/block.json", "catalog_source/backbone_additions/tile.json"]
-SLAB_BACKBONE = "catalog_source/backbone_slabs.json"
+# the ONE variety backbone and the ONE committed additions file (spec rev 8 section 3)
+BACKBONES = ["catalog_source/backbone_varieties.json", "catalog_source/backbone_additions/varieties.json"]
+VARIETY_BACKBONE = "catalog_source/backbone_varieties.json"
 # (file, {column: (field, rule)}): rule "display" for a variety Name (title-cased as emit writes it), "clean" for a
 # place, port or vocabulary name (case kept)
 TABLES = [
     ("catalog_source/origin_map.csv", {"variety": (fk.VARIATION_NAME, "display"), "stone_type": (fk.TYPE_NAME, "clean"),
                                        "city": (fk.PRODUCT_ORIGIN_CITY, "clean"),
                                        "county": (fk.PRODUCT_ORIGIN_COUNTY, "clean")}),
-    ("catalog_source/missing_variants.csv", {"Name": (fk.VARIATION_NAME, "display")}),
     ("catalog_source/ports.csv", {"name": (fk.PORT_NAME, "clean"), "region_name": (fk.PORT_REGION_NAME, "clean")}),
     ("catalog_source/backbone_additions/backbone_value_updates.csv", {"variety": (fk.VARIATION_NAME, "display")}),
     # a synonym's canonical value is Medusa's vocabulary spelling: cleaned, never re-cased
@@ -118,9 +116,9 @@ def clean_backbone(text: str) -> str:
 
 
 def _check_keys_stay(before: dict[str, str], after: dict[str, str]) -> None:
-    """No Key moves: every slab variant's deterministic Key (the one rule, over its type and name) is the same
+    """No Key moves: every variety post's deterministic Key (the one rule, over its type and name) is the same
     before and after cleaning. Compared before/after, so a post already missing on main is not counted."""
-    old, new = (json.loads(t[SLAB_BACKBONE])["posts"] for t in (before, after))
+    old, new = (json.loads(t[VARIETY_BACKBONE])["posts"] for t in (before, after))
     moved = [o["variant"] for o, n in zip(old, new)
              if new_key(o["stone_type"], o["variant"]) != new_key(n["stone_type"], n["variant"])]
     if moved:

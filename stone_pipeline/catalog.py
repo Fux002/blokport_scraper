@@ -129,9 +129,8 @@ def run(outputs_root: Path | None = None) -> Path:
     # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
     # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color
-    from stone_pipeline.config.categories import CATEGORIES
-    _additions = sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json"))
-    _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
+    _additions = [SETTINGS.paths.backbone_additions_file]   # this run's new varieties, coloured in place
+    _merged = [SETTINGS.paths.backbone_json]                # read-only: a new variety inherits a known colour
     product_images: dict[str, str] = {}                # variation_key -> its product photo (first wins)
     for r in rows:
         if r.variation_key and r.image_keys and r.variation_key not in product_images:
