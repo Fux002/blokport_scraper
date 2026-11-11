@@ -712,8 +712,9 @@ def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, brand, parts)
 _PACKAGE = Path(market_prices.__file__).parent
 # the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
 # factory (the run entry)
+# scrapers.run: the product scraper's suppliers, for the supplier flag (register.supplier_keys)
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
-                    "stone_pipeline.io.storage"}
+                    "stone_pipeline.io.storage", "scrapers.run"}
 # openpyxl reads the supplied .xlsx price sheets; botocore's ClientError tells the intake record's absence from a failure
 _THIRD_PARTY = {"pydantic", "yaml", "httpx", "openpyxl", "openpyxl.utils.exceptions", "botocore.exceptions"}
 _NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}

@@ -17,6 +17,7 @@ from pydantic import (
 from market_prices import config
 from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
+from market_prices.text import same_site
 
 SLUG = re.compile(r"[a-z0-9_]+")
 
@@ -91,6 +92,8 @@ class Site(BaseModel):
     decided_on: Optional[Day] = None
     statements: SiteStatements = SiteStatements()
     grade_labels: tuple[Words, ...] = ()
+    # The product scraper's source id when this seller is also one of the owner's suppliers (check_suppliers).
+    supplier_key: Optional[Words] = None
 
     @field_validator("site_id")
     @classmethod
@@ -153,6 +156,31 @@ class Register(BaseModel):
         return self
 
 
+def check_suppliers(register: Register, domains: dict[str, str]) -> None:
+    """A seller that is one of the owner's suppliers is flagged from the product scraper, never by hand: every
+    supplier_key is a supplier's source id, its domain is the site's, and a supplier's domain never goes unflagged.
+    `domains` is scrapers.run.supplier_domains() (source id -> site_domain)."""
+    for site in register.sites:
+        if site.supplier_key is not None:
+            if site.supplier_key not in domains:
+                raise RegisterError(f"site {site.site_id}: supplier_key {site.supplier_key!r} is not one of the "
+                                    f"product scraper's suppliers {sorted(domains)}")
+            if not same_site(site.base_url, domains[site.supplier_key]):
+                raise RegisterError(f"site {site.site_id}: base_url {site.base_url} is not supplier "
+                                    f"{site.supplier_key}'s domain {domains[site.supplier_key]}")
+            continue
+        if matched := sorted(key for key, domain in domains.items() if same_site(site.base_url, domain)):
+            raise RegisterError(f"site {site.site_id}: {site.base_url} is the domain of supplier {matched[0]}; "
+                                f"set supplier_key: {matched[0]}")
+
+
+def supplier_keys() -> dict[str, str]:
+    """The product scraper's suppliers and their domains. Imported here, not at the top: only a register or layout
+    load needs the fetchers, and every fetcher module is imported to read them."""
+    from scrapers.run import supplier_domains
+    return supplier_domains()
+
+
 def load_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
     """The validated register of one brand. Any problem raises, so no site runs on a half-read register."""
     if not SLUG.fullmatch(brand):
@@ -170,4 +198,5 @@ def load_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
         raise RegisterError(f"{path} does not validate: {exc}") from exc
     if register.brand != brand:
         raise RegisterError(f"{path} declares brand {register.brand!r}")
+    check_suppliers(register, supplier_keys())
     return register

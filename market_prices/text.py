@@ -31,6 +31,13 @@ def site_host(url: str) -> str:
     return host.removeprefix("www.")
 
 
+def same_site(url: str, domain: str) -> bool:
+    """Whether `url`'s host is `domain` or a subdomain of it, with case and a leading "www." dropped on both sides.
+    A whole host, never a registrable domain: two SlabWare tenants share slabware.com and are different sellers."""
+    host, wanted = site_host(url), domain.strip().lower().removeprefix("www.")
+    return bool(host) and bool(wanted) and (host == wanted or host.endswith(f".{wanted}"))
+
+
 def on_site(url: str, base_url: str) -> bool:
     """Whether `url` is plain http(s) on the site's own host or a subdomain. Anything a browser could read differently
     from this parser (userinfo, backslashes, non-ASCII, whitespace) is refused rather than interpreted."""

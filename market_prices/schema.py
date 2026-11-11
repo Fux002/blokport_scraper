@@ -76,6 +76,8 @@ class Observation(BaseModel):
     seller_type: SellerType
     seller_country: str = Field(pattern=r"^[A-Z]{2}$")
     served_market: str = Field(pattern=r"^[A-Z]{2}$")
+    seller_is_our_supplier: bool
+    supplier_key: Optional[str]
     listing_key: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
@@ -100,6 +102,12 @@ class Observation(BaseModel):
     def _amount_matches_status(self) -> "Observation":
         if (self.price_status is PriceStatus.priced) != (self.price_amount is not None):
             raise ValueError("price_amount is set exactly when price_status is priced")
+        return self
+
+    @model_validator(mode="after")
+    def _supplier_flag_has_its_key(self) -> "Observation":
+        if self.seller_is_our_supplier != (self.supplier_key is not None):
+            raise ValueError("supplier_key is set exactly when seller_is_our_supplier is true")
         return self
 
     @model_validator(mode="after")
@@ -161,6 +169,8 @@ def csv_values(row: BaseModel) -> list[str]:
 def _cell(value: object) -> str:
     if value is None:
         return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, Enum):
         return str(value.value)
     if isinstance(value, dict):

@@ -11,7 +11,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 
 from market_prices import config
-from market_prices.register import SLUG, Country, Register, Words
+from market_prices.register import SLUG, Country, Register, Words, supplier_keys
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
@@ -49,6 +49,9 @@ class Competitor(BaseModel):
     seller_type: SellerType
     seller_country: Country
     served_market: Country
+    # The product scraper's source id when this competitor is also one of the owner's suppliers. A sheet has no site
+    # to check a domain against, so the key is checked against the suppliers at load (load_layouts).
+    supplier_key: Optional[Words] = None
 
     @field_validator("competitor_id")
     @classmethod
@@ -208,4 +211,8 @@ def load_layouts(brand: str, layouts_dir: Path = config.LAYOUTS_DIR) -> Layouts:
         raise LayoutError(f"{path} does not validate: {exc}") from exc
     if layouts.brand != brand:
         raise LayoutError(f"{path} declares brand {layouts.brand!r}")
+    suppliers = supplier_keys()
+    if unknown := sorted({c.supplier_key for c in layouts.competitors if c.supplier_key} - set(suppliers)):
+        raise LayoutError(f"{path}: supplier_key {unknown} is not one of the product scraper's suppliers "
+                          f"{sorted(suppliers)}")
     return layouts

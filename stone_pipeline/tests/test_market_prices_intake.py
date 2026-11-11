@@ -301,7 +301,7 @@ def test_a_known_layout_gives_the_exact_rows():
     assert first == {
         "contract_version": "2", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
-        "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
+        "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
         "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Finish": "Polished"}, "grade_text": None,
         "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",

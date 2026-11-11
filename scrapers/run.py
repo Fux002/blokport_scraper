@@ -39,6 +39,9 @@ except ImportError:
 # (fulei was the same supplier as fuleistone -- category 246 "Live Inventory" vs fuleistone's 148 "Stone Slabs"
 # superset -- so it was removed as a superseded duplicate, not a distinct pending source.)
 _SOURCES = ("marenostone", "polonine", "zucchi", "varsha", "fuleistone", "sentas")
+# The dormant ScraperBase modules named above: not scraped, but still the owner's suppliers, so the competitor-price
+# register knows their domains too (supplier_domains). A ScraperBase module is in exactly one of the two tuples.
+DORMANT = ("develi", "ferraz", "temmer", "tureks", "brumagran")
 
 
 def _discover(source: str) -> Type[ScraperBase]:
@@ -55,6 +58,21 @@ def _discover(source: str) -> Type[ScraperBase]:
 
 # source id -> ScraperBase subclass, in _SOURCES order (preserved by dict insertion).
 REGISTRY: dict[str, Type[ScraperBase]] = {name: _discover(name) for name in _SOURCES}
+
+
+def supplier_domains() -> dict[str, str]:
+    """Every supplier the product scraper knows (REGISTRY and DORMANT), by source id, to its declared site_domain.
+    Discovered on call, so importing this module never imports the dormant scrapers. An empty or shared domain
+    raises: the competitor-price supplier flag must never match a guess."""
+    domains = {name: _discover(name).site_domain for name in (*_SOURCES, *DORMANT)}
+    if empty := sorted(name for name, domain in domains.items() if not domain):
+        raise RuntimeError(f"scrapers with no site_domain: {empty}")
+    seen: dict[str, str] = {}
+    for name, domain in domains.items():
+        if domain in seen:
+            raise RuntimeError(f"scrapers {seen[domain]} and {name} both declare site_domain {domain!r}")
+        seen[domain] = name
+    return domains
 
 
 def run_one(source: str):

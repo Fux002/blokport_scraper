@@ -2,7 +2,7 @@
 
 Reference prices seen on competitor sites, and read from the competitor price sheets the owner supplies, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site or a sheet says. Matching, conversion, grading and trust rules belong to the consumer.
 
-Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files; every other column is as in version 1.
+Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1.
 
 ## Where
 
@@ -29,6 +29,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
 | seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
+| seller_is_our_supplier, supplier_key | `true` when this seller is also one of the owner's suppliers, with `supplier_key` the product scraper's source id for it (empty when `false`). Copied from the register, which derives it from the product scraper's suppliers, never typed by hand |
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
 | listing_text | The seller's name for the listing, and short description when there is one |
@@ -46,6 +47,8 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency and min_qty_text: `listing`, `site_statement` (said once for the whole site) or `unknown` |
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
+
+A row with `seller_is_our_supplier` = `true` is still a public price, the same universe price as any competitor's, labelled as the owner's supplier. The consumer shows a supplier's list prices as their own line, apart from the competitor comparison, and never as the buy price: the owner's buy price comes only from his own load.
 
 No photos are collected. Text cells are the seller's own words: read them as data, and do not open the raw file in a spreadsheet that runs formulas.
 
@@ -87,8 +90,8 @@ A file is refused, named, and left in the intake (never half-read) when it is no
 
 ## Adding a competitor sheet
 
-One `competitors` entry (id, the names the sheet uses, seller type, country, market) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
+One `competitors` entry (id, the names the sheet uses, seller type, country, market, and `supplier_key` when the competitor is one of the owner's suppliers, checked against the product scraper's suppliers at load) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
 
 ## Adding a site
 
-One entry in `market_prices/sites/<brand>.yaml`. `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
+One entry in `market_prices/sites/<brand>.yaml`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.

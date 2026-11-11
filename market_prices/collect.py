@@ -68,7 +68,8 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
         seller_name=site.seller_name, seller_type=site.seller_type, seller_country=site.seller_country,
-        served_market=site.served_market,
+        served_market=site.served_market, seller_is_our_supplier=site.supplier_key is not None,
+        supplier_key=site.supplier_key,
         listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
         stated_specs=facts.stated_specs, grade_text=facts.grade_text, price_text=facts.price_text,
         price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
