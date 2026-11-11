@@ -681,7 +681,11 @@ why a re-seed needs no special handling.
 - `inventory`: `sku`, `quantity`, `made_to_order`. Served only after the product is
   `synced`. A `quantity` of 0 is the reversible delist for a discontinued product.
   `made_to_order` true (a free-size shape, cut on demand) is on sale with no count:
-  `quantity` is null exactly then. The ack echoes both; it is refused when either moved.
+  `quantity` is null exactly then. The ack echoes both; it is refused when either moved. An optional
+  `reason` says why a stock is 0: `delisted` (vendor take-offline), `replaced_by_lot` (with `lot_code`),
+  `no_photo` (a draft until its standardised photo is published) or `held` (a product Medusa holds that a
+  later produce held: its stock can no longer be stated, so it is taken off sale, never left at its last count;
+  the produce that emits it again serves its real stock). Medusa reads an unknown reason as a plain stock.
 
 Booleans and casing follow the existing template conventions. The canonical
 attribute names are exactly the backbone spellings the scraper already validates

@@ -22,6 +22,9 @@ Response `200` (from `sync.purge_discontinued`):
 - `409` if a sync pull is in flight (never purge mid-serve) -- body `{ "error": "..." }`.
 - Semantics: each SKU is tombstoned so Medusa deletes the same set (product + scraper_sync_ref) via the
   `/sync/v1/removed` pull lane.
+- Not dead stock, so never purged (except by a vendor removal): a stock 0 with reason `no_photo` (hidden until
+  its photo is published) or `held` (a product Medusa holds that a later produce held, served on the inventory
+  lane as `{quantity: 0, made_to_order: false, reason: "held"}`; its stock is unknown, not gone).
 
 ## S-4 -- inventory keying (answers B-2's investigation)
 

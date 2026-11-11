@@ -144,6 +144,18 @@ def discontinued(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProduc
             if sku.startswith(prefix) and sku not in scraped]
 
 
+def held(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) -> list[tuple[str, str]]:
+    """The products Medusa holds (the products export) that this run HOLDS (`rows`: validate's rejects and review
+    holds), as (sku, handle) for the hide: a stock the scraper can no longer state is taken off sale, never left at its
+    last count. A held product Medusa does not hold has no listing to hide. In row order, each SKU once."""
+    out: dict[str, str] = {}
+    for row in rows:
+        sku = sku_for(row, cfg)
+        if sku in known.by_sku and sku not in out:
+            out[sku] = known.by_sku[sku].get("handle") or ""
+    return list(out.items())
+
+
 def _is_live(entry: dict) -> bool:
     """Medusa still lists this product with stock. Only a readable quantity <= 0 is delisted already; a
     blank or unreadable one counts as live, so an unknown can only make the mass-delist guard stricter."""
