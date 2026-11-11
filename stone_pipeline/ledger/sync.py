@@ -1018,6 +1018,17 @@ def variation_live_products(ledger: Ledger, key: str) -> int:
     return int(row["n"]) if row else 0
 
 
+class GoneListingsShowVariety(RuntimeError):
+    """A variety some gone listing shows cannot be retired: retiring cascades its products, and a gone listing's record
+    is never deleted (table 505). Raised whatever `force` says: the operator moves or decides those listings first."""
+
+
+def variation_gone_listings(ledger: Ledger, key: str) -> list[str]:
+    """The SKUs of the gone listings (gone_at set) that show this variety, sorted."""
+    return [r["sku"] for r in ledger.execute(
+        f"SELECT sku FROM product WHERE variation_key = ? AND sku IN ({GONE_SKUS_SQL}) ORDER BY sku", (key,))]
+
+
 def retire_variation(ledger: Ledger, key: str, force: bool = False,
                      reason: str = "variation_removed") -> dict:
     """Cascade a variety's explicit removal (also the old side of a re-key). Its products (which belong to
@@ -1026,6 +1037,9 @@ def retire_variation(ledger: Ledger, key: str, force: bool = False,
     never-synced variety: Medusa never received it, so there is nothing to tell it to delete). The caller
     (lifecycle) has already guarded existence + the live-product precondition. Serve-in-flight guarded."""
     _lock_and_check_in_flight(ledger)
+    if gone := variation_gone_listings(ledger, key):
+        raise GoneListingsShowVariety(f"variety {key!r} is shown by {len(gone)} gone listing(s) {', '.join(gone)}: "
+                                      "their records stay (table 505); move them to another variety first")
     var = ledger.get("variation", "key", key)
     prods = ledger.execute("SELECT sku, source FROM product WHERE variation_key = ?", (key,)).fetchall()
     if prods:                                  # E1: product tombstones (serve before the variation one)
