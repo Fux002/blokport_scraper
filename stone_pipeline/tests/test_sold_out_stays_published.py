@@ -77,7 +77,7 @@ def test_a_listing_still_gone_keeps_its_first_gone_at(tmp_path):
         assert _stock(ledger, "SEN-1") == (0, "sold_out", FIRST)
 
 
-@pytest.mark.parametrize("hidden", ["no_photo", "delisted"])
+@pytest.mark.parametrize("hidden", ["no_photo", "delisted", "held"])
 def test_a_hidden_listing_gone_keeps_its_publish_state_and_gets_gone_at(tmp_path, hidden):
     with _open(tmp_path) as ledger:
         _prod(ledger, "SEN-1", qty=0, reason=hidden)
@@ -87,7 +87,7 @@ def test_a_hidden_listing_gone_keeps_its_publish_state_and_gets_gone_at(tmp_path
 
 
 def test_the_hidden_reasons_are_the_hide_set_agreed_with_m4():
-    assert set(HIDDEN_REASONS) == {"no_photo", "delisted"}          # #632 adds 'held'
+    assert set(HIDDEN_REASONS) == {"no_photo", "delisted", "held"}   # 'held' is #632's (stock unknown)
 
 
 def test_a_bundle_replaced_by_its_lot_stays_replaced_and_is_not_gone(tmp_path):
@@ -181,6 +181,22 @@ def test_a_hard_reset_spares_gone_listings_and_tombstones_the_rest(tmp_path, sco
         assert _stock(ledger, "SEN-GONE") == (0, "sold_out", FIRST) and ledger.get("product", "sku", "SEN-GONE")
         assert _stock(ledger, "SEN-HID") == (0, "no_photo", FIRST)
         assert ledger.get("product", "sku", "SEN-LIVE") is None
+
+
+def test_a_gone_listing_a_hard_reset_spares_is_served_again_once_from_zero(tmp_path):
+    # a factory reset is coordinated: Medusa is wiped too, so the spared record must re-serve (review M2 on #634)
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-GONE", qty=0, reason="sold_out", gone_at=FIRST)
+        reset_sync_state(ledger, hard=True)
+        product, stock = ledger.get("product", "sku", "SEN-GONE"), ledger.get("inventory", "sku", "SEN-GONE")
+        assert (product["state"], product["medusa_id"], product["last_synced"]) == ("pending", None, None)
+        assert (stock["last_synced_qty"], stock["last_synced_reason"]) == (None, None)
+        assert _stock(ledger, "SEN-GONE") == (0, "sold_out", FIRST)
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'P2', last_synced = ? WHERE sku = 'SEN-GONE'",
+                       (now_iso(),))                                    # Blokport creates it again and acks
+        served = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
+        assert served["SEN-GONE"] == {"sku": "SEN-GONE", "quantity": 0, "made_to_order": False, "reason": "sold_out",
+                                      "gone_at": FIRST}
 
 
 def test_a_seed_drop_keeps_a_variety_a_gone_listing_shows(tmp_path):
