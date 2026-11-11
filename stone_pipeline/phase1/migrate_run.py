@@ -112,6 +112,17 @@ def _versioned(s3: _S3, spec: dict, what: str) -> bytes:
     return data
 
 
+def _retired_keys_pin(inputs: dict) -> str:
+    """MIGRATE_INPUTS.retired_keys.sha256, the only digest the env's committed retired-Keys file is read at; an absent
+    or empty pin refuses by name, before any store is read."""
+    spec = inputs.get("retired_keys")
+    sha = spec.get("sha256") if isinstance(spec, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise MigrationRefused("MIGRATE_INPUTS has no retired_keys {sha256} pin: the env's committed retired-Keys file "
+                               f"({RETIRED_KEYS_PATH.name}) is read only at its pinned digest")
+    return sha
+
+
 def _committed(path: Path, what: str) -> bytes:
     try:
         return path.read_bytes()
@@ -150,14 +161,14 @@ def _fetch_stores(s3: _S3, recorded: dict, work: Path, write: bool) -> dict:
     return out
 
 
-def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_writer.Report, dict]:
+def _plan(s3: _S3, inputs: dict, stores: dict, work: Path,
+          retired_pin: str) -> tuple[dict, store_writer.Report, dict]:
     """Every decision and every new file, written under `work`, nothing to S3: (new files by name, report, the
     icon copies)."""
     key_map = read_key_map(_versioned(s3, inputs["key_map"], "key map"), inputs["key_map"]["sha256"])
     survivors = read_survivor_map(_versioned(s3, inputs["survivor_map"], "survivor map"),
                                   inputs["survivor_map"]["sha256"], inputs["key_map"]["sha256"])
-    retired_keys = read_retired_keys(_committed(RETIRED_KEYS_PATH, "retired keys"), inputs["retired_keys"]["sha256"],
-                                     key_map)
+    retired_keys = read_retired_keys(_committed(RETIRED_KEYS_PATH, "retired keys"), retired_pin, key_map)
     export = read_variants_export(_versioned(s3, inputs["export"], "export").decode("utf-8-sig"),
                                   require_status=True, name=inputs["export"]["key"])
     archived = {v.key for v in export if v.status == "archived"}
@@ -238,11 +249,12 @@ def _write(s3: _S3, files: dict, copies: list, stores: dict) -> dict:
 
 def run(client, inputs: dict, write: bool) -> dict:
     """The whole run against an S3 client; returns the report. Raises MigrationRefused on a refused input."""
+    retired_pin = _retired_keys_pin(inputs)
     s3 = _S3(client, SETTINGS.s3.bucket)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         stores = _fetch_stores(s3, inputs["stores"], work, write)
-        files, report, copies = _plan(s3, inputs, stores, work)
+        files, report, copies = _plan(s3, inputs, stores, work, retired_pin)
         result = {"write": write, "counts": report.counts, "listed": report.listed, "aborts": report.aborts,
                   "step1_digests": {n: s["digest"] for n, s in stores.items()}}
         if report.aborts:
