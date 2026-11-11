@@ -51,6 +51,23 @@ def _fetch_inputs() -> None:
             raise SystemExit(2)
         log.warning("fetch_inputs skipped; matching runs against whatever export is local",
                     exc_info=True)
+    # The name-field kinds have NO local fallback on any environment: every writer cleans a name by them, so a
+    # produce that cannot fetch the map stops loud rather than write a name on a guessed kind.
+    try:
+        from stone_pipeline.io import medusa_inputs
+        medusa_inputs.fetch_field_kinds()
+    except Exception:
+        log.exception("field-kinds.json could not be fetched; a produce never writes names on a guessed kind")
+        raise SystemExit(2)
+    # The operator's manual overrides: S3 is their authority on every environment, so a produce that cannot fetch
+    # them stops loud rather than run on a stale or unvouched copy (none on S3 = none, as before).
+    try:
+        from stone_pipeline.io import medusa_inputs
+        medusa_inputs.fetch_overrides()
+    except Exception:
+        log.exception("manual_overrides.csv could not be fetched or is malformed; a produce never runs on unvouched "
+                      "overrides")
+        raise SystemExit(2)
     # Realign the category registry with the export NOW on disk. The pcats were read once at import
     # (bootstrap, BEFORE this fetch); a produce that just pulled a changed attributes.csv -- a new Medusa
     # pcat id or a corrected category label -- would otherwise keep gating emit + new-variety fan-out on

@@ -33,10 +33,16 @@ case "$RUN_MODE" in
   generate-textures)
     echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
+  cutout-meta)
+    echo "==> add what each published 3D slab is made from to its outline (the outline only; the cut-out untouched)"
+    exec python -m stone_pipeline.photos.cutout_meta ;;
+  phase1-migrate)
+    echo "==> phase 1 store migration (SC-3): MIGRATE_WRITE=0 decides and writes nothing; 1 writes the .v2 stores"
+    exec python -m stone_pipeline.phase1.migrate_run ;;
   market-prices)
     echo "==> collect competitor prices for this deployment's brand (approved sites only) -> <env>/market_prices/<brand>/"
     exec python -m market_prices.run ;;
   *)
-    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures | market-prices)" >&2
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures | cutout-meta | phase1-migrate | market-prices)" >&2
     exit 2 ;;
 esac

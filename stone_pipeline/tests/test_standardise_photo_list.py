@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pytest
 from botocore.exceptions import ClientError
 
@@ -186,3 +187,72 @@ def test_one_handle_in_two_sources_stops_the_catalog(tmp_path, monkeypatch):
     _run_dir(tmp_path / "out", "sentas", ["same"])
     with pytest.raises(RuntimeError, match="'same'"):
         catalog.collect_products(tmp_path / "out")
+
+
+# --- the defaulted sizes beside it (STANDARDISE.DEFAULTED_FILE): a size the produce filled from the pack's defaults is
+# never squared to, so a keystone on such a listing is held, not drawn at a guessed size (#605 review M1) -------------
+def _defaulted(handle, *fields):
+    from stone_pipeline.core.schema import FlagCode, ReviewFlag
+    row = _emitted(handle, A)
+    row.review_flags = [ReviewFlag(field=f, code=FlagCode.dimension_defaulted) for f in fields]
+    return row
+
+
+def test_the_emit_lists_the_handles_whose_length_or_width_was_defaulted_from_the_photo_list_s_rows(tmp_path):
+    from stone_pipeline.stages import emit
+    rows = [_defaulted("w", "width"), _defaulted("l", "length"), _defaulted("h", "height"), _emitted("real", A),
+            _defaulted("l", "length")]
+    emit.write_photos_json(rows, tmp_path / C.PHOTOS_FILE)
+    first = (tmp_path / C.DEFAULTED_FILE).read_bytes()
+    assert json.loads(first) == ["l", "w"]                     # the footprint only: a defaulted thickness squares nothing
+    emit.write_photos_json(list(reversed(rows)), tmp_path / C.PHOTOS_FILE)
+    assert (tmp_path / C.DEFAULTED_FILE).read_bytes() == first
+    assert C.DEFAULTED_KEY.rsplit("/", 1) == [C.PHOTOS_KEY.rsplit("/", 1)[0], C.DEFAULTED_FILE]
+
+
+def test_the_catalog_gathers_the_defaulted_sizes_beside_the_photo_list(tmp_path, monkeypatch):
+    from stone_pipeline import catalog
+    _to_upload(monkeypatch, tmp_path / "to_upload")
+    z = _run_dir(tmp_path / "out", "zucchi", ["z1", "z2"])
+    (z / "4_products_import" / C.DEFAULTED_FILE).write_text(json.dumps(["z2"]))
+    s = _run_dir(tmp_path / "out", "sentas", ["s1"])
+    (s / "4_products_import" / C.DEFAULTED_FILE).write_text(json.dumps(["s1"]))
+    catalog.collect_products(tmp_path / "out")
+    assert (tmp_path / "to_upload" / C.DEFAULTED_FILE).read_text() == json.dumps(["s1", "z2"], separators=(",", ":"))
+
+
+def test_a_defaulted_size_reads_as_unknown_so_a_keystone_on_it_is_held(monkeypatch):
+    from stone_pipeline.standardise import outline
+    _slab_category(monkeypatch)
+    sheet = "Product Handle,Product Category 1,Product Length,Product Width\nreal,pcat_S,2.85,1.85\nguess,pcat_S,3.3,2.0\n"
+    found = index.build(sheet, {"real": [("sentas", A)], "guess": [("sentas", B)]}, frozenset({"guess"}))
+    assert found[A]["size"] == (2.85, 1.85) and found[B]["size"] is None
+    q = np.float32([[4.0, 14.0], [1128.3, 36.0], [1050.4, 610.9], [97.0, 626.9]])   # POL-736's keystone, 1.18
+    assert isinstance(outline.steep_aspect(q, found[B]["size"]), str)
+
+
+@pytest.mark.parametrize("text", ["", "{}", '"x"', "[1]", '[""]', '["b", "a"]', '["a", "a"]'])
+def test_a_malformed_defaulted_list_fails_loud(text):
+    with pytest.raises(ValueError):
+        index.parse_defaulted(text)
+
+
+def test_the_job_reads_the_defaulted_sizes_and_a_present_but_unreadable_file_fails_loud(monkeypatch):
+    from stone_pipeline.photos import source as src
+    files = {f"{src.ENV_SEGMENT}/{C.PHOTOS_KEY}": json.dumps({"one": [["sentas", A]]}).encode(),
+             f"{src.ENV_SEGMENT}/{C.DEFAULTED_KEY}": b'["one"]'}
+
+    def get(client, key):
+        if key not in files:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return files[key]
+    _slab_category(monkeypatch)
+    monkeypatch.setattr(src, "_get", get)
+    monkeypatch.setattr(src, "_sheet", lambda client: "Product Handle,Product Category 1,Product Length,Product Width\n"
+                                                      "one,pcat_S,3.3,2.0\n")
+    assert src.sheet_photos(object())[A]["size"] is None
+    files[f"{src.ENV_SEGMENT}/{C.DEFAULTED_KEY}"] = b"not json"
+    with pytest.raises(RuntimeError, match="defaulted"):
+        src.sheet_photos(object())
+    del files[f"{src.ENV_SEGMENT}/{C.DEFAULTED_KEY}"]                 # a producer from before the file: none defaulted
+    assert src.sheet_photos(object())[A]["size"] == (3.3, 2.0)

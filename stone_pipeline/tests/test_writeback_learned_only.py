@@ -49,7 +49,7 @@ def test_a_fuzzy_bind_is_still_saved():
     idx.add("a", "Kashmir Golda", surfaces=[], block_type="granite", origins={"BR"})
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(_stage().ref), "variants": {"slab": SimpleNamespace(
-            by_id={"a": SimpleNamespace(key="slab_granite_kashmir_golda_1", archived=False)})}}),
+            by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1", archived=False)})}}),
         engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=wb.WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Goldx",

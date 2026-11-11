@@ -22,8 +22,8 @@ from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, decisions, match_variation, normalize, reconcile_tree
 from stone_pipeline.tests.test_mint_type_authority import _typed_gap_row
 
-EXPORT_FIELDS = ["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
-EXISTING_KEY = "slab_granite_alpine_00000000-0000-0000-0000-000000000001"
+EXPORT_FIELDS = ["Id", "Key", "Name", "Type", "Aliases"]
+EXISTING_KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
 def _paths(tmp_path: Path) -> SimpleNamespace:
@@ -65,7 +65,7 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     # an unrelated existing variety, so the index is a real (non-empty) export
     _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine",
-                                       "Aliases": "Alpine Granite"}])
+                                       "Type": "Granite", "Aliases": "Alpine Granite"}])
 
     # -- produce 1: the scrape gaps, the operator mints it as 'Honey' --------------------------------------
     ref1 = loaders.load_all()
@@ -76,15 +76,15 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "honey onyx"): {"action": "mint", "seed_name": "Honey"}}))
     res1 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref1)
-    minted = res1.new_variants["slab"]
+    minted = res1.new_variants
     assert [r["Name"] for r in minted] == ["Honey"]
     honey_key = minted[0]["Key"]
-    assert honey_key.startswith("slab_onyx_honey_")
+    assert honey_key.startswith("onyx__honey_")
     assert "Honey Onyx" in minted[0]["Aliases"].split("|")
 
     # -- boundary: Medusa pulls the variety and re-exports it (Id assigned, Aliases carried) ----------------
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Aliases": minted[0]["Aliases"]}])
+        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": minted[0]["Aliases"]}])
 
     # -- produce 2: the same scrape binds through the alias surface, nothing is proposed again -------------
     ref2 = loaders.load_all()
@@ -96,8 +96,8 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     assert not rows2[0].tree_gaps
 
     res2 = curate.build_curation(rows2, ref2)
-    assert res2.new_variants["slab"] == []                     # no re-mint: the decision is spent
-    assert all(a.get("_status") != "pending" for a in res2.alias_additions["slab"])
+    assert res2.new_variants == []                     # no re-mint: the decision is spent
+    assert all(a.get("_status") != "pending" for a in res2.alias_additions)
 
 
 def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monkeypatch):
@@ -110,12 +110,12 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {}))
-    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine", "Type": "Granite"}])
     ref = loaders.load_all()
 
     # produce 1 surfaces the card ...
     res0 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref)
-    assert res0.new_variants["slab"] == []
+    assert res0.new_variants == []
     decisions.write_confirm_file(res0.pending_confirm)        # what write_curation does at the end of a produce
     _, listing = server.dispatch("GET", ["review", "variants"], None)
     card = next(v for v in listing["variants"] if v["variant"] == "Honey Onyx")
@@ -129,10 +129,10 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
 
     # ... produce 2 mints 'Honey' under the corrected name, reading the real store ...
     res1 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref)
-    minted = res1.new_variants["slab"]
+    minted = res1.new_variants
     assert [r["Name"] for r in minted] == ["Honey"]
     honey_key = minted[0]["Key"]
-    assert honey_key.startswith("slab_onyx_honey_")
+    assert honey_key.startswith("onyx__honey_")
     # the card is gone: the decision is spent (the produce rewrites the queue without it)
     decisions.write_confirm_file(res1.pending_confirm)
     _, listing = server.dispatch("GET", ["review", "variants"], None)
@@ -140,7 +140,7 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
 
     # ... Medusa pulls it and re-exports ...
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Aliases": minted[0]["Aliases"]}])
+        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": minted[0]["Aliases"]}])
 
     # ... produce 3: the first mint on a spelling is its GLOBAL meaning: the zucchi product binds to 'Honey'
     # through the alias the rename attached for everyone, and so does another vendor's identical spelling.
@@ -150,7 +150,7 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     assert zucchi.variation_key == honey_key and zucchi.variation_id == "var_honey"
     assert not zucchi.tree_gaps
     assert other.variation_key == honey_key and not other.tree_gaps
-    assert curate.build_curation([zucchi], ref3).new_variants["slab"] == []   # nothing proposed again
+    assert curate.build_curation([zucchi], ref3).new_variants == []   # nothing proposed again
 
 
 def test_one_session_mints_named_apart_only_by_case_create_one_variety(tmp_path, monkeypatch):
@@ -164,7 +164,7 @@ def test_one_session_mints_named_apart_only_by_case_create_one_variety(tmp_path,
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {}))
-    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine", "Type": "Granite"}])
     ref = loaders.load_all()
     rows = [_typed_gap_row("Agata Blu", "Granite"), _typed_gap_row("Agata Bleu", "Granite")]
     decisions.write_confirm_file(curate.build_curation(rows, ref).pending_confirm)
@@ -175,10 +175,9 @@ def test_one_session_mints_named_apart_only_by_case_create_one_variety(tmp_path,
         assert code == 200 and body["result"] == "minted", body
 
     minted = curate.build_curation(rows, ref).new_variants
-    for branch in ("slab", "block", "tile"):
-        assert [r["Name"] for r in minted[branch]] == ["Agata Blue"], (branch, minted[branch])
-    assert minted["slab"][0]["Key"].startswith("slab_granite_agata_blue_")
-    assert set(minted["slab"][0]["Aliases"].split("|")) == {"Agata Blu", "Agata Bleu"}
+    assert [r["Name"] for r in minted] == ["Agata Blue"], minted
+    assert minted[0]["Key"].startswith("granite__agata_blue_")
+    assert set(minted[0]["Aliases"].split("|")) == {"Agata Blu", "Agata Bleu"}
 
 
 def test_renamed_mint_is_idempotent_while_the_pull_lags(tmp_path, monkeypatch):
@@ -187,14 +186,14 @@ def test_renamed_mint_is_idempotent_while_the_pull_lags(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
-    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine", "Type": "Granite"}])
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "honey onyx"): {"action": "mint", "seed_name": "Honey"}}))
     ref = loaders.load_all()
     first = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref).new_variants
     second = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref).new_variants
     assert first == second
-    assert [r["Key"] for r in first["slab"]] == [r["Key"] for r in second["slab"]]
+    assert [r["Key"] for r in first] == [r["Key"] for r in second]
 
 
 def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monkeypatch):
@@ -212,8 +211,8 @@ def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monke
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Brown Granite", "stone_type": "Granite"}], {}))
-    BG_KEY = "slab_granite_brown_granite_00000000-0000-0000-0000-000000000002"
-    _write_export(paths.export_file, [{"Id": "var_bg", "Key": BG_KEY, "Name": "Brown Granite"}])
+    BG_KEY = "granite__brown_granite_00000000-0000-0000-0000-000000000002"
+    _write_export(paths.export_file, [{"Id": "var_bg", "Key": BG_KEY, "Name": "Brown Granite", "Type": "Granite"}])
 
     def _bg(key="p1", src="marenostone"):
         return CanonicalRow(src_site=src, surrogate_key=key, variety_match_key="Brown Granite",
@@ -233,14 +232,14 @@ def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monke
 
     # ... curate mints Chocolate Classic DESPITE the match (the override fix) ...
     res1 = curate.build_curation([_bg()], ref1)
-    minted = res1.new_variants["slab"]
+    minted = res1.new_variants
     assert [r["Name"] for r in minted] == ["Chocolate Classic"], minted
     cc_key = minted[0]["Key"]
-    assert cc_key.startswith("slab_granite_chocolate_classic_"), cc_key
+    assert cc_key.startswith("granite__chocolate_classic_"), cc_key
 
     # boundary: Medusa re-exports Chocolate Classic ...
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_cc", "Key": cc_key, "Name": "Chocolate Classic", "Aliases": minted[0].get("Aliases", "")}])
+        {"Id": "var_cc", "Key": cc_key, "Name": "Chocolate Classic", "Type": "Granite", "Aliases": minted[0].get("Aliases", "")}])
 
     # produce 2: marenostone's product re-points to Chocolate Classic via the vendor-scoped alias;
     # another vendor's identical spelling is NOT re-pointed (the statement was marenostone-only).

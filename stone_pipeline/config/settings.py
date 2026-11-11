@@ -262,6 +262,17 @@ def _reference_file(filename: str) -> Path:
 # Colour is NOT last-resorted here (it inherits the variety's texture-classified colour, 'Natural' floor).
 
 
+# --- Product descriptions (owner decision O3, report 21) ------------------------
+# A supplier description passes only as plain English prose: its share of these English function words must reach
+# DESCRIPTION_MIN_ENGLISH_SHARE (prod: English 0.20 to 0.45; the Spanish zucchi texts 0.014; internal notes 0.0).
+# 'no' is deliberately absent: it is also Spanish and Italian.
+DESCRIPTION_FUNCTION_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in", "is", "it", "its", "of",
+    "on", "or", "that", "the", "this", "to", "which", "with",
+})
+DESCRIPTION_MIN_ENGLISH_SHARE = 0.10
+
+
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
 class Confidence(IntEnum):
     """Four level confidence, high > medium > low > none, with numeric backing
@@ -292,12 +303,18 @@ class Paths:
     from_medusa_dir: Path = _FROM_MEDUSA
     review_dir: Path = _REVIEW
     outputs_dir: Path = _OUTPUTS
+    # curate's raw new + alias-update delta, read only by emit, which publishes to_upload/1_variants_update.csv
+    # from it as the cleaned subset of 1_variants_full.csv (one cleaning point; never uploaded itself).
+    curate_delta_csv: Path = _OUTPUTS / "curate_delta.csv"
     # small CSV samples the test suite reads (self-contained in the package).
     tests_fixtures_dir: Path = REPO_ROOT / "tests" / "fixtures"
 
     # attribute name -> Medusa id; lives in from_medusa/<env>/ because its ids come FROM
     # that env's Medusa (like the variants export), not hand-maintained like catalog_source/.
     attributes_csv: Path = _FROM_MEDUSA / "attributes.csv"
+    # which name field is a NAME and which an IDENTIFIER, published by the backend beside attributes.csv; the
+    # one map, read only by reference/loaders/field_kinds.py and fetched by every produce (no committed copy).
+    field_kinds_json: Path = _FROM_MEDUSA / "field-kinds.json"
     # The combined cross-category id-variants EXPORT (with Medusa Id), download-only:
     # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
     # by the catalog (to_upload/) and never read back -- input and output never alias.
@@ -315,16 +332,11 @@ class Paths:
     # committed base itself is pristine, so lifecycle falls back to it.
     variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
-    # per-category backbone files derive from the CATEGORIES registry (config/categories.py).
+    # the ONE variety backbone every category reads (the pack's backbone_file, spec rev 8 section 3)
     @property
-    def backbone_json(self) -> Path:        # the DEFAULT-FORM backbone (the pack's primary category), NOT
-        # literally slab -- a non-stone pack whose default form is not named 'slab' would otherwise crash here
-        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path. Imported here, not at
-        # the top: the registry imports settings, so settings reads it only once both are loaded.
-        from stone_pipeline.config.categories import category, default_form_name
-        return category(default_form_name()).backbone_path
-
-    # A specific category's backbone is category(<name>).backbone_path -- no per-product-type accessor.
+    def backbone_json(self) -> Path:
+        from stone_pipeline.config.domain import active_pack
+        return _catalog_source_file(active_pack().backbone_file)
 
     @property
     def type_density_csv(self) -> Path:
@@ -349,6 +361,11 @@ class Paths:
         # the per-run new-variety backbone deltas, PACK-NAMESPACED (stone stays flat). Under this instance's
         # catalog_source_dir, so a Paths pointed at another catalog_source writes its deltas there too
         return _pack_namespaced(self.catalog_source_dir) / "backbone_additions"
+
+    @property
+    def backbone_additions_file(self) -> Path:
+        # curate's per-run delta: one post per new (type, name) variety, whatever its categories (phase 1)
+        return self.backbone_additions_dir / "varieties.json"
 
     @property
     def origin_map_csv(self) -> Path:

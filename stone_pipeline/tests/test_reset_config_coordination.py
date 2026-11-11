@@ -38,7 +38,7 @@ def _seed_config(tmp_path, monkeypatch):
     decisions_store.decide("marenostone", "Crystal White", "Crystal White", "Granite", origin="IR",
                            exists_as=_all, alias_target=_none)                       # a confirmed origin
     decisions_store.set_variety_origin("Crystal White", "Granite", "IN,IR")                # a variety origin edit
-    store.add_retired("slab_granite_x_uuid")
+    store.add_retired("granite__x_uuid")
 
 
 def test_clear_helpers_empty_queues_and_ids_but_keep_decisions(tmp_path, monkeypatch):
@@ -51,7 +51,7 @@ def test_clear_helpers_empty_queues_and_ids_but_keep_decisions(tmp_path, monkeyp
     # durable operator intent SURVIVES
     assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}          # mint kept
     assert views.seed_types(exists_as=_all, alias_target=_none) == {("", "black absolute"): "Granite"}
-    assert store.load_retired() == {"slab_granite_x_uuid"}
+    assert store.load_retired() == {"granite__x_uuid"}
 
 
 def test_clear_review_pending_rejects_a_bad_kind(tmp_path, monkeypatch):
@@ -82,7 +82,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
     assert decisions_store.list_pending("variety") == [] and decisions_store.attribute_ids() == {}
     # durable intent still survives a global reset
     assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}
-    assert store.load_retired() == {"slab_granite_x_uuid"}
+    assert store.load_retired() == {"granite__x_uuid"}
 
 
 def test_global_reset_snapshots_both_stores_immediately_scoped_does_not(tmp_path, monkeypatch):
@@ -249,7 +249,7 @@ def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     assert code == 400 and "global-only" in out["error"]
     # nothing was touched: the durable overlay is intact
     assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}
-    assert store.load_retired() == {"slab_granite_x_uuid"}
+    assert store.load_retired() == {"granite__x_uuid"}
 
 
 def test_a_refused_ledger_reset_does_not_touch_config(tmp_path, monkeypatch):
@@ -316,7 +316,7 @@ def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
     prods = tmp_path / "products_export.csv"
     prods.write_text("Variant Sku,Product Handle,Inventory Quantity\nVAR-1,ghost-1,0\n", encoding="utf-8")
     variants = tmp_path / "variants_export.csv"
-    variants.write_text("Id,Key,Name\nmed_1,slab_x_uuid,Ghost\n", encoding="utf-8")
+    variants.write_text("Id,Key,Name,Type\nmed_1,marble__x_uuid,Ghost,Marble\n", encoding="utf-8")
     patched = dataclasses.replace(settings.SETTINGS, paths=dataclasses.replace(
         settings.SETTINGS.paths, products_known_csv=prods, variants_export_csv=variants))
     monkeypatch.setattr(settings, "SETTINGS", patched)
@@ -338,18 +338,18 @@ def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
 
 def _stub_ledger_and_sync(monkeypatch, captured, live=0):
     """A hermetic ledger + sync for the VARIETY-scoped unmint: one variety 'Crystal White' (Granite) with its
-    three category Keys, plus a bystander variety. variety_identity is stubbed to the branch-free rule so
-    the sibling grouping is deterministic without the type vocab."""
+    three Keys, plus a bystander variety. variety_identity is stubbed to (type, name) so the sibling grouping
+    is deterministic without the type vocab."""
     from stone_pipeline import lifecycle
     from stone_pipeline.reference import loaders
     rows = [
-        {"key": "slab_granite_crystal_white_a", "name": "Crystal White"},
-        {"key": "block_granite_crystal_white_b", "name": "Crystal White"},
-        {"key": "tile_granite_crystal_white_c", "name": "Crystal White"},
-        {"key": "slab_granite_absolute_black_d", "name": "Absolute Black"},
+        {"key": "granite__crystal_white_a", "name": "Crystal White"},
+        {"key": "granite__crystal_white_b", "name": "Crystal White"},
+        {"key": "granite__crystal_white_c", "name": "Crystal White"},
+        {"key": "granite__absolute_black_d", "name": "Absolute Black"},
     ]
     monkeypatch.setattr(loaders, "variety_identity",
-                        lambda key, name: (key.split("_")[0], "granite", name.lower().replace(" ", "_")))
+                        lambda key, name: ("granite", name.lower().replace(" ", "_")))
 
     class _Sync:
         def _lock_and_check_in_flight(self, lg):
@@ -381,10 +381,10 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
     captured = {}
     _stub_ledger_and_sync(monkeypatch, captured)
 
-    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_a")       # ONE Key in...
+    result, code = lifecycle.unmint_variation("granite__crystal_white_a")       # ONE Key in...
     assert code == 200
-    assert sorted(captured["retired"]) == ["block_granite_crystal_white_b",           # ...ALL three siblings out
-                                          "slab_granite_crystal_white_a", "tile_granite_crystal_white_c"]
+    assert sorted(captured["retired"]) == ["granite__crystal_white_a",           # ...ALL three siblings out
+                                          "granite__crystal_white_b", "granite__crystal_white_c"]
     assert captured["reason"] == "variation_unminted"
     assert result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["mint_decisions_cleared"] == 1                                      # cleared ONCE per variety
@@ -409,7 +409,7 @@ def test_bulk_unmint_collapses_siblings_to_one_variety_and_is_best_effort(tmp_pa
     captured = {}
     _stub_ledger_and_sync(monkeypatch, captured)
     result, code = lifecycle.unmint_variations(
-        ["slab_granite_crystal_white_a", "block_granite_crystal_white_b", "bad_key"])
+        ["granite__crystal_white_a", "granite__crystal_white_b", "bad_key"])
     assert code == 200
     assert result["requested"] == 3 and result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["skipped"] == [{"key": "bad_key", "code": 404, "error": "unknown variation 'bad_key'"}]
@@ -423,9 +423,9 @@ def test_unmint_reports_an_honest_status_when_nothing_was_removed(tmp_path, monk
     _stub_ledger_and_sync(monkeypatch, {})
     assert lifecycle.unmint_variations(["nope_1", "nope_2"])[1] == 404
     _stub_ledger_and_sync(monkeypatch, {}, live=2)                                   # variety has live products
-    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_a")
+    result, code = lifecycle.unmint_variation("granite__crystal_white_a")
     assert code == 409 and result["variety_count"] == 0 and result["skipped"][0]["code"] == 409
-    assert lifecycle.unmint_variation("slab_granite_crystal_white_a", force=True)[1] == 200
+    assert lifecycle.unmint_variation("granite__crystal_white_a", force=True)[1] == 200
 
 
 def test_bulk_unmint_rejects_empty_or_invalid_keys(tmp_path, monkeypatch):
@@ -443,14 +443,14 @@ def test_list_minted_variations_groups_non_base_keys(monkeypatch):
     from stone_pipeline.ledger import writethrough
     import stone_pipeline.ledger.db as db
 
-    monkeypatch.setattr(lifecycle, "_committed_base_keys", lambda: {"slab_granite_base_x"})
+    monkeypatch.setattr(lifecycle, "_committed_base_keys", lambda: {"granite__base_x"})
     monkeypatch.setattr(writethrough, "ledger_path", lambda: "/tmp/x.db", raising=False)
     monkeypatch.setattr(writethrough, "backend_fingerprint", lambda: "fp", raising=False)
     rows = [
-        {"key": "slab_granite_base_x", "name": "Base Stone", "type": "Granite"},        # in base -> excluded
-        {"key": "slab_quartzite_ocean_blue_a", "name": "Ocean Blue", "type": "Quartzite"},
-        {"key": "block_quartzite_ocean_blue_b", "name": "Ocean Blue", "type": "Quartzite"},
-        {"key": "slab_crystal_lumiere_c", "name": "Lumiere", "type": "Crystal"},
+        {"key": "granite__base_x", "name": "Base Stone", "type": "Granite"},        # in base -> excluded
+        {"key": "quartzite__ocean_blue_a", "name": "Ocean Blue", "type": "Quartzite"},
+        {"key": "quartzite__ocean_blue_b", "name": "Ocean Blue", "type": "Quartzite"},
+        {"key": "marble__crystal_lumiere_c", "name": "Lumiere", "type": "Crystal"},
     ]
 
     class _LG:
@@ -464,7 +464,7 @@ def test_list_minted_variations_groups_non_base_keys(monkeypatch):
     assert result["variety_count"] == 2 and result["key_count"] == 3
     assert {v["variety"] for v in result["minted"]} == {"Ocean Blue", "Lumiere"}
     ob = next(v for v in result["minted"] if v["variety"] == "Ocean Blue")
-    assert sorted(ob["keys"]) == ["block_quartzite_ocean_blue_b", "slab_quartzite_ocean_blue_a"]
+    assert sorted(ob["keys"]) == ["quartzite__ocean_blue_a", "quartzite__ocean_blue_b"]
 
 
 def test_list_minted_variations_refuses_without_a_committed_base(monkeypatch):
@@ -479,8 +479,8 @@ def test_unmint_all_minted_derives_keys_from_the_minted_list(monkeypatch):
     from stone_pipeline import lifecycle
     monkeypatch.setattr(lifecycle, "list_minted_variations", lambda: (
         {"minted": [{"variety": "Ocean Blue", "stone_type": "Quartzite",
-                     "keys": ["slab_q_ocean_a", "block_q_ocean_b"]},
-                    {"variety": "Lumiere", "stone_type": "Crystal", "keys": ["slab_c_lumiere_c"]}],
+                     "keys": ["marble__q_ocean_a", "marble__q_ocean_b"]},
+                    {"variety": "Lumiere", "stone_type": "Crystal", "keys": ["marble__c_lumiere_c"]}],
          "variety_count": 2, "key_count": 3}, 200))
     got = {}
     monkeypatch.setattr(lifecycle, "unmint_variations",
@@ -488,7 +488,7 @@ def test_unmint_all_minted_derives_keys_from_the_minted_list(monkeypatch):
                                                    {"unminted": keys, "unminted_count": len(keys)}, 200))
     result, code = lifecycle.unmint_all_minted(force=True)
     assert code == 200
-    assert got["keys"] == ["slab_q_ocean_a", "block_q_ocean_b", "slab_c_lumiere_c"] and got["force"] is True
+    assert got["keys"] == ["marble__q_ocean_a", "marble__q_ocean_b", "marble__c_lumiere_c"] and got["force"] is True
     assert result["source"] == "all_minted"
 
     # no minted varieties -> clean no-op, never calls unmint
@@ -509,14 +509,14 @@ def test_committed_base_keys_reads_the_real_csv_and_never_falls_back_to_the_seed
     from stone_pipeline import lifecycle
     from stone_pipeline.config import settings as settings_mod
     base = tmp_path / "variants_export_base.csv"
-    base.write_text("Key,Name,Image,Aliases\nslab_granite_a_1,A,,\nblock_granite_a_2,A,,\n,blank,,\n",
+    base.write_text("Key,Name,Type,Aliases\ngranite__a_1,A,Granite,\ngranite__a_2,A,Granite,\n,blank,,\n",
                     encoding="utf-8")
     seed = tmp_path / "variants_export_base.seed.csv"
-    seed.write_text("Key,Name\nslab_granite_SEEDONLY_9,Seed\n", encoding="utf-8")    # a seed that DIFFERS
+    seed.write_text("Key,Name,Type\ngranite__seedonly_9,Seed,Granite\n", encoding="utf-8")    # a seed that DIFFERS
     # _committed_base_keys imports SETTINGS function-locally, so patch the settings MODULE attribute it reads
     monkeypatch.setattr(settings_mod, "SETTINGS", types.SimpleNamespace(paths=types.SimpleNamespace(
         variants_export_base_csv=base, variants_export_base_seed_csv=seed)))
-    assert lifecycle._committed_base_keys() == {"slab_granite_a_1", "block_granite_a_2"}   # blank Key dropped
+    assert lifecycle._committed_base_keys() == {"granite__a_1", "granite__a_2"}   # blank Key dropped
     base.unlink()                                                                       # base absent post-roll
     assert lifecycle._committed_base_keys() == set()                                    # NOT the seed's keys
 
@@ -534,16 +534,16 @@ def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key
     p, now = tmp_path / "dev.ledger", now_iso()
 
     def _var(ledger, key, name):
-        ledger.upsert("variation", {"key": key, "branch": key.split("_")[0], "type": "Granite", "name": name,
-                                    "aliases": "[]", "image_url": "", "image_sha256": None,
-                                    "image_model": None, "volume": "", "medusa_id": "V", "in_full": 1,
+        ledger.upsert("variation", {"key": key, "type": "Granite", "name": name,
+                                    "aliases": "[]",
+                                    "medusa_id": "V", "in_full": 1,
                                     "payload_hash": "", "state": "synced", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
 
-    sibs = ["slab_granite_crystal_white_aaaaaaaa-aaaa-5aaa-aaaa-aaaaaaaaaaaa",
-            "block_granite_crystal_white_bbbbbbbb-bbbb-5bbb-bbbb-bbbbbbbbbbbb",
-            "tile_granite_crystal_white_cccccccc-cccc-5ccc-cccc-cccccccccccc"]
-    other = "slab_granite_absolute_black_dddddddd-dddd-5ddd-dddd-dddddddddddd"
+    sibs = ["granite__crystal_white_aaaaaaaa-aaaa-5aaa-aaaa-aaaaaaaaaaaa",
+            "granite__crystal_white_bbbbbbbb-bbbb-5bbb-bbbb-bbbbbbbbbbbb",
+            "granite__crystal_white_cccccccc-cccc-5ccc-cccc-cccccccccccc"]
+    other = "granite__absolute_black_dddddddd-dddd-5ddd-dddd-dddddddddddd"
     with Ledger.open(p, env="development") as ledger:
         for k in sibs:
             _var(ledger, k, "Crystal White")

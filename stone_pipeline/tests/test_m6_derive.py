@@ -409,11 +409,12 @@ def test_thickness_range_defaults_to_standard(ref, cfg):
 
 
 def test_face_range_uses_maximum(ref, cfg):
-    # a face dimension given as a range ('105 to 145cm') resolves to its MAX (1.45 m) -- cut smaller later.
+    # a face dimension given as a range ('105 to 145cm') resolves to its MAX (1.45 m) -- cut smaller later. Beside the
+    # 1.97 m face it is the SHORTER one, so the flat-dims order ships it as the width (test_dimension_face_order).
     row = _slab_row(raw_dimensions="length=105 to 145cm;height=1.97m", raw_thickness="2cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 1.45 and "length:parsed" in row.dimension_method
+    assert (row.length, row.width) == (1.97, 1.45) and "width:parsed" in row.dimension_method
 
 
 def test_multi_thickness_defaults_to_standard_keeps_faces(ref, cfg):
@@ -734,3 +735,75 @@ def test_handle_is_namespaced_and_stable(ref, cfg):
     derive.derive_handle(row, cfg)
     assert row.handle == row.slug
     assert row.handle.endswith("-pol-620")
+
+
+def test_a_title_is_built_from_parts_written_by_their_fields():
+    # W10: each part by its own field, then the whole by the title's (identifier) rule. On BlokPort every part
+    # is a name, so a title reads as before; an accent never reaches a title.
+    row = _slab_row(variation_name="Brown St Laurent", finish_name="Polished", type_name="Marble")
+    derive.derive_title(row)
+    assert row.title == "Brown St Laurent Polished Marble"
+    row = _slab_row(variation_name=None, raw_name="Crème Slab 黑")
+    derive.derive_title(row)
+    assert (row.title, row.title_method) == ("", "raw_name_unfoldable")
+    row = _slab_row(variation_name=None, raw_name="Crème Slab")
+    derive.derive_title(row)
+    assert row.title == "Creme Slab"
+
+
+@pytest.mark.parametrize("text, kept", [
+    ("This granite is quarried in Brazil and is suitable for kitchen worktops and floors.", True),
+    ("Black granite slab, polished, for the kitchen and the bath of the house.", True),
+    ("HOLD FOR SAHIL BHAIYA <br /> do not sell to anyone else please thanks", False),
+    ("Granito de color gris con vetas blancas, ideal para encimeras y suelos interiores.", False),
+    ("A marble with &amp; veins that runs through the whole of the slab surface.", False),
+])
+def test_a_description_passes_only_as_english_prose(text, kept):
+    # W11 (owner O3): a supplier description passes when it is plain English prose; HTML, another language or
+    # an internal note falls back to the generated description.
+    row = _slab_row(raw_description=text)
+    derive.derive_description(row)
+    assert (row.description_method == "passthrough") is kept, row.description
+
+
+def test_a_passed_description_is_normalised_not_reworded():
+    row = _slab_row(raw_description="This granite is\r\nquarried in Brazil​ and is used in the kitchen.")
+    derive.derive_description(row)
+    assert row.description == "This granite is\nquarried in Brazil and is used in the kitchen."
+
+
+def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_form(ref):
+    # W24: the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
+    from types import SimpleNamespace
+    from stone_pipeline.core.text import UnfoldableName
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="São Francisco")
+    assert derive.collection_location(ref, cfg) == ("BR", "Sao Francisco")
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="黑")
+    with pytest.raises(UnfoldableName):
+        derive.collection_location(ref, cfg)
+
+
+def test_overrides_pass_their_fields_rules(ref):
+    # W22: an override is cleaned by its field's rule; a description override that is not English prose fails
+    # the row loudly (the row guard dead-letters it), never silently replaced.
+    from types import SimpleNamespace
+    values = {"title": "São X Polished", "origin_city": "São Paulo"}
+    over = SimpleNamespace(overrides=SimpleNamespace(get=lambda site, key, f: values.get(f)))
+    row = _slab_row()
+    derive._apply_overrides(row, over)
+    assert (row.title, row.origin_city) == ("Sao X Polished", "Sao Paulo")
+    values = {"description": "HOLD FOR SAHIL BHAIYA <br /> do not sell"}
+    with pytest.raises(ValueError):
+        derive._apply_overrides(_slab_row(), over)
+
+
+def test_a_size_outside_the_category_s_band_is_flagged_with_the_band(ref):
+    # prod POL-755: the vendor typed a width of 19.75 m; the flag carries the band it was checked against, so the 3D
+    # gate can say both (stages.images: size_out_of_band)
+    row = _slab_row(raw_dimensions="length=3.00m;height=19.75m")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    # the longer plan face is the length (flat-dims, #611), so the typo is the length's
+    lo, hi = derive._plausible_band(*derive.active_pack().dimension_ranges[derive.dimension_category(row)]["length"])
+    flag = next(f for f in row.review_flags if f.code == FlagCode.dimension_out_of_range)
+    assert (flag.field, flag.raw_value, flag.detail) == ("length", "19.75", f"band {lo:g} to {hi:g}")

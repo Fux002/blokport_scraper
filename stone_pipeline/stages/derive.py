@@ -13,12 +13,14 @@ from __future__ import annotations
 import csv
 import functools
 import json
+import math
 import re
 
 from stone_pipeline.config import domain
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.categories import CATEGORIES, bulk_form_name, category, default_form_name
-from stone_pipeline.config.settings import SETTINGS, Confidence
+from stone_pipeline.config.settings import (DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE, SETTINGS,
+                                             Confidence)
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -26,8 +28,8 @@ from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import ORIGIN_HOLD_MULTI_HOME, CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
-from stone_pipeline.core.text import indefinite_article, slugify, title_case
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.core.text import UnfoldableName, clean_description, indefinite_article, slugify, title_case
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds
 
 log = logfmt.get_logger("derive")
 
@@ -226,6 +228,80 @@ def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, defau
     return default
 
 
+def _dimension_overrides(row: CanonicalRow, ref: ReferenceData, category: str) -> dict[str, float]:
+    """The operator's length/width/height overrides for the row, in metres (flat-dims: height = thickness, width =
+    the short face). A value that is not a positive finite number, or that lies outside the category's plausible
+    band, raises, so the row guard dead-letters the row loudly instead of publishing a wrong size: an override skips
+    the unit correction (a person states metres), so an office "325" meant as 3.25 m must not become a 325 m slab."""
+    if ref.overrides is None:
+        return {}
+    ranges = active_pack().dimension_ranges[category]
+    out: dict[str, float] = {}
+    for field in ("length", "width", "height"):
+        raw = ref.overrides.get(row.src_site, row.surrogate_key or "", field)
+        if raw is None:
+            continue
+        try:
+            metres = float(raw)
+        except ValueError:
+            metres = float("nan")
+        if not (math.isfinite(metres) and metres > 0):
+            raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is not a positive number of metres")
+        band_lo, band_hi = _plausible_band(*ranges.get(field, (0.0, 5.0)))
+        if not band_lo <= metres <= band_hi:
+            raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is outside the {category} band "
+                             f"{band_lo:g} to {band_hi:g} m")
+        out[field] = metres
+    return out
+
+
+def _dimension(row: CanonicalRow, field: str, scraped: float | None, default: float, category: str,
+               methods: list[str], overridden: dict[str, float], source: str = "parsed") -> float | None:
+    """One canonical dimension: the operator's override when it sets one (recorded `<field>:override`), else the
+    scraped value resolved by _resolve_dimension. An override is checked against the vendor's own value every run
+    and never silently gives way to it, nor overwrites it unreported: a DIFFERENT vendor value flags both values, an
+    EQUAL one flags the override as redundant (the premise of the exception no longer holds, so remove it)."""
+    if field not in overridden:
+        return _resolve_dimension(row, field, scraped, default, category, methods, source)
+    value = overridden[field]
+    methods.append(f"{field}:override")
+    if scraped is not None:
+        vendor = round(_normalize_unit(scraped, field, category)[0], 3)
+        mine = round(value, 3)
+        if vendor != mine:
+            row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_override_differs, raw_value=str(vendor),
+                                    best_guess=str(mine), confidence=Confidence.medium, method="override",
+                                    src_url=row.src_url))
+        else:
+            row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_override_redundant, raw_value=str(vendor),
+                                    best_guess=f"{mine} (override redundant, remove)", confidence=Confidence.high,
+                                    method="override", src_url=row.src_url))
+    return value
+
+
+_FACE_SWAP = {"length": "width", "width": "length"}
+
+
+def _order_faces(row: CanonicalRow, length: float | None, width: float | None, methods: list[str],
+                 first_flag: int) -> tuple[float | None, float | None]:
+    """The flat-dims convention (height = thickness): length is the LONGER plan face, width the shorter. Applied once,
+    after the unit correction (a unit-less '203' meant as 2.03 m would otherwise sort as the longer) and after an
+    override (an override is ordered too). On a swap the provenance follows the values: each face's method label and
+    the flags this step raised (from `first_flag`) trade names, and the swap is recorded as `faces:ordered`. A face
+    that is None (held for retry) leaves nothing to order, and neither does a face that is not positive: a parsed 0 is
+    a data error, kept where the vendor put it so validate rejects it, never moved."""
+    if length is None or width is None or length <= 0 or width <= 0 or width <= length:
+        return length, width
+    for i, method in enumerate(methods):
+        name, _, how = method.partition(":")
+        if name in _FACE_SWAP:
+            methods[i] = f"{_FACE_SWAP[name]}:{how}"
+    for flag in row.review_flags[first_flag:]:
+        flag.field = _FACE_SWAP.get(flag.field, flag.field)
+    methods.append("faces:ordered")
+    return width, length
+
+
 def _plausible_band(lo: float, hi: float) -> tuple[float, float]:
     """The plausible band around a pack range (lo, hi): the ONE tolerance the unit correction and the
     out-of-range check share, so they can never disagree."""
@@ -259,6 +335,7 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
     category = dimension_category(row)
+    first_flag = len(row.review_flags)             # the flags this step raises (_order_faces relabels only those)
     defaults = active_pack().dimension_defaults[category]
 
     faces: dict[str, float] = {}
@@ -279,24 +356,29 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     # raw -> canonical, once: raw 'height' is the SHORT FACE -> canonical width; the thickness -> canonical
     # height. Every shape lying flat, so face area is length x width and thickness bands read height.
     methods: list[str] = []
-    length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods,
-                                face_source)
-    width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods,
-                               face_source)
-    height = _resolve_dimension(row, "height", thickness, defaults["height"], category, methods)
+    # An operator override (state/overrides.py) is the top strategy, applied HERE rather than in _apply_overrides
+    # (which runs after this function), so the weight below is derived from the overridden size.
+    overridden = _dimension_overrides(row, ref, category)
+    length = _dimension(row, "length", faces.get("length"), defaults["length"], category, methods, overridden,
+                        face_source)
+    width = _dimension(row, "width", faces.get("height"), defaults["width"], category, methods, overridden,
+                       face_source)
+    height = _dimension(row, "height", thickness, defaults["height"], category, methods, overridden)
 
     # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would
     # inflate the freight weight to thousands of tonnes. Correct it generally (every source, every dimension)
     # against the category's physical range; never touches a value that is valid as metres. See _normalize_unit.
-    length, _lc = _normalize_unit(length, "length", category)
-    height, _hc = _normalize_unit(height, "height", category)
-    width, _wc = _normalize_unit(width, "width", category)
+    # An override is stated in metres by a person, so it is never "corrected".
+    length, _lc = (length, False) if "length" in overridden else _normalize_unit(length, "length", category)
+    height, _hc = (height, False) if "height" in overridden else _normalize_unit(height, "height", category)
+    width, _wc = (width, False) if "width" in overridden else _normalize_unit(width, "width", category)
     for _name, _corr, _val in (("length", _lc, length), ("height", _hc, height), ("width", _wc, width)):
         if _corr:
             methods.append(f"{_name}:cm_to_m")
             row.add_flag(ReviewFlag(field=_name, code=FlagCode.dimension_unit_corrected,
                                     best_guess=f"{_val}m (read as centimetres)",
                                     confidence=Confidence.medium, method="cm_to_m", src_url=row.src_url))
+    length, width = _order_faces(row, length, width, methods, first_flag)
 
     weight, weight_method = _derive_weight(row, ref, length, width, height)
     methods.append(weight_method)
@@ -310,7 +392,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
         if not band_lo <= value <= band_hi:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
                                     raw_value=str(value), confidence=Confidence.low,
-                                    method="range_check", src_url=row.src_url))
+                                    method="range_check", src_url=row.src_url,   # detail: what it was checked against
+                                    detail=f"band {band_lo:g} to {band_hi:g}"))
 
     row.length = round(length, 3) if length is not None else None
     row.width = round(width, 3) if width is not None else None
@@ -631,8 +714,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         gate_rule = rule if vendor_iso else None   # an unresolvable primary_origin corroborates nothing
         if gate_rule and vendor_iso in gate_rule.countries:
             row.origin_country_code = vendor_iso
-            row.origin_city = gate_rule.city
-            row.origin_county = gate_rule.county
+            row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, gate_rule.city)
+            row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, gate_rule.county)
             row.origin_source = "vendor_origin"
             row.origin_confidence = _conf_name(Confidence.high)
             return
@@ -651,8 +734,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             _hold_for_origin_confirmation(row, rule.countries, home or None, ORIGIN_HOLD_MULTI_HOME)
             return
         row.origin_country_code = iso
-        row.origin_city = rule.city
-        row.origin_county = rule.county
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, rule.city)
+        row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, rule.county)
         row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(Confidence.high)
         return
@@ -709,7 +792,13 @@ def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[s
     iso = ref.to_iso(country)
     if not iso:
         raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
-    return iso, city or None
+    # a source-level operator setting: a city with no ASCII form stops this source's run loudly (UnfoldableName)
+    return iso, _place(field_kinds.PRODUCT_COLLECTION_CITY, city) or None
+
+
+def _place(field: str, value: str | None) -> str | None:
+    """A city or county by its field's rule; empty stays empty. UnfoldableName propagates (the caller's guard)."""
+    return field_kinds.clean(field, value) if value else value
 
 
 def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
@@ -751,27 +840,37 @@ def derive_title(row: CanonicalRow) -> None:
     # stays only in the description, via _FORMAT_WORD). Finish is dropped for blocks (uncut stone has no
     # finish; avoids 'Carrara Raw'); material is omitted when the variety name already implies it
     # (_material_suffix). The handle keys off variety+finish INDEPENDENTLY (derive_handle).
+    # A title is an identifier built from parts: each part is written by its own field, then the whole by the
+    # title's rule (field-kinds.json), so an accent never reaches a title and an identifier part keeps its case.
     if not row.variation_name:
-        row.title = title_case(row.raw_name or "")
-        row.title_method = "raw_name_fallback"
+        try:
+            row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, title_case(row.raw_name or ""))
+            row.title_method = "raw_name_fallback"
+        except UnfoldableName:
+            row.title, row.title_method = "", "raw_name_unfoldable"     # never a half-folded title
         return
     variety = _primary_variety_name(row.variation_name)
-    parts = [variety]
+    parts = [field_kinds.display(field_kinds.VARIATION_NAME, variety)]
     if row.finish_name and not row.is_block:
-        parts.append(row.finish_name)
+        parts.append(field_kinds.display(field_kinds.FINISH_NAME, row.finish_name))
     if material := _material_suffix(variety, row.type_name):
-        parts.append(material)
-    row.title = title_case(" ".join(p for p in parts if p))
+        parts.append(field_kinds.display(field_kinds.TYPE_NAME, material))
+    row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, " ".join(p for p in parts if p))
     row.title_method = "construct"
 
 
 def derive_description(row: CanonicalRow) -> None:
-    if row.raw_description and len(row.raw_description.strip()) > 20:
-        row.description = row.raw_description.strip()
+    prose = clean_description(row.raw_description or "", DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+    if prose and len(prose) > 20:
+        row.description = prose
         row.description_method = "passthrough"
         return
-    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name
-                                               or f"This {active_pack().generic_material_word}"))
+    no_name = f"This {active_pack().generic_material_word}"
+    try:
+        variety = field_kinds.display(field_kinds.VARIATION_NAME,
+                                      _primary_variety_name(row.variation_name or row.raw_name or no_name))
+    except UnfoldableName:
+        variety = no_name                     # the existing no-name wording, never a half-folded name
     stone_type = (row.type_name or active_pack().generic_material_word).lower()  # generic material noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
@@ -836,12 +935,17 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         else:
             log.warning("override origin_country_code did not resolve to a country; ignored",
                         extra={"extra_fields": {"value": v, "surrogate": row.surrogate_key}})
+    # An override passes its field's rule like a derived value; one that fails it raises, so the row guard
+    # dead-letters the row loudly instead of storing it or silently replacing it.
     if v := get("origin_city"):
-        row.origin_city = v
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, v)
     if v := get("title"):
-        row.title, row.title_method = v, "override"
+        row.title, row.title_method = field_kinds.clean(field_kinds.PRODUCT_TITLE, v), "override"
     if v := get("description"):
-        row.description, row.description_method = v, "override"
+        prose = clean_description(v, DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+        if prose is None:
+            raise ValueError(f"description override for {row.surrogate_key!r} is not plain English prose")
+        row.description, row.description_method = prose, "override"
 
 
 def _provenance_gap(row: CanonicalRow) -> bool:

@@ -13,7 +13,7 @@ from stone_pipeline.core.schema import GapKind
 from stone_pipeline.core.text import looks_code_shaped, looks_like_artifact
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
-from stone_pipeline.stages.curate.aliasing import alias_and_backfill, collision_owners
+from stone_pipeline.stages.curate.aliasing import collision_owners
 from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
                                                   variety_identity)
 from stone_pipeline.stages.curate.minting import mint
@@ -23,17 +23,17 @@ from stone_pipeline.stages.curate.review import (hold_archived_variety, hold_cod
 from stone_pipeline.stages.format_resolve import branch_of
 
 
-def observe_branches_and_images(c: Curation) -> None:
-    # which branches a gapped variety was ACTUALLY observed in (has a scraped product). A variety is still
-    # created in every active category for a uniform catalog, but only its product-backed branch needs an
-    # image generated. Keyed by the CLEANED variety name (the minted identity), so it lines up with the
-    # new-variant dedup even when two raw names clean to the same variety.
+def observe_categories_and_images(c: Curation) -> None:
+    # which categories a gapped variety was ACTUALLY observed in (has a scraped product): a new variety is ONE
+    # record, and these are the categories its icons are made for. Keyed by the CLEANED variety name (the
+    # minted identity), so it lines up with the new-variant dedup even when two raw names clean to the same
+    # variety.
     for row in c.rows:
         if not any(g.gap_kind == GapKind.missing_variation for g in row.tree_gaps):
             continue
         _, _, clean = variety_identity(c, row)
         if clean:
-            c.variety_branches.setdefault(proj.norm(clean), set()).add(branch_of(row))
+            c.variety_categories.setdefault(proj.norm(clean), set()).add(branch_of(row))
     # First non-empty evidence image PER variety (across ALL its rows, gapped or not): a review card shows
     # the triggering row's photo, but that row may have none while a sibling row of the same variety has
     # one. Cosmetic only: the image is operator-verification evidence, never data.
@@ -116,15 +116,11 @@ def _reject_or_decide(c: Curation, row, gap, name: str, stone_type: str, clean: 
     return False
 
 
-def _archived_owner_name(c: Curation, owner: tuple[str, str], row) -> str | None:
+def _archived_owner_name(c: Curation, owner: tuple[str, str]) -> str | None:
     """The display name of an alias OWNER (norm name, norm type) that is archived in Medusa, else None. VE2:
     a NEW alias onto an archived variety never serves, so classify surfaces a card instead of a silent gap.
-    Checked in the ROW'S OWN branch only: an archived block Key must not flag a slab listing (whose 'mint as
-    new' would create a duplicate) -- the listing binds to the variety in its own category."""
-    imp = c.imports.get(branch_of(row))
-    if imp is None:
-        return None
-    e = imp.by_name_type.get(owner)
+    A variety is one record whatever its category, so its archived flag is the one record's."""
+    e = c.existing.by_name_type.get(owner)
     return e["Name"] if (e and e.get("archived")) else None
 
 
@@ -155,8 +151,8 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
         named = next((o for o in same_type if o[0] == proj.norm(clean)), None)
         if named or len({o[0] for o in same_type}) == 1:
             owner = named or same_type[0]
-            alias_and_backfill(c, owner, name, clean, stone_type, row, gap)
-            if (vname := _archived_owner_name(c, owner, row)):   # VE2: alias still recorded; surface the hold
+            c.alias_new.setdefault(owner, set()).add(name)
+            if (vname := _archived_owner_name(c, owner)):   # VE2: alias still recorded; surface the hold
                 hold_archived_variety(c, clean, vname, owner[1], row)
         else:
             hold_collision(c, clean, stone_type, sorted({o[0] for o in same_type}), row)
@@ -200,7 +196,7 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
         # tier happened to rank first, so it is held for the operator to state the variety instead.
         if d.verdict == "alias" and nt and (stone_type or len(_canonical_types(c, nn)) == 1):
             c.alias_new.setdefault((nn, nt), set()).add(name)
-            if (vname := _archived_owner_name(c, (nn, nt), row)):   # VE2: fuzzy-confirmed alias onto archived
+            if (vname := _archived_owner_name(c, (nn, nt))):   # VE2: fuzzy-confirmed alias onto archived
                 hold_archived_variety(c, clean, vname, nt, row)
             return True
         if d.verdict in ("alias", "review"):

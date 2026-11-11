@@ -22,7 +22,7 @@ _FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 def test_emit_build_from_seed_is_idempotent():
     # Build the full variant list from the committed base twice; the outputs must be byte-identical.
     # emit_catalog reads only the seed + generated artifacts (absent in CI -> empty), so this exercises
-    # the real normalize + union-fill + consolidate path that writes the base each run.
+    # the real normalize + consolidate + collapse path that writes the base each run.
     from stone_pipeline.stages import emit_catalog
     emit_catalog.build()
     first = _FULL.read_bytes()
@@ -41,16 +41,15 @@ def test_committed_base_is_already_a_fixed_point():
     from stone_pipeline.reference import seed
     stats = seed.verify()
     assert stats["fixed_point"], f"committed base drifts on rebuild (first diff at row {stats['first_diff_row']})"
-    # A (branch,type,Name) variety may exist under ONLY ONE Key. Two Keys for the same stone+name is a
+    # A (type, Name) variety may exist under ONLY ONE Key. Two Keys for the same stone+name is a
     # duplicate variety -- invisible to the fixed-point check (distinct Keys stay a stable fixed point),
     # so it is guarded explicitly here; it is the class that shipped duplicate products.
     assert stats["duplicate_varieties"] == 0, f"committed base has {stats['duplicate_varieties']} duplicate varieties"
-    # Every Key must carry a real stone type. A type-less / mis-keyed variety (slab_alpine_luxe, minted
+    # Every Key must carry a real stone type. A type-less / mis-keyed variety (type slug 'alpine', minted
     # before the type-less-mint guard) is fixed-point-invisible too, and ships type-less to Medusa.
     assert stats["malformed_type_keys"] == 0, f"committed base has {stats['malformed_type_keys']} type-less/mis-keyed varieties"
     # A MIS-TYPED variety (name's stone-type word contradicts the Key's type, e.g. 'Agata White' keyed
-    # semi_precious_stone) is a data error the pipeline deletes and the emit drops. Left in the base it
-    # survives in one category and vanishes from another (uneven Medusa cleaning), breaking uniformity.
+    # semi_precious_stone) is a data error the pipeline deletes and the emit drops.
     assert stats["mistyped_variants"] == 0, f"committed base has {stats['mistyped_variants']} mistyped varieties"
     assert stats["clean"], "committed seed is not clean (fixed_point / duplicate / type-less / mistyped check failed)"
 
@@ -75,25 +74,12 @@ def test_no_committed_variety_is_mangled_by_clean_variety_name():
 def test_malformed_type_keys_flags_type_less_keys():
     # deterministic (no S3, no seed): the guard flags a Key whose type slug is not a real stone type
     from stone_pipeline.reference import seed
-    rows = [{"Key": "slab_marble_carrara_x"},                 # real type -> ok
-            {"Key": "slab_semi_precious_stone_smoky_x"},      # real multi-word type -> ok
-            {"Key": "slab_alpine_luxe_x"},                    # 'alpine' is not a stone type -> flagged
-            {"Key": "block_ice_burg_x"}]                      # 'ice' is not a stone type -> flagged
+    rows = [{"Key": "marble__carrara_x"},                     # real type -> ok
+            {"Key": "semi_precious_stone__smoky_x"},          # real multi-word type -> ok
+            {"Key": "alpine__luxe_x"},                        # 'alpine' is not a stone type -> flagged
+            {"Key": "ice__burg_x"}]                           # 'ice' is not a stone type -> flagged
     bad = seed._malformed_type_keys(rows)
-    assert bad == ["block_ice_burg_x", "slab_alpine_luxe_x"]  # sorted, only the type-less ones
-
-
-@pytest.mark.skipif(not _BASE.exists(), reason="no committed seed")
-def test_every_category_carries_the_full_variety_union():
-    """A variety belongs to the stone, not a format, so every active category must carry the FULL UNION of
-    varieties across all categories -- no slab without its block/tile, and a block-only variety must also
-    appear in slab and tile (no category is a master). The emit's union gap-fill establishes this and
-    `seed.verify` guards it; assert it on the committed base so a base edit or an emit regression that
-    breaks category uniformity is caught. Supersedes the old slab-master mirror / backbone-orphan checks."""
-    from stone_pipeline.reference import seed
-    base = seed._rows(_BASE)
-    assert seed._non_uniform_categories(base) == [], \
-        "a category does not carry the full variety union -- the seed is not category-uniform"
+    assert bad == ["alpine__luxe_x", "ice__burg_x"]           # sorted, only the type-less ones
 
 
 def test_alias_normalization_is_idempotent():
@@ -101,11 +87,14 @@ def test_alias_normalization_is_idempotent():
     # first pass; a second pass must be a no-op, or the base never reaches a fixed point.
     name = "Grey Emperador"
     raw = ["Gray Emperador, Emperador Grey", "(Silver Emperador)", "GREY EMPEROR", "Grey Emperador"]
-    once = clean_alias_list(name, raw)
-    twice = clean_alias_list(name, once)
+    from functools import partial
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
+    once, _ = clean_alias_list(name, raw, clean)
+    twice, _ = clean_alias_list(name, once, clean)
     assert once == twice, f"clean_alias_list is not idempotent: {once} -> {twice}"
     # a second pass over an already-clean list changes nothing
-    assert clean_alias_list(name, twice) == twice
+    assert clean_alias_list(name, twice, clean) == (twice, [])
 
 
 def test_title_case_is_idempotent():

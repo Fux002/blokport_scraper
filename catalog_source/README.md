@@ -11,15 +11,17 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
 
 - `backbone_slabs.json`, `backbone_blocks.json`, `backbone_tiles.json` — per-category
   "backbone": the allowed combinations (which colour/finish/quality each variety may
-  be sold as), each post carrying its `key`. Tiles MIRROR slabs (rebuild with
-  `python -m stone_pipeline.stages.build_tile_backbone`).
+  be sold as), each post carrying its `key`. Tiles MIRROR slabs.
 
 - `backbone_additions/` — PRODUCED each catalog run: the new varieties to append to
-  the backbones above (`slab.json` / `block.json` / `tile.json`) plus
+  the backbones above (`varieties.json`, one post per (type, name) with the `categories` its
+  products sit in) plus
   `backbone_value_updates.csv` (existing varieties missing a colour/finish). Apply
   these to the backbones before building the tree.
 
-- `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …).
+- `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …, kind),
+  in the backend ports export's column order, so it imports as is (Settings > Ports). Every row
+  states its `kind` (sea | rail | air | inland): the backend's import refuses a row without one.
   Assign which ports each supplier ships from in `config/sources.yaml` `ports_default`,
   by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
 - `origin_map.csv` — the per-VARIETY quarry country (origin is a property of the stone, NOT the

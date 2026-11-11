@@ -446,13 +446,36 @@ def _get_review_attributes(params, body, query):
     return 200, {"attributes": decisions_store.list_pending("attribute")}
 
 
+def _name_refusal(field: str, value: str) -> tuple[int, dict] | None:
+    """The one refusal of a stated name, the backend's rule: 503 while the field kinds are not published, 400 for a
+    value with no ASCII form, 400 with `clean` for a value that is not its own clean form. None when it is clean."""
+    from stone_pipeline.core.text import UnfoldableName
+    from stone_pipeline.reference.loaders import field_kinds
+    try:
+        cleaned = field_kinds.clean(field, value)
+    except field_kinds.FieldKindsError:
+        return 503, {"error": "field kinds not published; retry once the backend has published field-kinds.json"}
+    except UnfoldableName:
+        return 400, {"error": f"{value!r} has no ASCII form; state it in plain letters"}
+    if cleaned != value:
+        return 400, {"error": f"{value!r} is not in its clean form", "clean": cleaned}
+    return None
+
+
 def _put_review_attribute(params, body, query):
     # {"kind":..., "medusa_id":...} for a pending attribute value (needs a Medusa id)
     from stone_pipeline.config import decisions_store
+    from stone_pipeline.reference.loaders import field_kinds
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
     value = unquote(params["value"])   # same decode-before-key rule as the variety PUT
     kind, medusa_id = _str(body, "kind"), _str(body, "medusa_id")
+    # the value becomes the name the products carry, so it is refused unless it is its kind's clean form (W14)
+    field = field_kinds.ATTRIBUTE_FIELDS.get(kind.lower())
+    if field is None:
+        return 400, {"error": f"kind must be one of {sorted(field_kinds.ATTRIBUTE_FIELDS)}"}
+    if err := _name_refusal(field, value):
+        return err
     # VE2: a restricted (archived or internal) Medusa id must never be pasted onto a pending value -- it would
     # make products unassignable. Dormant until the status columns exist (restricted_ids is then empty).
     from stone_pipeline.reference.loaders import restricted_ids
@@ -641,6 +664,9 @@ def _put_review_decide(params, body, query):
     widen = _flag(body, "widen")
     if not name or not raw_type:
         return 400, {"error": "name and type are required"}
+    from stone_pipeline.reference.loaders import field_kinds
+    if err := _name_refusal(field_kinds.VARIATION_NAME, name):     # the stated name is stored as given (W12)
+        return err
     vocab = _type_vocab()
     if proj.norm(raw_type) not in vocab:
         return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
@@ -657,10 +683,9 @@ def _put_review_decide(params, body, query):
     origin = _resolve_origin_iso(raw_origin) if raw_origin else ""
     if raw_origin and not origin:
         return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
-    from stone_pipeline.stages.curate import active_branches, gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.stages import decisions as _decisions
-    retired = _decisions.load_retired()
-    if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
+    if new_key(stone_type, name) in _decisions.load_retired():
         return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                      "retired": True}
     if (refusal := _ve2_decide_gate(listings, name, stone_type, color, origin, widen)) is not None:
@@ -783,6 +808,11 @@ def _put_origin(params, body, query):
     city, county = _str(body, "city"), _str(body, "county")
     if not (variety and stone_type):
         return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
+    from stone_pipeline.reference.loaders import field_kinds
+    for field, value in ((field_kinds.VARIATION_NAME, variety), (field_kinds.PRODUCT_ORIGIN_CITY, city),
+                         (field_kinds.PRODUCT_ORIGIN_COUNTY, county)):
+        if value and (err := _name_refusal(field, value)):     # each becomes a name the products carry (W13)
+            return err
     isos = []
     for c in _str_list(body.get("countries"), "countries"):
         if not (iso := _resolve_origin_iso(c)):
@@ -1151,6 +1181,12 @@ def _validate_source_put(name: str, body: dict, stored: dict | None) -> tuple[in
         return 400, {"error": f"source {name!r} requires at least one shipping port: set 'ports' to a "
                      "non-empty list of the supplier's port names / LOCODEs (Medusa derives a product's "
                      "ports from these)."}
+    # the collection city is a name the products carry (W25): a stored unclean city is refused on every save until
+    # it is re-saved clean, which the release runbook does once for zucchi
+    from stone_pipeline.reference.loaders import field_kinds
+    city = body["collection_city"]          # stripped above (_SOURCE_STR_FIELDS)
+    if city and (err := _name_refusal(field_kinds.PRODUCT_COLLECTION_CITY, city)):
+        return err
     # the integer fields are validated HERE, so a malformed value is the client's 400 (it used to reach
     # int() in the store and answer 500)
     for field in _SOURCE_INT_FIELDS:
@@ -1291,6 +1327,13 @@ def boot(config_db, ledger_path) -> None:
     from stone_pipeline.io import medusa_inputs
     if medusa_inputs.fetch_attributes():
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    # The name-field kinds: a boot failure is logged, not fatal. The routes that clean a name read the map per
+    # request and answer 503 until a later boot or produce fetch has written a valid one.
+    try:
+        medusa_inputs.fetch_field_kinds()
+        log.info("boot: fetched field-kinds.json")
+    except Exception:
+        log.warning("boot: field-kinds.json not fetched; the name routes answer 503 until it is", exc_info=True)
 
 
 def shutdown(config_db, periodic) -> None:

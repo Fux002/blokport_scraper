@@ -1,43 +1,22 @@
-"""Lots across the boundaries: no per-source setting gates them (a config store that still holds the retired
-`lots` switch drops it and keeps its sources), and lot_code / lot_position travel through the ledger into
-the pull payload Blokport reads (stored, part of the change fingerprint, null outside a lot)."""
+"""Lots across the boundaries: no per-source setting gates them, and lot_code / lot_position travel through
+the ledger into the pull payload Blokport reads (stored, part of the change fingerprint, null outside a lot)."""
 
 from __future__ import annotations
-
-import sqlite3
-from contextlib import closing
-
-import pytest
 
 from stone_pipeline.config import store
 from stone_pipeline.config.control import server
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import add_icon
 from stone_pipeline.stages import emit
 
-KEY = "slab_marble_calacatta_viola_1"
+KEY = "marble__calacatta_viola_1"
 
 
 # -- config store: no lots setting --------------------------------------------------------------------------
-
-def test_a_v7_config_store_drops_the_retired_lots_switch_and_keeps_its_sources(tmp_path, monkeypatch):
-    db = tmp_path / "config.db"
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(db))
-    store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas Marble", "ports": ["Izmir"]})
-    with closing(sqlite3.connect(db)) as raw:                              # simulate a v7 store
-        raw.execute("ALTER TABLE source ADD COLUMN lots INTEGER NOT NULL DEFAULT 0")
-        raw.execute("UPDATE source SET lots = 1")
-        raw.execute("PRAGMA user_version = 7")
-        raw.commit()
-    row = store.get_row("sentas")
-    assert "lots" not in row and (row["vendor"], row["ports"]) == ("Sentas Marble", ["Izmir"])
-    with closing(sqlite3.connect(db)) as raw:
-        assert "lots" not in {r[1] for r in raw.execute("PRAGMA table_info(source)")}
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
-
 
 def test_a_partial_put_changes_only_the_fields_it_names(tmp_path, monkeypatch):
     # an admin form that does not render a field must never reset it to its default on save
@@ -62,12 +41,12 @@ def _row(lot_code="B6392-u", lot_position=5):
 
 def _seed_variation(ledger):
     now = now_iso()
-    ledger.upsert("variation", {"key": KEY, "branch": "slab", "type": "Marble", "name": "Calacatta Viola",
-                                "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None,
-                                "image_model": None,
-                                "volume": "", "medusa_id": "V1", "in_full": 1, "payload_hash": "",
+    ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Calacatta Viola",
+                                "aliases": "[]",
+                                "medusa_id": "V1", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, KEY)
 
 
 def test_the_ledger_stores_the_lot_and_a_lot_change_re_serves_the_piece(tmp_path):
@@ -89,30 +68,8 @@ def test_the_pull_payload_carries_the_lot_and_null_outside_one(tmp_path):
         now = now_iso()
         for sku, code, pos in [("SEN-7149-5", "B6392-u", 5), ("SEN-2213", None, None)]:
             ledger.upsert("product", {"sku": sku, "source": "sen", "variation_key": KEY, "state": "pending",
-                                      "lot_code": code, "lot_position": pos,
+                                      "category": "slabs", "lot_code": code, "lot_position": pos,
                                       "created_at": now, "updated_at": now}, pk=("sku",))
         by = {r["external_id"]: r["payload"] for r in ready(ledger, "products")}
         assert (by["SEN-7149-5"]["lot_code"], by["SEN-7149-5"]["lot_position"]) == ("B6392-u", 5)
         assert by["SEN-2213"]["lot_code"] is None and by["SEN-2213"]["lot_position"] is None
-
-
-def test_a_v6_ledger_gains_the_lot_columns_and_keeps_its_data(tmp_path):
-    if sqlite3.sqlite_version_info < (3, 35, 0):
-        pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v6 shape")
-    p = tmp_path / "mig.ledger"
-    with Ledger.open(p, env="development") as lg:
-        _seed_variation(lg)
-    raw = sqlite3.connect(p)                                                # simulate a v6 ledger
-    raw.execute("DROP INDEX idx_product_lot_code")                          # a v6 ledger has neither
-    for col in ("lot_code", "lot_position"):
-        raw.execute(f"ALTER TABLE product DROP COLUMN {col}")
-    raw.execute("ALTER TABLE inventory DROP COLUMN replaced_by_lot_code")
-    raw.execute("PRAGMA user_version = 6")
-    raw.execute("UPDATE ledger_meta SET schema_version = 6")
-    raw.commit()
-    raw.close()
-    with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        cols = {r[1] for r in lg.conn.execute("PRAGMA table_info(product)")}
-        assert {"lot_code", "lot_position"} <= cols
-        assert lg.get("variation", "key", KEY)["name"] == "Calacatta Viola"

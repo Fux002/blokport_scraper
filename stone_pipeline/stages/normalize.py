@@ -24,7 +24,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VocabResolver
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds
 
 log = logfmt.get_logger("normalize")
 
@@ -85,7 +85,10 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         if forced:
             looked = ref.attributes.resolve_id(vocab, forced)
             setattr(row, f"{vocab}_id", looked[1] if looked else None)
-            setattr(row, f"{vocab}_name", forced)
+            # a resolved override carries the vocabulary's canonical spelling; an unresolved one its field's
+            # clean form (UnfoldableName raises into the row guard: loud and isolated, never stored half-folded)
+            setattr(row, f"{vocab}_name", looked[0] if looked
+                    else field_kinds.clean(field_kinds.ATTRIBUTE_FIELDS[vocab], forced))
             setattr(row, f"{vocab}_method", "override")
             if looked:
                 setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.high))
@@ -118,6 +121,13 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         setattr(row, f"{vocab}_confidence", _confidence_name(resolution.confidence))
         setattr(row, f"{vocab}_method", resolution.method)
 
+        # a colour LIST naming two or more distinct colours: recorded here, applied by reconcile (rule 1: the pack's
+        # multicolour value). The row keeps the first colour until then, so the matcher narrows by the vendor's own
+        # colour exactly as before; best_guess keeps it, the colour such a listing carried before rule 1.
+        if vocab == "color" and is_multi and len(resolution.evidence.get("resolved") or []) >= 2:
+            row.add_flag(ReviewFlag(field=vocab, code=FlagCode.multicolour_from_vendor, raw_value=raw_value,
+                                    best_guess=canonical, confidence=Confidence.medium, method="multi_value",
+                                    src_url=row.src_url))
         if is_multi:
             row.add_flag(
                 ReviewFlag(

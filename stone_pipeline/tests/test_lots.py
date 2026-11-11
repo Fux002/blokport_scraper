@@ -221,7 +221,7 @@ def test_a_second_lot_of_the_same_stone_is_flagged_once_like_a_second_bundle():
 
 # -- downstream: the lot gate in validate -------------------------------------------------------------------
 
-def _emittable_piece(code="L-1", position=1, variation_key="slab_marble_cv_1", qty=1, **kw):
+def _emittable_piece(code="L-1", position=1, variation_key="marble__cv_1", qty=1, **kw):
     base = dict(src_site="sentas", surrogate_key=f"7149-{position}", lot_code=code, lot_position=position,
                 variation_key=variation_key, variation_id="V1", type_name="Marble", type_id="T1",
                 color_id="C1", finish_id="F1", quality_id="Q1", category_pcat_id="PC1",
@@ -234,7 +234,7 @@ def _emittable_piece(code="L-1", position=1, variation_key="slab_marble_cv_1", q
 
 
 def _lot_rejects(rows):
-    validate.run(rows, emit_on_review=True, source_code="test")
+    validate.run(rows, emit_on_review=True, source_code="test", published=frozenset())
     return [[r.detail for r in row.reject_reasons if r.rule == "lot_inconsistent"] for row in rows]
 
 
@@ -245,7 +245,7 @@ def test_a_consistent_lot_passes_the_lot_gate():
 @pytest.mark.parametrize("second, detail", [
     (dict(position=1), "position_duplicate"),
     (dict(position=None), "position_missing"),
-    (dict(variation_key="slab_marble_other_2"), "identity_differs"),
+    (dict(variation_key="marble__other_2"), "identity_differs"),
     (dict(type_name="Onyx"), "identity_differs"),
     (dict(category_pcat_id="PC2"), "identity_differs"),
     (dict(qty=2), "quantity_above_one"),
@@ -275,3 +275,9 @@ def test_the_lot_summary_counts_each_lot_s_pieces():
     assert lots.summary(rows) == [{"lot_code": "L-1", "variety": "Calacatta Viola",
                                    "pieces": 2, "sold": 0, "emitted": 1, "held": 1,
                                    "awaiting_answer": False}]
+
+def test_a_lot_code_label_is_written_by_its_field():
+    # W27: the readable part passes product.lot_code's rule; the uuid part is unchanged
+    from stone_pipeline.stages.lots import lot_code
+    code = lot_code("MAR", "ref-1", "Løt 1")
+    assert code.startswith("Lot 1-") and code.split("-", 2)[-1] == lot_code("MAR", "ref-1", "Lot 1").split("-", 2)[-1]

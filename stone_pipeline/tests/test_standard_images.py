@@ -175,11 +175,12 @@ def test_a_run_reads_its_environment_s_current_categories_before_its_product_she
     calls = []
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)
     monkeypatch.setattr(categories, "refresh_category_pcats", lambda: calls.append("refresh"))
-    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or b"{}")
-    monkeypatch.setattr(src.index, "build", lambda text, photos: calls.append("index") or {})
+    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or
+                        (b"[]" if key.endswith(src.C.DEFAULTED_FILE) else b"{}"))
+    monkeypatch.setattr(src.index, "build", lambda text, photos, defaulted: calls.append("index") or {})
     assert src.sheet_photos(object()) == {}
     assert calls == ["fetch", "refresh", f"{settings.ENV_SEGMENT}/{src.C.SHEET_KEY}",        # prod has no committed export
-                     f"{settings.ENV_SEGMENT}/{src.C.PHOTOS_KEY}", "index"]
+                     f"{settings.ENV_SEGMENT}/{src.C.PHOTOS_KEY}", f"{settings.ENV_SEGMENT}/{src.C.DEFAULTED_KEY}", "index"]
 
 
 def _slab_category(monkeypatch, pcat="pcat_S"):
@@ -193,7 +194,7 @@ def test_the_product_index_follows_the_categories_refreshed_from_the_export(monk
     from stone_pipeline.standardise import index
     _slab_category(monkeypatch, "pcat_PROD_SLABS")                                        # the id prod's export carries
     sheet = "Product Handle,Product Category 1,Product Length,Product Width\nh,pcat_PROD_SLABS,3.0,1.8\n"
-    assert index.build(sheet, {"h": [("sentas", A)]})[A]["format"] == "slab"
+    assert index.build(sheet, {"h": [("sentas", A)]}, frozenset())[A]["format"] == "slab"
 
 
 def test_listings_take_each_product_s_own_photos_in_its_order_from_the_photo_list(monkeypatch):
@@ -218,7 +219,7 @@ def test_a_published_listing_keeps_all_its_own_photos_whatever_the_sheet_shows(m
     photos = {"one": [("sentas", A), ("sentas", B)]}
     assert index.listings(sheet, photos) == [
         {"key": "one", "sku": "SEN-1", "source": "sentas", "stone": ("v1", "f1"), "format": "slab", "photos": [A, B]}]
-    assert set(index.build(sheet, photos)) == {A, B}                                      # the GPU job sees both
+    assert set(index.build(sheet, photos, frozenset())) == {A, B}                                      # the GPU job sees both
 
 
 def test_a_photo_several_listings_show_is_their_stone_s_or_a_conflict():
