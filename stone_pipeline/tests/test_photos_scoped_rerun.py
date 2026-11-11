@@ -83,6 +83,21 @@ def test_an_unknown_sku_in_the_scope_is_refused_naming_it():
         process.scoped(LISTINGS, scope)
 
 
+SLAB_AND_BLOCK = [_sku_listing("SEN-1", A), {**_listing(B, key="sen-2", fmt="block"), "sku": "SEN-2"}]
+
+
+def test_a_scope_naming_a_listing_that_gets_no_cut_out_is_refused_naming_it_and_its_format():
+    # a block in a 3D scope is paid for and gets no cut-out: blocks get no 3D (the owner's rule)
+    scope = process.read_scope(_scope_file(["SEN-1", "SEN-2"]), SCOPE_KEY)
+    with pytest.raises(process.ScopeRefused, match=r"no 3D cut-out: SEN-2 \(block\)$"):
+        process.scoped(SLAB_AND_BLOCK, scope)
+
+
+def test_a_slab_only_scope_passes_unchanged_beside_a_block_on_the_sheet():
+    scope = process.read_scope(_scope_file(["SEN-1"]), SCOPE_KEY)
+    assert process.scoped(SLAB_AND_BLOCK, scope) == [SLAB_AND_BLOCK[0]]
+
+
 def test_a_scope_file_that_is_no_scope_fails_loud_naming_its_key():
     with pytest.raises(process.ScopeRefused, match=SCOPE_KEY):
         process.read_scope(_Store({SCOPE_KEY: b'["SEN-1"]'}), SCOPE_KEY)
