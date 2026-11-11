@@ -3,9 +3,10 @@
     python -m stone_pipeline.phase1.migrate_run
 
 Inputs come from the environment, never flags:
-- MIGRATE_INPUTS: one JSON object. The two maps and the new export as {key, version_id, sha256}. The step-1 record:
+- MIGRATE_INPUTS: one JSON object. The two maps and the new export as {key, version_id, sha256}; the env's committed
+  retired-Keys file (retired_keys/{env}.csv) as {sha256}. The step-1 record:
   every store's version_id and, for the real run, the dry run's digest:
-  {"key_map": {...}, "survivor_map": {...}, "export": {...},
+  {"key_map": {...}, "survivor_map": {...}, "export": {...}, "retired_keys": {"sha256": "..."},
    "stores": {"ledger": {"version_id": "...", "digest": "..."}, "config": ..., "writeback": ..., "refreshed": ...,
               "base_from_medusa": ..., "base_to_upload": ..., "outputs": {"version_id": "..."}}}
   A store absent at step 1 has version_id null.
@@ -32,7 +33,8 @@ from stone_pipeline.io import storage
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.phase1 import store_writer
-from stone_pipeline.phase1.migrate_stores import MigrationRefused, read_key_map, read_survivor_map
+from stone_pipeline.phase1.migrate_stores import (MigrationRefused, read_key_map, read_retired_keys,
+                                                  read_survivor_map)
 from stone_pipeline.phase1.rewrite_committed import rewrite_base
 from stone_pipeline.reference.medusa_files import read_variants_export
 from stone_pipeline.refresh_images import MARKER_KEY
@@ -57,6 +59,9 @@ STORES = {
 NEW_STORES = {"ledger": snapshot.snapshot_key(ENV_NAME), "config": snapshot.config_key(ENV_NAME),
               "writeback": snapshot.state_writeback_key(ENV_NAME)}
 REQUIRED_STORES = ("ledger", "config")     # the migration has nothing to migrate without them
+# the env's committed retired-Keys file (baked into the image), read only at MIGRATE_INPUTS.retired_keys.sha256
+RETIRED_KEYS_DIR = Path(__file__).with_name("retired_keys")
+RETIRED_KEYS_PATH = RETIRED_KEYS_DIR / f"{ENV_NAME}.csv"
 
 
 class _S3:
@@ -107,6 +112,13 @@ def _versioned(s3: _S3, spec: dict, what: str) -> bytes:
     return data
 
 
+def _committed(path: Path, what: str) -> bytes:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        raise MigrationRefused(f"{what}: {path} is not committed for this env") from exc
+
+
 def _fetch_stores(s3: _S3, recorded: dict, work: Path, write: bool) -> dict:
     """Each step-1 store, read by its recorded VersionId into `work`: name -> {path, digest, version_id}. Refuses a
     store moved on since step 1 with other content, and in the real run a digest that is not the dry run's."""
@@ -144,6 +156,8 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_
     key_map = read_key_map(_versioned(s3, inputs["key_map"], "key map"), inputs["key_map"]["sha256"])
     survivors = read_survivor_map(_versioned(s3, inputs["survivor_map"], "survivor map"),
                                   inputs["survivor_map"]["sha256"], inputs["key_map"]["sha256"])
+    retired_keys = read_retired_keys(_committed(RETIRED_KEYS_PATH, "retired keys"), inputs["retired_keys"]["sha256"],
+                                     key_map)
     export = read_variants_export(_versioned(s3, inputs["export"], "export").decode("utf-8-sig"),
                                   require_status=True, name=inputs["export"]["key"])
     archived = {v.key for v in export if v.status == "archived"}
@@ -171,7 +185,9 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_
                                             STORES[name][0]), encoding="utf-8")
     if stores["refreshed"]["path"] is not None:
         old_keys = store_writer.old_marker_keys(stores["refreshed"]["path"].read_bytes())
-        pairs, sub = store_writer.remap_marker(old_keys, key_map)
+        pairs, sub = store_writer.remap_marker(old_keys, key_map,
+                                               store_writer.ledger_variation_tombstones(stores["ledger"]["path"]),
+                                               retired_keys)
         _fold(report, sub)
         files["refreshed"] = work / "refreshed.json"
         files["refreshed"].write_text(json.dumps(pairs), encoding="utf-8")

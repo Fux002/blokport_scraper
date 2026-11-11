@@ -49,6 +49,9 @@ prod_image_upgrade_batch = 1000
 # passed 2 h on 2026-09-14 and was killed as wedged.
 run_timeout_seconds = 14400
 
+# Dev off (owner 2026-11-10: no dev GPU spend, dev proves logic on tests and a few rows; Mas 2026-11-11): a dev produce
+# never submits the texture GPU job. Prod keeps its own.
+dev_auto_texture  = false
 prod_auto_texture = true
 
 # A product without a standardised photo is hidden (qty 0, reason no_photo) and kept for review. Prod has it by the
@@ -58,12 +61,13 @@ dev_require_standard_photo = true
 # The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image each env's standardise jobs run, built by
 # deploy/build_standardise_image.sh as standardise-pin-<sha12> of the commit it holds. A job definition is applied
 # before its env's svc runs the matching code (the release order, STANDARDISE_PROCESS.md).
-# AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
+# AUTO: on in prod: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run).
+# Off in dev (owner 2026-11-10: no dev GPU spend; Mas 2026-11-11), so a dev produce never starts the photo GPU jobs. The
 # month's budget, hosted calls and GPU together, is the owner's: prod 400 USD for November's combined pass, dev 100 USD
 # (2026-11-05).
 dev_standardise_image_tag  = "standardise-pin-809b0b3e2806"
 prod_standardise_image_tag = "standardise-pin-423d02f59c1d"
-dev_standardise_auto       = true
+dev_standardise_auto       = false
 prod_standardise_auto      = true
 # The automatic clean-up of marks (FAL) stays off in both until the owner switches it on (owner 2026-11-02); a photo the
 # owner clicks is cleaned either way, within the cleaning cap below (owner 2026-11-05). Prod ran it ON once for the
