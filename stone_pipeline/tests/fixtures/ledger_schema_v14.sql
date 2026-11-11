@@ -1,0 +1,343 @@
+-- TEST FIXTURE: the v14 ledger DDL, verbatim from stone_pipeline/ledger/schema.sql at 7a81c45~1 (the last ledger
+-- before phase 1), so the store writer is tested against the real old shape.
+-- Sync ledger schema (Phase 1).
+--
+-- This is the data model from SYNC_LEDGER_DESIGN.md section 4, expressed as DDL.
+-- One database PER ENVIRONMENT (a dev ledger and a prod ledger); the env is never
+-- mixed. Target for Phase 1 is SQLite on the task's LOCAL disk with an S3 snapshot
+-- (never EFS, see design section 12 / M4). The DDL is written to lift cleanly to
+-- RDS Postgres later: only TEXT/INTEGER/REAL, CHECK constraints instead of native
+-- enums, ISO8601 TEXT timestamps, and JSON stored as TEXT. No em dashes (design
+-- principle 2).
+--
+-- Refinements vs section 4 (DDL forced these to be precise; flagged for review):
+--   1. Env guard: section 4 says "all tables carry env." Realized here as a single
+--      `ledger_meta` row holding the env + fingerprint, asserted by the DAL at every
+--      connection open. Same guarantee (a misrouted connection aborts), without an
+--      env column duplicated on every row. One DB per env makes per-row env moot.
+--   2. `variation.image_url` stores the live TEXTURE url directly (the CSV Image
+--      cell; empty when no texture exists), because a variant texture is
+--      Key-addressed (`{Key}.png`), not content-hash addressed. `image_sha256` is
+--      reserved for a future content-addressed texture lane. Scraped PHOTOS, which
+--      are content-hash addressed, still derive their live url from `image.live_key`
+--      (one source of truth for that lane) and link via `product.image_shas`.
+--   3. `combination.category` and `combination.type` store the canonical NAMES (the
+--      design calls the category dimension "category_pcat"). Names are re-seed safe;
+--      the pcat id is resolved at the boundary. combo_key hashes the name tuple.
+--   4. `gap.id` and `sync_run.id` are DAL-generated TEXT ids (ULID-style), not
+--      auto-increment, to stay dialect-neutral.
+--
+-- payload_hash inputs are documented per table (design section 4 / M3). The DAL
+-- computes payload_hash and combo_key with a stable canonical serialization so the
+-- same desired state always hashes the same (determinism).
+
+PRAGMA foreign_keys = ON;   -- SQLite: enforce the FK declarations below.
+
+-- ---------------------------------------------------------------------------
+-- ledger_meta: the env guard (one row). The DAL asserts RunContext.env == env
+-- and the fingerprint at every open, so a dev process can never write a prod
+-- ledger or vice versa (design section 2 cross-env guard).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ledger_meta (
+    id                     INTEGER PRIMARY KEY CHECK (id = 1),   -- single row
+    env                    TEXT    NOT NULL CHECK (env IN ('development', 'production')),
+    backend_id_fingerprint TEXT,                                 -- hash of the live id set
+    schema_version         INTEGER NOT NULL,
+    created_at             TEXT    NOT NULL,
+    updated_at             TEXT    NOT NULL
+);
+
+-- ---------------------------------------------------------------------------
+-- variation: one row per canonical variety, addressed by the deterministic Key
+-- (Medusa external_id). A type or canonical-name correction is a NEW Key (a
+-- re-key, design section 5C), not an update of this row.
+--
+-- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: category, type, name,
+--   aliases, image_url) plus image_sha256 (a texture re-made at the same url). volume is not served, so
+--   not hashed. fill_variation_types re-hashes the row when it fills the type.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS variation (
+    key           TEXT PRIMARY KEY,                    -- {branch}_{slug(type)}_{slug(name)}_{uuid5}
+    -- the branch set mirrors the active domain pack's category names (stone: slab/block/tile). A different
+    -- product pack must widen/regenerate this CHECK before its first ledger write (config/domains/<pack>.yaml).
+    branch        TEXT NOT NULL CHECK (branch IN ('slab', 'block', 'tile')),
+    type          TEXT NOT NULL,                       -- canonical stone type name
+    name          TEXT NOT NULL,                       -- canonical variety name
+    aliases       TEXT,                                -- JSON array of strings
+    image_url     TEXT,                                -- live texture url (the CSV Image cell); empty if none
+    image_sha256  TEXT,                                -- reserved: content-hash if texture is ever content-addressed
+    image_model   TEXT,                                -- generator of the current texture, null if none
+    volume        TEXT,                                -- "Volume per kg (m3/kg)", kept as text for exactness
+    medusa_id     TEXT,                                -- null until synced
+    -- 1 when this variation is in the produced 1_variants_full set (the catalog
+    -- output), 0 for export-only rows kept for ids/FK (junk, consolidated-away).
+    -- render_variants_full renders only in_full rows; the export dump for
+    -- combinations uses ALL rows.
+    in_full       INTEGER NOT NULL DEFAULT 0,
+    -- VE2: 1 when the Medusa export marks this variety archived (a frozen variety: it is served to no
+    -- variations lane, so never created or updated, and no NEW product binds to it; existing products keep
+    -- flowing). A PURE MIRROR of the export's status column, recomputed every produce (writethrough).
+    archived      INTEGER NOT NULL DEFAULT 0,
+    payload_hash  TEXT,
+    state         TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
+    sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive failed Medusa applies (dead-letter counter)
+    sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
+    abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
+    retry_after   TEXT,                                 -- after a failed apply: not served again before this time
+    first_seen    TEXT NOT NULL,
+    last_synced   TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_variation_serve ON variation (state, created_at, key);
+CREATE INDEX IF NOT EXISTS idx_variation_branch ON variation (branch);
+
+-- ---------------------------------------------------------------------------
+-- attribute: the controlled vocabulary. Existing values are refreshed from
+-- Medusa; NEW values discovered by the pipeline start `pending` and HOLD their
+-- dependents until synced (design C3). Keyed by (category, value).
+-- No payload_hash: an attribute is identified by its (category, value); it has no
+-- other mutable content to diff.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attribute (
+    -- the vocab set mirrors the domain pack's attributes + 'category' (stone: color/finish/quality/type).
+    -- A different product pack must widen/regenerate this CHECK before its first ledger write.
+    category    TEXT NOT NULL CHECK (category IN ('color','finish','quality','type','category')),
+    value       TEXT NOT NULL,                         -- canonical value (exact spelling Medusa resolves on)
+    medusa_id   TEXT,                                  -- null until synced
+    state       TEXT NOT NULL DEFAULT 'pending'
+                CHECK (state IN ('pending','dirty','syncing','synced','needs_resync')),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (category, value)
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_serve ON attribute (state, created_at, category, value);
+
+-- ---------------------------------------------------------------------------
+-- combination: a priceable tuple. category and type ARE dimensions (design C1),
+-- so combo_key hashes the full tuple and they are stored explicitly. Matches
+-- 2_valid_combinations.csv (product_category_id, type_id, variation_id, finish_id,
+-- color_id, quality_id), resolved to ids by name at the boundary.
+--
+-- combo_key = hash(category, type, variation_key, color, finish, quality)
+-- payload_hash covers the same tuple (a combination has no other content).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS combination (
+    combo_key      TEXT PRIMARY KEY,
+    category       TEXT NOT NULL,                       -- canonical category name (design "category_pcat")
+    type           TEXT NOT NULL,                       -- canonical type name
+    variation_key  TEXT NOT NULL REFERENCES variation (key),
+    color          TEXT NOT NULL,
+    finish         TEXT NOT NULL,
+    quality        TEXT NOT NULL,
+    medusa_id      TEXT,                                -- null until synced
+    payload_hash   TEXT,
+    state          TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
+    last_synced    TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_combination_serve ON combination (state, created_at, combo_key);
+CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_key);
+
+-- ---------------------------------------------------------------------------
+-- product: a supplier's concrete offering, keyed by SKU ({source_code}-{surrogate}
+-- uppercased). SKU is stable across a variation re-key, so a product re-points
+-- onto the new variation_key rather than being recreated (design section 5C).
+--
+-- payload_hash covers exactly the served payload (ledger/payloads.product_hash) except photo_ready and
+--   made_to_order (Blokport reads them at create only; the stock lane owns them afterwards), plus the payload
+--   contract and standard_version (the ETags of the standardised files, not stored). sales_channel_id is not
+--   served, so not hashed.
+-- ---------------------------------------------------------------------------
+--
+-- Two groups of columns. The DESIGN fields (name-based: color/finish/quality/
+-- category/type as names, variation_key) are the pull-payload shape; their ids are
+-- resolved from the attribute/variation tables at render time. The PRESENTATION
+-- fields below them exist to reproduce the legacy 55-column import CSV exactly
+-- during the parallel migration (the equivalence test), and can be dropped once
+-- that CSV is retired. surrogate_key reproduces the SKU; the image columns preserve
+-- the branch-specific slotting (oriented for blocks, product images for slabs).
+CREATE TABLE IF NOT EXISTS product (
+    sku                  TEXT PRIMARY KEY,
+    source               TEXT NOT NULL,                -- source_code
+    vendor               TEXT,                          -- the company this source belongs to (sync `vendor`)
+    surrogate_key        TEXT,                          -- reproduces the SKU via emit._sku
+    -- nullable: a product bootstrapped from products_export (known SKU + handle +
+    -- stock, no variety link yet) carries no variation_key until a run emits it.
+    -- render_products renders only rows WITH a variation_key, so these minimal
+    -- rows back the inventory FK without leaking into a product import CSV.
+    variation_key        TEXT REFERENCES variation (key),
+    -- design fields (names; ids resolved at render)
+    color                TEXT,
+    finish               TEXT,
+    quality              TEXT,
+    type                 TEXT,                          -- the product's stone type name (-> type_id, type_name)
+    category             TEXT,                          -- canonical category name (-> category_pcat_id)
+    -- presentation fields (reproduce the legacy import CSV)
+    title                TEXT,
+    description          TEXT,
+    handle               TEXT,
+    slug                 TEXT,
+    weight               REAL,                          -- dims as REAL so emit._num(:g) reproduces exactly
+    length               REAL,
+    width                REAL,
+    height               REAL,
+    origin_country_code  TEXT,
+    origin_city          TEXT,
+    origin_county        TEXT,
+    collection_country_code TEXT,                       -- supplier collection country (ISO-2; independent of origin)
+    collection_city      TEXT,                          -- supplier collection city
+    thumbnail_key        TEXT,
+    oriented_image_keys  TEXT,                          -- JSON array, ordered (blocks: Front/Right/Back/Left)
+    product_image_keys   TEXT,                          -- JSON array, ordered (slabs: Product Image 1..N)
+    model_3d_key         TEXT,                          -- the lead slab's 3D cut-out url; null = no 3D
+    -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
+    -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
+    photo_ready          INTEGER NOT NULL DEFAULT 1,
+    company_id           TEXT,
+    sales_channel_id     TEXT,
+    ports                TEXT,                          -- JSON array of port ids
+    visibility           TEXT,                          -- null -> render the config constant
+    discountable         TEXT,                          -- null -> render the config constant
+    sold_in_bundle       INTEGER,                       -- 0/1
+    bundle_size          INTEGER,
+    inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
+    made_to_order        INTEGER NOT NULL DEFAULT 0,    -- 1: on sale with no count (a free-size shape)
+    lot_code             TEXT,                          -- shared by every piece of a lot; null = not in a lot
+    lot_position         INTEGER,                       -- the piece's place in the lot's cut order
+    medusa_id            TEXT,                          -- null until synced
+    payload_hash         TEXT,
+    state                TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
+    sync_attempts        INTEGER NOT NULL DEFAULT 0,    -- consecutive failed Medusa applies (dead-letter counter)
+    sync_error           TEXT,                          -- last Medusa failure reason; null once synced
+    abandoned_at         TEXT,                          -- set when the operator drops a structural dead-letter (terminal)
+    retry_after          TEXT,                          -- after a failed apply: not served again before this time
+    last_synced          TEXT,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_product_serve ON product (state, created_at, sku);
+CREATE INDEX IF NOT EXISTS idx_product_variation ON product (variation_key);
+CREATE INDEX IF NOT EXISTS idx_product_source ON product (source);
+
+-- ---------------------------------------------------------------------------
+-- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order, reason, replaced_by_lot_code)
+-- vs the last synced stock drives what is served (design section 7, db.STOCK_DELTA_SQL). qty 0 is the reversible
+-- delist for a discontinued product; made_to_order 1 is on sale with no count (qty NULL). A failed or refused ack
+-- waits and dead-letters by the product lane's rule (sync_attempts, retry_after; dead at SETTINGS.sync.max_attempts).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inventory (
+    sku              TEXT PRIMARY KEY REFERENCES product (sku),
+    qty              INTEGER,                           -- null exactly when made_to_order
+    made_to_order    INTEGER NOT NULL DEFAULT 0,
+    last_synced_qty  INTEGER,
+    last_synced_made_to_order INTEGER,                  -- null until first inventory sync
+    reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
+                                                        -- hides it), 'replaced_by_lot' (a bundle split into its
+                                                        -- pieces) vs null (ordinary out-of-stock, stays listed)
+    replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
+    updated_at       TEXT NOT NULL,
+    last_synced_reason   TEXT,                          -- the reason Medusa last acked (null until first sync)
+    last_synced_lot_code TEXT,                          -- the lot code Medusa last acked
+    sync_attempts    INTEGER NOT NULL DEFAULT 0,        -- consecutive failed/refused acks (dead at the cap)
+    sync_error       TEXT,                              -- last failure reason; null once synced
+    retry_after      TEXT,                              -- after a failed ack: not served again before this time
+    abandoned_at     TEXT,                              -- set when the operator drops a dead stock row (until a new stock)
+    CHECK (made_to_order IN (0, 1) AND (made_to_order = 1) = (qty IS NULL))
+);
+
+-- ---------------------------------------------------------------------------
+-- image: one row per unique image content (sha256). Two lanes, two gates
+-- (design H1): a variation gates on its variant_texture being promoted, a product
+-- on its scraped_photo set being promoted. The live url is read from live_key.
+-- A persistently failing generation goes `failed` and escalates its variation
+-- (design H2).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS image (
+    sha256       TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL CHECK (kind IN ('scraped_photo', 'variant_texture')),
+    source_url   TEXT,
+    staging_key  TEXT,
+    live_key     TEXT,                                  -- null until promoted
+    state        TEXT NOT NULL DEFAULT 'staged'
+                 CHECK (state IN ('staged','generating','promoted','failed')),
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_image_state ON image (state);
+CREATE INDEX IF NOT EXISTS idx_image_kind ON image (kind);
+
+-- ---------------------------------------------------------------------------
+-- gap: the durable, deduped queue of things a human must resolve (the per-run
+-- tree_gaps.csv plus the review queues). An open gap HOLDS its dependents. Deduped
+-- across runs by (kind, name).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gap (
+    id                TEXT PRIMARY KEY,                 -- DAL-generated ULID-style id
+    kind              TEXT NOT NULL
+                      CHECK (kind IN ('missing_variation','missing_leaf_child','missing_attribute','image_generation_failed')),
+    name              TEXT NOT NULL,
+    nearest_existing  TEXT,
+    nearest_score     REAL,
+    example_url       TEXT,
+    state             TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'resolved')),
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE (kind, name)
+);
+CREATE INDEX IF NOT EXISTS idx_gap_state ON gap (state);
+
+-- ---------------------------------------------------------------------------
+-- removed: the ONE tombstone lane for BOTH entity kinds. When a product is
+-- hard-deleted (dead-stock or a vendor removal) OR a variation is retired (an explicit
+-- operator removal / the old side of a re-key, design section 5C), a row is recorded
+-- here so Medusa can pull the deletion on GET /sync/removed, delete its own entity, and
+-- ack. `kind` says what `external_id` addresses: a product SKU or a variation Key.
+-- Medusa acks 'done' (the delete happened -> the tombstone row is removed) or 'blocked'
+-- (an open reservation blocks the hard-delete -> keep it, re-serve, and dead-letter to
+-- 'dead' after SETTINGS.sync.max_attempts blocks). Served while state='pending', with PRODUCT
+-- tombstones ordered before VARIATION tombstones so Medusa deletes children before the
+-- parent (a variant with products cannot be deleted). No FK (the row is gone); a
+-- re-created SKU or re-minted Key clears its tombstone in populate so a live entity and
+-- a pending tombstone never coexist.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS removed (
+    external_id   TEXT PRIMARY KEY,                     -- the deleted product SKU or variation Key (Medusa external_id)
+    kind          TEXT NOT NULL DEFAULT 'product'
+                  CHECK (kind IN ('product','variation')),  -- what external_id addresses
+    source        TEXT,                                 -- source_code, for scope/audit (product tombstones)
+    -- why: 'discontinued' | 'vendor_removed' | 'reset_dropped' (products); 'variation_removed' | 'variation_unminted'
+    -- | 'reseed_dedup' | 'not_in_seed' | 'stale_not_in_seed' (variations, and a reconciled variety's products)
+    reason        TEXT,
+    state         TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (state IN ('pending','dead')),  -- pending serves; 'done' deletes the row; dead = blocked cap
+    sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)
+    sync_error    TEXT,
+    abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
+    retry_after   TEXT,                                 -- after a 'blocked' ack: not served again before this time
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+-- serve scan by state; ready_removed adds the product-before-variation order in the query (E1) so
+-- this index does not reference `kind` (it is added by migrate AFTER schema.sql runs on old ledgers).
+CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, external_id);
+
+-- ---------------------------------------------------------------------------
+-- sync_run: the audit ledger, one row per reconcile pass. `counts` is a JSON blob
+-- of per-type / per-state tallies for GET /sync/status and the run summary.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sync_run (
+    id           TEXT PRIMARY KEY,                      -- DAL-generated run id
+    env          TEXT NOT NULL CHECK (env IN ('development', 'production')),
+    fingerprint  TEXT,
+    started      TEXT NOT NULL,
+    finished     TEXT,
+    status       TEXT,
+    counts       TEXT,                                  -- JSON
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_run_started ON sync_run (started);

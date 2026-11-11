@@ -32,7 +32,7 @@ from stone_pipeline.io import storage
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
-from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
+from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
 from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("catalog")
@@ -115,11 +115,6 @@ def run(outputs_root: Path | None = None) -> Path:
     from stone_pipeline.stages import decisions as _decisions
     _decisions.heal_drifted_membership(rows)
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
-    # Regenerate every mirror backbone (Tiles) from the CURRENT slab backbone before anything reads it:
-    # emit_catalog's tile mirror rows (below) and tree_build's combinations both consume the tile backbone,
-    # so rebuilding it here makes tiles a pure derivation of slabs that can never silently rot. (The manual
-    # build_tile_backbone step used to be forgotten, leaving polluted tiles inconsistent with cleaned slabs.)
-    build_tile_backbone.build()
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
@@ -134,9 +129,8 @@ def run(outputs_root: Path | None = None) -> Path:
     # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
     # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color
-    from stone_pipeline.config.categories import CATEGORIES
-    _additions = sorted(SETTINGS.paths.backbone_additions_dir.glob("*.json"))
-    _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
+    _additions = [SETTINGS.paths.backbone_additions_file]   # this run's new varieties, coloured in place
+    _merged = [SETTINGS.paths.backbone_json]                # read-only: a new variety inherits a known colour
     product_images: dict[str, str] = {}                # variation_key -> its product photo (first wins)
     for r in rows:
         if r.variation_key and r.image_keys and r.variation_key not in product_images:
@@ -179,54 +173,52 @@ def run(outputs_root: Path | None = None) -> Path:
     return sync
 
 
-def _s3_image_checker():
-    """Return a callable Key -> bool reporting whether <env>/variations/{Key}.png exists on S3, or
-    None when S3 is unreachable (no boto3/creds -- CI/sandbox) so the gate no-ops there. Backed by a
-    SINGLE list_objects_v2 of the variations prefix (one network round-trip TOTAL, shared with
-    emit_catalog), not a head_object per Key -- so the cost is O(1) network calls regardless of how
-    many variants are checked. The check is READ-ONLY, so it runs even under s3.dry_run."""
-    from stone_pipeline.stages.emit_catalog import _s3_variation_keys
-    keys = _s3_variation_keys()
-    return None if keys is None else (lambda key: key in keys)
-
-
-def _s3_image_copier():
-    """Return a callable (old_key, new_key) -> bool that copies {old}.png to {new}.png in
-    <env>/variations/ on S3, or None when S3 is unreachable. A re-typed variant is the SAME stone, so
-    its existing image is copied to the new Key rather than regenerated."""
-    from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS as _S
+def _s3_object_copier():
+    """Return a callable (source object key, target object key) -> bool that copies one object within the env's
+    staging bucket, or None when S3 is unreachable. A re-typed variety is the SAME stone, so its existing icons are
+    copied to the new Key rather than regenerated."""
+    from stone_pipeline.config.settings import SETTINGS as _S
     s3 = _S.s3
     try:
         client = storage.aws_client("s3", config=storage.BOUNDED, profile=s3.credentials_profile)
     except Exception:
         return None
-    prefix = f"{ENV_SEGMENT}/variations/"
 
-    def copy(old: str, new: str) -> bool:
+    def copy(source: str, target: str) -> bool:
         try:
-            client.copy_object(Bucket=s3.bucket, Key=f"{prefix}{new}.png",
-                               CopySource={"Bucket": s3.bucket, "Key": f"{prefix}{old}.png"})
+            client.copy_object(Bucket=s3.bucket, Key=target, CopySource={"Bucket": s3.bucket, "Key": source})
             return True
         except Exception:
             return False
     return copy
 
 
-def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
-    """When a variant is re-typed (its mis-typed Key is flagged in variants_to_delete and its NAME
-    resolves to a different, correct type), copy its S3 image from the old Key to the new correct Key
-    -- so the re-typed variant keeps its image instead of being held imageless out of the upload.
-    Idempotent (skips when the new Key already has an image); no-op when S3 is unreachable, so the
-    local sandbox is unchanged and AWS does it in-build."""
+def copy_variety_icons(old: str, new: str, existing: dict[str, dict[str, str]], copier) -> int:
+    """Copy each category icon of `old` that `new` does not have yet (`existing`: the S3 listing, {Key: {category
+    name: ETag}}), pair by pair through io.variety_icons. Returns the number copied."""
+    from stone_pipeline.io import variety_icons
+    have = existing.get(new, {})
+    return sum(1 for name in sorted(existing.get(old, {})) if name not in have
+               and copier(variety_icons.icon_key(old, name), variety_icons.icon_key(new, name)))
+
+
+def migrate_retyped_variant_images(ref, existing=None, copier=None) -> int:
+    """When a variety is re-typed (its mis-typed Key is flagged in variants_to_delete and its NAME resolves to a
+    different, correct type), copy its S3 icons, each category's, from the old Key to the new correct Key, so the
+    re-typed variety keeps its icons instead of being held imageless out of the upload. Idempotent (a pair the new
+    Key already has is skipped); no-op when S3 is unreachable, so the local sandbox is unchanged and AWS does it
+    in-build."""
     dele = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     if not dele.exists():
         return 0
-    checker = checker if checker is not None else _s3_image_checker()
-    copier = copier if copier is not None else _s3_image_copier()
-    if checker is None or copier is None:
+    if existing is None:
+        from stone_pipeline.stages.emit_catalog import _s3_icon_pairs
+        existing = _s3_icon_pairs()
+    copier = copier if copier is not None else _s3_object_copier()
+    if existing is None or copier is None:
         return 0
     from stone_pipeline.adapters.tokens import explicit_type_word
-    from stone_pipeline.stages.curate import gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     copied = 0
     for r in csv.DictReader(dele.open(encoding="utf-8-sig")):
         old = (r.get("Key") or "").strip()
@@ -236,9 +228,9 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
         looked = ref.attributes.resolve_id("type", explicit_type_word(name) or name)
         if not looked:
             continue                                   # can't derive the correct type from the name
-        new = gen_key(old.split("_")[0], looked[0], name)
-        if new != old and checker(old) and not checker(new) and copier(old, new):
-            copied += 1
+        new = new_key(looked[0], name)
+        if new != old:
+            copied += copy_variety_icons(old, new, existing, copier)
     if copied:
         log.info("migrated re-typed variant images to their new S3 Keys",
                  extra={"extra_fields": {"copied": copied}})
@@ -455,10 +447,10 @@ def write_variants_to_delete() -> int:
         if name and looks_code_shaped(name) == "bare_code":
             reason = "bare_code: supplier code/brand abbreviation, not a variety"
         elif name and loaders.is_mistyped_variant(key, name):
-            kt = key.split("_")[1] if key.count("_") >= 2 else "?"
-            reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
+            reason = (f"mistyped: name says '{explicit_type_word(name)}' but keyed as type "
+                      f"'{loaders.type_slug_from_key(key)}'")
         if reason:
-            rows.append({"Key": key, "Name": name, "Id": r.id, "Image": r.image, "reason": reason})
+            rows.append({"Key": key, "Name": name, "Id": r.id, "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     # Preserve a previously-flagged variant that auto-detection can't re-derive (e.g. a single-token
     # name like 'Sodalita' that isn't an explicit type word) AS LONG AS it is still in the export.
@@ -471,11 +463,10 @@ def write_variants_to_delete() -> int:
                 src = by_key[pk]
                 rows.append({"Key": pk, "Name": src.name or (prev.get("Name") or "").strip(),
                              "Id": src.id or (prev.get("Id") or "").strip(),
-                             "Image": src.image or (prev.get("Image") or "").strip(),
                              "reason": prev.get("reason") or "flagged for deletion"})
     out.parent.mkdir(parents=True, exist_ok=True)
     # operator-opened delete list carrying scraped Names -> sanitize against formula injection + atomic.
-    csvio.write_dicts(out, ["Key", "Name", "Id", "Image", "reason"],
+    csvio.write_dicts(out, ["Key", "Name", "Id", "reason"],
                       sorted(rows, key=lambda r: r["Key"]), sanitize=True)
     if rows:
         log.warning("junk variants in the export -- delete in Medusa + S3",

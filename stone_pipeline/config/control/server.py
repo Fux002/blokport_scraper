@@ -683,10 +683,9 @@ def _put_review_decide(params, body, query):
     origin = _resolve_origin_iso(raw_origin) if raw_origin else ""
     if raw_origin and not origin:
         return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
-    from stone_pipeline.stages.curate import active_branches, gen_key
+    from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.stages import decisions as _decisions
-    retired = _decisions.load_retired()
-    if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
+    if new_key(stone_type, name) in _decisions.load_retired():
         return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                      "retired": True}
     if (refusal := _ve2_decide_gate(listings, name, stone_type, color, origin, widen)) is not None:

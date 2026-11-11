@@ -221,7 +221,7 @@ def test_a_second_lot_of_the_same_stone_is_flagged_once_like_a_second_bundle():
 
 # -- downstream: the lot gate in validate -------------------------------------------------------------------
 
-def _emittable_piece(code="L-1", position=1, variation_key="slab_marble_cv_1", qty=1, **kw):
+def _emittable_piece(code="L-1", position=1, variation_key="marble__cv_1", qty=1, **kw):
     base = dict(src_site="sentas", surrogate_key=f"7149-{position}", lot_code=code, lot_position=position,
                 variation_key=variation_key, variation_id="V1", type_name="Marble", type_id="T1",
                 color_id="C1", finish_id="F1", quality_id="Q1", category_pcat_id="PC1",
@@ -245,7 +245,7 @@ def test_a_consistent_lot_passes_the_lot_gate():
 @pytest.mark.parametrize("second, detail", [
     (dict(position=1), "position_duplicate"),
     (dict(position=None), "position_missing"),
-    (dict(variation_key="slab_marble_other_2"), "identity_differs"),
+    (dict(variation_key="marble__other_2"), "identity_differs"),
     (dict(type_name="Onyx"), "identity_differs"),
     (dict(category_pcat_id="PC2"), "identity_differs"),
     (dict(qty=2), "quantity_above_one"),

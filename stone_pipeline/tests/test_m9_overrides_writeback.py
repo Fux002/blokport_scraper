@@ -95,10 +95,10 @@ def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):
     # add the new variety to the slabs reference (simulating the human fix)
     new_id = "01TESTNEWVARIETY00000000XY"
     base.variants["slab"].by_id[new_id] = loaders.Variant(
-        variation_id=new_id, key="slab_granite_totally_new", name="Totally New Variety Xyz",
-        image="", aliases=[])
+        variation_id=new_id, key="granite__totally_new", name="Totally New Variety Xyz",
+        aliases=[])
     base.backbone.by_norm_name["totally new variety xyz"] = [loaders.BackboneVariety(
-        variant="Totally New Variety Xyz", category="Slabs", stone_type="Granite",
+        variant="Totally New Variety Xyz", stone_type="Granite",
         colors=["Black"], finishes=["Polished"], qualities=["A"], aliases=[])]
 
     # run 2: same scrape, the formerly gapped row now resolves; the other is unchanged

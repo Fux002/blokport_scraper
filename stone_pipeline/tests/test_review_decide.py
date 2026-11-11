@@ -157,8 +157,8 @@ def test_put_decide_applies_one_statement_to_every_spelling_on_a_card():
 
 def test_put_decide_refuses_a_retired_variety(monkeypatch):
     from stone_pipeline.stages import decisions as stage_decisions
-    from stone_pipeline.stages.curate import active_branches, gen_key
-    key = gen_key(active_branches()[0], "Onyx", "Old Stone")
+    from stone_pipeline.phase1.variety_key import new_key
+    key = new_key("Onyx", "Old Stone")
     monkeypatch.setattr(stage_decisions, "load_retired", lambda: {key})
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "marenostone", "scraped": "Old Stone", "name": "Old Stone", "type": "Onyx"})

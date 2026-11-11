@@ -40,15 +40,15 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.core.text import split_bracket_alias
-from stone_pipeline.phase1.variety_key import new_key
+from stone_pipeline.phase1.variety_key import _slug_us, new_key
 from stone_pipeline.reference.medusa_files import read_attributes
-from stone_pipeline.stages.curate.keys import BRANCHES, _slug_us
 
 # --- config ---------------------------------------------------------------------------------------------
 ENVS = ("development", "production")           # every env whose stores are unioned
-BRANCH_ORDER = BRANCHES                         # the pack's category order -> category rank (not hardcoded)
+BRANCH_ORDER = tuple(c.name for c in CATEGORIES)  # the pack's category order -> category rank (not hardcoded)
 OUTPUT_CSV = "variety_key_map.csv"              # written in the output dir; its sha256 is printed
 CSV_COLUMNS = ("old_key", "new_key", "category_rank", "type_name")
 

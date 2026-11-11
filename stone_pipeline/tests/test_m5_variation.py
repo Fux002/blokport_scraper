@@ -179,7 +179,7 @@ def test_type_overridden_by_variety(ref):
     row = CanonicalRow(
         src_site="polonine", surrogate_key="x",
         variation_id="vid",
-        variation_key="slab_marble_arabescato_00000000-0000-0000-0000-000000000000",
+        variation_key="marble__arabescato_00000000-0000-0000-0000-000000000000",
         variation_name="Arabescato",
         type_name="Granite", color_name="White", finish_name="Polished", quality_name="A",
     )
@@ -199,7 +199,7 @@ def test_type_name_fallback_when_key_carries_no_known_type_slug(ref):
     row = CanonicalRow(
         src_site="polonine", surrogate_key="x",
         variation_id="vid",
-        variation_key="slab_notarealtype_azul_white_00000000-0000-0000-0000-000000000000",
+        variation_key="notarealtype__azul_white_00000000-0000-0000-0000-000000000000",
         variation_name="Azul White",
         type_name="Quartzite", color_name="White", finish_name="Polished", quality_name="A",
     )

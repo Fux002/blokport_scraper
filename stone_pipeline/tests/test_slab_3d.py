@@ -4,7 +4,6 @@ stored in the ledger, part of the change fingerprint, and pulled as {cutout, met
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 
 import cv2
@@ -16,15 +15,16 @@ from stone_pipeline.config.standardise_settings import STANDARDISE as C
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow, Confidence, FlagCode, ReviewFlag
 from stone_pipeline.io import imagestore
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import add_icon
 from stone_pipeline.stages import emit, images
 from stone_pipeline.standardise import cutout
 
 A, B, C3 = "a" * 64, "b" * 64, "c" * 64
 BASE = f"https://bucket.s3.amazonaws.com/{ENV_SEGMENT}/products"
-KEY = "slab_marble_calacatta_viola_1"
+KEY = "marble__calacatta_viola_1"
 
 
 def _slab_png(w, h, alpha):
@@ -422,11 +422,12 @@ def test_the_misfits_reach_the_source_s_diagnostics(tmp_path):
 
 def _seed_variation(ledger):
     now = now_iso()
-    ledger.upsert("variation", {"key": KEY, "branch": "slab", "type": "Marble", "name": "Calacatta Viola",
-                                "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "V1", "in_full": 1, "payload_hash": "",
+    ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Calacatta Viola",
+                                "aliases": "[]",
+                                "medusa_id": "V1", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, KEY)
 
 
 def _row(model_3d_key, standard_version=None):
@@ -471,25 +472,7 @@ def test_the_pull_payload_carries_both_3d_files_and_null_without_one(tmp_path):
         now = now_iso()
         for sku, key in (("SEN-7154-4", url), ("SEN-2213", None)):
             ledger.upsert("product", {"sku": sku, "source": "sen", "variation_key": KEY, "state": "pending",
-                                      "model_3d_key": key, "created_at": now, "updated_at": now}, pk=("sku",))
+                                      "category": "slabs", "model_3d_key": key, "created_at": now, "updated_at": now}, pk=("sku",))
         by = {r["external_id"]: r["payload"] for r in ready(ledger, "products")}
         assert by["SEN-7154-4"]["model_3d"] == {"cutout": url, "meta": f"{BASE}/standard/cutout/sentas/{A}.json"}
         assert by["SEN-2213"]["model_3d"] is None
-
-
-def test_a_v9_ledger_gains_the_3d_column_and_keeps_its_data(tmp_path):
-    if sqlite3.sqlite_version_info < (3, 35, 0):
-        pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v9 shape")
-    p = tmp_path / "mig.ledger"
-    with Ledger.open(p, env="development") as lg:
-        _seed_variation(lg)
-    raw = sqlite3.connect(p)                                                # simulate a v9 ledger
-    raw.execute("ALTER TABLE product DROP COLUMN model_3d_key")
-    raw.execute("PRAGMA user_version = 9")
-    raw.execute("UPDATE ledger_meta SET schema_version = 9")
-    raw.commit()
-    raw.close()
-    with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert "model_3d_key" in {r[1] for r in lg.conn.execute("PRAGMA table_info(product)")}
-        assert lg.get("variation", "key", KEY)["name"] == "Calacatta Viola"

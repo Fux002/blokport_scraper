@@ -1,0 +1,471 @@
+[
+  {
+    "key": "agate__agata_blue_spiral_d4e0a856-5951-5668-afb1-0faf25c8bce6",
+    "variant": "Agata Blue Spiral",
+    "stone_type": "Agate",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "agate__agata_brown_82df6880-99f0-5cc1-9a42-07f0ae3fb668",
+    "variant": "Agata Brown",
+    "stone_type": "Agate",
+    "color": [
+      "Brown"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "agate__agata_colors_bfdc3c4f-4cc2-5df5-9bc2-282cd78b5186",
+    "variant": "Agata Colors",
+    "stone_type": "Agate",
+    "color": [
+      "Beige"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "agate__agata_natural_436f4c08-c3ed-5cb4-905e-6713d92f33e6",
+    "variant": "Agata Natural",
+    "stone_type": "Agate",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "agate__agata_tropicalia_cecce2bc-cd22-5409-9dce-65168c28fbcb",
+    "variant": "Agata Tropicalia",
+    "stone_type": "Agate",
+    "color": [
+      "Beige"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "agate__agata_white_cc811c20-fb0d-514c-9cc3-71f42d7fd579",
+    "variant": "Agata White",
+    "stone_type": "Agate",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab"
+    ]
+  },
+  {
+    "key": "dolomite__matarazzo_81811cec-34b6-58ed-93b0-73df5dd22c21",
+    "variant": "Matarazzo",
+    "stone_type": "Dolomite",
+    "color": [
+      "Golden",
+      "White"
+    ],
+    "finishes": [
+      "Honed",
+      "Polished",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block"
+    ]
+  },
+  {
+    "key": "marble__calcite_blue_c9bea828-d948-5e35-9a7f-23bd2879527b",
+    "variant": "Calcite Blue",
+    "stone_type": "Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "quartzite__cappadocia_54f1632b-7478-5ebc-a8d0-f27089622ff9",
+    "variant": "Cappadocia",
+    "stone_type": "Quartzite",
+    "color": [
+      "Beige"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Aqua Blue",
+    "stone_type": "",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Avocatus",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Leathered",
+      "Polished",
+      "Honed",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Capolavoro",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Crystallo Bianco",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Crystallo Traslux",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Da Vinci",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Jasper Green",
+    "stone_type": "",
+    "color": [
+      "Green"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  },
+  {
+    "key": "",
+    "variant": "Monalisa",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A",
+      "B",
+      "C"
+    ],
+    "aliases": [],
+    "merged_from": [],
+    "categories": [
+      "block",
+      "slab",
+      "tile"
+    ]
+  }
+]

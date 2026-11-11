@@ -21,12 +21,12 @@ def _prod(ledger, sku, source, qty, last):
     """A synced product of `source` with a synced variation and a stock row (last == qty, i.e. not
     already a pending delta), so a later qty change is a clean, observable delta."""
     now = now_iso()
-    ledger.upsert("variation", {"key": f"slab_{sku}", "branch": "slab", "type": "", "name": "x",
-                                "aliases": "[]", "image_url": "", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "V", "in_full": 1,
+    ledger.upsert("variation", {"key": f"marble__{sku}", "type": "", "name": "x",
+                                "aliases": "[]",
+                                "medusa_id": "V", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
-    ledger.upsert("product", {"sku": sku, "source": source, "variation_key": f"slab_{sku}",
+    ledger.upsert("product", {"sku": sku, "source": source, "variation_key": f"marble__{sku}",
                               "state": "synced", "medusa_id": "P", "created_at": now,
                               "updated_at": now}, pk=("sku",))
     ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": last,
@@ -97,51 +97,52 @@ def test_variation_tombstone_lane_orders_before_products_and_deletes_the_row(tmp
     from stone_pipeline.ledger.sync import record_tombstones
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        ledger.upsert("variation", {"key": "slab_marble_x_1", "branch": "slab", "type": "Marble",
-                                    "name": "X", "aliases": "[]", "image_url": "u", "image_sha256": None,
-                                    "image_model": None, "volume": "", "medusa_id": "VID", "in_full": 0,
+        ledger.upsert("variation", {"key": "marble__x_1", "type": "Marble",
+                                    "name": "X", "aliases": "[]",
+                                    "medusa_id": "VID", "in_full": 0,
                                     "payload_hash": "", "state": "retiring", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
         record_tombstones(ledger, [("AAA-1", "aaa")], reason="vendor_removed", kind="product")
-        record_tombstones(ledger, [("slab_marble_x_1", None)], reason="variation_removed", kind="variation")
+        record_tombstones(ledger, [("marble__x_1", None)], reason="variation_removed", kind="variation")
         served = ready(ledger, "removed")
         assert [t["payload"]["kind"] for t in served] == ["product", "variation"]        # E1 order
-        assert served[1]["payload"] == {"kind": "variation", "key": "slab_marble_x_1",
+        assert served[1]["payload"] == {"kind": "variation", "key": "marble__x_1",
                                         "reason": "variation_removed"}
-        assert ack(ledger, "removed", "slab_marble_x_1", status_="done") == 1
-        assert ledger.get("variation", "key", "slab_marble_x_1") is None                 # variety row gone
+        assert ack(ledger, "removed", "marble__x_1", status_="done") == 1
+        assert ledger.get("variation", "key", "marble__x_1") is None                 # variety row gone
         assert [t["external_id"] for t in ready(ledger, "removed")] == ["AAA-1"]          # product tombstone remains
 
 
 def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
-    # explicit variety removal: force-cascade its live product (tombstoned), delete its combinations,
-    # tombstone the variety (E2 synced) + hold it 'retiring', and on ack-done hard-delete the row (E3).
+    # explicit variety removal: force-cascade its live product (tombstoned), tombstone the variety (E2 synced) +
+    # hold it 'retiring' (its icons stay with the row), and on ack-done hard-delete the row and its icons (E3).
     from stone_pipeline.ledger.sync import retire_variation, variation_live_products
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
-                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                    "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+        ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
+                                    "aliases": "[]",
+                                    "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
         ledger.upsert("product", {"sku": "ZUC-1", "source": "zuc", "variation_key": "K", "state": "synced",
                                   "medusa_id": "P", "created_at": now, "updated_at": now}, pk=("sku",))
         ledger.upsert("inventory", {"sku": "ZUC-1", "qty": 5, "last_synced_qty": 5, "last_synced_made_to_order": 0,
                                     "updated_at": now}, pk=("sku",))
-        ledger.execute("INSERT INTO combination (combo_key, category, type, variation_key, color, finish, "
-                       "quality, state, created_at, updated_at) VALUES ('c1','Slabs','Marble','K','White',"
-                       "'Polished','A','synced',?,?)", (now, now))
+        ledger.execute("INSERT INTO variation_category_image (key, category_handle, s3_key, etag) "
+                       "VALUES ('K', 'slabs', 'dev/variations/K/slab.png', 'e1')")
         assert variation_live_products(ledger, "K") == 1
         out = retire_variation(ledger, "K", force=True)
         assert out["products_removed"] == 1 and out["tombstoned_variation"] is True
         assert ledger.get("variation", "key", "K")["state"] == "retiring"
         assert ledger.get("product", "sku", "ZUC-1") is None
-        assert ledger.execute("SELECT COUNT(*) n FROM combination WHERE variation_key='K'").fetchone()["n"] == 0
+        icons = "SELECT COUNT(*) n FROM variation_category_image WHERE key = 'K'"
+        assert ledger.execute(icons).fetchone()["n"] == 1                              # held with the row
         served = ready(ledger, "removed")
         assert [t["payload"]["kind"] for t in served] == ["product", "variation"]      # E1 order
         assert ack(ledger, "removed", "ZUC-1", status_="done") == 1
         assert ack(ledger, "removed", "K", status_="done") == 1
         assert ledger.get("variation", "key", "K") is None                             # row gone (E3)
+        assert ledger.execute(icons).fetchone()["n"] == 0                              # its icons with it
 
 
 def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
@@ -151,9 +152,9 @@ def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
     from stone_pipeline.ledger.sync import retire_variation
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
-                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                    "volume": "", "medusa_id": "VID", "in_full": 0, "payload_hash": "",
+        ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
+                                    "aliases": "[]",
+                                    "medusa_id": "VID", "in_full": 0, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
         retire_variation(ledger, "K")                                          # no products -> retiring + tombstone
@@ -175,9 +176,9 @@ def test_retire_never_synced_variety_drops_it_without_a_tombstone(tmp_path):
     from stone_pipeline.ledger.sync import retire_variation
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        ledger.upsert("variation", {"key": "NS", "branch": "slab", "type": "Marble", "name": "Y",
-                                    "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-                                    "volume": "", "medusa_id": None, "in_full": 1, "payload_hash": "",
+        ledger.upsert("variation", {"key": "NS", "type": "Marble", "name": "Y",
+                                    "aliases": "[]",
+                                    "medusa_id": None, "in_full": 1, "payload_hash": "",
                                     "state": "pending", "first_seen": now, "last_synced": None,
                                     "created_at": now, "updated_at": now}, pk=("key",))
         out = retire_variation(ledger, "NS")
@@ -190,9 +191,9 @@ def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
     from stone_pipeline.ledger.sync import retire_variation, un_retire_variation
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
-                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                    "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+        ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
+                                    "aliases": "[]",
+                                    "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
         retire_variation(ledger, "K")
@@ -258,35 +259,6 @@ def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
         ledger.execute("UPDATE inventory SET qty = 8, reason = NULL WHERE sku = 'DEL-1'")
         back = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
         assert back["DEL-1"] == {"sku": "DEL-1", "quantity": 8, "made_to_order": False}   # back in stock, no reason
-
-
-def test_reopen_migrates_an_old_ledger_to_the_tombstone_lane(tmp_path):
-    # a ledger created before v3 has no `removed` table; reopening must re-apply the schema (recreate it
-    # via CREATE IF NOT EXISTS) and run _migrate (inventory.reason), or removal silently breaks in prod.
-    p = tmp_path / "old.ledger"
-    with Ledger.open(p, env="development") as ledger:
-        ledger.execute("DROP TABLE removed")
-        ledger.execute("PRAGMA user_version = 2")             # pretend this is a pre-v3 ledger
-    with Ledger.open(p, env="development") as ledger:
-        assert ledger.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removed'").fetchone() is not None
-        assert "reason" in {r["name"] for r in ledger.execute("PRAGMA table_info(inventory)")}
-
-
-def test_reopen_migrates_removed_kind_column_v4(tmp_path):
-    # a pre-v4 ledger has a `removed` table WITHOUT the `kind` discriminator; reopening must ADD it
-    # (default 'product', the only lane before v4) so the generalized product+variation lane works.
-    p = tmp_path / "old4.ledger"
-    with Ledger.open(p, env="development") as ledger:
-        ledger.execute("DROP TABLE removed")
-        ledger.execute("CREATE TABLE removed (external_id TEXT PRIMARY KEY, source TEXT, reason TEXT, "
-                       "state TEXT NOT NULL DEFAULT 'pending', sync_attempts INTEGER NOT NULL DEFAULT 0, "
-                       "sync_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
-        ledger.execute("PRAGMA user_version = 3")             # pretend this is a pre-v4 ledger
-    with Ledger.open(p, env="development") as ledger:
-        assert "kind" in {r["name"] for r in ledger.execute("PRAGMA table_info(removed)")}
-        ledger.execute("INSERT INTO removed (external_id, created_at, updated_at) VALUES ('X-1','t','t')")
-        assert ledger.get("removed", "external_id", "X-1")["kind"] == "product"   # existing rows default product
 
 
 def test_delete_source_removes_only_that_config_row(tmp_path):

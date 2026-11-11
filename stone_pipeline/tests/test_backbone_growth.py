@@ -13,18 +13,16 @@ These are pure tests (no sockets, no live scrape): the autouse conftest fixture 
 from __future__ import annotations
 
 import json
-import sqlite3
 
 from stone_pipeline import build, produce
 from stone_pipeline.config import decisions_store as ds
 from stone_pipeline.config.control import runner, server
-from stone_pipeline.config import store
 from stone_pipeline.reference.loaders import Backbone, BackboneVariety, _norm, load_backbone
 from stone_pipeline.stages import decisions
 
 
 def _variety(quals=("A",), finishes=("Polished",), colors=("Black",), stone_type="Granite"):
-    return BackboneVariety(variant="Tiger Black", category="Slabs", stone_type=stone_type,
+    return BackboneVariety(variant="Tiger Black", stone_type=stone_type,
                            colors=list(colors), finishes=list(finishes), qualities=list(quals), aliases=[])
 
 
@@ -267,24 +265,3 @@ def test_runner_accepts_republish_stage():
 
 
 # -- the CHECK migration (legacy DBs) ------------------------------------------
-
-def test_legacy_review_pending_check_is_migrated(monkeypatch, tmp_path):
-    """A config.db created before the queue was generic pins kind in a CHECK; opening it must drop the
-    CHECK (carrying rows across) so backbone_leaf items insert."""
-    db = tmp_path / "legacy.db"
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(db))
-    conn = sqlite3.connect(str(db))
-    conn.executescript(store._SCHEMA)
-    conn.execute("PRAGMA user_version = 1")
-    conn.execute("CREATE TABLE review_pending (kind TEXT NOT NULL CHECK (kind IN ('variety','attribute')), "
-                 "ref TEXT NOT NULL, payload TEXT NOT NULL, sources TEXT, updated_at TEXT NOT NULL, "
-                 "PRIMARY KEY (kind, ref))")
-    conn.execute("INSERT INTO review_pending VALUES ('variety', 'x', '{}', NULL, 't')")
-    conn.commit()
-    conn.close()
-
-    decisions.write_backbone_leaf_pending([_suggestion()])    # would fail the old CHECK
-    assert len(ds.list_pending("backbone_leaf")) == 1
-    with store.open_store() as c:
-        sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'review_pending'").fetchone()[0]
-    assert "CHECK" not in sql
