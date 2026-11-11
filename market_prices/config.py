@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
-CONTRACT_VERSION = "1"
+CONTRACT_VERSION = "2"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
+LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
@@ -55,3 +56,21 @@ DESCRIPTION_SPEC_MAX_VALUE_CHARS = 200
 PILOT_BRAND = "blokport"
 PILOT_SITE_ID = "ceralith"
 PILOT_SAMPLE_ROWS = 5
+
+# The sheet intake (market_prices/intake.py): the owner's competitor price sheets, from
+# <env>/market_prices/<brand>/intake/ on S3, one delivered run per absorbed file. Each file is absorbed once, by its
+# sha256, recorded in ABSORBED_FILE under the brand prefix.
+INTAKE_DIR_NAME = "intake"
+ABSORBED_FILE = "intake_absorbed.csv"
+INTAKE_RUNS_DIR_NAME = "intake"
+SHEET_COLLECTOR_VERSION = "sheet-intake/1"
+# A sheet row's site_status decision: the owner supplied the file, so no terms gate applies.
+FILE_DECISION = "supplied"
+# Caps on a hostile file: the bytes as uploaded, what an xlsx (a zip) expands to before it is parsed, and the grid.
+MAX_INTAKE_FILE_BYTES = 20 * 1024 * 1024
+MAX_XLSX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_SHEET_ROWS = 50_000
+MAX_SHEET_COLUMNS = 200
+SHEET_MAX_DIGITS = 18
+# A file no layout reads is refused with its first rows quoted, so the layout for it can be written from the message.
+INTAKE_REFUSAL_ROWS_SHOWN = 3

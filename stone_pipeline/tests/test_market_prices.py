@@ -714,7 +714,8 @@ _PACKAGE = Path(market_prices.__file__).parent
 # factory (the run entry)
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
                     "stone_pipeline.io.storage"}
-_THIRD_PARTY = {"pydantic", "yaml", "httpx"}
+# openpyxl reads the supplied .xlsx price sheets; botocore's ClientError tells the intake record's absence from a failure
+_THIRD_PARTY = {"pydantic", "yaml", "httpx", "openpyxl", "openpyxl.utils.exceptions", "botocore.exceptions"}
 _NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}
 _HTTP_CLIENTS = {"httpx", "requests", "curl_cffi", "aiohttp", "urllib3"}
 

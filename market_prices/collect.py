@@ -18,8 +18,8 @@ from market_prices.fetching import (
 )
 from market_prices.register import Register, Site
 from market_prices.schema import (
-    DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, VatBasis,
-    columns, csv_values,
+    DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source,
+    VatBasis, columns, csv_values,
 )
 
 _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
@@ -66,8 +66,9 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     for name in _LISTING_FIELDS:
         provenance[name] = Provenance.listing if getattr(facts, name) is not None else Provenance.unknown
     return Observation(
-        contract_version=config.CONTRACT_VERSION, brand=brand, site_id=site.site_id, seller_name=site.seller_name,
-        seller_type=site.seller_type, seller_country=site.seller_country, served_market=site.served_market,
+        contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
+        seller_name=site.seller_name, seller_type=site.seller_type, seller_country=site.seller_country,
+        served_market=site.served_market,
         listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
         stated_specs=facts.stated_specs, grade_text=facts.grade_text, price_text=facts.price_text,
         price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
@@ -83,8 +84,9 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
     def finish(status: SiteRunStatus, detail: str, kept: Iterable[Observation] = ()) -> SiteResult:
         ordered = tuple(sorted(kept, key=lambda row: row.listing_key))
         return SiteResult(ordered, SiteStatus(
-            contract_version=config.CONTRACT_VERSION, brand=brand, site_id=site.site_id, status=status,
-            rows=len(ordered), malformed_listings=malformed, duplicate_listings=duplicates, detail=detail,
+            contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
+            status=status, rows=len(ordered), malformed_listings=malformed, duplicate_listings=duplicates,
+            detail=detail,
             terms_checked_on=site.terms.checked_on.isoformat() if site.terms.checked_on else None,
             decision=site.decision.value, observed_at=stamp.observed_at, run_id=stamp.run_id))
 

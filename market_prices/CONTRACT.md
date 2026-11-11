@@ -1,6 +1,8 @@
-# Market price observations: delivery contract (version 1)
+# Market price observations: delivery contract (version 2)
 
-Reference prices seen on competitor sites, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site says. Matching, conversion, grading and trust rules belong to the consumer.
+Reference prices seen on competitor sites, and read from the competitor price sheets the owner supplies, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site or a sheet says. Matching, conversion, grading and trust rules belong to the consumer.
+
+Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files; every other column is as in version 1.
 
 ## Where
 
@@ -23,6 +25,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | Column | Meaning |
 |---|---|
 | contract_version | This contract's version |
+| source | `site`: read from a site in the register. `file`: read from a supplied price sheet (see "Price sheets") |
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
 | seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
@@ -68,6 +71,23 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 - **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for that deployment's brand (`SCRAPER_BRAND`), env and bucket. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
 - **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (`PILOT_BRAND`, `PILOT_SITE_ID` in `config.py`) against development's bucket and prints a summary with the first rows. It refuses any other environment, and any site the register has not approved, before a single request.
+
+## Price sheets (`source` = `file`)
+
+The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3://<bucket>/<env>/market_prices/<brand>/intake/`. RUN_MODE=market-prices-intake reads each file once, by its sha256, and delivers it as its own run folder, published like a crawl run:
+
+- `run_id` and `observed_at` are when S3 received the file (its LastModified), not a price date. A date the sheet states is in `stated_specs` as written.
+- `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the file; its `decision` is `supplied` and `terms_checked_on` is empty.
+- `source_url` is `s3://<bucket>/<intake key>?versionId=<version>#<sheet>!R<row>` (`#R<row>` for a csv): the exact file version and row.
+- `stated_specs` holds every column the layout does not map, header to cell as written.
+- `provenance` `site_statement` means the sheet's layout states it once for every row (for example its currency or VAT basis).
+- `s3://<bucket>/<env>/market_prices/<brand>/intake_absorbed.csv` records each absorbed file: `sha256`, `key`, `version_id`, `layout_id`, `run_id`, sorted by `sha256`.
+
+A file is refused, named, and left in the intake (never half-read) when it is not `.csv`/`.xlsx`, is over a size cap, matches no layout's exact header row, or names a competitor the layout file does not declare. A row that cannot be read is counted in `malformed_listings`.
+
+## Adding a competitor sheet
+
+One `competitors` entry (id, the names the sheet uses, seller type, country, market) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
 
 ## Adding a site
 

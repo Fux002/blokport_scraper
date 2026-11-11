@@ -16,6 +16,13 @@ class MalformedListing(ValueError):
     """One listing cannot be read. It is counted against the site; the other listings still count."""
 
 
+class Source(str, Enum):
+    """Where a row came from: a site this path read, or a price sheet the owner supplied (contract v2)."""
+
+    site = "site"
+    file = "file"
+
+
 class SellerType(str, Enum):
     merchant = "merchant"
     wholesaler = "wholesaler"
@@ -62,6 +69,7 @@ class Observation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str
+    source: Source
     brand: str
     site_id: str
     seller_name: str
@@ -110,6 +118,7 @@ class SiteStatus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str
+    source: Source
     brand: str
     site_id: str
     status: SiteRunStatus

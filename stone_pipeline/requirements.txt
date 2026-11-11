@@ -20,6 +20,11 @@ pillow>=10.0
 fal-client>=0.4
 requests>=2.31
 
+# The competitor price-sheet intake (market_prices/sheet_files.py): .xlsx read with openpyxl, which parses its XML
+# through defusedxml when installed (an uploaded sheet is hostile input).
+openpyxl>=3.1
+defusedxml>=0.7
+
 # Optional (lazy-imported, config-gated)
 browser_cookie3>=0.19   # only if a scraper needs browser cookie auth (none do today)
 # sentence-transformers  # variation tier 8 (matching.enable_semantic)
