@@ -11,10 +11,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 
 from market_prices import config
-from market_prices.register import SLUG, Country, Register, Words, supplier_keys
+from market_prices.register import SLUG, Country, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
+# A bare host such as "www.stonecorp.co.uk": lowercase labels, no scheme, path, port or spaces.
+Host = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")]
 _CELL = re.compile(r"([A-Z]{1,3})([1-9][0-9]*)")
 _SPACE = re.compile(r"\s+")
 
@@ -49,8 +51,9 @@ class Competitor(BaseModel):
     seller_type: SellerType
     seller_country: Country
     served_market: Country
-    # The product scraper's source id when this competitor is also one of the owner's suppliers. A sheet has no site
-    # to check a domain against, so the key is checked against the suppliers at load (load_layouts).
+    # The competitor's own site host, and the product scraper's source id when it is also one of the owner's
+    # suppliers: checked both ways against the suppliers at load (load_layouts), by the register's rule.
+    site_domain: Host
     supplier_key: Optional[Words] = None
 
     @field_validator("competitor_id")
@@ -212,7 +215,8 @@ def load_layouts(brand: str, layouts_dir: Path = config.LAYOUTS_DIR) -> Layouts:
     if layouts.brand != brand:
         raise LayoutError(f"{path} declares brand {layouts.brand!r}")
     suppliers = supplier_keys()
-    if unknown := sorted({c.supplier_key for c in layouts.competitors if c.supplier_key} - set(suppliers)):
-        raise LayoutError(f"{path}: supplier_key {unknown} is not one of the product scraper's suppliers "
-                          f"{sorted(suppliers)}")
+    for competitor in layouts.competitors:
+        if problem := supplier_problem(f"{path}: competitor {competitor.competitor_id}", competitor.site_domain,
+                                       competitor.supplier_key, suppliers):
+            raise LayoutError(problem)
     return layouts

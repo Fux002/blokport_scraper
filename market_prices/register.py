@@ -17,7 +17,7 @@ from pydantic import (
 from market_prices import config
 from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
-from market_prices.text import same_site
+from market_prices.text import same_host, site_host
 
 SLUG = re.compile(r"[a-z0-9_]+")
 
@@ -156,22 +156,28 @@ class Register(BaseModel):
         return self
 
 
+def supplier_problem(label: str, host: str, supplier_key: Optional[str], domains: dict[str, str]) -> Optional[str]:
+    """Why a seller's supplier flag is wrong, or None. The flag is written in the register (or the layout file) and
+    checked both ways against the product scraper's suppliers: the key is a supplier's source id, its domain is the
+    seller's host, and a supplier's domain never goes without the key. `domains` is scrapers.run.supplier_domains()
+    (source id -> site_domain). The one rule for a register site and a price sheet's competitor."""
+    if supplier_key is not None:
+        if supplier_key not in domains:
+            return (f"{label}: supplier_key {supplier_key!r} is not one of the product scraper's suppliers "
+                    f"{sorted(domains)}")
+        if not same_host(host, domains[supplier_key]):
+            return f"{label}: {host} is not supplier {supplier_key}'s domain {domains[supplier_key]}"
+        return None
+    if matched := sorted(key for key, domain in domains.items() if same_host(host, domain)):
+        return f"{label}: {host} is the domain of supplier {matched[0]}; set supplier_key: {matched[0]}"
+    return None
+
+
 def check_suppliers(register: Register, domains: dict[str, str]) -> None:
-    """A seller that is one of the owner's suppliers is flagged from the product scraper, never by hand: every
-    supplier_key is a supplier's source id, its domain is the site's, and a supplier's domain never goes unflagged.
-    `domains` is scrapers.run.supplier_domains() (source id -> site_domain)."""
+    """Every site's supplier flag, by supplier_problem."""
     for site in register.sites:
-        if site.supplier_key is not None:
-            if site.supplier_key not in domains:
-                raise RegisterError(f"site {site.site_id}: supplier_key {site.supplier_key!r} is not one of the "
-                                    f"product scraper's suppliers {sorted(domains)}")
-            if not same_site(site.base_url, domains[site.supplier_key]):
-                raise RegisterError(f"site {site.site_id}: base_url {site.base_url} is not supplier "
-                                    f"{site.supplier_key}'s domain {domains[site.supplier_key]}")
-            continue
-        if matched := sorted(key for key, domain in domains.items() if same_site(site.base_url, domain)):
-            raise RegisterError(f"site {site.site_id}: {site.base_url} is the domain of supplier {matched[0]}; "
-                                f"set supplier_key: {matched[0]}")
+        if problem := supplier_problem(f"site {site.site_id}", site_host(site.base_url), site.supplier_key, domains):
+            raise RegisterError(problem)
 
 
 def supplier_keys() -> dict[str, str]:

@@ -32,10 +32,15 @@ def site_host(url: str) -> str:
 
 
 def same_site(url: str, domain: str) -> bool:
-    """Whether `url`'s host is `domain` or a subdomain of it, with case and a leading "www." dropped on both sides.
-    A whole host, never a registrable domain: two SlabWare tenants share slabware.com and are different sellers."""
-    host, wanted = site_host(url), domain.strip().lower().removeprefix("www.")
-    return bool(host) and bool(wanted) and (host == wanted or host.endswith(f".{wanted}"))
+    """Whether `url`'s host is `domain` or a subdomain of it (same_host)."""
+    return same_host(site_host(url), domain)
+
+
+def same_host(host: str, domain: str) -> bool:
+    """Whether `host` is `domain` or a subdomain of it, with case and a leading "www." dropped on both sides. A whole
+    host, never a registrable domain: two SlabWare tenants share slabware.com and are different sellers."""
+    seen, wanted = (value.strip().lower().removeprefix("www.") for value in (host, domain))
+    return bool(seen) and bool(wanted) and (seen == wanted or seen.endswith(f".{wanted}"))
 
 
 def on_site(url: str, base_url: str) -> bool:

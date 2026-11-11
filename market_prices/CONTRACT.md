@@ -29,7 +29,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
 | seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
-| seller_is_our_supplier, supplier_key | `true` when this seller is also one of the owner's suppliers, with `supplier_key` the product scraper's source id for it (empty when `false`). Copied from the register, which derives it from the product scraper's suppliers, never typed by hand |
+| seller_is_our_supplier, supplier_key | `true` when this seller is also one of the owner's suppliers, with `supplier_key` the product scraper's source id for it (empty when `false`). Copied from the row's seller: written in the register and checked both ways against the product scraper's suppliers at load |
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
 | listing_text | The seller's name for the listing, and short description when there is one |
@@ -90,7 +90,7 @@ A file is refused, named, and left in the intake (never half-read) when it is no
 
 ## Adding a competitor sheet
 
-One `competitors` entry (id, the names the sheet uses, seller type, country, market, and `supplier_key` when the competitor is one of the owner's suppliers, checked against the product scraper's suppliers at load) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
+One `competitors` entry (id, the names the sheet uses, seller type, country, market, its own `site_domain` (a bare host), and `supplier_key` when the competitor is one of the owner's suppliers; the flag is written in the layout file and checked both ways against the product scraper's suppliers at load, as for a site) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
 
 ## Adding a site
 
