@@ -21,7 +21,9 @@ identities carry the bracketed slug in every old Key but one clean Name, so a ro
 and never parses its own slug (which would mint a second new Key).
 
 Aborts (each lists the offending Keys, then the run fails):
-  - name_tie: one identity carries two canonical names (D1 tie rule).
+  - name_tie: one identity's store Names give two different new Keys: their name slugs differ (D1 tie rule, an
+    in-place rename). Names that differ only in what the slug folds (punctuation, case, accents: 'St. Amber' and
+    'St Amber') give ONE new Key, so they map; each such identity is listed (spellings), never silently passed.
   - unresolved_type: a row-less Key whose type cannot be parsed, or whose parsed/row type does not map to
     exactly one Medusa type name in the vocabulary (`from_medusa/<env>/attributes.csv` type rows, both envs).
   - type_conflict: one old Key carries two different types across stores.
@@ -119,6 +121,7 @@ class KeyMapResult:
     untyped: list[str] = field(default_factory=list)              # old Keys held (stone_type ''): no new Key
     ghosts: list[str] = field(default_factory=list)               # backbone-only Keys: mapped, no store row
     merged: list[str] = field(default_factory=list)               # new Keys fed by two middles (N1 review)
+    spellings: list[str] = field(default_factory=list)            # identities whose store Names differ in spelling only
     aborts: dict[str, list[str]] = field(default_factory=dict)    # kind -> listed detail lines
 
     @property
@@ -277,6 +280,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
     protected_to_new: dict[str, set[str]] = {}
     new_to_entries: dict[str, list[tuple[int, str, bool]]] = {}   # new Key -> (rank, old Key, store-backed?)
     new_to_mids: dict[str, set[str]] = {}
+    spellings: set[str] = set()                   # 'middle (name | name)': spelling-only differences
 
     for old_key in sorted(by_key):
         recs = by_key[old_key]
@@ -287,10 +291,12 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         mid = _middle(old_key)
 
         store_names = store_names_of.get(mid, set())
-        if len(store_names) > 1:                        # D1 tie: STORE Names only (C1)
+        if len({_slug_us(n) for n in store_names}) > 1:   # D1 tie: STORE Names (C1) that give two new Keys
             res.aborts.setdefault("name_tie", []).append(old_key)
             continue
-        canonical_name = (next(iter(store_names)) if store_names
+        if len(store_names) > 1:                        # one new Key either way (the map carries no name): listed
+            spellings.add(f"{mid} ({' | '.join(sorted(store_names))})")
+        canonical_name = (min(store_names) if store_names
                           else (sorted(backbone_names_of[mid])[0] if backbone_names_of.get(mid) else None))
 
         types = types_of.get(mid, set())
@@ -342,6 +348,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
 
     # M3: a new Key fed by more than one middle merges two Medusa records; a non-abort list for N1 review.
     res.merged = sorted(nk for nk, mids in new_to_mids.items() if len(mids) > 1)
+    res.spellings = sorted(spellings)
 
     for nk, keys in sorted(protected_to_new.items()):
         if len(keys) > 1:
@@ -441,8 +448,10 @@ def main(stores: list[StorePaths], out_dir: Path) -> int:
         print("store", line)
     result, digest = generate(stores, out_dir / OUTPUT_CSV)
     print(f"mapped {len(result.rows)} old Keys; {len(result.untyped)} untyped held, "
-          f"{len(result.ghosts)} backbone-only ghosts, {len(result.merged)} merged (N1 review)")
-    for label, items in (("untyped", result.untyped), ("ghost", result.ghosts), ("merged", result.merged)):
+          f"{len(result.ghosts)} backbone-only ghosts, {len(result.merged)} merged (N1 review), "
+          f"{len(result.spellings)} spelling-only name differences")
+    for label, items in (("untyped", result.untyped), ("ghost", result.ghosts), ("merged", result.merged),
+                         ("spelling", result.spellings)):
         if items:
             print(f"  {label} ({len(items)}): {', '.join(items)}")
     if not result.ok:
