@@ -103,7 +103,8 @@ def test_a_spelling_only_difference_maps_to_its_one_new_key_and_is_listed():
 def test_a_different_name_on_one_identity_still_aborts_as_a_name_tie():
     # 'St Ambre' slugs apart from 'St Amber': two new Keys, an in-place rename (D1), so the map aborts and lists it
     res = build_key_map(_st_amber("St Ambre"), LIMESTONE)
-    assert res.aborts["name_tie"] == sorted(f"{b}_limestone_st_amber_u{i}" for i, b in enumerate(("slab", "block", "tile")))
+    copies = (f"{b}_limestone_st_amber_u{i}" for i, b in enumerate(("slab", "block", "tile")))
+    assert res.aborts["name_tie"] == sorted(copies)
     assert res.spellings == []
 
 
