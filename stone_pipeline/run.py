@@ -309,11 +309,13 @@ class Resolved:
 @dataclass(frozen=True)
 class Delist:
     """The stock decisions: existing products, the ones whose supplier stock moved, the products the scrape dropped
-    (after both delist guards) and the dropped bundles their lot replaced ({sku: (lot_code, pieces)})."""
+    (after both delist guards), the dropped bundles their lot replaced ({sku: (lot_code, pieces)}) and the products
+    Medusa holds that this run held, hidden until a produce emits them again."""
     existing_rows: list[CanonicalRow]
     changed: list[CanonicalRow]
     discontinued: list[tuple[str, str]]
     replaced: dict[str, tuple[str, int]]
+    held: list[tuple[str, str]]
 
     @property
     def replaced_codes(self) -> dict[str, str]:
@@ -612,6 +614,13 @@ def finalize_rows(ctx: RunContext, resolved: Resolved,
     return validation
 
 
+def _stock_off_exposure(skus: list[tuple[str, str]], cfg: SourceConfig,
+                        known: product_state.KnownProducts) -> tuple[int, int]:
+    """(live products `skus` would take off sale, this source's live products): the mass-delist guard's two sides,
+    (0, 0) without the product export."""
+    return product_state.delist_exposure(skus, cfg, known) if known else (0, 0)
+
+
 def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult,
                   known: product_state.KnownProducts) -> Delist:
     """The stock decisions: the stock delta of existing products, the products the scrape dropped (each delist guard
@@ -640,20 +649,32 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     # health gate yet would delist every product it failed to fetch. Refuse to mass-delist: if a
     # single run would take down >30% of this source's LIVE products, drop the delist and flag
     # it loudly -- almost certainly an incomplete scrape, not a real bulk discontinuation.
-    _would_delist, _src_live = product_state.delist_exposure(discontinued, source_cfg, known) if known else (0, 0)
+    _would_delist, _src_live = _stock_off_exposure(discontinued, source_cfg, known)
     if _src_live and _would_delist > SETTINGS.thresholds.delist_max_fraction * _src_live:
         run_log.warning("delist refused: a single run would discontinue too much of the catalog "
                         "(likely a partial scrape) -- keeping products listed",
                         extra={"extra_fields": {"would_delist": _would_delist, "source_live": _src_live,
                                                 "fraction": round(_would_delist / _src_live, 3)}})
         discontinued = []
+    # the products Medusa holds that this run held (rejects and review holds): hidden until a produce emits them again.
+    # The SAME guard, on the hide's own count: a stage that holds most rows (a fault, not a real hold) must not take the
+    # catalogue off sale. Checked apart from the delist, so an unrelated hold never refuses a real delist.
+    held = product_state.held(validation.rejects + validation.review_only, source_cfg, known) if known else []
+    _would_hide, _src_live = _stock_off_exposure(held, source_cfg, known)
+    if _src_live and _would_hide > SETTINGS.thresholds.delist_max_fraction * _src_live:
+        run_log.warning("hide refused: a single run would hold too much of the catalog (likely a stage holding "
+                        "every row) -- keeping products listed, none hidden",
+                        extra={"extra_fields": {"would_hide": _would_hide, "source_live": _src_live,
+                                                "fraction": round(_would_hide / _src_live, 3)}})
+        held = []
     # a discontinued bundle whose pieces now form a lot was REPLACED, not dropped: its delist names the lot
     # (Blokport deactivates it and redirects its page there). After the guards, so a refused delist refuses both.
     lot_of = lots.replacements(rows, source_cfg)
     replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
     ctx.manifest.totals["products_discontinued"] = len(discontinued)
     ctx.manifest.totals["bundles_replaced_by_lots"] = len(replaced)
-    return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced)
+    return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced,
+                  held=held)
 
 
 def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
@@ -705,7 +726,7 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
     ledger_failed = False
     if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(delist.discontinued), source_cfg,
-                                          mode=ctx.mode, replaced=delist.replaced_codes):
+                                          mode=ctx.mode, replaced=delist.replaced_codes, held=tuple(delist.held)):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this

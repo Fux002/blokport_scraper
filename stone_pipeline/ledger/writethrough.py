@@ -115,11 +115,13 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
 
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, mode: OutputMode,
-                  replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
+                  replaced: dict[str, str] | None = None, held: Sequence[tuple[str, str]] = (),
+                  path: str | Path | None = None) -> bool:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
     a catalog/stock change. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
+    `held` (sku, handle): products Medusa holds that this run held, hidden (stock 0, reason 'held').
 
     A stock-only run (OutputMode.STOCK, the stock refresh) records stock only. That run skips the image stage, so its
     rows carry no photos, gallery or 3D: written as products they would strip every product's images and
@@ -146,10 +148,11 @@ def record_source(emit_rows: Sequence[CanonicalRow],
             n_stock = populate.populate_inventory(ledger, stock_rows, cfg)
             n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
+            n_held = populate.hide_held(ledger, held)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "inventory_only": mode.stock_only, "products": n_products,
             "inventory": n_stock, "left_to_full_run": len(emit_rows) - len(stock_rows),
-            "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
+            "withdrawn_unsent": n_withdrawn, "discontinued": n_gone, "held_hidden": n_held}})
         return True
     except Exception:
         # NOT "shadow only" anymore: the ledger IS the live sync source (Medusa pulls it). A failure here

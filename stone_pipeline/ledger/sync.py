@@ -312,6 +312,7 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
         # quantity is null exactly when made_to_order (on sale with no count)
         payload = {"sku": r["sku"], "quantity": r["qty"], "made_to_order": bool(r["made_to_order"])}
         # 'delisted' -> Medusa hides; 'replaced_by_lot' -> Medusa deactivates + 301s to the lot (lot_code);
+        # 'no_photo' -> a draft until its photo is published; 'held' -> stock 0, hidden while a produce holds it;
         # absent -> a plain out-of-stock
         if r["reason"]:
             payload["reason"] = r["reason"]
@@ -860,10 +861,11 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     # dead stock = a product not on sale, stock 0 (populate_discontinued / a drop set it there). A product hidden
-    # only until its standardised photo is published (reason 'no_photo') is not dead stock: it comes back, so only the
-    # vendor removal (reason 'vendor_removed') deletes it.
+    # only until its standardised photo is published (reason 'no_photo') or while a produce holds it (reason 'held',
+    # its stock unknown, not gone) is not dead stock: it comes back, so only the vendor removal (reason
+    # 'vendor_removed') deletes it.
     if reason != "vendor_removed":
-        scope += " AND i.reason IS NOT 'no_photo'"
+        scope += " AND COALESCE(i.reason, '') NOT IN ('no_photo', 'held')"
     rows = ledger.execute(
         f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
         f"WHERE NOT {on_sale_sql('i')}{scope}", params).fetchall()

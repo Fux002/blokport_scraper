@@ -316,6 +316,29 @@ def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceCon
     return len(stale)
 
 
+def hide_held(ledger: Ledger, pairs: Iterable[tuple[str, str]]) -> int:
+    """Hide the products Medusa holds that this run HELD (product_state.held, after the mass-delist guard): stock 0,
+    reason 'held'. Their stock can no longer be stated (stock undetermined, a tree gap, a review hold), so it is taken
+    off sale rather than left at its last count. Blokport hides a stock that is not on sale and reads an unknown reason
+    as a plain stock update. Not dead stock: the purge keeps it, and the produce that emits it again writes its real
+    stock with no reason (populate_inventory), which serves the un-hide. A minimal product row is created if absent, as
+    populate_discontinued does (the products export shows Medusa holds it)."""
+    now = now_iso()
+    n = 0
+    for sku, handle in pairs:
+        src, _, _ = sku.partition("-")
+        ledger.execute(
+            "INSERT OR IGNORE INTO product (sku, source, handle, state, last_synced, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sku, src.lower(), handle or "", "synced", now, now, now),
+        )
+        _write_stock(ledger, ledger.get("inventory", "sku", sku),
+                     {"sku": sku, "qty": 0, "made_to_order": 0, "reason": "held", "replaced_by_lot_code": None,
+                      "updated_at": now})
+        n += 1
+    return n
+
+
 def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
                           replaced: dict[str, str] | None = None) -> int:
     """Mark products the supplier dropped as out of stock (qty 0), the reversible
