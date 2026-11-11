@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Iterator, Mapping, Optional
 from urllib.parse import urlencode
 
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
 
 _API_SPEC_FIELDS = ("sku", "weight", "formatted_weight", "formatted_dimensions")
 _DIMENSION_FIELDS = ("length", "width", "height")
+# [^<>]: an opening tag ends at the next '<' as well, so a '<li' that never reaches its '>' fails at once instead of
+# scanning to the end of the page on every attempt (quadratic on a page of them)
+_LIST_OPEN = re.compile(r"<li\b[^<>]*>", re.IGNORECASE)
+_LIST_CLOSE = re.compile(r"</li\s*>", re.IGNORECASE)
 
 
 def _mapping(value: object, what: str) -> Mapping:
@@ -84,7 +89,42 @@ def _attributes(listing: Mapping) -> dict[str, str]:
     return labelled
 
 
+def _list_items(html: str) -> list[str]:
+    """The text inside each <li>...</li>, in page order: an opening tag, then the next closing tag after it. Each
+    search resumes where the last one stopped, so the scan is linear even on a hostile page of unclosed <li> (a
+    lazy regex over the whole item retried from every opening, and a megabyte of them stalled a listing for minutes).
+    Once no closing tag follows an opening, no later item can close either, so the scan stops."""
+    items, at = [], 0
+    while (opening := _LIST_OPEN.search(html, at)) is not None:
+        closing = _LIST_CLOSE.search(html, opening.end())
+        if closing is None:
+            break
+        items.append(html[opening.end():closing.start()])
+        at = closing.end()
+    return items
+
+
+def _description_specs(listing: Mapping) -> list[tuple[str, str]]:
+    """The "Label: value" items of the description's HTML list, as the seller wrote them, in page order. An item with
+    no label, an empty side, or a label or value too long to be a spec is prose and is left out."""
+    description = listing.get("description")
+    if not isinstance(description, str):
+        return []
+    items = []
+    for item in _list_items(description):
+        text = clean_text(item)
+        if not text or ":" not in text:
+            continue
+        label, value = (part.strip() for part in text.split(":", 1))
+        if (label and value and len(label) <= config.DESCRIPTION_SPEC_MAX_LABEL_CHARS
+                and len(value) <= config.DESCRIPTION_SPEC_MAX_VALUE_CHARS):
+            items.append((label, value))
+    return items
+
+
 def _stated_specs(listing: Mapping, attributes: Mapping[str, str]) -> dict[str, str]:
+    """Every spec the listing states: its attributes, then the API's own fields, then the description's list items. A
+    description item never replaces a label already stated, compared without case ("dikte" is the attribute Dikte)."""
     specs = dict(attributes)
     dimensions = listing.get("dimensions") or {}
     sources = {name: listing.get(name) for name in _API_SPEC_FIELDS}
@@ -93,6 +133,11 @@ def _stated_specs(listing: Mapping, attributes: Mapping[str, str]) -> dict[str, 
         text = clean_text(value)
         if text:
             specs.setdefault(name, text)
+    taken = {label.casefold() for label in specs}
+    for label, value in _description_specs(listing):
+        if label.casefold() not in taken:
+            specs[label] = value
+            taken.add(label.casefold())
     return specs
 
 
