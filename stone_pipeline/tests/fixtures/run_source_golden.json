@@ -3,7 +3,11 @@
  "detail_floor/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "detail_floor/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "detail_floor/LEDGER:inventory": "2500228d228c2e830ba8fe57e172ff33982fbeaed7bda7a4ae54f46521358868",
+<<<<<<< HEAD
  "detail_floor/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "detail_floor/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "detail_floor/LEDGER:product": "b40ea991e95ad4b680e5b76a3baff9f4c4cab0f0293668caf421c6cfda6ce56d",
  "detail_floor/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "detail_floor/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -54,7 +58,11 @@
  "full_cold/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_cold/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_cold/LEDGER:inventory": "1629bfbecf845d0c2cbbad770a76fb7f7320d320ab900b97caa2495354dc6cd3",
+<<<<<<< HEAD
  "full_cold/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "full_cold/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "full_cold/LEDGER:product": "e873c104a65578c4c798010b08b1e5a1dbccbf477f6569d583271bad4ecdf8fb",
  "full_cold/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_cold/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -95,7 +103,11 @@
  "full_known/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_known/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_known/LEDGER:inventory": "af70c0285d1a823fe52135cd7877853faa2b0548ae0c2fc68b71b8ffb2adbf34",
+<<<<<<< HEAD
  "full_known/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "full_known/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "full_known/LEDGER:product": "68da5b51ca859dec27b92f0f53e5ff3e9d6c82ae79a266a15988a0c90f211e3e",
  "full_known/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "full_known/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -146,7 +158,11 @@
  "lots/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "lots/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "lots/LEDGER:inventory": "5e6cf42fe14ac440b45cb61a964af87faf89d2ce0b8f88d7273e45a5fc77406c",
+<<<<<<< HEAD
  "lots/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "lots/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "lots/LEDGER:product": "fb046e5f07c474a7b20ddc81288457395b4187e07c1f6f30849583ae1051a9e0",
  "lots/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "lots/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -177,7 +193,11 @@
  "mass_delist/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "mass_delist/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "mass_delist/LEDGER:inventory": "1629bfbecf845d0c2cbbad770a76fb7f7320d320ab900b97caa2495354dc6cd3",
+<<<<<<< HEAD
  "mass_delist/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "mass_delist/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "mass_delist/LEDGER:product": "e873c104a65578c4c798010b08b1e5a1dbccbf477f6569d583271bad4ecdf8fb",
  "mass_delist/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "mass_delist/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -228,7 +248,11 @@
  "stock/LEDGER:gap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "stock/LEDGER:image": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "stock/LEDGER:inventory": "f3255f5ba0df8684e019c6eeeae1ebb939f0eb3a34313ca2301c4e2a40b9326a",
+<<<<<<< HEAD
  "stock/LEDGER:ledger_meta": "573b6481c9e71b000825d58a0d7abec48a6d9eef99035916c44a615ca3d0dca5",
+=======
+ "stock/LEDGER:ledger_meta": "24d4d343b3ad950b047dd7d30f0ea114236f053ef9ca2fa11bb101f6618d5d23",
+>>>>>>> origin/fix/photo-unpublished
  "stock/LEDGER:product": "d50453193eebb6744f564a273063964ea4a4b8775edfccc0a78594c355499af0",
  "stock/LEDGER:removed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "stock/LEDGER:sync_run": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

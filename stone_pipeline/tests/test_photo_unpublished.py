@@ -29,6 +29,7 @@ from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import sync, writethrough
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
 from stone_pipeline.stages import images
 
 _OLD = "2026-11-04T12:12:47+00:00"
@@ -50,6 +51,8 @@ def _open(path) -> Ledger:
             "medusa_id, first_seen, last_synced, created_at, updated_at) "
             "VALUES (?, 'Marble', 'Abadeh Amvaj', '[]', 1, '', 'synced', 'V', ?, ?, ?, ?)",
             (_VARIATION, _OLD, _OLD, _OLD, _OLD))
+        add_icon(ledger, _VARIATION)                 # phase 1: a product serves once its variety has its category's icon
+        seed_slab_category(ledger)
     return ledger
 
 
@@ -62,10 +65,10 @@ def _held_row(path, sku, *, state="dirty", in_medusa=True, photos="standard"):
         thumb, gallery, cutout = _SCRAPED, [_SCRAPED], None
     with _open(path) as ledger:
         ledger.execute(
-            "INSERT INTO product (sku, source, variation_key, state, medusa_id, last_synced, payload_hash, "
+            "INSERT INTO product (sku, source, variation_key, category, state, medusa_id, last_synced, payload_hash, "
             "sync_attempts, sync_error, retry_after, thumbnail_key, product_image_keys, oriented_image_keys, "
-            "model_3d_key, created_at, updated_at) VALUES (?, 'mar', ?, ?, ?, ?, 'h-old', 1, 'not copied', ?, ?, ?, "
-            "'[]', ?, ?, ?)",
+            "model_3d_key, created_at, updated_at) VALUES (?, 'mar', ?, 'slabs', ?, ?, ?, 'h-old', 1, 'not copied', "
+            "?, ?, ?, '[]', ?, ?, ?)",
             (sku, _VARIATION, state, "prod_1" if in_medusa else None, _OLD if in_medusa else None, _OLD, thumb,
              json.dumps(gallery), cutout, _OLD, _OLD))
 
@@ -77,7 +80,7 @@ def _emitted(surrogate, photos="standard"):
                         handle=f"h-{surrogate.lower()}", title="Abadeh Amvaj", inventory_quantity=5,
                         thumbnail_key=urls[0], product_image_keys=urls, image_keys=urls,
                         model_3d_key=_BASE + _CUTOUT if photos == "standard" else None,
-                        standard_version="etag-1", standard_photo=True)
+                        standard_version="etag-1", standard_photo=True, category_pcat_id=SLAB_PCAT)
 
 
 @pytest.fixture
@@ -283,7 +286,8 @@ def test_a_phase_1_v15_ledger_gains_photo_unpublished_in_place_and_keeps_its_dat
     raw.close()
     for _ in range(2):                                                              # the second open is a no-op
         with Ledger.open(path, env="development") as ledger:
-            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 16
-            assert ledger.get("ledger_meta", "id", 1)["schema_version"] == 16
+            # v16 is this column's own version; a later column moves SCHEMA_VERSION on, never this step
+            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 16
+            assert ledger.get("ledger_meta", "id", 1)["schema_version"] == SCHEMA_VERSION
             row = ledger.get("product", "sku", "MAR-1")
             assert row["photo_unpublished"] is None and row["state"] == "synced"

@@ -203,8 +203,9 @@ def test_a_v16_ledger_gains_reserved_at_in_place_and_keeps_its_data(tmp_path):
     raw.close()
     for _ in range(2):                                               # the second open is a no-op
         with Ledger.open(p, env="development") as lg:
-            assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 17
-            assert lg.get("ledger_meta", "id", 1)["schema_version"] == 17
+            # v17 is this column's own version; a later column moves SCHEMA_VERSION on, never this step
+            assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 17
+            assert lg.get("ledger_meta", "id", 1)["schema_version"] == SCHEMA_VERSION
             row = lg.get("variation", "key", "marble__a_1")
             assert row["reserved_at"] is None and row["state"] == "synced"
 
