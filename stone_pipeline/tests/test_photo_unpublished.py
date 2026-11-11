@@ -286,7 +286,8 @@ def test_a_phase_1_v15_ledger_gains_photo_unpublished_in_place_and_keeps_its_dat
     raw.close()
     for _ in range(2):                                                              # the second open is a no-op
         with Ledger.open(path, env="development") as ledger:
-            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 16
-            assert ledger.get("ledger_meta", "id", 1)["schema_version"] == 16
+            # v16 is this column's own version; a later column moves SCHEMA_VERSION on, never this step
+            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 16
+            assert ledger.get("ledger_meta", "id", 1)["schema_version"] == SCHEMA_VERSION
             row = ledger.get("product", "sku", "MAR-1")
             assert row["photo_unpublished"] is None and row["state"] == "synced"
