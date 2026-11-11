@@ -95,10 +95,10 @@ def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):
     # add the new variety to the slabs reference (simulating the human fix)
     new_id = "01TESTNEWVARIETY00000000XY"
     base.variants["slab"].by_id[new_id] = loaders.Variant(
-        variation_id=new_id, key="slab_granite_totally_new", name="Totally New Variety Xyz",
-        image="", aliases=[])
+        variation_id=new_id, key="granite__totally_new", name="Totally New Variety Xyz",
+        aliases=[])
     base.backbone.by_norm_name["totally new variety xyz"] = [loaders.BackboneVariety(
-        variant="Totally New Variety Xyz", category="Slabs", stone_type="Granite",
+        variant="Totally New Variety Xyz", stone_type="Granite",
         colors=["Black"], finishes=["Polished"], qualities=["A"], aliases=[])]
 
     # run 2: same scrape, the formerly gapped row now resolves; the other is unchanged
@@ -110,3 +110,17 @@ def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):
     # untouched row identical to run 1
     assert rows2[0].variation_id == rows1[0].variation_id
     assert rows2[0].type_name == rows1[0].type_name
+
+
+def test_an_attribute_override_carries_medusas_spelling_or_its_clean_form(ref):
+    # W21: an override that resolves carries the vocabulary's canonical spelling, not the operator's typing; one
+    # that does not resolve is stored by its field's rule and keeps its attr_unresolved flag.
+    ref.overrides = Overrides(by_key={("polonine", "1"): {"color_name": "bLACK"}})
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="polonine", surrogate_key="1", raw_color="x")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.color_name == "Black"
+    ref.overrides = Overrides(by_key={("polonine", "1"): {"color_name": "Rosé Sparkle"}})
+    row = CanonicalRow(src_site="polonine", surrogate_key="1", raw_color="x")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.color_name == "Rose Sparkle" and row.color_id is None

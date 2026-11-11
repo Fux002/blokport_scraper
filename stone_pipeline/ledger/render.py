@@ -16,6 +16,7 @@ import json
 import tempfile
 from pathlib import Path
 
+from stone_pipeline.config.categories import category_by_handle
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio
 from stone_pipeline.core.schema import CanonicalRow
@@ -37,18 +38,16 @@ def render_variants_full(ledger: Ledger, path: str | Path) -> int:
 
     Rows are emitted in insertion order (rowid), which is the source file order when
     the ledger was loaded from that file, so a round-trip reproduces row order. The
-    dict keys are the imported column names, so the header (including the unicode in
-    "Volume per kg (m3/kg)") can never drift from the producer's.
+    dict keys are the producer's column names, so the header can never drift from it.
     """
-    key_col, name_col, image_col, aliases_col, volume_col = VARIANTS_FULL_COLS
+    key_col, name_col, type_col, aliases_col = VARIANTS_FULL_COLS
     rows = [{
         key_col: v["key"],
         name_col: v["name"],
-        image_col: v["image_url"] or "",
+        type_col: v["type"],
         aliases_col: _aliases_cell(v["aliases"]),
-        volume_col: v["volume"] or "",
     } for v in ledger.execute(
-        "SELECT key, name, image_url, aliases, volume FROM variation "
+        "SELECT key, name, type, aliases FROM variation "
         "WHERE in_full = 1 ORDER BY rowid")]
     return csvio.write_dicts(path, VARIANTS_FULL_COLS, rows, sanitize=False)
 
@@ -73,7 +72,7 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         type_name=p["type"],
         type_id=attribute_id(ledger, "type", p["type"]) if p["type"] else None,
         variation_id=variation_id,
-        category_pcat_id=attribute_id(ledger, "category", p["category"]) if p["category"] else None,
+        category_pcat_id=attribute_id(ledger, "category", _category_label(p["category"])) if p["category"] else None,
         title=p["title"], description=p["description"], handle=p["handle"], slug=p["slug"],
         weight=p["weight"], length=p["length"], width=p["width"], height=p["height"],
         origin_country_code=p["origin_country_code"],
@@ -93,6 +92,14 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         made_to_order=bool(p["made_to_order"]),
         inventory_quantity=_stored_count(p),
     )
+
+
+def _category_label(handle: str) -> str:
+    """The category attribute value (the label) of a stored category HANDLE (D11). An unknown handle raises: a product
+    is never rendered under a guessed category."""
+    if (cat := category_by_handle(handle)) is None:
+        raise ValueError(f"category handle {handle!r} is no pack category")
+    return cat.label
 
 
 def _stored_count(p) -> int | None:
@@ -157,17 +164,13 @@ def _dump_attributes(ledger: Ledger, path: Path) -> None:
 
 
 def _dump_variations_export(ledger: Ledger, path: Path) -> None:
-    """Ledger variation table -> variants_export.csv shape. build_combinations reads
-    Id, Key and Name; the rest fill the header."""
+    """Ledger variation table -> variants_export.csv shape (Id plus the variety file's columns). build_combinations
+    reads Id, Key and Name; the rest fill the header."""
     with Path(path).open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
-        for r in ledger.execute(
-            "SELECT medusa_id, key, name, image_url, aliases, volume FROM variation"
-        ):
-            aliases = "|".join(json.loads(r["aliases"])) if r["aliases"] else ""
-            w.writerow([r["medusa_id"] or "", r["key"], r["name"] or "",
-                        r["image_url"] or "", aliases, r["volume"] or ""])
+        w.writerow(["Id", *VARIANTS_FULL_COLS])
+        for r in ledger.execute("SELECT medusa_id, key, name, type, aliases FROM variation"):
+            w.writerow([r["medusa_id"] or "", r["key"], r["name"] or "", r["type"], _aliases_cell(r["aliases"])])
 
 
 def render_combinations(ledger: Ledger, path: str | Path, *,

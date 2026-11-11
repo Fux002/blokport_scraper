@@ -56,9 +56,9 @@ def _largest(mask: np.ndarray) -> np.ndarray:
 def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarray, np.ndarray]:
     """(the object inside box [x0, y0, x1, y1] (or the one object at a point (x, y)) with holes filled and
     attachments trimmed, SAM's own mask: what it counted as stone; the holes are where labels and clips sit).
-    emb = embed(model, rgb). widest: SAM's
-    largest proposal instead of its most confident one (with straps in front, the confident one is the part
-    between the straps, the largest the whole slab; in a close-up, the whole frame of stone)."""
+    emb = embed(model, rgb). widest: SAM's largest proposal instead of its most confident one (with straps in front,
+    the confident one is the part between the straps, the largest the whole slab; in a close-up, the whole frame of
+    stone), every piece of it (stone_from_proposals)."""
     import torch
     sam, proc, device = model
     if len(box) == 2:
@@ -71,12 +71,28 @@ def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarra
         out = sam(image_embeddings=emb, **prompt)
     masks = proc.image_processor.post_process_masks(out.pred_masks.float().cpu(), raw["original_sizes"],
                                                     raw["reshaped_input_sizes"])[0][0]
-    pick = int(masks.flatten(1).sum(1).argmax()) if widest else int(out.iou_scores.cpu()[0][0].argmax())
-    raw_mask = _largest(masks[pick].numpy().astype(np.uint8))
+    return stone_from_proposals(masks.numpy().astype(np.uint8), out.iou_scores.float().cpu()[0][0].numpy(), widest)
+
+
+def stone_from_proposals(masks: np.ndarray, scores: np.ndarray, widest: bool) -> tuple[np.ndarray, np.ndarray]:
+    """slab_mask's (mask, raw) from SAM's proposals (0/1 masks, one per proposal) and its predicted IoU for each. The
+    most confident proposal gives its largest piece. The widest is the whole slab, so it gives EVERY piece of it of at
+    least STRAP_PIECE_MIN of it: straps in front cut a slab into pieces (POL-473, std-2b: 66k + 515k + 81k px), and its
+    largest piece alone is the part between them; a fleck of the warehouse is no piece."""
+    pick = int(masks.reshape(len(masks), -1).sum(1).argmax()) if widest else int(np.argmax(scores))
+    keep = _pieces if widest else _largest
+    raw_mask = keep(masks[pick])
     contours, _ = cv2.findContours(raw_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     mask = cv2.drawContours(np.zeros_like(raw_mask), contours, -1, 1, -1)   # the slab, holes filled
     k = max(3, int(C.TRIM_SHARE * min(mask.shape)))
-    return _largest(cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))), raw_mask
+    return keep(cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))), raw_mask
+
+
+def _pieces(mask: np.ndarray) -> np.ndarray:
+    """The pieces of mask of at least STRAP_PIECE_MIN of it, together (empty when it has none)."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= C.STRAP_PIECE_MIN * stats[1:, cv2.CC_STAT_AREA].sum()]
+    return np.isin(labels, keep).astype(np.uint8)
 
 
 def flare_mask(rgb: np.ndarray, on: np.ndarray) -> np.ndarray:

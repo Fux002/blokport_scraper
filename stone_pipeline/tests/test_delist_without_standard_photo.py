@@ -167,6 +167,7 @@ def _stage(monkeypatch, rows, removed=frozenset(), assigned=None, emitted=None):
     unless `emitted` names them): the conflict set it classified."""
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: _VIEWS)
+    monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1500.0, 1000.0))   # at the slabs' 2.85 x 1.9
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: removed)
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {} if assigned is None else assigned)
     cfg = type("Cfg", (), {"mode": "passthrough"})()
@@ -176,7 +177,8 @@ def _stage(monkeypatch, rows, removed=frozenset(), assigned=None, emitted=None):
 
 def _slabs(*keys, variety="v1", finish="f1"):
     return [CanonicalRow(src_site="sentas", surrogate_key=k, format_value="Slab", image_keys=[_improved(A)],
-                         variation_id=variety, finish_id=finish, handle=f"{k}-sen-{k}") for k in keys]
+                         variation_id=variety, finish_id=finish, handle=f"{k}-sen-{k}", length=2.85, width=1.9,
+                         height=0.02) for k in keys]
 
 
 def _sku(row):
@@ -239,6 +241,7 @@ def test_a_run_that_cannot_read_the_removals_or_the_assignments_cannot_tell(monk
         rows = _slabs("1")
         monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
         monkeypatch.setattr(images, "_load_standard_views", lambda cfg: _VIEWS)
+        monkeypatch.setattr(images, "_outline_size", lambda src, sha: (1500.0, 1000.0))
         monkeypatch.setattr(images, "_load_owner_removed", lambda cfg, r=removed: r)
         cfg = type("Cfg", (), {"mode": "passthrough"})()
         images.run(rows, cfg=cfg)

@@ -27,6 +27,7 @@ import hashlib
 import json
 import re
 from stone_pipeline.core import env
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -40,6 +41,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.io import download as dl
 from stone_pipeline.io import imagestore
 from stone_pipeline.io import storage
+from stone_pipeline.standardise import cutout
 
 log = logfmt.get_logger("images")
 
@@ -208,7 +210,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
 
 
 def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None, *,
-                  image_pipeline: bool) -> Optional[dict[str, dict[str, list[str]]]]:
+                  image_pipeline: bool,
+                  mismatches: Optional[list[dict]] = None) -> Optional[dict[str, dict[str, list[str]]]]:
     """After validation: every product linked to its standardised photo, from the published pool, and the conflict set
     {source: {sha: [handles]}} of the emitted products (index.shared_photos, each with every photo it has: the products
     on the sheet, nothing validation rejected), returned to be stored (save_conflicts) as the one set the photo process
@@ -216,7 +219,9 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     pool cannot be read (nothing is stored then; the products keep their images and their listed state). The rows are one
     source's; `image_pipeline` is its switch as the produce loaded it (one value for the whole run). Off: every product
     keeps its hosted scraped photos (standard_photo stays None; populate never hides it), and the photo list and the
-    conflict set are made as for any source (the photo process refuses a source on the sheet without them)."""
+    conflict set are made as for any source (the photo process refuses a source on the sheet without them). A product
+    carries its lead's 3D slab only from its own photo and at its own measured size (_no_3d); each emitted product
+    refused one is added to `mismatches` (the source's diagnostics, photo_scale_mismatch) when given."""
     cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
     removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
@@ -228,19 +233,160 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     conflicts = {(src, sha) for src, photos in by_source.items() for sha in photos}
     removed, assigned = removed or set(), assigned or {}
     skus = _skus(rows) if removed or conflicts else {}
-    for row in rows:
+    shared = _lot_shared(rows)
+    # each product's view of the pool and its lead, read from its own photos before the views replace them; then the
+    # 3D outlines (and a lot piece's judge record) those leads need, read at once under the settings cap
+    leads = [_lead_of(row, _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned), cfg)
+             if image_pipeline else None for row in rows]
+    outlines, judged = _read_3d_inputs(rows, leads, shared)
+    misfits: list[tuple[CanonicalRow, dict]] = []
+    for row, found in zip(rows, leads):
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
-        if not image_pipeline:                         # off: it keeps the hosted scraped photos
+        if found is None:                              # off: it keeps the hosted scraped photos
             continue
-        seen = _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned)
-        lead = listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen)
+        seen, lead = found
         row.standard_photo = lead is not None if known else None
         if row.image_keys:
-            # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(seen, lead) if _is_3d_format(row) else None
+            if row.model_3d_key and (misfit := _no_3d(row, lead, seen, outlines, shared, judged)) is not None:
+                row.model_3d_key = None
+                misfits.append((row, misfit))
             row.standard_version = standard_version(seen, lead, with_3d=bool(row.model_3d_key))
             _slot_row(row, standardised(row.image_keys, seen, lead))
+    if mismatches is not None:
+        on_sheet = {id(r) for r in emitted}
+        reported = [(r, m) for r, m in misfits if id(r) in on_sheet]
+        sku_of = _skus([r for r, _ in reported])
+        mismatches.extend({**m, "sku": sku_of[id(r)]} for r, m in reported)
     return None if views is None else by_source
+
+
+def _lead_of(row: CanonicalRow, seen: dict[str, dict[str, str]],
+             cfg) -> tuple[dict[str, dict[str, str]], Optional[Lead]]:
+    """(the published views as the product sees them, its lead): a tile's own rendered set, any other's photo."""
+    return seen, (listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen))
+
+
+def _read_3d_inputs(rows: list[CanonicalRow], leads: list, shared: dict[str, set[str]]):
+    """({(source, sha, ETag): outline px size}, {(source, sha): judge record or None}) of what _no_3d needs: the
+    outline of every lead's 3D slab, and the judge's record of the own photo of every lot piece shown from its lot's
+    shared photo. Read at once, CUTOUT_OUTLINE_READ_WORKERS at a time (a fixed cap, Mas); any read failure raises."""
+    from stone_pipeline.photos.publish import pool_map
+
+    wanted, owns = set(), set()
+    for row, found in zip(rows, leads):
+        if found is None or not row.image_keys or not _is_3d_format(row):
+            continue
+        seen, lead = found
+        if model_3d(seen, lead) is None:
+            continue
+        _, src, sha = lead
+        lot_shared = shared.get(row.lot_code or "", set())
+        if sha in lot_shared:
+            if (own := _own_photo(row, lot_shared)) is not None:
+                owns.add(own)
+        else:
+            wanted.add((src, sha, seen[imagestore.CUTOUT_SUBDIR][sha]))
+    wanted, owns = sorted(wanted), sorted(owns)
+    cap = STANDARDISE.CUTOUT_OUTLINE_READ_WORKERS
+    outlines = dict(zip(wanted, pool_map(cap, lambda w: _outline_size(w[0], w[1]), wanted)))
+    judged = dict(zip(owns, pool_map(cap, lambda o: _judged(*o), owns)))
+    return outlines, judged
+
+
+def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
+           outlines: dict[tuple[str, str, str], tuple[float, float]],
+           shared: dict[str, set[str]], judged: dict[tuple[str, str], Optional[dict]]) -> Optional[dict]:
+    """None when a product may carry its lead's 3D slab: a lot piece shown from its own photo, never its lot's shared
+    one (Mas: no 3D until its own photo passes), and its length and width measured (inside the category's band, not
+    filled from the pack's defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule
+    Blokport's renders measure too: the cut-out's width is the listing's length). Else why not, a photo_scale_mismatch
+    row of the source's diagnostics: the judge's reason for a lot piece, both figures (and the band) for a size.
+    outlines: each outline's px size by (source, sha, ETag), read once a run; shared: the lots' shared photos."""
+    _, src, sha = lead
+    if sha in shared.get(row.lot_code or "", ()):
+        return {"listing": row.handle, "reason": "lot_shared_photo", "lead": sha,
+                "why": _own_photo_state(_own_photo(row, shared[row.lot_code]), judged)}
+    w_px, h_px = outlines[(src, sha, seen[imagestore.CUTOUT_SUBDIR][sha])]
+    found = {"listing": row.handle, "length_m": row.length, "width_m": row.width,
+             "cutout_px": [round(w_px), round(h_px)]}
+    if not (row.length and row.width and row.length > 0 and row.width > 0):
+        return {**found, "reason": "size_missing", "listing_aspect": None, "cutout_aspect": round(w_px / h_px, 3),
+                "fit_pct": None}
+    found |= {"listing_aspect": round(row.length / row.width, 3), "cutout_aspect": round(w_px / h_px, 3),
+              "fit_pct": round(cutout.aspect_off(w_px, h_px, row.length, row.width), 2)}
+    band = {f.field: f.detail for f in row.review_flags
+            if f.code == FlagCode.dimension_out_of_range and f.field in ("length", "width")}
+    if band:                                            # derive's range check: no size of its category (Mas)
+        return {**found, "reason": "size_out_of_band", "band": band}
+    if _defaulted_size(row, ("length", "width")):
+        return {**found, "reason": "size_defaulted"}
+    if cutout.aspect_misfit(w_px, h_px, row.length, row.width) is not None:
+        return {**found, "reason": "photo_scale_mismatch"}
+    return None
+
+
+def _lot_shared(rows: list[CanonicalRow]) -> dict[str, set[str]]:
+    """{lot code: the photos two or more of its pieces show}: the lot's shared (bundle) photos. Each piece shows its own
+    photos first, then the bundle's, never another piece's own (stages.lots._split), so a piece's other photos are its
+    own. A lot of one piece has none: its photos cannot be told apart and count as its own."""
+    shows: dict[str, Counter] = {}
+    for row in rows:
+        if row.lot_code:
+            shows.setdefault(row.lot_code, Counter()).update({sha for _, sha in _shown(row)})
+    return {lot: {sha for sha, n in seen.items() if n > 1} for lot, seen in shows.items()}
+
+
+def _own_photo(row: CanonicalRow, shared: set[str]) -> Optional[tuple[str, str]]:
+    """(source, sha) of a lot piece's own photo: its first photo not shared in its lot; None when it has none."""
+    return next(((src, sha) for src, sha in _shown(row) if sha not in shared), None)
+
+
+def _own_photo_state(own: Optional[tuple[str, str]], judged: dict[tuple[str, str], Optional[dict]]) -> str:
+    """Why a lot piece is not shown from its own photo: the judge's reason when it failed, as the photo process's latest
+    run of it recorded (_judged, read ahead into `judged`)."""
+    if own is None:
+        return "no own photo"
+    record = judged[own]
+    if record is None:
+        return "own photo not judged"
+    if record.get("verdict") != "fail":
+        return f"own photo {record.get('verdict')}"
+    return "own photo failed: " + "; ".join(f"{p.get('kind')}: {p.get('where')}" for p in record.get("problems") or [])
+
+
+def _judged(src: str, sha: str) -> Optional[dict]:
+    """The judge's record of one photo in the clean run, else in the standardiser run (CLEAN_TAG, RUN_TAG); None when
+    neither judged it. Any other failure to read it raises: the produce fails loud for the source."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    from stone_pipeline.photos.source import round_prefix
+    for tag in (STANDARDISE.CLEAN_TAG, STANDARDISE.RUN_TAG):
+        key = f"{round_prefix(tag, src)}judged/{sha}.json"
+        try:
+            record = json.loads(_get_object(key))
+        except ClientError as exc:
+            if storage.s3_error_is_missing(exc):
+                continue
+            raise RuntimeError(f"the judge's record {key} cannot be read: {exc}") from exc
+        except (BotoCoreError, ValueError) as exc:          # ValueError: not JSON
+            raise RuntimeError(f"the judge's record {key} cannot be read: {exc}") from exc
+        if not isinstance(record, dict):
+            raise RuntimeError(f"the judge's record {key} is not a JSON object")
+        return record
+    return None
+
+
+def _outline_size(src: str, sha: str) -> tuple[float, float]:
+    """A published 3D slab's outline size in px (cutout.outline_size). Raises when it cannot be read or is not one: the
+    produce fails loud for the source, never a silent "no 3D"."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    key = imagestore.cutout_key(src, sha, "json")
+    try:
+        return cutout.outline_size(json.loads(_get_object(key)))
+    except (BotoCoreError, ClientError, ValueError) as exc:     # ValueError: not JSON, or not an outline
+        raise RuntimeError(f"the 3D slab's outline {key} cannot be read: {exc}") from exc
 
 
 def save_conflicts(by_source: dict[str, dict[str, list[str]]]) -> None:
@@ -374,9 +520,8 @@ def standard_version(views: dict[str, dict[str, str]], lead: Optional[Lead], wit
     return " ".join(views[k][sha] for k in kinds if sha in views.get(k, ()))
 
 
-def _defaulted_size(row: CanonicalRow) -> bool:
-    return any(f.code == FlagCode.dimension_defaulted and f.field in ("length", "width", "height")
-               for f in row.review_flags)
+def _defaulted_size(row: CanonicalRow, fields: tuple[str, ...] = ("length", "width", "height")) -> bool:
+    return any(f.code == FlagCode.dimension_defaulted and f.field in fields for f in row.review_flags)
 
 
 def _is_tile(row: CanonicalRow) -> bool:

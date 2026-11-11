@@ -65,6 +65,17 @@ showing its stone (`CLOSEUP_SLAB_*`); when none does, or both halves of an open 
 reason is recorded, never a guess. Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
 close view, no 3D.
 
+The 3D slab keeps the proportions its photo measured. The produce's image stage links it to a product only at that
+product's own measured size: length and width inside the category's band (derive's range check, its flag naming
+the band; Mas: else `size_out_of_band`) and not filled from the pack's defaults, and the cut-out's width:height
+within `PHOTO_ASPECT_TOLERANCE_PCT` (5, inclusive) of the product's length:width (`cutout.aspect_misfit`, the one rule
+the tile stone uses too, measured as Blokport's renders measure it). Otherwise the product keeps its photos with no 3D,
+and it is listed with both figures under `photo_scale_mismatch` in its source's diagnostics (`stages.json`, served by
+`GET /config/v1/diagnostics/{source}`). An outline that cannot be read fails the source's produce, never a silent no-3D.
+A lot piece carries a 3D slab only from its own photo (Mas, 2026-11-10): one shown from its lot's shared (bundle) photo,
+because its own photo failed the judge or is not worked yet, gets none and is listed there as `lot_shared_photo` with
+the judge's reason ("own photo failed: <kind>: <where>"), until its own photo passes through the usual repair path.
+
 A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
 (in this run, or as the listing's choice from an earlier one, picked again as "kept"), only the listing's whole results
 are judged after it, and the first that passes becomes the choice; if none does, the close-up stays. What was already
@@ -157,6 +168,34 @@ the text reader), then stops for a slab drawn the same; only the slabs drawn dif
 they cost a judge call (one each, its candidate's, in the same run). The round is sized to the month's budget and window
 like any other: what does not fit goes on in the next run.
 
+## A scoped run (a re-run list)
+
+A fix the outline recheck cannot see (#605's keystone squaring: `layout.drawn_differently` compares the wall and the
+sawn edge only) reaches no published photo by itself. A scoped run takes an explicit list instead:
+`SCRAPER_STANDARDISE_SCOPE_KEY` names one S3 JSON object, `{"listings": [SKU, ...], "restandardise": [sha, ...]}`, read
+as ONLY_KEY's lists are (`process.read_scope`).
+
+- Steps 1 to 7 work the listed listings alone, in the list's order (`process.scoped`); the decisions, the conflict
+  assignments and publish stay the whole sheet's, and the run's rows merge into `tracked.csv` and `review.json`
+  (`merge_review`), so a listing not on the list is never touched.
+- Each listed photo is a finished photo of a listed listing (`process.restandardise_items`); the run tag's GPU round
+  takes it once more (`Selection.gpu_todo`; its slice names it to the job as `RESTANDARDISE_KEY`, stored and read as
+  `ONLY_KEY` is), drawn in full (`photo.standardise(redo="restandardise")`) as a candidate under
+  `STANDARDISE.RESTANDARDISED` whatever its outline reads. The judge settles it as it settles a recheck's (`settle`):
+  promoted over the result on a pass, discarded on a fail. Either way, or when the re-run gives no whole slab, the
+  rule's note `<run folder><RESTANDARDISED><sha>.json` is written: it is the record, so a re-run never redoes it, and a
+  run cut short before its candidate was complete redoes it. A later fix that wants another pass takes a new folder
+  name.
+- A photo kept as it was is listed in the run's summary (`restandardise_kept`) and problems with the reason (the judge's,
+  or why the re-run gave no slab): the 3D gate still blocks it, so it goes to the people's list.
+- `SCRAPER_STANDARDISE_RUN_CAP_USD` is required with a scope (`process.unconfigured`): the run's total, its GPU rounds,
+  verdicts, edits and checks together, never passes it whatever the monthly budgets leave (`select.RunCap`, reserved by
+  both of its Spends in `Spend.reserve`).
+- An unknown SKU, a SKU listed twice, or a photo that is no finished photo of a listed listing is refused at the start,
+  every one named, before anything is paid (`ScopeRefused`, exit 2). Without a scope the run is as before.
+- A listing that gets no 3D cut-out (any format but `C.CUTOUT_FORMAT`, a block for one) is refused the same way, each SKU
+  named with its format: it would be paid for and get no cut-out, and blocks get no 3D.
+
 ## Tile listings
 
 The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone, from any
@@ -170,7 +209,7 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
   finish (Tiger Black Flamed), none with a published 3D cut-out, or every one refused.
 - **Refused cut-outs**: a crosshatch over the face (straight lines along both axes: `TILE_GRID_*`; Tiger Black
   805cf5ac scores 17.6, every other of 510 prod cut-outs at most 1.97), or proportions more than
-  `TILE_ASPECT_TOLERANCE` from the slab's listed size (its scale would be a guess). Lamp reflections
+  `PHOTO_ASPECT_TOLERANCE_PCT` from the slab's listed size (its scale would be a guess). Lamp reflections
   (`marks.flare_mask`) and a 3 cm rim are never cut. The slab job's fills (labels, straps, flares it painted over) are
   not saved, so they cannot be avoided yet: the job would have to save a fill mask beside `<sha>.slab.png`
   (`<sha>.fill.png`, 8-bit, the squared slab's frame, 255 where it painted or a hosted edit changed the stone) and

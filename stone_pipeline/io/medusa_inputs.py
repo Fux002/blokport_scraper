@@ -18,11 +18,10 @@ from pathlib import Path
 from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.categories import category_for_key
-from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, SETTINGS,
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS,
                                             THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED)
 from stone_pipeline.core import logfmt
-from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
+from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client, s3_error_is_missing
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("deploy.fetch_inputs")
@@ -41,10 +40,12 @@ _PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_bas
 # export is gitignored, so after every roll it is absent while the committed base (the same scraper-owned variants,
 # Id-free) is in the image. Without this the guard never ran on a fresh task.
 _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
-# The variant exports list every vendor's variants; the scraper keeps only its own (a Key whose prefix is one of its
-# categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
+# The variant exports list every vendor's variants; the scraper keeps only its own: Medusa's export marks them
+# `owner = scraper` (PHASE-1-SPEC D5, from scraper_sync_ref), and the base, which the scraper writes whole, carries no
+# owner column. Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
+OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
 # Medusa's downloads, checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv
 # at import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
@@ -63,14 +64,18 @@ def check_readable(name: str, path: Path) -> None:
 
 
 def own_variants(path: Path) -> int:
-    """Rewrite a variant export keeping only the scraper's own variants (and rows without a Key, as before); returns
-    how many rows it dropped. A file with nothing to drop is left as it is."""
+    """Rewrite a variant export keeping only the scraper's own variants (`owner` = scraper, D5); returns how many rows
+    it dropped. A file without an owner column (the base) is every row the scraper's and is left as it is; an owner
+    value other than `scraper` or empty is refused (ValueError), never read as either."""
     with path.open(encoding="utf-8-sig", newline="") as h:
         rows = list(csv.reader(h))
-    if not rows or "Key" not in rows[0]:
+    if not rows or OWNER_COLUMN not in rows[0]:
         return 0
-    at = rows[0].index("Key")
-    kept = [r for r in rows[1:] if len(r) <= at or not r[at].strip() or category_for_key(r[at])]
+    at = rows[0].index(OWNER_COLUMN)
+    owners = {(r[at] if len(r) > at else "").strip() for r in rows[1:]}
+    if bad := sorted(owners - {OWNER_SCRAPER, ""}):
+        raise ValueError(f"{path.name}: owner column holds {bad}; only {OWNER_SCRAPER!r} or empty are read")
+    kept = [r for r in rows[1:] if len(r) > at and r[at].strip() == OWNER_SCRAPER]
     dropped = len(rows) - 1 - len(kept)
     if dropped:
         with path.open("w", encoding="utf-8", newline="") as h:
@@ -160,6 +165,61 @@ def fetch_attributes(client=None, target=None) -> bool:
         tmp.unlink(missing_ok=True)
 
 
+# fetched and validated only by fetch_field_kinds, so the map has one fetch path (skipped by the bulk fetch_all)
+FIELD_KINDS_NAME = "field-kinds.json"
+
+
+def fetch_field_kinds(client=None, target=None) -> None:
+    """Fetch field-kinds.json, the backend's map of name and identifier fields, validate it, and swap it in.
+    Unlike fetch_attributes it RAISES on any failure: no name is written on a guessed kind, so a produce stops
+    (exit 2) and the config server's name routes answer 503 until a valid map arrives. `target` overrides the
+    destination for tests."""
+    from stone_pipeline.reference.loaders import field_kinds
+    key = f"{ENV_SEGMENT}/scraper/from_medusa/{FIELD_KINDS_NAME}"
+    target = Path(target or SETTINGS.paths.field_kinds_json)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _incoming(target)
+    try:
+        client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
+        client.download_file(S3_BUCKET, key, str(tmp))
+        field_kinds.parse(tmp.read_bytes(), key)   # validates brand + every required field before the swap
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+# The operator's manual overrides (state/overrides.py), under the DURABLE-state prefix beside the ledger and config.db
+# snapshots (ledger/snapshot.py): the office drops the file here; S3 is its authority, a task never uploads it.
+OVERRIDES_KEY = f"{ENV_NAME}/scraper/state/manual_overrides.csv"
+
+
+def fetch_overrides(client=None, target=None) -> bool:
+    """Fetch the manual overrides fresh, validate every entry (load_overrides) and swap the file in: True. No file on
+    S3 means no overrides, as before the file had a home: the local copy is removed and False returned. Any other
+    failure (a fetch error, a malformed copy) RAISES with the local file untouched, so a produce stops (exit 2)
+    rather than run on overrides nobody can vouch for. `target` overrides the destination for tests."""
+    from stone_pipeline.state.overrides import load_overrides
+    target = Path(target or SETTINGS.paths.overrides_csv)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _incoming(target)
+    try:
+        client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
+        try:
+            client.download_file(S3_BUCKET, OVERRIDES_KEY, str(tmp))
+        except ClientError as exc:
+            if not s3_error_is_missing(exc):
+                raise
+            target.unlink(missing_ok=True)
+            print(f"   (no {OVERRIDES_KEY}: no manual overrides)")
+            return False
+        n = len(load_overrides(tmp))           # refuses an unsigned or malformed entry before the swap
+        os.replace(tmp, target)
+        print(f"   {OVERRIDES_KEY}: {n} override(s)")
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def fetch_all() -> int:
     """Every input of this environment's from_medusa/ fetched from S3 (the produce's first step; deploy/fetch_inputs is
     an operator's manual run of it), each through the thin-copy guard, the reader check and an atomic replace: 0."""
@@ -173,7 +233,7 @@ def fetch_all() -> int:
         for obj in page.get("Contents", []):
             key = obj["Key"]
             name = key[len(prefix):]
-            if not name:  # the prefix "folder" placeholder
+            if not name or name == FIELD_KINDS_NAME:  # the prefix "folder" placeholder; the map's own fetch path
                 continue
             target = dest / name
             # guard against a key with '..' segments resolving outside dest (path traversal)

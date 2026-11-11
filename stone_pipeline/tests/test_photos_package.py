@@ -48,7 +48,7 @@ def test_deploy_holds_only_the_glue():
 def test_the_photo_process_is_the_photos_package():
     assert {p.stem for p in PHOTOS.glob("*.py")} == {
         "__init__", "process", "select", "publish", "decisions", "review", "batch", "source", "close", "retouch_job",
-        "diag", "edit_test", "mark_logo_step"}
+        "diag", "edit_test", "mark_logo_step", "cutout_meta"}
 
 
 def test_no_stone_pipeline_module_imports_deploy():
@@ -119,7 +119,7 @@ def test_the_photo_code_names_no_source_and_no_product():
 @pytest.mark.parametrize("script", ["deploy/run_pipeline.sh", "deploy/build_standardise_image.sh"])
 def test_every_entry_point_a_script_names_is_a_module_that_exists(script):
     text = (ROOT / script).read_text()
-    named = set(re.findall(r"python -m ([a-z_.]+)", text)) | set(re.findall(r"'python -m ([a-z_\\.]+)", text))
+    named = set(re.findall(r"python -m ([a-z0-9_.]+)", text)) | set(re.findall(r"'python -m ([a-z0-9_\\.]+)", text))
     assert named and "deploy.standardise" not in text
     for module in {m.replace("\\", "") for m in named}:
         if module.endswith("."):                                         # the build script's pattern of the run modes

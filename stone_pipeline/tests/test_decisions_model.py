@@ -82,3 +82,14 @@ def test_mint_origin_rules_key_the_created_name():
         ("", "verde"): {"action": "mint", "seed_type": "Granite", "seed_country": "BR"},
     })
     assert dec.mint_origin_rules() == {("honey", "onyx"): "IR", ("verde", "granite"): "BR"}
+
+
+def test_a_global_mint_always_stores_its_stated_name(tmp_path, monkeypatch):
+    # W15: the stated name is always stored. A spelling with no ASCII form keys like its stated ASCII name
+    # ('Nero 黑 Marquina' and 'Nero Marquina'), so a "renamed" test dropped the name and the next produce
+    # could never mint it (the spelling cannot be a name).
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    decisions_store.decide("zucchi", "Nero 黑 Marquina", "Nero Marquina", "Marble",
+                           exists_as=_no, alias_target=_none, clean=lambda s, t: s)
+    dec = decisions_store.load_decisions(exists_as=_no, alias_target=_none)
+    assert dec.statements[("", "nero marquina")].name == "Nero Marquina"

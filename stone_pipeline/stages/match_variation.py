@@ -1,9 +1,9 @@
 """Stage 4: resolve variation (section 7 Stage 4, engine in section 5A).
 
-Category scoped: the branch (a registry category name) selects that category's
-variant index (ref.variants[name], from the ONE combined export), because the same
-variety has a different variation id per category. One engine per category, built
-from the registry. Standalone categories (not stone varieties) route to their own
+One engine per registry category (ref.variants[name]); since phase 1 every category
+that shares the stone-variety vocabulary indexes the SAME varieties (a variety is one
+record per (type, name), with no category), so the engine a row uses changes nothing
+about which variety it can bind. Standalone categories (not stone varieties) route to their own
 matcher via STANDALONE_MATCHERS instead. The matcher blocks on category, then type
 and colour; the input is variety_match_key; aliases participate in every tier.
 
@@ -114,9 +114,9 @@ class VariationStage:
     def build(cls, ref: ReferenceData, writeback: WriteBack | None = None,
               writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> "VariationStage":
         thresholds = SETTINGS.thresholds
-        # Stick to the category: each branch matches only against its OWN variants
-        # (no cross-category borrowing). One engine per registry category; a new
-        # category gets its engine automatically from ref.variants.
+        # One engine per registry category; a new category gets its engine automatically from ref.variants.
+        # Every stone-vocabulary category's table is the same varieties (phase 1), so each engine binds the
+        # same Keys.
         persisted = load_alias_writeback(writeback_path)  # confirmed spellings -> exact hits
         auto, floor = thresholds.variation_auto_accept, thresholds.variation_review_floor
         engines: dict[str, VariationEngine] = {}
@@ -217,24 +217,9 @@ class VariationStage:
 
         engine = self._engine(branch)
 
-        # A category that is not yet ACTIVATED (no Medusa pcat) and has no reference
-        # is held in the gap queue rather than borrowing another category's id. Once
-        # activated, it flows through normal matching against its (initially empty)
-        # reference, so every row gaps as missing_variation and mints a variant (each
-        # category's engine is isolated, so no other category's id is ever borrowed).
-        if cat and not cat.active and not engine.index.candidates:
-            row.variation_method = "category_not_activated"
-            row.add_gap(TreeGap(
-                src_site=row.src_site, surrogate_key=row.surrogate_key or "",
-                raw_name=row.raw_name or "",
-                normalized_name=proj.norm(row.variety_match_key or row.raw_name or ""),
-                suggested_type=row.raw_type, suggested_color=row.color_name or row.raw_color,
-                gap_kind=GapKind.missing_mirror_reference,
-                nearest_existing="(tile variation export not supplied)",
-                example_src_url=row.src_url,
-            ))
-            return
-
+        # A category that is not yet ACTIVATED (no Medusa pcat) matches like any other: every stone category shares
+        # the one variety table (phase 1), so there is no other category's id to borrow, and validate refuses the
+        # row (category_invalid) until its category is active.
         # override is the top strategy: a human-set variation_id always wins
         overrides = self.ref.overrides
         if overrides is not None:

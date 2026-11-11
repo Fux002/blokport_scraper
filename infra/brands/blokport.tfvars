@@ -61,7 +61,7 @@ dev_require_standard_photo = true
 # AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
 # month's budget, hosted calls and GPU together, is the owner's: prod 400 USD for November's combined pass, dev 100 USD
 # (2026-11-05).
-dev_standardise_image_tag  = "standardise-pin-423d02f59c1d"
+dev_standardise_image_tag  = "standardise-pin-809b0b3e2806"
 prod_standardise_image_tag = "standardise-pin-423d02f59c1d"
 dev_standardise_auto       = true
 prod_standardise_auto      = true

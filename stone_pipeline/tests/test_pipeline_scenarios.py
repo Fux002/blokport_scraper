@@ -16,22 +16,25 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import simulate, sync
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_inventory, populate_products
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
 
 
 def _variety(lg: Ledger, key: str, medusa_id: str, state: str = "synced") -> None:
-    """A servable variation: typed, textured, in the produced set."""
+    """A servable variation: typed, with a slab icon, in the produced set (and the Slabs category seeded)."""
     now = now_iso()
     lg.upsert("variation", {
-        "key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": key.rsplit("_", 1)[0],
-        "aliases": "[]", "image_url": "https://s3/tex.png", "image_sha256": None, "image_model": None,
-        "volume": "", "medusa_id": medusa_id, "in_full": 1, "payload_hash": key, "state": state,
+        "key": key, "type": "Marble", "name": key.rsplit("_", 1)[0],
+        "aliases": "[]",
+        "medusa_id": medusa_id, "in_full": 1, "payload_hash": key, "state": state,
         "first_seen": now, "last_synced": None, "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(lg, key)
+    seed_slab_category(lg)
 
 
 def _row(surrogate: str, variation_key: str, color: str = "Black", qty: str = "5") -> CanonicalRow:
     """A canonical product row carrying the STABLE variation_key (as match stamps it)."""
     return CanonicalRow(
-        src_site="x", surrogate_key=surrogate, variation_key=variation_key,
+        src_site="x", surrogate_key=surrogate, variation_key=variation_key, category_pcat_id=SLAB_PCAT,
         variation_id="EXPORT-" + variation_key,   # the churn-prone id; must NOT be the link
         color_name=color, finish_name="Polished", quality_name="A", type_name="Marble",
         title=f"{variation_key} {color}", description="A stone.", handle=f"h-{surrogate}",
@@ -55,8 +58,8 @@ def test_cold_start_converges_with_invariants(tmp_path):
     cfg = load_source("polonine")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
         for i in range(3):
-            _variety(lg, f"slab_marble_v{i}_0001", medusa_id=f"V{i}", state="synced")
-        rows = [_row(f"A{i}", f"slab_marble_v{i}_0001") for i in range(3)]
+            _variety(lg, f"marble__v{i}_0001", medusa_id=f"V{i}", state="synced")
+        rows = [_row(f"A{i}", f"marble__v{i}_0001") for i in range(3)]
         populate_products(lg, rows, cfg)
         populate_inventory(lg, rows, cfg)
 
@@ -73,8 +76,8 @@ def test_cold_start_converges_with_invariants(tmp_path):
 def test_hot_reproduce_is_a_fixed_point(tmp_path):
     cfg = load_source("polonine")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variety(lg, "slab_marble_x_0001", medusa_id="V1")
-        rows = [_row("A1", "slab_marble_x_0001")]
+        _variety(lg, "marble__x_0001", medusa_id="V1")
+        rows = [_row("A1", "marble__x_0001")]
         populate_products(lg, rows, cfg)
         simulate.simulate_sync(lg)                                    # product synced with an id
         before = _snapshot(lg, "pol")
@@ -89,9 +92,9 @@ def test_hot_reproduce_is_a_fixed_point(tmp_path):
 def test_content_change_re_serves_only_the_changed_product(tmp_path):
     cfg = load_source("polonine")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variety(lg, "slab_marble_x_0001", medusa_id="V1")
-        _variety(lg, "slab_marble_y_0001", medusa_id="V2")
-        rows = [_row("A1", "slab_marble_x_0001"), _row("A2", "slab_marble_y_0001")]
+        _variety(lg, "marble__x_0001", medusa_id="V1")
+        _variety(lg, "marble__y_0001", medusa_id="V2")
+        rows = [_row("A1", "marble__x_0001"), _row("A2", "marble__y_0001")]
         populate_products(lg, rows, cfg)
         simulate.simulate_sync(lg)
         # change ONE product's content
@@ -109,12 +112,12 @@ def test_content_change_re_serves_only_the_changed_product(tmp_path):
 def test_medusa_id_churn_never_orphans(tmp_path):
     cfg = load_source("polonine")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variety(lg, "slab_marble_x_0001", medusa_id="V1")
-        rows = [_row("A1", "slab_marble_x_0001")]
+        _variety(lg, "marble__x_0001", medusa_id="V1")
+        rows = [_row("A1", "marble__x_0001")]
         populate_products(lg, rows, cfg)
         simulate.simulate_sync(lg)
         # Medusa re-mints the variation id (clean-start re-sync) -- the export id in the row is now stale
-        lg.execute("UPDATE variation SET medusa_id = 'REMINT-1' WHERE key = 'slab_marble_x_0001'")
+        lg.execute("UPDATE variation SET medusa_id = 'REMINT-1' WHERE key = 'marble__x_0001'")
         populate_products(lg, rows, cfg)                             # re-produce
         assert _no_orphans(lg) == 0                                  # link held via the stable Key
         assert _snapshot(lg, "pol")["POL-A1"][0] == "synced"        # and stayed synced
@@ -125,14 +128,14 @@ def test_medusa_id_churn_never_orphans(tmp_path):
 def test_add_a_scraper_leaves_earlier_ones_untouched(tmp_path):
     pol, mar = load_source("polonine"), load_source("marenostone")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _variety(lg, "slab_marble_x_0001", medusa_id="V1")           # shared backbone
-        _variety(lg, "slab_marble_y_0001", medusa_id="V2")
-        populate_products(lg, [_row("A1", "slab_marble_x_0001")], pol)
+        _variety(lg, "marble__x_0001", medusa_id="V1")           # shared backbone
+        _variety(lg, "marble__y_0001", medusa_id="V2")
+        populate_products(lg, [_row("A1", "marble__x_0001")], pol)
         simulate.simulate_sync(lg)                                    # polonine synced (ids churned)
         pol_before = _snapshot(lg, "pol")
 
         # ADD marenostone -- references the SAME shared variety + a synced one
-        populate_products(lg, [_row("B1", "slab_marble_x_0001"), _row("B2", "slab_marble_y_0001")], mar)
+        populate_products(lg, [_row("B1", "marble__x_0001"), _row("B2", "marble__y_0001")], mar)
 
         assert _snapshot(lg, "pol") == pol_before                    # ISOLATION: polonine byte-identical
         assert _no_orphans(lg) == 0                                  # marenostone products resolve
@@ -152,8 +155,8 @@ def test_partial_ack_then_restart_serves_only_the_unacked(tmp_path):
     cfg = load_source("polonine")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
         for i in range(4):
-            _variety(lg, f"slab_marble_v{i}_0001", medusa_id=f"V{i}")
-        populate_products(lg, [_row(f"A{i}", f"slab_marble_v{i}_0001") for i in range(4)], cfg)
+            _variety(lg, f"marble__v{i}_0001", medusa_id=f"V{i}")
+        populate_products(lg, [_row(f"A{i}", f"marble__v{i}_0001") for i in range(4)], cfg)
         served = [i["external_id"] for i in sync.ready(lg, "products")]   # LEASES all four -> 'syncing'
         assert len(served) == 4
         assert lg.counts("product") == {"syncing": 4}                     # in-flight, not yet acked

@@ -48,9 +48,11 @@ from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 # The files in to_upload/ that are not deliverables: this module publishes them beside the deliverables but does not
 # list them in the deliverables manifest, which no consumer reads them through. The operator checklist (core.layout),
-# the photo process's list of each listing's photos (read by its fixed key, STANDARDISE.PHOTOS_KEY), and the texture
-# fingerprints the produce writes beside 1_variants_full.csv (stages.emit_catalog, read back by the ledger populate).
-UPLOAD_SIDE_FILES = frozenset({"SYNC_STEPS.md", STANDARDISE.PHOTOS_FILE, "variant_image_shas.json"})
+# the photo process's list of each listing's photos and of its defaulted sizes (read by their fixed keys,
+# STANDARDISE.PHOTOS_KEY and DEFAULTED_KEY), and the texture fingerprints the produce writes beside 1_variants_full.csv
+# (stages.emit_catalog, read back by the ledger populate).
+UPLOAD_SIDE_FILES = frozenset({"SYNC_STEPS.md", STANDARDISE.PHOTOS_FILE, STANDARDISE.DEFAULTED_FILE,
+                               "variant_image_shas.json"})
 
 MANIFEST_CONTRACT = "v1"
 MANIFEST_NAME = "manifest.json"

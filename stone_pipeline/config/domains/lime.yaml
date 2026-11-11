@@ -21,9 +21,10 @@ leaf_attributes: [color, finish, quality]
 
 # PLACEHOLDER category model -- replace with Calcport's REAL lime forms. Exactly one default_form; optionally
 # one bulk_form. base_image "" = real photo; pcat is env-specific (attributes.csv), so pcat_env_var null.
+backbone_file: backbone_varieties.json
 categories:
-  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0006", pcat_env_var: null, default_form: true, base_image: ""}
-  - {name: bag,   plural: bags,   label: Bags,   backbone_filename: backbone_bags.json,   shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0006", pcat_env_var: null, bulk_form: true,   base_image: ""}
+  - {name: block, plural: blocks, label: Blocks, shares_variety_vocab: true, fan_out: true, volume_per_kg: "0.0006", pcat_env_var: null, default_form: true, base_image: ""}
+  - {name: bag,   plural: bags,   label: Bags,   shares_variety_vocab: true, fan_out: true, finishes: [], volume_per_kg: "0.0006", pcat_env_var: null, bulk_form: true,   base_image: ""}
 
 # PLACEHOLDER: type words too generic to disambiguate on their own.
 ambiguous_type_words: [lime, calcium]
@@ -78,6 +79,7 @@ finish_phrase_default: "a natural lime surface"
 # Name-cleaning: lime has no granite-style code convention, so no code pattern and no trailing-grade strip
 # unless Calcport's naming needs them.
 name_code_pattern: null
+multicolour_value: null
 trailing_grade_letters: false
 
 # The stone-tuned CV colour palette cannot read lime tones -> texture-colour classification OFF; colour comes

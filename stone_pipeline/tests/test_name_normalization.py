@@ -57,16 +57,14 @@ def test_country_and_variety_keys_route_through_match_key():
         assert loaders_norm(v) == match_key(v) == proj.norm(v) == "united states"
 
 
-def test_title_case_preserves_display_accents_but_identity_still_folds():
-    # DISPLAY: Unicode-aware title-case keeps SOURCE accents and reads as the name.
-    from stone_pipeline.core.text import title_case
-    assert title_case("AZUL MACAÚBAS") == "Azul Macaúbas"            # source accent preserved
-    assert title_case("quartzo vitro rosé") == "Quartzo Vitro Rosé"
-    assert title_case("são GABRIEL") == "São Gabriel"
-    # accent RESTORATION is out of scope -- a missing accent is NOT invented
-    assert title_case("AZUL MACAUBAS") == "Azul Macaubas"
-    # IDENTITY still folds, so the accented and unaccented display names are ONE stone
-    assert match_key("Azul Macaúbas") == match_key("Azul Macaubas")
+def test_a_names_display_is_ascii_and_identity_still_folds():
+    # DISPLAY of a name is its field's rule: cleaned to ASCII, then title-cased (owner O1). title_case itself is
+    # casing only and decides no alphabet; IDENTITY folds, so the accented and plain spellings are ONE stone.
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    assert fk.display(fk.VARIATION_NAME, "AZUL MACA\u00daBAS") == "Azul Macaubas"
+    assert fk.display(fk.VARIATION_NAME, "quartzo vitro ros\u00e9") == "Quartzo Vitro Rose"
+    assert fk.display(fk.VARIATION_NAME, "s\u00e3o GABRIEL") == "Sao Gabriel"
+    assert match_key("Azul Maca\u00fabas") == match_key("Azul Macaubas")
 
 
 def test_title_case_lowercases_connectors_except_leading():
@@ -78,9 +76,12 @@ def test_title_case_lowercases_connectors_except_leading():
 
 
 def test_alias_dedup_is_accent_and_case_insensitive():
-    # aliases differing only by accent/case collapse to one, and the KEPT display keeps its accent
+    # aliases differing only by accent/case collapse to one, and the kept alias is its clean ASCII name
+    from functools import partial
     from stone_pipeline.core.text import clean_alias_list
-    assert clean_alias_list("Rosa", ["Rosé", "rose", "ROSÉ"]) == ["Rosé"]
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
+    assert clean_alias_list("Rosa", ["Ros\u00e9", "rose", "ROS\u00c9"], clean) == (["Rose"], [])
 
 
 def test_match_key_decomposed_accent_does_not_fork_identity():
@@ -135,3 +136,17 @@ def test_the_ascii_fast_path_is_exact():
     for n in (1, 2):
         for s in map("".join, itertools.product(chars, repeat=n)):
             assert match_key(s) == match_key(_prepared(s)), repr(s)
+
+
+def test_one_slug_rule_for_handles_keys_and_identity():
+    # A slug is the name's key words joined (W4), so a slug, a Key and the match key read a name one way: a curly
+    # and a straight apostrophe, and '&' and 'and', give one Key and one handle.
+    from stone_pipeline.core.text import slugify
+    from stone_pipeline.reference.loaders.identity import variety_identity
+    from stone_pipeline.phase1.variety_key import new_key
+    assert new_key("Marble", "Valle D’Aosta") == new_key("Marble", "Valle D'Aosta")
+    assert new_key("Marble", "Black & Gold") == new_key("Marble", "Black and Gold")
+    assert slugify("Black & Gold Polished") == "black-and-gold-polished"
+    assert slugify("Absolute Black™") == "absolute-black"
+    key = "granite__x_1"
+    assert variety_identity(key, "Valle D’Aosta") == variety_identity(key, "Valle D'Aosta")

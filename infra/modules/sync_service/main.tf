@@ -256,6 +256,9 @@ resource "aws_ecs_task_definition" "this" {
       secrets          = [{ name = "SCRAPER_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
       mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
+      # a stop (a roll, the scale to 0 before the store migration) lets the ledger's last snapshot save finish (it
+      # may wait 60 s, snapshot.py), not the Fargate default of about 30 s: the Fargate maximum, as the config container
+      stopTimeout = 120
     },
     {
       name         = "config"

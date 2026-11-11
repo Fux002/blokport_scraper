@@ -16,60 +16,44 @@ from stone_pipeline.config.categories import category
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.core.text import match_key
-from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso
+from stone_pipeline.io.variety_icons import ICON_SIDECAR, icon_key
+from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso, variation_icons
 from stone_pipeline.ledger.payloads import product_hash, variation_hash
+from stone_pipeline.phase1.variety_key import variety_key_problem
 from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_str
 
-def _image_models(path: str | Path | None = None) -> dict[str, str]:
-    """{Key: model} from catalog_source/image_model.csv, the provenance audit of which generator made each
-    variant texture. Absent/corrupt -> empty, so a missing audit degrades to no provenance rather than
-    failing a produce. Pure + cheap (one small CSV), so it is safe to read per write-through. `path`
-    overrides the default location (tests; Paths is frozen so it cannot be monkeypatched)."""
-    from stone_pipeline.config.settings import SETTINGS
-    path = Path(path) if path else SETTINGS.paths.catalog_source_dir / "image_model.csv"
-    out: dict[str, str] = {}
-    try:
-        with path.open(encoding="utf-8-sig", newline="") as handle:
-            for r in csv.DictReader(handle):
-                key, model = (r.get("Key") or "").strip(), (r.get("model") or "").strip()
-                if key and model:
-                    out[key] = model
-    except (OSError, csv.Error):
-        return {}
+def read_icon_sidecar(path: Path) -> dict[str, list[dict]] | None:
+    """{Key: [icon row]} from emit's side file, each row a `variation_category_image` row (category handle, the pair's
+    S3 key, its ETag). None when there is no file: S3 was not listed (CI, local), so the stored icons stand and nothing
+    is served from a guess. A malformed file, a category name the pack does not have or an empty ETag raises."""
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        raise ValueError(f"{path.name}: expected {{Key: {{category name: ETag}}}}")
+    out: dict[str, list[dict]] = {}
+    for key, by_category in data.items():
+        rows = []
+        for name, etag in by_category.items():
+            if not isinstance(etag, str) or not etag:
+                raise ValueError(f"{path.name}: {key} {name} has no ETag")
+            s3_key = icon_key(key, name)   # refuses a Key the parser refuses and a name that is no pack category's
+            rows.append({"category_handle": category(name).handle, "s3_key": s3_key, "etag": etag})
+        out[key] = rows
     return out
 
 
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
-    """Reflect the produced 1_variants_full.csv onto the variation table: update each
-    variant's content (name, aliases, image, volume) and mark it in_full=1; insert
-    any new variant as pending (no Medusa id yet). Export-only rows (junk,
-    consolidated-away) are reset to in_full=0 so they never render. medusa_id, state,
-    branch, type and first_seen are preserved on existing rows (the bootstrap set
-    them from the export); only the produced content moves."""
-    _key, _name, _image, _aliases, _volume = _VARIANTS_FULL_COLS
+    """Reflect a produced variety file (1_variants_full.csv, or the base on a reset) onto the variation table: write
+    each variety's content (type, name, aliases) and its icons, and mark it in_full=1; insert a new variety as pending
+    (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state and
+    first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves."""
+    _key, _name, _type, _aliases = _VARIANTS_FULL_COLS
     now = now_iso()
-    # {Key: image content fingerprint} emit wrote next to 1_variants_full.csv from the S3 listing. Folded
-    # into the payload_hash below so a REGENERATED texture (same {Key}.png URL, new bytes) re-serves; a
-    # URL-only hash misses it. Tolerant of absence (CI/local, S3 unreachable) -> no fingerprint, no churn.
-    shas: dict[str, str] = {}
-    sha_path = Path(path).parent / "variant_image_shas.json"
-    if sha_path.exists():
-        try:
-            loaded = json.loads(sha_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                shas = loaded
-        except (json.JSONDecodeError, OSError):
-            shas = {}   # a corrupt sidecar must never crash the write-through; degrade to no fingerprint
-    # {Key: generator} from the committed provenance audit, so the ledger records WHICH model made each
-    # texture (design section: image_model drives the once-only quality upgrade). Tolerant of absence or a
-    # corrupt file -> no provenance, never a crash. NOT part of payload_hash: the generator is our own
-    # bookkeeping, not content Medusa receives, so recording it must never re-serve a variant.
-    models = _image_models()
-    # the type is not in the produced file: it is filled on the row (fill_variation_types), and the hash covers it
-    types = {r["key"]: r["type"] for r in ledger.execute("SELECT key, type FROM variation")}
+    sidecar = read_icon_sidecar(Path(path).parent / ICON_SIDECAR)
+    stored = variation_icons(ledger) if sidecar is None else {}
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
     with Path(path).open(encoding="utf-8-sig", newline="") as handle:
@@ -77,31 +61,18 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
             key = (r.get(_key) or "").strip()
             if not key:
                 continue
-            name = r.get(_name) or ""
-            image_url = r.get(_image) or ""
-            image_sha256 = shas.get(key) or None
+            if (problem := variety_key_problem(key)) is not None:
+                raise ValueError(f"{Path(path).name}: {key!r} is not a variety Key ({problem})")
+            name, type_ = r.get(_name) or "", r.get(_type) or ""
             aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
-            volume = r.get(_volume) or ""
-            # the Key prefix is the category name; validate against the ACTIVE PACK's registry (pack-driven),
-            # not a hardcoded stone set, so a non-stone pack's categories are kept, not silently dropped to "".
-            head = key.split("_", 1)[0]
-            branch = head if category(head) else ""
-            # the hash is the served payload plus the texture's fingerprint (payloads.variation_hash): a texture
-            # re-made at the stable URL re-serves; the volume is not served, so it never does
-            ph = variation_hash({"branch": branch, "type": types.get(key, ""), "name": name,
-                                 "aliases": json.dumps(aliases), "image_url": image_url,
-                                 "image_sha256": image_sha256})
+            icons = sidecar.get(key, []) if sidecar is not None else stored.get(key, [])
+            ph = variation_hash({"type": type_, "name": name, "aliases": json.dumps(aliases)}, icons)
             ledger.execute(
-                "INSERT INTO variation (key, branch, type, name, aliases, image_url, "
-                "image_sha256, image_model, volume, medusa_id, in_full, payload_hash, "
+                "INSERT INTO variation (key, type, name, aliases, medusa_id, in_full, payload_hash, "
                 "state, first_seen, last_synced, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET name = excluded.name, "
-                "aliases = excluded.aliases, image_url = excluded.image_url, "
-                "image_sha256 = excluded.image_sha256, "
-                "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
-                # provenance refresh: adopt a newly recorded generator, never blank one we already have.
-                "image_model = COALESCE(excluded.image_model, variation.image_model), "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET type = excluded.type, name = excluded.name, "
+                "aliases = excluded.aliases, in_full = 1, payload_hash = excluded.payload_hash, "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
                 # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
                 # 'retiring' variety that reappears in the produced set (its exclusion was cleared) must
@@ -121,10 +92,13 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "ELSE variation.retry_after END, "
                 "abandoned_at = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
                 "ELSE variation.abandoned_at END",
-                (key, branch, "", name, json.dumps(aliases), image_url, image_sha256,
-                 models.get(key), volume,
-                 None, ph, "pending", now, None, now, now),
+                (key, type_, name, json.dumps(aliases), None, ph, "pending", now, None, now, now),
             )
+            if sidecar is not None:   # the listing is the icons' authority: a pair gone from S3 is gone here
+                ledger.execute("DELETE FROM variation_category_image WHERE key = ?", (key,))
+                ledger.executemany(
+                    "INSERT INTO variation_category_image (key, category_handle, s3_key, etag) VALUES (?, ?, ?, ?)",
+                    [(key, i["category_handle"], i["s3_key"], i["etag"]) for i in icons])
             n += 1
     # E5: a re-minted variety must not carry a stale variation-tombstone, or Medusa's /removed pull would
     # delete the freshly re-created variety. Clear any variation tombstone now back in the produced set.
@@ -144,50 +118,21 @@ def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:
     return row["key"] if row else None
 
 
-def _category_name_for(ledger: Ledger, pcat_id: str | None) -> str | None:
-    """Store the category by canonical NAME (re-seed safe); the row carries the
-    pcat id, so reverse-map it through the seeded attribute table."""
+def _category_handle_for(ledger: Ledger, pcat_id: str | None) -> str | None:
+    """The product's category HANDLE (D11, re-seed safe): the row carries the pcat id, reverse-mapped through the
+    seeded category attribute to its label, whose pack category gives the handle. A label no pack category has
+    raises: a product is never stored under a guessed category."""
     if not pcat_id:
         return None
     row = ledger.execute(
         "SELECT value FROM attribute WHERE category = 'category' AND medusa_id = ? LIMIT 1",
         (pcat_id,),
     ).fetchone()
-    return row["value"] if row else None
-
-
-def fill_variation_types(ledger: Ledger) -> int:
-    """Fill the canonical stone `type` name on variations that lack it, recovered from
-    the Key's type slug ({branch}_{slug(type)}_{slug(name)}_{uuid}) matched against the
-    seeded `type` attribute vocabulary, longest match first (the same recovery
-    tree_build uses). This is the variation payload's last empty field (sync prereq).
-    Returns the number filled."""
-    # Key on match_key (the shared normalizer) so a Key slug (semi_precious_stone) matches a
-    # hyphenated vocab value (Semi-Precious Stone); a separator/case/accent never forks the type.
-    types = {match_key(r["value"]): r["value"]
-             for r in ledger.execute("SELECT value FROM attribute WHERE category = 'type'")}
-    if not types:
-        return 0
-    now = now_iso()
-    n = 0
-    for v in ledger.execute("SELECT key, branch, name, aliases, image_url, image_sha256 FROM variation "
-                            "WHERE type IS NULL OR type = ''").fetchall():
-        parts = v["key"].split("_")[1:-1]   # drop the branch prefix and the trailing uuid
-        found = None
-        for i in range(len(parts), 0, -1):
-            cand = match_key("_".join(parts[:i]))   # normalize the slug the same way as the vocab
-            if cand in types:
-                found = types[cand]
-                break
-        if found:
-            # the type is served, so it is in the hash; a synced-but-untyped variation was HELD (ready_variations
-            # gates on a non-empty type), so filling the type RE-SERVES it: synced -> dirty. pending/dirty stay as-is.
-            ledger.execute(
-                "UPDATE variation SET type = ?, payload_hash = ?, "
-                "state = CASE WHEN state = 'synced' THEN 'dirty' ELSE state END, "
-                "updated_at = ? WHERE key = ?", (found, variation_hash({**dict(v), "type": found}), now, v["key"]))
-            n += 1
-    return n
+    if row is None:
+        return None
+    if (cat := category(row["value"])) is None:
+        raise ValueError(f"category {row['value']!r} (pcat {pcat_id}) is no pack category")
+    return cat.handle
 
 
 def _photo_ready(r: CanonicalRow, prev, cfg: SourceConfig) -> bool:
@@ -221,7 +166,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # data, bootstrap) still resolves and a re-populate never stomps a good link with NULL.
         variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
             or (prev["variation_key"] if prev else None)
-        category = _category_name_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
+        category = _category_handle_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
         photo_ready = _photo_ready(r, prev, cfg)
         record = {
             "sku": sku,

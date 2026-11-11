@@ -13,7 +13,6 @@ from stone_pipeline.reference.loaders.common import env, norm
 @dataclass
 class BackboneVariety:
     variant: str
-    category: str
     stone_type: str
     colors: list[str]
     finishes: list[str]
@@ -28,6 +27,14 @@ class Backbone:
     # by stone_type (section 5A blocking).
     by_norm_name: dict[str, list[BackboneVariety]] = field(default_factory=dict)
     by_norm_alias: dict[str, list[BackboneVariety]] = field(default_factory=dict)
+    # phase 1: every post carries its variety's Key, so a variety's own post is found by Key, never by a name
+    # another post may also carry as an alias
+    by_key: dict[str, BackboneVariety] = field(default_factory=dict)
+
+    def variety_of(self, key: str | None, name: str, stone_type: str | None = None) -> Optional[BackboneVariety]:
+        """The variety's own post: the one carrying its Key; the name (then alias) lookup only for a variety with no
+        keyed post. File order never decides which post a variety reads."""
+        return self.by_key.get(key or "") or self.lookup(name, stone_type=stone_type)
 
     def lookup_all(self, name: str) -> list[BackboneVariety]:
         key = norm(name)
@@ -99,7 +106,7 @@ class Backbone:
             if (variety_norm, type_norm) in matched or not type_norm:
                 continue                               # already grown above, or an unusable type-less key
             created = BackboneVariety(
-                variant=variety_norm.title(), category="", stone_type=type_norm.title(),
+                variant=variety_norm.title(), stone_type=type_norm.title(),
                 colors=list(dict.fromkeys(adds.get("color", []))),
                 finishes=list(dict.fromkeys(adds.get("finish", []))),
                 qualities=list(dict.fromkeys(adds.get("quality", []))), aliases=[])
@@ -124,18 +131,17 @@ class Backbone:
         return len(self.by_norm_name)
 
 
-def _split_aliases(raw_aliases: list) -> list[str]:
-    """Backbone aliases are a list of strings, some containing comma-joined
-    surface forms (e.g. 'Preto Agata, Agate Black'). Flatten into single forms."""
-    out: list[str] = []
-    for entry in raw_aliases or []:
-        if not isinstance(entry, str):
-            continue
-        for piece in entry.split(","):
-            piece = piece.strip()
-            if piece:
-                out.append(piece)
-    return out
+def read_posts(path: Path) -> list[dict]:
+    """The posts of a backbone file ({"posts": [...]}) or an additions file (a bare list): the ONE reader every
+    backbone and additions read goes through. A HELD post is skipped: an untyped addition has neither a type nor a
+    phase 1 Key (it never gets a guessed type), so it is listed in the file and never read as a variety."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    posts = doc.get("posts", []) if isinstance(doc, dict) else doc
+    return [post for post in posts if not _held(post)]
+
+
+def _held(post: dict) -> bool:
+    return not (post.get("key") or "").strip() and not (post.get("stone_type") or "").strip()
 
 
 def load_backbone(path: Path | None = None) -> Backbone:
@@ -147,22 +153,22 @@ def load_backbone(path: Path | None = None) -> Backbone:
             "catalog_source/<pack>/ backbone JSON; a non-stone pack never falls back to stone's data. Add the "
             "pack's backbone file before running it.")
     backbone = Backbone()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    posts = data.get("posts", data if isinstance(data, list) else [])
-    for post in posts:
+    for post in read_posts(path):
         variant_name = (post.get("variant") or "").strip()
         if not variant_name:
             continue
         variety = BackboneVariety(
             variant=variant_name,
-            category=(post.get("category") or "").strip(),
             stone_type=(post.get("stone_type") or "").strip(),
             colors=[c for c in (post.get("color") or []) if c],
             finishes=[f for f in (post.get("finishes") or []) if f],
             qualities=[q for q in (post.get("qualities") or []) if q],
-            aliases=_split_aliases(post.get("aliases") or []),
+            # one alias per entry, as the writers' alias rule committed it (clean_alias_list)
+            aliases=list(post.get("aliases") or []),
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
+        if key := (post.get("key") or "").strip():
+            backbone.by_key[key] = variety
         for alias in variety.aliases:
             # an alias that folds to an empty key (a non-Latin script only) is no usable name: under ""
             # it would pool every such variety into one bucket

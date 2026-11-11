@@ -170,11 +170,11 @@ def fill_colors(backbone_paths: list[Path] | None = None,
     known-colour map READ-ONLY (so a mirror inherits an already-merged sibling's colour). `fetch` is the
     image byte-getter (injectable for tests). Returns counts."""
     from stone_pipeline.io import imagestore
-    paths = backbone_paths or [c.backbone_path for c in __import__(
-        "stone_pipeline.config.settings", fromlist=["CATEGORIES"]).CATEGORIES]
+    paths = backbone_paths or [SETTINGS.paths.backbone_json]
     fallback_color = active_pack().fallback_color   # the pack's generic colour ('Natural' for stone)
     product_images = product_images or {}
     fetch = fetch or _fetch_product_image
+    # the raw documents, not read_posts: this edits the files in place, held posts included (is_blank skips them)
     docs = {p: json.loads(Path(p).read_text(encoding="utf-8")) for p in paths if Path(p).exists()}
     ref_docs = [json.loads(Path(p).read_text(encoding="utf-8"))
                 for p in (reference_paths or []) if Path(p).exists()]
