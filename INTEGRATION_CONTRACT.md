@@ -46,8 +46,12 @@ Item (`ledger/sync.py` `failures`):
 ```
 `state` per `type`: `variations`/`products` rows in state `gap_held`; `removed` tombstones stuck in state `dead`;
 `inventory` stock rows at the attempt cap, state `dead`. Abandoned rows of every type are listed too, with
-`state` `"abandoned"`. The lanes come in that order (variations, products, removed, inventory), each newest-first
-and each capped at `limit` (default 200, via `?limit=`), so the list can hold up to four times `limit` items.
+`state` `"abandoned"`. A `products` row can also carry state `photo_unpublished` (additive, ledger v16): a product a
+change waits on (pending or dirty) held back because it links a standardised photo the photos side has not published,
+`error` `photo not published: N files (<first key>)`. It is NOT a dead-letter: it is never served, it clears itself
+when a produce finds the files published, and a requeue (or a reset) cannot revive it. The lanes come in that order
+(variations, products dead-letters, products held by an unpublished photo, removed, inventory), each newest-first
+and each capped at `limit` (default 200, via `?limit=`), so the list can hold up to five times `limit` items.
 
 ## S-3 -- GET /sync/v1/status  (sync server :8723)  -- READ THE GOTCHAS
 
@@ -60,7 +64,8 @@ Response:
   "gap":         { ... },
   "removed":     { "<state>": <count>, ... },   // dead-letters are state 'dead' HERE (NOT gap_held)
   "inventory":   { "total": <int>, "delta": <int>, "dead": <int>, "waiting": <int> },   // NOT a state histogram: NO gap_held key
-  "variation_reconcile": { "orphaned": <int> } }   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "variation_reconcile": { "orphaned": <int> },   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "product_photos": { "unpublished": <int> } }    // additive (v16): the S-2 photo_unpublished items; not a dead-letter, so not in the badge sum below
 ```
 
 Three things that make `status.scraper[type].gap_held` read wrong if assumed:
@@ -87,7 +92,8 @@ them straight through (`ledger/server.py` `dispatch`, `ledger/sync.py` `abandon_
 
 Body: `{ "type": "variations" | "products" | "removed" | "inventory", "external_id": "<str>" }`.
 A row is abandonable only in its dead-letter state: `variations`/`products` in `gap_held`, `removed` in `dead`,
-`inventory` at the attempt cap.
+`inventory` at the attempt cap. A `products` row in state `photo_unpublished` (S-2) is not a dead-letter, so abandoning
+it answers `409`; it clears itself once its photos are published.
 
 | Status | When | Body |
 |---|---|---|

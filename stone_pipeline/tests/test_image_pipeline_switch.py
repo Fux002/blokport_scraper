@@ -157,7 +157,7 @@ def _product(standard_photo):
 
 def _written(path, row, cfg):
     """(stored photo_ready, stock, stock reason) after the full produce's write of `row` (product, then its stock)."""
-    assert writethrough.record_source([row], [], cfg, mode=OutputMode.FULL, path=path)
+    assert writethrough.record_source([row], [], cfg, mode=OutputMode.FULL, published=frozenset(), path=path)
     with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         sku = emit._sku(row, cfg)
         product, stock = lg.get("product", "sku", sku), lg.get("inventory", "sku", sku)
