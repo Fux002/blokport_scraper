@@ -305937,7 +305937,7 @@
     },
     {
       "variant_id": 6560,
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Slabs",
       "stone_type": "Marble",
       "color": [
@@ -305968,7 +305968,6 @@
         "A"
       ],
       "aliases": [
-        "Super White Marble",
         "Brazil Arabescato Marble",
         "Brazil Arabescato",
         "Yudu Hui"
@@ -478083,7 +478082,7 @@
     },
     {
       "variant_id": 10124,
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Slabs",
       "stone_type": "Onyx",
       "color": [
@@ -493559,6 +493558,47 @@
         }
       ],
       "key": "slab_quartzite_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6"
+    },
+    {
+      "variant_id": 12194,
+      "variant": "Brazilian White",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Leathered",
+        "Bush Hammered and Brushed",
+        "Chiseled",
+        "Antique",
+        "Flamed and Waterjet",
+        "Sandblasted and Brushed",
+        "Flamed and Brushed",
+        "Raw",
+        "Flamed",
+        "Sawn Cut",
+        "Honed",
+        "Bush Hammered",
+        "Sandblasted",
+        "Polished",
+        "Brushed and Tumbled",
+        "Tumbled",
+        "Waterjet",
+        "Split Face",
+        "Brushed"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Quartzite"
+      ],
+      "image_file": "slab_quartzite_brazilian_white_f514e927-983d-50ae-9aaa-98118cdea823.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_brazilian_white_f514e927-983d-50ae-9aaa-98118cdea823"
     },
     {
       "variant_id": 203,

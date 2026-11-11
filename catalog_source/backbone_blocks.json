@@ -252278,7 +252278,7 @@
     },
     {
       "variant_id": 6560,
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
@@ -252302,7 +252302,6 @@
         "A"
       ],
       "aliases": [
-        "Super White Marble",
         "Brazil Arabescato Marble",
         "Brazil Arabescato",
         "Yudu Hui"
@@ -396417,7 +396416,7 @@
     },
     {
       "variant_id": 10124,
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Blocks",
       "stone_type": "Onyx",
       "color": [
@@ -475983,6 +475982,36 @@
     },
     {
       "variant_id": 12194,
+      "variant": "Brazilian White",
+      "category": "Blocks",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Quartzite"
+      ],
+      "image_file": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb"
+    },
+    {
+      "variant_id": 202,
       "variant": "Super White",
       "category": "Blocks",
       "stone_type": "Quartzite",
@@ -476003,10 +476032,9 @@
         "A"
       ],
       "aliases": [
-        "Brazilian White Quartzite",
         "Super White Quartzite"
       ],
-      "image_file": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb.png",
+      "image_file": "block_quartzite_super_white_131d09ad-addf-5ce6-a46a-c66ca1efc893.png",
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
@@ -476016,7 +476044,7 @@
           "reason": "stone_suffix"
         }
       ],
-      "key": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb"
+      "key": "block_quartzite_super_white_131d09ad-addf-5ce6-a46a-c66ca1efc893"
     },
     {
       "variant_id": 12196,

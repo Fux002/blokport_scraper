@@ -299329,7 +299329,7 @@
     },
     {
       "key": "tile_marble_super_white_bea4f3ba-a202-540e-9922-5722e8124efa",
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Tiles",
       "stone_type": "Marble",
       "color": [
@@ -299360,7 +299360,6 @@
         "A"
       ],
       "aliases": [
-        "Super White Marble",
         "Brazil Arabescato Marble",
         "Brazil Arabescato",
         "Yudu Hui"
@@ -467831,7 +467830,7 @@
     },
     {
       "key": "tile_onyx_super_white_bea4f3ba-a202-540e-9922-5722e8124efa",
-      "variant": "Super White",
+      "variant": "Brazilian White",
       "category": "Tiles",
       "stone_type": "Onyx",
       "color": [
@@ -482914,6 +482913,46 @@
           "reason": "stone_suffix"
         }
       ]
+    },
+    {
+      "key": "tile_quartzite_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008",
+      "variant": "Brazilian White",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Leathered",
+        "Bush Hammered and Brushed",
+        "Chiseled",
+        "Antique",
+        "Flamed and Waterjet",
+        "Sandblasted and Brushed",
+        "Flamed and Brushed",
+        "Raw",
+        "Flamed",
+        "Sawn Cut",
+        "Honed",
+        "Bush Hammered",
+        "Sandblasted",
+        "Polished",
+        "Brushed and Tumbled",
+        "Tumbled",
+        "Waterjet",
+        "Split Face",
+        "Brushed"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Quartzite"
+      ],
+      "image_file": "tile_quartzite_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": []
     },
     {
       "key": "tile_quartzite_cristallo_quartzite_a003aaf5-e185-542a-9d9c-2a7bf9e0a78f",
