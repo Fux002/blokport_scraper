@@ -47,7 +47,7 @@ from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.run import OutputMode, run_source
-from stone_pipeline.stages import magnitude_drift
+from stone_pipeline.stages import images, magnitude_drift
 from stone_pipeline.stages.product_state import sku_from
 from stone_pipeline.tests.test_ledger_writethrough import _seed_ledger_like_the_sync_server
 
@@ -208,6 +208,7 @@ def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
     ledger_path = base / "scenario.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     _seed_ledger_like_the_sync_server(ledger_path, base)
     out = base / "out"
     digests = {}
@@ -216,9 +217,21 @@ def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
         digests[f"MANIFEST:{source}"] = _sha(json.dumps(manifest.to_dict(), sort_keys=True, default=str).encode())
     for path in sorted(p for p in out.rglob("*") if p.is_file()):
         digests[str(path.relative_to(out))] = _file_digest(path)
+    _assert_no_photo_held(ledger_path)
     digests.update(_ledger_digests(ledger_path))
     digests["magnitude_baselines"] = _file_digest(magnitude_drift._path())
     return digests
+
+
+def _assert_no_photo_held(ledger_path: Path) -> None:
+    """The fixtures publish no standardised photo and link none (their passthrough pool read finds none), so no product
+    of a scenario is held back by an unpublished one: the golden pins served products, never ones the guard stopped."""
+    con = sqlite3.connect(ledger_path)
+    try:
+        total, held = con.execute("SELECT COUNT(*), COUNT(photo_unpublished) FROM product").fetchone()
+    finally:
+        con.close()
+    assert total > 0 and held == 0, f"{held} of {total} products carry photo_unpublished"
 
 
 def _full_run(data_dir, known=None):

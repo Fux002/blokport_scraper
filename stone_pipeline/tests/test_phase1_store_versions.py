@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from stone_pipeline.config import store
-from stone_pipeline.ledger.db import Ledger, LedgerError
+from stone_pipeline.ledger.db import PHASE1_VERSION, SCHEMA_VERSION, Ledger, LedgerError
 
 
 def _columns(conn, table):
@@ -19,7 +19,7 @@ def _columns(conn, table):
 
 def test_a_new_ledger_is_v15_one_row_per_variety_with_its_category_icons(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= PHASE1_VERSION == 15
         variation = _columns(lg.conn, "variation")
         assert not variation & {"branch", "image_url", "image_sha256", "image_model", "volume"}
         assert _columns(lg.conn, "variation_category_image") == {"key", "category_handle", "s3_key", "etag"}
