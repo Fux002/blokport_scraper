@@ -29,6 +29,13 @@ locals {
 
   bucket_arn = "arn:aws:s3:::${var.staging_bucket}"
   object_arn = "arn:aws:s3:::${var.staging_bucket}/*"
+  # the phase 1 stores (stone_pipeline/ledger/snapshot.py: snapshot_key, config_key, state_writeback_key, the `.v2`
+  # generation): the only objects whose versions the store migration may delete (its L2 re-run, plan SC-3 4a M1)
+  phase1_store_arns = [for key in [
+    "${var.target_env}/scraper/ledger/${var.target_env}.v2.db",
+    "${var.target_env}/scraper/config/config.v2.db",
+    "${var.target_env}/scraper/state/alias_writeback.v2.csv",
+  ] : "arn:aws:s3:::${var.staging_bucket}/${key}"]
 
   has_secrets = length(var.ssm_secret_arns) > 0
 }
@@ -144,9 +151,18 @@ resource "aws_iam_role" "task" {
 
 data "aws_iam_policy_document" "task" {
   statement {
-    sid       = "StagingBucketRW"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    sid = "StagingBucketRW"
+    # GetObjectVersion: the store migration (RUN_MODE=phase1-migrate) reads its inputs and the step-1 stores BY
+    # VersionId. Read-only.
+    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:DeleteObject"]
     resources = [local.object_arn]
+  }
+  statement {
+    # PERMANENTLY destroys a version, and versions are the restore path: so ONLY the three phase 1 store keys, for
+    # the migration's L2 re-run (delete a written `.v2` by its recorded VersionId before running again)
+    sid       = "Phase1StoreVersionDelete"
+    actions   = ["s3:DeleteObjectVersion"]
+    resources = local.phase1_store_arns
   }
   statement {
     sid       = "StagingBucketList"
