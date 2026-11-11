@@ -241,7 +241,8 @@ GET `/sync/v1/inventory` item payloads:
   gone listing with its reason.
 - Never deleted: the scraper never sends a tombstone for a gone listing. The purge (S-1) skips it, a vendor removal
   unpublishes every product as `delisted` instead of tombstoning, and a hard or factory reset and a seed variety drop
-  spare it. A reset re-serves a spared gone listing once from zero (Medusa is wiped too on a factory reset).
+  spare it. A reset re-serves a spared gone listing once from zero (Medusa is wiped too on a factory reset). A variety
+  a gone listing shows cannot be retired or unminted (409, naming the gone SKUs).
 - Condition of done (505): the backend lanes never unpublish or hard-delete a `sold_out` listing. The inventory lane
   stops rejecting it when it is not on sale, and `held` joins the hide set. The scraper half reaches a pull only with or
   after that change.
