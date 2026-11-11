@@ -87,3 +87,30 @@ def test_a_held_product_emitted_again_serves_its_real_stock(tmp_path, monkeypatc
         populate_inventory(lg, [_row("1", qty=5)], CFG)             # the next produce emits it again
         assert sync.ready_inventory(lg) == [{"external_id": _sku("1"),
                                              "payload": {"sku": _sku("1"), "quantity": 5, "made_to_order": False}}]
+
+
+def _decide(rows, held_rows, known, caplog):
+    import logging
+    from types import SimpleNamespace
+    from stone_pipeline import run as run_module
+    from stone_pipeline.stages.validate import ValidationResult
+    ctx = SimpleNamespace(run_log=logging.LoggerAdapter(logging.getLogger("held-guard"), {}), source_cfg=CFG,
+                          scrape_path=None, manifest=SimpleNamespace(totals={}))
+    with caplog.at_level("WARNING"):
+        return run_module.decide_delist(ctx, rows, ValidationResult(rejects=held_rows), known)
+
+
+def test_a_run_that_holds_too_much_of_the_live_catalogue_hides_none_and_says_so(caplog):
+    # a broken stage that rejects every row must not take the whole catalogue off sale: the hide passes the SAME
+    # mass-delist guard as a delist (delist_max_fraction of the live catalogue), counted together with it
+    rows = [_row(str(i)) for i in range(10)]
+    delist = _decide(rows, rows, _known(*(str(i) for i in range(10))), caplog)
+    assert delist.held == [] and delist.discontinued == []
+    assert any("refused" in r.getMessage() and "hid" in r.getMessage() for r in caplog.records)
+
+
+def test_a_run_that_holds_a_few_live_products_hides_them(caplog):
+    rows = [_row(str(i)) for i in range(10)]
+    delist = _decide(rows, rows[:2], _known(*(str(i) for i in range(10))), caplog)
+    assert delist.held == [(_sku("0"), "h-0"), (_sku("1"), "h-1")]
+    assert not any("refused" in r.getMessage() for r in caplog.records)
