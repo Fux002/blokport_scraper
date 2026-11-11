@@ -25,6 +25,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from stone_pipeline.phase1.variety_key import variety_key_problem
+
 FIXTURE = Path(__file__).parent / "fixtures" / "wood"
 REPO = Path(__file__).resolve().parents[2]
 FEED = json.loads((FIXTURE / "workspace" / "wood_feed.json").read_text(encoding="utf-8"))
@@ -148,7 +150,7 @@ def test_the_catalog_carries_only_wood(wood, products):
     upload = wood / "to_upload" / "development"
     variants = _csv(upload / "1_variants_full.csv")
     assert variants and {v["Name"] for v in variants} == {r["name"] for r in FEED}
-    assert all(v["Key"].split("_", 1)[0] in ("plank", "beam", "panel") for v in variants)
+    assert all(variety_key_problem(v["Key"]) is None for v in variants)        # phase 1 Keys: one per variety
     combos = _csv(upload / "2_valid_combinations.csv")
     wood_pcats = {r["sourceid"] for r in _csv(wood / "from_medusa" / "development" / "attributes.csv")
                   if r["category"] == "category"}

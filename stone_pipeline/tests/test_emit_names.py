@@ -9,7 +9,7 @@ from stone_pipeline.stages import emit_catalog
 
 
 def _row(name, aliases=""):
-    return {"Key": "slab_granite_x_1", "Name": name, "Aliases": aliases}
+    return {"Key": "granite__x_1", "Name": name, "Aliases": aliases}
 
 
 def test_an_accented_name_is_written_clean():
@@ -19,7 +19,7 @@ def test_an_accented_name_is_written_clean():
 
 
 def test_a_name_with_no_ascii_form_stops_emit_naming_the_key():
-    with pytest.raises(UnfoldableName, match="slab_granite_x_1"):
+    with pytest.raises(UnfoldableName, match="granite__x_1"):
         emit_catalog._write_names(_row("Nero \u9ed1 Marquina"))
 
 

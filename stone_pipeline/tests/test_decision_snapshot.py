@@ -58,7 +58,7 @@ _NO_OPERATOR_DECISION = {
 # Every write route that changes the ledger, with a body that reaches its ledger op.
 _LEDGER_WRITES = {
     ("POST", ("reset",)): {}, ("POST", ("delist",)): {"sources": ["polonine"]}, ("POST", ("purge",)): {},
-    ("DELETE", ("sources", "{name}")): None, ("POST", ("variations", "unmint")): {"keys": ["slab_granite_x_1"]},
+    ("DELETE", ("sources", "{name}")): None, ("POST", ("variations", "unmint")): {"keys": ["granite__x_1"]},
     ("POST", ("variations", "{key}", "{verb}")): None,
 }
 
@@ -107,7 +107,7 @@ def test_every_self_snapshotting_route_is_proven_above():
 @pytest.mark.parametrize("route", sorted(_LEDGER_WRITES, key=str))
 def test_every_ledger_write_route_goes_through_the_one_ledger_op(monkeypatch, one_source, route):
     method, pattern = route
-    segments = ["polonine" if t == "{name}" else "slab_granite_x_1" if t == "{key}" else "retire" if t == "{verb}"
+    segments = ["polonine" if t == "{name}" else "granite__x_1" if t == "{key}" else "retire" if t == "{verb}"
                 else t for t in pattern]
     reached: list[str] = []
     monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: reached.append(name) or _canned_ledger_op(name, work))

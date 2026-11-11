@@ -24,7 +24,7 @@ from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import load_backbone
-from stone_pipeline.config.categories import CATEGORIES
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, match_variation
 from stone_pipeline.stages.curate.context import CurationResult
 from stone_pipeline.stages.curate.minting import leaf_updates
@@ -63,14 +63,9 @@ def test_curate_proposes_an_alias_exactly_when_the_writeback_would_learn_it(monk
 def test_near_meta_keeps_every_type_of_a_multi_type_name():
     _resolver, meta = alias_resolver.from_backbones()
     types: dict[str, set[str]] = {}
-    seen = set()
-    for c in CATEGORIES:
-        if c.backbone_path in seen or not c.backbone_path.exists():
-            continue
-        seen.add(c.backbone_path)
-        for vlist in load_backbone(c.backbone_path).by_norm_name.values():
-            for v in vlist:
-                types.setdefault(proj.norm(v.variant), set()).add(proj.norm(v.stone_type))
+    for vlist in load_backbone(SETTINGS.paths.backbone_json).by_norm_name.values():   # the ONE variety backbone
+        for v in vlist:
+            types.setdefault(proj.norm(v.variant), set()).add(proj.norm(v.stone_type))
     multi = {n: ts for n, ts in types.items() if len(ts) > 1}
     assert multi, "the committed backbones carry multi-type names"
     assert all((n, t) in meta for n, ts in multi.items() for t in ts)

@@ -1,0 +1,84 @@
+{
+  "posts": [
+    {
+      "key": "ash__white_ash_4f1ae32c-444f-563a-b998-f32e87c7bb6e",
+      "variant": "White Ash",
+      "stone_type": "Ash",
+      "color": [
+        "Light"
+      ],
+      "finishes": [
+        "Oiled",
+        "Lacquered",
+        "Waxed",
+        "Brushed",
+        "Sanded"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "merged_from": []
+    },
+    {
+      "key": "larch__siberian_larch_595281f6-bbcb-56b6-974d-aa85e179c57e",
+      "variant": "Siberian Larch",
+      "stone_type": "Larch",
+      "color": [
+        "Natural"
+      ],
+      "finishes": [
+        "Oiled",
+        "Lacquered",
+        "Waxed",
+        "Brushed",
+        "Sanded"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "merged_from": []
+    },
+    {
+      "key": "oak__rustic_oak_746c2028-c94a-5445-85ce-0dff34129f49",
+      "variant": "Rustic Oak",
+      "stone_type": "Oak",
+      "color": [
+        "Natural"
+      ],
+      "finishes": [
+        "Oiled",
+        "Lacquered",
+        "Waxed",
+        "Brushed",
+        "Sanded"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "merged_from": []
+    },
+    {
+      "key": "walnut__black_walnut_03fceba6-37db-59c8-96a5-6bdaed6e3597",
+      "variant": "Black Walnut",
+      "stone_type": "Walnut",
+      "color": [
+        "Brown"
+      ],
+      "finishes": [
+        "Oiled",
+        "Lacquered",
+        "Waxed",
+        "Brushed",
+        "Sanded"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "merged_from": []
+    }
+  ]
+}

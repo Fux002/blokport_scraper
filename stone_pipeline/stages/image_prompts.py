@@ -109,7 +109,8 @@ def product_backed_pairs() -> set[tuple[str, str]]:
     variety that gained a product in a new category (never in the additions, so the new-variety queue alone misses
     it). A category its products are not sold in gets no icon."""
     pairs: set[tuple[str, str]] = set()
-    exp, prods = _export_file(), _products_file()
+    exp = _export_file()
+    prods = _products_file()
     if not (exp.exists() and prods.exists()):
         return pairs
     id_to_key = {r.id: r.key for r in read_variants_export(exp, require_status=VARIANTS_EXPORT_STATUS_REQUIRED)
