@@ -207,9 +207,9 @@ def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
 
 def test_tombstone_done_retires_blocked_retries_and_dead_letters(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _prod(ledger, "AAA-1", "aaa", qty=5, last=5)
-        _prod(ledger, "AAA-2", "aaa", qty=5, last=5)
-        delist_source(ledger, source_codes=["aaa"])
+        _prod(ledger, "AAA-1", "aaa", qty=0, last=0)
+        _prod(ledger, "AAA-2", "aaa", qty=0, last=0)
+        ledger.execute("UPDATE inventory SET reason = 'replaced_by_lot'")      # the purge's dead stock
         purge_discontinued(ledger, source_codes=["aaa"])
 
         # 'done' retires the tombstone -> no longer served

@@ -233,7 +233,8 @@ GET `/sync/v1/inventory` item payloads:
     // reappeared: a plain stock, no reason, no gone_at
 ```
 - `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone. It is absent on a
-  listing that is not gone. Blokport v1 accepts it and does not store it.
+  listing that is not gone. Blokport v1 accepts it and does not store it, so it rides the listing's next served stock:
+  a hidden listing whose reason does not change is not served again for `gone_at` alone.
 - Hide reasons: `no_photo`, `delisted` (`held` once #632 lands). Any other reason at stock 0 is shown (sold out) once the
   backend lane change lands. Today a stock 0 with NO reason is hidden (measured by M4), and the scraper always sends a
   gone listing with its reason.

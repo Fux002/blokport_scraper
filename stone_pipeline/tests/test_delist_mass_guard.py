@@ -45,7 +45,7 @@ def test_sold_history_does_not_block_a_real_delist(tmp_path, scrape_data_dir, ca
     second = _run(tmp_path, "second", scrape_data_dir, export)
 
     assert not any("delist refused" in r.getMessage() for r in caplog.records)
-    assert _skus(second / "review" / "products_discontinued.csv") == {"MAR-GONE-1"} | {s for s, _ in sold}
+    assert _skus(second / "review" / "products_discontinued.csv") == {"MAR-GONE-1"}   # sold history: reported once
 
 
 def test_a_partial_scrape_is_still_refused(tmp_path, scrape_data_dir, caplog):
