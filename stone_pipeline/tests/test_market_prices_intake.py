@@ -19,11 +19,13 @@ import pytest
 import yaml
 from botocore.exceptions import ClientError
 
-from market_prices import config, intake
+from market_prices import collect, config, intake
 from market_prices.collect import _observation, stamp_for
 from market_prices.layouts import LayoutError, Layouts, check_ids_apart, load_layouts
 from market_prices.register import Register
-from market_prices.schema import ListingFacts, MalformedListing, Observation, PriceStatus, SiteStatus, Source, columns
+from market_prices.schema import (
+    ListingFacts, MalformedListing, Observation, PriceStatus, Provenance, SiteStatus, Source, columns,
+)
 from market_prices.sheet_files import FileRefused, read_tables
 from market_prices.sheet_values import read_currency, read_price
 from stone_pipeline.io.deliverables import MANIFEST_NAME
@@ -494,6 +496,41 @@ def test_a_formula_without_a_cached_value_makes_its_row_malformed():
     result = _absorb(data, _layouts(layout), key=f"{PREFIX}/intake/stonecorp.xlsx")
     assert [row.listing_key for row in result.observations] == ["SC-2"]
     assert _status(result).malformed_listings == 1
+
+
+def _renamed_sheet(data: bytes, old: str, new: str) -> bytes:
+    """The workbook with one sheet's title rewritten in workbook.xml: Excel never writes a title over 31 characters,
+    so a longer one only comes from a hand-made file."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(out, "w") as target:
+        for part in source.infolist():
+            body = source.read(part)
+            if part.filename == "xl/workbook.xml":
+                body = body.replace(f'name="{old}"'.encode(), f'name="{new}"'.encode())
+            target.writestr(part, body)
+    return out.getvalue()
+
+
+def test_a_worksheet_title_over_excels_31_characters_refuses_the_file():
+    data = _renamed_sheet(_xlsx({"S": [["a"]]}), "S", "Price" + " " * 5000 + "List")
+    with pytest.raises(FileRefused, match="31"):
+        read_tables("prices.xlsx", data)
+
+
+def test_a_generated_cell_cannot_reach_the_cell_cap():
+    """The cap guards the seller's text. A cell the intake builds from file metadata is bounded by S3's and Excel's
+    own limits: a bucket name of 63 characters, a key and a version id of 1024 bytes each, a worksheet title of 31
+    characters (anything longer is refused above) and the row cap. At every limit at once, percent-encoded at the
+    worst rate (3 characters per byte of 4-byte UTF-8), the source_url is far under the cap, so no file name, sheet
+    or version can make every row of a file malformed. The provenance cell is 8 fixed keys of fixed values."""
+    file = intake.IntakeFile(key="\U0001F600" * 256, version_id="\U0001F600" * 256, last_modified=RECEIVED,
+                             data=b"")
+    url = intake._source_url("b" * 63, file, "\U0001F600" * 31, config.MAX_SHEET_ROWS - 1)
+    assert len(url) < config.MAX_CELL_CHARS // 10
+    longest = max((value.value for value in Provenance), key=len)
+    fields = (*collect._SITE_STATEMENT_FIELDS, *collect._LISTING_FIELDS)
+    provenance = json.dumps({name: longest for name in fields}, separators=(",", ":"))
+    assert len(provenance) < config.MAX_CELL_CHARS // 100
 
 
 def test_xlsx_xml_is_parsed_through_defusedxml():
