@@ -200,26 +200,26 @@ def _export(tmp_path, text: str, encoding: str = "utf-8") -> Path:
 
 
 def test_export_without_a_status_column_reads_every_row_active(tmp_path):
-    p = _export(tmp_path, _EXPORT + "v1,slab_marble_a_1,A,Marble,A1|A2\n")
+    p = _export(tmp_path, _EXPORT + "v1,marble__a_1,A,Marble,A1|A2\n")
     assert read_variants_export(p, require_status=False) == [
         ExportVariation("marble__a_1", "A", "v1", "Marble", ("A1", "A2"), "active")]
 
 
 def test_export_new_shape_carries_status(tmp_path):
-    p = _export(tmp_path, "Id,Key,Name,Type,Aliases,status\nv1,slab_a_1,A,Marble,,active\nv2,slab_b_1,B,Marble,,Archived\n")
+    p = _export(tmp_path, "Id,Key,Name,Type,Aliases,status\nv1,a__1,A,Marble,,active\nv2,b__1,B,Marble,,Archived\n")
     got = read_variants_export(p, require_status=True)
     assert [(v.key, v.status, v.archived) for v in got] == [("a__1", "active", False), ("b__1", "archived", True)]
 
 
 def test_export_reordered_and_extra_columns_parse_by_header_name(tmp_path):
-    p = _export(tmp_path, " status ,Extra,Aliases, Type , Name ,Key,Id\nactive,x, a | |b ,Marble,A,slab_a_1,v1\n")
+    p = _export(tmp_path, " status ,Extra,Aliases, Type , Name ,Key,Id\nactive,x, a | |b ,Marble,A,a__1,v1\n")
     assert read_variants_export(p, require_status=True) == [
         ExportVariation("a__1", "A", "v1", "Marble", ("a", "b"), "active")]
 
 
 def test_export_optional_columns_read_empty_when_absent(tmp_path):
     # the Id-free base shape, and an export without Aliases: Id and Aliases read empty
-    base = _export(tmp_path, "Key,Name,Type\nslab_a_1,A,Marble\n")
+    base = _export(tmp_path, "Key,Name,Type\na__1,A,Marble\n")
     assert read_variants_export(base, require_status=False) == [
         ExportVariation("a__1", "A", "", "Marble", (), "active")]
 
@@ -233,7 +233,7 @@ def test_export_missing_required_column_raises_naming_file_and_column(tmp_path, 
 
 @pytest.mark.parametrize("status", ["", "deleted"])
 def test_export_empty_or_invalid_status_cell_raises_naming_the_row(tmp_path, status):
-    p = _export(tmp_path, f"Id,Key,Name,Type,status\nv1,slab_a_1,A,Marble,active\nv2,slab_b_1,B,Marble,{status}\n")
+    p = _export(tmp_path, f"Id,Key,Name,Type,status\nv1,a__1,A,Marble,active\nv2,b__1,B,Marble,{status}\n")
     with pytest.raises(ValueError, match="line 3: status"):
         read_variants_export(p, require_status=False)
 
@@ -245,13 +245,13 @@ def test_export_require_status_without_the_column_raises(tmp_path):
 
 
 def test_export_blank_rows_skipped_and_half_rows_kept(tmp_path):
-    p = _export(tmp_path, _EXPORT + ",,,,\n\n,slab_a_1,A,Marble,\nv2,,B,Marble,\n")
+    p = _export(tmp_path, _EXPORT + ",,,,\n\n,a__1,A,Marble,\nv2,,B,Marble,\n")
     assert [(v.id, v.key, v.name) for v in read_variants_export(p, require_status=False)] == [
         ("", "a__1", "A"), ("v2", "", "B")]
 
 
 def test_export_bom_and_text_form(tmp_path):
-    body = _EXPORT + "v1,slab_a_1,A,Marble,\r\n"
+    body = _EXPORT + "v1,a__1,A,Marble,\r\n"
     from_file = read_variants_export(_export(tmp_path, body, encoding="utf-8-sig"), require_status=False)
     assert from_file == read_variants_export("\ufeff" + body, require_status=False)
     assert [v.key for v in from_file] == ["a__1"]
@@ -259,15 +259,15 @@ def test_export_bom_and_text_form(tmp_path):
 
 def test_export_text_form_errors_name_the_file_it_came_from(tmp_path):
     with pytest.raises(ValueError, match=r"^variants_export\.csv: missing"):
-        read_variants_export("Key\nslab_a_1\n", require_status=False)
+        read_variants_export("Key\na__1\n", require_status=False)
     with pytest.raises(ValueError, match=r"^variants_export_base\.csv: missing"):
-        read_variants_export("Key\nslab_a_1\n", require_status=False, name="variants_export_base.csv")
+        read_variants_export("Key\na__1\n", require_status=False, name="variants_export_base.csv")
 
 
 def test_the_loader_names_the_base_file_in_an_error(tmp_path):
     from stone_pipeline.reference.loaders import load_existing_variants
     base = tmp_path / "variants_export_base.csv"
-    base.write_text("Key\nslab_a_1\n", encoding="utf-8")
+    base.write_text("Key\na__1\n", encoding="utf-8")
     with pytest.raises(ValueError, match=re.escape(str(base))):
         load_existing_variants(base, ["slab"])
 
@@ -284,7 +284,7 @@ def test_own_variants_keeps_the_status_column_whole(tmp_path):
 
 def test_variety_names_reads_the_text_form():
     from stone_pipeline.standardise.tile_plan import variety_names
-    assert variety_names("Id,Key,Name,Type\nv1,slab_a_1,A,Marble\n,slab_b_1,B,Marble\nv3,slab_c_1,,Marble\n") == {"v1": "A"}
+    assert variety_names("Id,Key,Name,Type\nv1,a__1,A,Marble\n,b__1,B,Marble\nv3,c__1,,Marble\n") == {"v1": "A"}
 
 
 # Medusa's variants export reaches the code through these names. Inside a function, the export is a marker
