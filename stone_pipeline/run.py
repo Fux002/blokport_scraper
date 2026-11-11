@@ -649,8 +649,8 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     _would_take_down, _src_live = (product_state.delist_exposure(discontinued + held, source_cfg, known)
                                    if known else (0, 0))
     if _src_live and _would_take_down > SETTINGS.thresholds.delist_max_fraction * _src_live:
-        run_log.warning("delist refused: a single run would take too much of the catalog off sale "
-                        "(likely a partial scrape or a stage holding every row) -- keeping products listed, "
+        run_log.warning("delist refused: a single run would discontinue too much of the catalog "
+                        "(likely a partial scrape, or a stage holding every row) -- keeping products listed, "
                         "none discontinued and none hidden",
                         extra={"extra_fields": {"would_delist": len(discontinued), "would_hide": len(held),
                                                 "would_take_down": _would_take_down, "source_live": _src_live,
