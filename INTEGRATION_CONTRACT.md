@@ -22,6 +22,8 @@ Response `200` (from `sync.purge_discontinued`):
 - `409` if a sync pull is in flight (never purge mid-serve) -- body `{ "error": "..." }`.
 - Semantics: each SKU is tombstoned so Medusa deletes the same set (product + scraper_sync_ref) via the
   `/sync/v1/removed` pull lane.
+- Scope (S-7): the purge deletes only bundles replaced by their lot (`reason: "replaced_by_lot"`). The scraper
+  never purges a gone listing (sold out or hidden) or a delisted vendor's products: their records stay.
 
 ## S-4 -- inventory keying (answers B-2's investigation)
 
@@ -215,6 +217,32 @@ screen's job.
 
 A statement decided after the last applying produce on record has reached no product, so it is never blocked.
 With no applying produce on record, the produce output decides: products it shows bound block the undo.
+
+## S-7 -- a listing gone at its supplier stays published as sold out (inventory lane; table 505, agreed with M4)
+
+Owner's ruling 11-11. A listing its supplier no longer has (sold or removed) keeps its record, photos and textures
+permanently and comes back under the same SKU if it reappears.
+
+GET `/sync/v1/inventory` item payloads:
+```
+{ "sku": "<SKU>", "quantity": 0, "made_to_order": false, "reason": "sold_out", "gone_at": "<UTC ISO>" }
+    // gone, was published: stays published, stock 0, not buyable, shown as sold out
+{ "sku": "<SKU>", "quantity": 0, "made_to_order": false, "reason": "no_photo" | "delisted", "gone_at": "<UTC ISO>" }
+    // gone, was hidden: keeps its reason and stays hidden (no new display case)
+{ "sku": "<SKU>", "quantity": <N>, "made_to_order": false }
+    // reappeared: a plain stock, no reason, no gone_at
+```
+- `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone. It is absent on a
+  listing that is not gone. Blokport v1 accepts it and does not store it.
+- Hide reasons: `no_photo`, `delisted` (`held` once #632 lands). Any other reason at stock 0 is shown (sold out) once the
+  backend lane change lands. Today a stock 0 with NO reason is hidden (measured by M4), and the scraper always sends a
+  gone listing with its reason.
+- Never deleted: the scraper never sends a tombstone for a gone listing. The purge (S-1) skips it, a vendor removal
+  unpublishes every product as `delisted` instead of tombstoning, and a hard or factory reset and a seed variety drop
+  spare it.
+- Condition of done (505): the backend lanes never unpublish or hard-delete a `sold_out` listing. The inventory lane
+  stops rejecting it when it is not on sale, and `held` joins the hide set. The scraper half reaches a pull only with or
+  after that change.
 
 ## Notes
 - `combinations` is NOT a sync lane (dormant): it never appears in `/failures` and its `status.combination`
