@@ -82,6 +82,19 @@ def _consistency_gate() -> None:
         raise SystemExit(CONSISTENCY_GATE_RC)
 
 
+def store_kept_photos() -> None:
+    """Store the kept-photo set (the photos of the listings that left sale and keep their records, table 505) from the
+    ledger, once per produce, for the photo process (stages.images.save_kept). Inert unless write-through is on: the
+    ledger is the one record of which listings left sale."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.stages import images
+    if not writethrough.enabled():
+        return
+    with writethrough.connect(bind=False) as ledger:
+        kept = sync.kept_photos(ledger)
+    images.save_kept(kept)
+
+
 def _record_catalog() -> None:
     """Reflect the produced variations onto the ledger (flag-gated). The ledger is what Medusa pulls, so a
     failed write-through is a failed produce: exit non-zero rather than report a clean success whose
@@ -163,6 +176,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # them regardless; the sync engine gates their products on the variation being synced, and produce
     # reconciles the gate against the ledger (held vs fatal). Inert unless write-through is enabled.
     _record_catalog()
+    store_kept_photos()
 
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check. In the
