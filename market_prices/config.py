@@ -71,6 +71,9 @@ MAX_INTAKE_FILE_BYTES = 20 * 1024 * 1024
 MAX_XLSX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 MAX_SHEET_ROWS = 50_000
 MAX_SHEET_COLUMNS = 200
+# Excel's own limit on a worksheet title. A longer one only comes from a hand-made file, and it would be quoted into
+# every row's source_url, so such a file is refused before it is read (sheet_files).
+MAX_SHEET_TITLE_CHARS = 31
 SHEET_MAX_DIGITS = 18
 # A file no layout reads is refused with its first rows quoted, so the layout for it can be written from the message.
 INTAKE_REFUSAL_ROWS_SHOWN = 3

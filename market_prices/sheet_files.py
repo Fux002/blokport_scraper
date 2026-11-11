@@ -74,6 +74,9 @@ def _xlsx_tables(name: str, data: bytes) -> list[Table]:
         values = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         formulas = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=False)
         try:
+            if long := [title for title in values.sheetnames if len(title) > config.MAX_SHEET_TITLE_CHARS]:
+                raise FileRefused(f"{name}: a worksheet title over Excel's {config.MAX_SHEET_TITLE_CHARS} "
+                                  f"characters ({len(long[0])} characters)")
             return [_sheet_table(name, values[title], formulas[title]) for title in values.sheetnames]
         finally:
             values.close()
