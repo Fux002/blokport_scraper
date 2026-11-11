@@ -40,9 +40,9 @@ PREFIX = "dev/market_prices/blokport"
 def _competitors() -> list[dict]:
     return [
         {"competitor_id": "stonecorp_gb", "names": ["StoneCorp Ltd", "StoneCorp"], "seller_type": "wholesaler",
-         "seller_country": "GB", "served_market": "GB"},
+         "seller_country": "GB", "served_market": "GB", "site_domain": "stonecorp.example"},
         {"competitor_id": "rocca_it", "names": ["Rocca"], "seller_type": "merchant", "seller_country": "IT",
-         "served_market": "GB"},
+         "served_market": "GB", "site_domain": "rocca.example"},
     ]
 
 

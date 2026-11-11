@@ -177,9 +177,9 @@ def test_a_row_cannot_say_supplier_without_its_key_or_the_reverse():
 
 
 # --- a price sheet's competitor ---------------------------------------------------------------------------------------
-def _layouts(supplier_key=None) -> dict:
+def _layouts(supplier_key=None, site_domain="ferraz-rival.example") -> dict:
     competitor = {"competitor_id": "ferraz_br", "names": ["Ferraz"], "seller_type": "wholesaler",
-                  "seller_country": "BR", "served_market": "GB"}
+                  "seller_country": "BR", "served_market": "GB", "site_domain": site_domain}
     if supplier_key:
         competitor["supplier_key"] = supplier_key
     return {"brand": "blokport", "competitors": [competitor], "layouts": [{
@@ -188,12 +188,38 @@ def _layouts(supplier_key=None) -> dict:
         "number": {"decimal": ".", "thousands": ","}}]}
 
 
-def test_a_sheet_competitor_names_its_supplier_by_the_same_keys_and_an_unknown_one_refuses(tmp_path):
-    (tmp_path / "blokport.yaml").write_text(yaml.safe_dump(_layouts("ferraz")), encoding="utf-8")
-    assert load_layouts("blokport", tmp_path).competitors[0].supplier_key == "ferraz"
-    (tmp_path / "blokport.yaml").write_text(yaml.safe_dump(_layouts("nonexistent")), encoding="utf-8")
-    with pytest.raises(LayoutError, match="nonexistent"):
-        load_layouts("blokport", tmp_path)
+def _load(tmp_path, document: dict) -> Layouts:
+    (tmp_path / "blokport.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_layouts("blokport", tmp_path)
+
+
+def test_a_sheet_competitor_declares_its_site_domain_as_a_bare_host():
+    with pytest.raises(ValueError, match="site_domain"):
+        Layouts.model_validate(_layouts(site_domain=None))
+    for bad in ("https://ferraz.example", "ferraz.example/prices", "", "ferraz example"):
+        with pytest.raises(ValueError):
+            Layouts.model_validate(_layouts(site_domain=bad))
+
+
+def test_a_sheet_supplier_key_on_its_suppliers_domain_loads(tmp_path):
+    loaded = _load(tmp_path, _layouts("ferraz", site_domain="ferrazbrasilinventory.com"))  # www. on one side only
+    assert loaded.competitors[0].supplier_key == "ferraz"
+
+
+def test_a_sheet_competitors_unknown_supplier_key_refuses(tmp_path):
+    with pytest.raises(LayoutError, match="supplier_key 'nonexistent'"):
+        _load(tmp_path, _layouts("nonexistent"))
+
+
+def test_a_sheet_supplier_key_on_another_domain_refuses(tmp_path):
+    with pytest.raises(LayoutError, match="ferraz-rival.example"):
+        _load(tmp_path, _layouts("ferraz"))
+
+
+def test_a_sheet_competitor_on_a_suppliers_domain_without_the_key_refuses(tmp_path):
+    with pytest.raises(LayoutError, match="polonine"):
+        _load(tmp_path, _layouts(site_domain="polonine.slabware.com"))
+    assert _load(tmp_path, _layouts(site_domain="other.slabware.com")).competitors[0].supplier_key is None
 
 
 def test_a_sheet_row_copies_its_competitors_supplier_flag():
@@ -202,7 +228,9 @@ def test_a_sheet_row_copies_its_competitors_supplier_flag():
     file = intake.IntakeFile(key="dev/market_prices/blokport/intake/ferraz.csv", version_id="v1",
                              last_modified=MOMENT, data=out.getvalue().encode())
     for key, flag in (("ferraz", True), (None, False)):
-        (row,) = intake.absorb_file(file, Layouts.model_validate(_layouts(key)), "bucket", "blokport").observations
+        layouts = Layouts.model_validate(_layouts(key, site_domain="www.ferrazbrasilinventory.com" if key
+                                                  else "ferraz-rival.example"))
+        (row,) = intake.absorb_file(file, layouts, "bucket", "blokport").observations
         assert (row.seller_is_our_supplier, row.supplier_key) == (flag, key)
 
 
@@ -211,3 +239,5 @@ def test_the_contract_says_a_suppliers_list_price_is_its_own_line_never_the_buy_
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
     assert "| seller_is_our_supplier, supplier_key |" in text
     assert "never as the buy price" in text
+    assert "written in the register and checked both ways against the product scraper's suppliers at load" in text
+    assert "never typed by hand" not in text
