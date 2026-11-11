@@ -10,13 +10,10 @@ exists in Medusa, so the redirect never points at an empty lot. A plain sold-out
 from __future__ import annotations
 
 import csv
-import sqlite3
-
-import pytest
 
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory
 from stone_pipeline.ledger.sync import ready
 from stone_pipeline.stages import emit, lots
@@ -102,28 +99,6 @@ def test_a_bundle_listed_again_drops_its_replacement(tmp_path):
         row = _inventory_row(ledger, "SEN-2555")
         assert (row["qty"], row["reason"], row["replaced_by_lot_code"]) == (9, None, None)
 
-
-def test_a_v7_ledger_gains_the_replacement_column(tmp_path):
-    if sqlite3.sqlite_version_info < (3, 35, 0):
-        pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v7 shape")
-    p = tmp_path / "mig.ledger"
-    with Ledger.open(p, env="development") as lg:
-        _product(lg, "SEN-1")
-    raw = sqlite3.connect(p)
-    raw.execute("ALTER TABLE inventory DROP COLUMN replaced_by_lot_code")
-    raw.execute("DROP INDEX idx_product_lot_code")                          # v7 (dev today) has neither
-    raw.execute("PRAGMA user_version = 7")
-    raw.execute("UPDATE ledger_meta SET schema_version = 7")
-    raw.commit()
-    raw.close()
-    with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert "replaced_by_lot_code" in {r[1] for r in lg.conn.execute("PRAGMA table_info(inventory)")}
-        assert lg.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'idx_product_lot_code'").fetchone()
-        assert lg.get("product", "sku", "SEN-1")["source"] == "sen"
-
-
-# -- the review record both sides read before resuming the pull -----------------------------------------
 
 def test_the_review_folder_records_every_replacement_and_never_suggests_deleting_it(tmp_path):
     discontinued = [("SEN-2555", "afyon-sugar-honed-sen-2555"), ("SEN-2213", "afyon-gold-honed-sen-2213")]

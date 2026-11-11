@@ -104,7 +104,7 @@ python -m stone_pipeline.tree        # -> to_upload/2_valid_combinations.csv (af
   the immutable "existing variants" the catalog reads. Refresh after each upload.
 - `catalog_source/backbone_{slabs,blocks,tiles}.json`
   — per-category allowed combinations (each post carries its `key`). Tiles mirror
-  slabs and are rebuilt by `python -m stone_pipeline.stages.build_tile_backbone`.
+  slabs.
 - `catalog_source/attributes.csv` — attribute/category name → Medusa
   sourceId (includes a `category,Tiles,<pcat>` row so the tree emits a Tiles node).
 

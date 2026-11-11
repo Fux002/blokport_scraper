@@ -235,18 +235,17 @@ def test_clean_variety_name_generic_and_prefix():
     assert c("ZB Patagonia", (r"^[Zz]\s*[Bb]?\s+",)) == "Patagonia"
 
 
-def test_accents_preserved_in_display_folded_in_identity():
-    # The DISPLAY name PRESERVES source accents (reads as the name); IDENTITY (slug/key/match key)
-    # folds them -- so 'Porriño' and 'Porrino' are still ONE stone, but the display shows 'Porriño'.
-    from stone_pipeline.core.text import ascii_fold, title_case, slugify
+def test_accents_fold_in_display_and_in_identity():
+    # The DISPLAY of a name is ASCII (its field's rule, owner O1); IDENTITY (slug/key/match key) folds accents
+    # too, so 'Porri\u00f1o' and 'Porrino' are ONE stone and show as 'Porrino'.
+    from stone_pipeline.core.text import ascii_fold, slugify
     from stone_pipeline.matching.projections import norm
-    # identity folds accents (one stone regardless of accent)
-    assert ascii_fold("Rosa Porriño") == "Rosa Porrino"
-    assert slugify("Cinza Corumbá") == "cinza-corumba"
-    assert norm("Porriño") == norm("Porrino")            # accent-insensitive matching
-    # display PRESERVES accents (Unicode-aware title-case), and does not fold to ASCII
-    assert title_case("são GABRIEL") == "São Gabriel"
-    assert title_case("Rosa Porriño") == "Rosa Porriño"
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    assert ascii_fold("Rosa Porri\u00f1o") == "Rosa Porrino"
+    assert slugify("Cinza Corumb\u00e1") == "cinza-corumba"
+    assert norm("Porri\u00f1o") == norm("Porrino")            # accent-insensitive matching
+    assert fk.display(fk.VARIATION_NAME, "s\u00e3o GABRIEL") == "Sao Gabriel"
+    assert fk.display(fk.VARIATION_NAME, "Rosa Porri\u00f1o") == "Rosa Porrino"
 
 
 def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch, scrape_data_dir):
@@ -283,11 +282,11 @@ def test_emit_consolidate_folds_grade_codes_only():
     # graded variants fold into one base (originals -> aliases); distinct same-name variants are
     # NOT deduped and real names never merge.
     from stone_pipeline.stages.emit_catalog import _consolidate
-    rows=[{"Key":"slab_limestone_rosal_b_1","Name":"Rosal B","Image":"","Aliases":"Rosal Cd","Volume per kg (m³/kg)":""},
-          {"Key":"slab_limestone_rosal_c_1","Name":"Rosal C","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
-          {"Key":"slab_limestone_rosal_original_1","Name":"Rosal Original","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
-          {"Key":"slab_agate_agata_black_1","Name":"Agata Black","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
-          {"Key":"slab_agate_agata_black_2","Name":"Agata Black","Image":"","Aliases":"","Volume per kg (m³/kg)":""}]
+    rows=[{"Key":"limestone__rosal_b_1","Name":"Rosal B","Type":"Limestone","Aliases":"Rosal Cd"},
+          {"Key":"limestone__rosal_c_1","Name":"Rosal C","Type":"Limestone","Aliases":""},
+          {"Key":"limestone__rosal_original_1","Name":"Rosal Original","Type":"Limestone","Aliases":""},
+          {"Key":"agate__agata_black_1","Name":"Agata Black","Type":"Agate","Aliases":""},
+          {"Key":"agate__agata_black_2","Name":"Agata Black","Type":"Agate","Aliases":""}]
     out=_consolidate(rows)
     names=[r["Name"] for r in out]
     assert "Rosal" in names and "Rosal C" not in names and "Rosal B" not in names   # folded
@@ -295,29 +294,6 @@ def test_emit_consolidate_folds_grade_codes_only():
     assert "Rosal Original" in names                                                # distinct, kept
     rosal=next(r for r in out if r["Name"]=="Rosal")
     assert "Rosal B" in rosal["Aliases"] and "Rosal C" in rosal["Aliases"] and "Rosal Cd" in rosal["Aliases"]
-
-
-def test_variant_image_link_never_points_at_a_missing_image():
-    # a variant advertises its S3 image link ONLY when the {Key}.png actually exists -- a
-    # product-backed variant whose image was never generated (the marjan_silver bug) stays blank.
-    from stone_pipeline.stages.emit_catalog import _image_link
-    base = "https://b.s3/dev/variations/"
-    s3 = {"block_travertine_marjan_6c92"}  # only this one is actually on S3
-    # product-backed but NOT on S3 -> blank (was a 404 before)
-    assert _image_link("block_travertine_marjan_silver_4735", False, True, s3, base) == ""
-    # on S3 -> stamped
-    assert _image_link("block_travertine_marjan_6c92", False, True, s3, base) == f"{base}block_travertine_marjan_6c92.png"
-    # already-imaged variant not in the (stale) listing -> still blank when S3 is authoritative
-    assert _image_link("k", True, False, s3, base) == ""
-
-
-def test_variant_image_link_falls_back_when_s3_unreachable():
-    # S3 unreachable (s3_keys=None, e.g. CI): keep the prior heuristic so output is unchanged.
-    from stone_pipeline.stages.emit_catalog import _image_link
-    base = "https://b.s3/dev/variations/"
-    assert _image_link("k", False, True, None, base) == f"{base}k.png"   # product-backed -> stamp
-    assert _image_link("k", True, False, None, base) == f"{base}k.png"   # already-imaged -> stamp
-    assert _image_link("k", False, False, None, base) == ""              # neither -> blank
 
 
 def test_plural_format_tag_resolves():

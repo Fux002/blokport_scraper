@@ -79,6 +79,8 @@ class Manifest:
     held: list[dict] = field(default_factory=list)
     # per lot: pieces loaded / sent / held (lots.summary); [] for a source without lots
     lots: list[dict] = field(default_factory=list)
+    # each emitted product the image stage linked no 3D slab for, with both figures (images.link_standard); [] when none
+    photo_scale_mismatch: list[dict] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     write_backs: list[str] = field(default_factory=list)
     started_at: Optional[str] = None

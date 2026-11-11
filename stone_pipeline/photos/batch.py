@@ -69,13 +69,20 @@ def slices(todo):
             for n, i in enumerate(range(0, len(shas), C.RUN_SLICE))]
 
 
-def submit(batch, s3, queue, jobdef, tag, todo, run_id, ids):
+def submit(batch, s3, queue, jobdef, tag, todo, run_id, ids, forced=frozenset()):
     """Store each slice's photo list (the run's own files, run_id) and submit its two jobs, appending each job id to ids as
-    it is submitted (so a submit that fails part way still knows its jobs). todo = {source: shas}."""
+    it is submitted (so a submit that fails part way still knows its jobs). todo = {source: shas}; forced = {(source,
+    sha)} of a scoped run's photos to re-standardise once: each slice holding some stores their list the same way and
+    names it to its jobs (RESTANDARDISE_KEY, read as ONLY_KEY is: stone_pipeline.photos.source.listed_shas)."""
     for src, n, shas in slices(todo):
         only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}-{src}-{n}.json"
         s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
-        common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only))]
+        lists = [("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only)]
+        if redo := [sha for sha in shas if (src, sha) in forced]:
+            again = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-restandardise-{run_id}-{src}-{n}.json"
+            s3.put_object(Bucket=S3_BUCKET, Key=again, Body=json.dumps(redo).encode(), ContentType="application/json")
+            lists.append(("RESTANDARDISE_KEY", again))
+        common = [{"name": k, "value": str(v)} for k, v in lists]
         name = f"{src}-{tag}-{n}"
         retouch = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
                                    timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
@@ -90,7 +97,7 @@ def submit(batch, s3, queue, jobdef, tag, todo, run_id, ids):
     return ids
 
 
-def submit_close(batch, s3, queue, jobdef, tag, todo, run_id, ids):
+def submit_close(batch, s3, queue, jobdef, tag, todo, run_id, ids, forced=frozenset()):
     """Store each slice's photo list (the run's own files, run_id) and submit its close-only job (stone_pipeline.photos.close:
     the chosen photos' close-ups made again), appending each job id to ids as it is submitted. todo = {source: shas of its
     chosen photos}; tag: the clean tag, whose choice records the job reads."""
@@ -227,7 +234,7 @@ def ran_usd(batch, ids, reserved, now=time.time, sleep=time.sleep):
 
 
 def run_round(batch, s3, tag, todo, run_id, deadline, spend, work=STANDARDISE_ROUND, clock=time.monotonic,
-              now=time.time, sleep=time.sleep):
+              now=time.time, sleep=time.sleep, forced=frozenset()):
     """Every listed photo through the round's work under `tag` (STANDARDISE_ROUND: retouch and standardise; CLOSE_ROUND:
     the close-up made again): [(job name, why)] of failed jobs. No jobs, no ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
     is left. The round is sized to the month's budget left: as many whole slices as their price fits (price: the GPU's
@@ -253,7 +260,7 @@ def run_round(batch, s3, tag, todo, run_id, deadline, spend, work=STANDARDISE_RO
     try:
         with raised(batch, pool(batch, queue)):
             try:
-                work.submit(batch, s3, queue, jobdef, tag, todo, run_id, ids)
+                work.submit(batch, s3, queue, jobdef, tag, todo, run_id, ids, forced)
                 return wait(batch, ids, started + min(wait_limit(len(slices(todo))), window), clock=clock)
             except BaseException as exc:
                 stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")

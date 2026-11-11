@@ -10,13 +10,13 @@ from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
 from stone_pipeline.stages.curate.aliasing import (collect_matched_aliases, drop_confirmed_from_review,
                                                    emit_alias_rows)
 from stone_pipeline.stages.curate.attributes import build_attribute_curation
-from stone_pipeline.stages.curate.classify import classify, observe_branches_and_images
+from stone_pipeline.stages.curate.classify import classify, observe_categories_and_images
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.stages.curate.context import CurationResult, new_curation
-from stone_pipeline.stages.curate.existing import load_all_existing
-from stone_pipeline.stages.curate.keys import BRANCHES
+from stone_pipeline.stages.curate.existing import load_existing
 from stone_pipeline.stages.curate.minting import emit_new_variants, finish, leaf_updates
 from stone_pipeline.stages.curate.output import write_curation
+from stone_pipeline.stages.curate.review import colour_cards
 
 log = logfmt.get_logger("curate")
 
@@ -29,14 +29,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData,
     decisions object the stage entry loaded once for the produce; a direct caller may omit it."""
     c = new_curation(rows, ref, operator)
     collect_matched_aliases(c)
-    observe_branches_and_images(c)
+    observe_categories_and_images(c)
     classify(c)
+    c.pending_confirm.extend(colour_cards(rows, ref))
     drop_confirmed_from_review(c)
-    result = CurationResult(
-        alias_additions={b: [] for b in BRANCHES},
-        new_variants={b: [] for b in BRANCHES},
-        backbone_new={b: [] for b in BRANCHES},
-    )
+    result = CurationResult()
     emit_alias_rows(c, result)
     emit_new_variants(c, result)
     leaf_updates(rows, result)
@@ -67,9 +64,8 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     # Did this produce honour every stored decision? The gaps become cards in the one review list, so a
     # decision the pipeline ignores is visible on the FIRST produce after it, never a day later.
     from stone_pipeline.stages import decision_audit
-    existing = {owner for imp in load_all_existing().values() for owner in imp.by_name_type}
-    created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
-               for lst in result.new_variants.values() for v in lst}
+    existing = set(load_existing().by_name_type)
+    created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]))) for v in result.new_variants}
     pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}
     # VE2: the (source, spelling) a freeze card holds this run; a mint held by one of these is already
     # surfaced, so decision_audit suppresses its duplicate "not applied" gap (only these kinds, keyed by both).

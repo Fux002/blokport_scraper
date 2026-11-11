@@ -16,8 +16,8 @@ is no longer served. Re-running is therefore convergent: only the un-synced delt
 ever moves.
 
 Eligibility (8.4) is enforced server-side so the puller cannot load out of order: a
-product is served only once its variation is synced AND that variety's texture is
-live (the H2 hold, via variation.image_url), and stock only once Medusa holds its
+product is served only once its variation is synced AND that variety has an icon in the
+product's category (the H2 hold, via variation_category_image), and stock only once Medusa holds its
 product (it acked the product's id). One gate is still deferred: every referenced
 attribute synced (all attributes are synced after bootstrap; NEW values are the
 dormant C3 case). No em dashes (design principle 2).
@@ -31,8 +31,8 @@ from datetime import datetime, timedelta, timezone
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
-                                      RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL,
-                                      Ledger, in_medusa_sql, now_iso, on_sale_sql)
+                                      RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql,
+                                      now_iso, on_sale_sql, variation_icons)
 from stone_pipeline.ledger.payloads import product_payload, variation_payload
 
 log = logfmt.get_logger("ledger.sync")
@@ -74,10 +74,6 @@ def reap_stale_syncing(ledger: Ledger, table: str | None = None,
 _ENTITY = {
     "variations": ("variation", "key"),
     "products": ("product", "sku"),
-    # NB: no 'combinations' -- that lane is dormant (no write-through populates it, no ready_* serves
-    # it, and the combination table lacks the sync_attempts/sync_error columns the ack fail-path uses,
-    # so wiring it here would make ack('combinations','failed') raise). Combinations are CSV-rendered
-    # from the export and Medusa resolves priceable tuples itself. Re-add only with a full serve lane.
 }
 
 
@@ -85,7 +81,7 @@ _ENTITY = {
 
 def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     """Per-type state counts. Each state-bearing table reports every state it can hold (db.STATES), 0 for one
-    with no rows: a count is always a value, never an absent key (combination is all 0 until materialized);
+    with no rows: a count is always a value, never an absent key;
     inventory reports total rows, the `delta` count (exactly what the inventory lane would serve now), the `dead`
     count (dead-lettered stock rows not abandoned, like gap_held) and the `waiting` count (un-hides waiting on their
     product's own sync)."""
@@ -166,7 +162,8 @@ def _sub_limit(limit: int | None) -> str:
 
 # ONE source of truth for "eligible to serve", reused by the lease (ready_*) AND the non-leasing
 # peek (count_ready) so the two can never diverge -- a variation is servable once produced + typed;
-# a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias. Neither while
+# a product once its variation is LIVE (synced, typed) and has an icon in the product's own category (D11: both
+# columns hold the category HANDLE, so the gate joins equal values). `v` is the joined variation alias. Neither while
 # it waits out a failed apply (retry_after): each takes the current time as its one parameter.
 # VE2: an archived variation is FROZEN -- the variations lane never serves it (no create, no update), and the
 # products lane admits it only for an EXISTING product (one Medusa holds, in_medusa_sql): a new product on an
@@ -177,7 +174,8 @@ _ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archiv
 _ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') "
                      f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
                      "AND v.type IS NOT NULL AND v.type != '' "
-                     "AND v.image_url IS NOT NULL AND v.image_url != '' "
+                     "AND EXISTS (SELECT 1 FROM variation_category_image ci "
+                     "WHERE ci.key = v.key AND ci.category_handle = p.category) "
                      "AND (p.retry_after IS NULL OR p.retry_after <= ?)")
 
 
@@ -226,24 +224,25 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "UPDATE variation SET state = 'syncing', reserved_at = NULL, updated_at = ? WHERE key IN ("
         "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
-        "RETURNING key, branch, type, name, aliases, image_url, payload_hash",
+        "RETURNING key, type, name, aliases, payload_hash",
         (now, now)).fetchall()
+    icons = variation_icons(ledger, [v["key"] for v in rows])
     return _isolate(ledger, "variation", "key", rows, lambda v: {
-        "external_id": v["key"], "payload_hash": v["payload_hash"], "payload": variation_payload(v)})
+        "external_id": v["key"], "payload_hash": v["payload_hash"],
+        "payload": variation_payload(v, icons.get(v["key"], []))})
 
 
 def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Products awaiting sync whose VARIATION is synced AND has a live variant texture.
+    """Products awaiting sync whose VARIATION is synced AND has an icon in the product's category.
 
-    The texture gate is the H2 hold decision: a product never lists until its variety's
-    {Key}.png exists, so it is not served with scraped photos only. variation.image_url
-    is non-empty exactly when that texture is live on S3 (emit_catalog only stamps the
-    link when the object exists), so the gate needs no extra S3 call.
+    The icon gate is the H2 hold decision: a product never lists until its variety's icon
+    in that category exists, so it is not served with scraped photos only. A
+    variation_category_image row exists exactly when emit listed that pair on S3, so the
+    gate needs no extra S3 call.
 
-    The variation must also be TYPED: the product inherits its category and type from the
-    variation, so a synced-but-untyped variation (a bootstrap-synced export row that
-    fill_variation_types could not resolve) would make the product inherit an empty type
-    and list broken. Gating on `v.type` holds those products until the variety is typed.
+    The variation must also be TYPED: Blokport checks the product's type against its
+    variety's, so a synced-but-untyped variation would bind the product to an empty type.
+    Gating on `v.type` holds those products until the variety is typed.
 
     The payload (payloads.product_payload) carries ZERO Medusa ids (the review's red flag): everything is an
     external reference Medusa resolves on its side. `vendor` (the source) resolves to the
@@ -534,20 +533,17 @@ def _ack_removed(ledger: Ledger, external_id: str, failed: bool, reason: str | N
     if failed:
         return _block_tombstone(ledger, external_id, row["sync_attempts"], reason or "blocked")
     if row["kind"] == "variation":
-        # E3 + self-heal: hard-delete the variety only once it is FK-safe (no product/combination re-acquired it).
+        # E3 + self-heal: hard-delete the variety only once it is FK-safe (no product re-acquired it).
         # A raced produce with a stale retired-key exclusion could re-link a product onto the retiring Key; if so,
         # KEEP the tombstone and count the attempt like a block, so it re-serves after the wait (not on every
         # pull) and self-heals once the next (properly-excluding) produce moves those children off -- never a blind
         # DELETE that would FK-fail and orphan the row with no tombstone.
-        child = ledger.execute(
-            "SELECT 1 FROM product WHERE variation_key = ? "
-            "UNION ALL SELECT 1 FROM combination WHERE variation_key = ? LIMIT 1",
-            (external_id, external_id)).fetchone()
+        child = ledger.execute("SELECT 1 FROM product WHERE variation_key = ? LIMIT 1", (external_id,)).fetchone()
         if child:
             log.warning("retiring variety re-acquired children; keeping its tombstone to re-serve",
                         extra={"extra_fields": {"key": external_id}})
             _block_tombstone(ledger, external_id, row["sync_attempts"],
-                             "done refused: the variety has products or combinations in the ledger again")
+                             "done refused: the variety has products in the ledger again")
             return 0
         ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
     return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
@@ -728,19 +724,18 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
 
     A pristine reset zeroes sync state but by its old invariant never removed a live variety, so a
     duplicate / re-key OLD SIDE seeded before a seed cleanup lingers forever and every produce re-renders
-    it (the ledger is the render source). This collapses every (branch,type,name) that resolves to MORE
+    it (the ledger is the render source). This collapses every (type, name) that resolves to MORE
     THAN ONE Key to a single survivor -- the committed-seed Key if one is present, else the clean-slug Key
     -- and TOMBSTONES + drops the rest on the ONE removed lane (kind='variation'). The tombstone is what
     makes Medusa delete the old side by Key on the removals pull; Medusa's own consumer blocks a variety
     that still has products, so a live one can never be wrongly deleted. A minted variety with no twin is
     untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys.
 
-    `seed_identities` (the (branch,type,name) identity set of the committed seed): when given, a variety
+    `seed_identities` (the (type, name) identity set of the committed seed): when given, a variety
     whose identity is NOT in the seed -- a test mint or a Medusa-only leftover carried back by the export
     union -- is dropped WHOLE (all its category Keys) and tombstoned, so a factory reset + removals pull
-    brings Medusa in line with the base instead of re-importing the leftover forever. Identity-keyed, so a
-    legacy Key and a seed Key for the SAME variety match and a real variety is never dropped for a key
-    mismatch. Omit it (None) to keep the old dedup-only behaviour.
+    brings Medusa in line with the base instead of re-importing the leftover forever. Identity-keyed, so two
+    Keys of the SAME variety match and a real variety is never dropped for a key mismatch. Omit it (None) to keep the old dedup-only behaviour.
 
     `protected` is the operator's 'not a duplicate' set (decisions_store.protected_keys): a Key in it is
     NEVER dropped, so a false-positive collapse the operator already overrode does not re-tombstone on the
@@ -780,12 +775,11 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
             record_tombstones(ledger, [(r["sku"], r["source"]) for r in held], reason=reason, kind="product")
             record_tombstones(ledger, [(k, None) for k in keys], reason=reason, kind="variation")
         q = ",".join("?" * len(dropped))
-        # FK order: inventory -> product -> combination -> variation. The reconcile runs before the reset, so a
-        # dropped variety can still have products here.
+        # FK order: inventory -> product -> variation (its icons cascade). The reconcile runs before the reset, so
+        # a dropped variety can still have products here.
         ledger.execute(f"DELETE FROM inventory WHERE sku IN "
                        f"(SELECT sku FROM product WHERE variation_key IN ({q}))", tuple(dropped))
         ledger.execute(f"DELETE FROM product WHERE variation_key IN ({q})", tuple(dropped))
-        ledger.execute(f"DELETE FROM combination WHERE variation_key IN ({q})", tuple(dropped))
         ledger.execute(f"DELETE FROM variation WHERE key IN ({q})", tuple(dropped))
     log.warning("variation table reconciled to seed (dedup old sides + drop non-seed leftovers)",
                 extra={"extra_fields": {"tombstoned_dropped": len(dropped),
@@ -813,7 +807,7 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     cleared. prune_stale removes ONLY in_full=0 rows (already out of the catalogue), never a live variety.
 
     `source_codes` scopes products (+ their stock) to those sources; the shared base layer
-    (variations/attributes/combinations) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
+    (variations/attributes) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
     """
     now, out = now_iso(), {}
     _lock_and_check_in_flight(ledger)          # atomic guard: refuse if a pull holds a lease
@@ -972,8 +966,7 @@ def variation_live_products(ledger: Ledger, key: str) -> int:
 def retire_variation(ledger: Ledger, key: str, force: bool = False,
                      reason: str = "variation_removed") -> dict:
     """Cascade a variety's explicit removal (also the old side of a re-key). Its products (which belong to
-    it) are tombstoned + hard-deleted; its combinations (the dormant lane) are deleted so the variety row
-    is FK-safe to drop; then EITHER a variation tombstone is recorded and the row held 'retiring' until
+    it) are tombstoned + hard-deleted, so the variety row is FK-safe to drop; then EITHER a variation tombstone is recorded and the row held 'retiring' until
     Medusa acks the delete (only if it was ever synced -- E2), OR the row is dropped locally now (a
     never-synced variety: Medusa never received it, so there is nothing to tell it to delete). The caller
     (lifecycle) has already guarded existence + the live-product precondition. Serve-in-flight guarded."""
@@ -987,7 +980,6 @@ def retire_variation(ledger: Ledger, key: str, force: bool = False,
         q = ",".join("?" * len(skus))
         ledger.execute(f"DELETE FROM inventory WHERE sku IN ({q})", tuple(skus))   # child first (FK)
         ledger.execute(f"DELETE FROM product WHERE sku IN ({q})", tuple(skus))
-    ledger.execute("DELETE FROM combination WHERE variation_key = ?", (key,))      # dormant lane, FK child
     synced = bool(var and var["medusa_id"])
     if synced:                                 # E2: only tell Medusa to delete what it actually received
         record_tombstones(ledger, [(key, None)], reason=reason, kind="variation")
@@ -1017,7 +1009,6 @@ def prune_stale_variations(ledger: Ledger) -> dict:
         "SELECT key FROM variation v WHERE v.in_full = 0 AND v.state != 'retiring' "
         "AND NOT EXISTS (SELECT 1 FROM product p WHERE p.variation_key = v.key)")]
     for key in keys:
-        ledger.execute("DELETE FROM combination WHERE variation_key = ?", (key,))   # dormant FK child
         record_tombstones(ledger, [(key, None)], reason="stale_not_in_seed", kind="variation")
         ledger.set_state("variation", "key", key, "retiring")
     if keys:

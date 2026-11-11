@@ -30,6 +30,20 @@ def _no_ambient_aws(monkeypatch):
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _published_field_kinds():
+    """The name-field kinds come from the backend's published field-kinds.json, which a produce fetches. Tests read
+    the committed fixture instead (the only place a copy lives), so every writer cleans by a real map. Session-scoped
+    so a module-scoped fixture that runs the pipeline sees it too; the cache keys by file hash, so a test that points
+    `_path` elsewhere needs no reset."""
+    from pathlib import Path
+    from stone_pipeline.reference.loaders import field_kinds
+    fixture = Path(__file__).parent / "fixtures" / "field-kinds.json"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(field_kinds, "_path", lambda: fixture)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_magnitude_baselines(monkeypatch, tmp_path_factory):
     """The drift gate's baseline lives in the developer's gitignored state/ (absent in CI). A stale one there

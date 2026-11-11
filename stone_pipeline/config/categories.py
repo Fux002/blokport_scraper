@@ -2,16 +2,14 @@
 
 Built at import from the active product-domain pack (config/domains/<pack>.yaml) and this env's Medusa export
 (from_medusa/<env>/attributes.csv, for the pcat ids), so SCRAPER_DOMAIN_PACK and the env tier must be set before the
-first import. It imports settings, never the reverse (settings reads it only lazily, in Paths.backbone_json), so a
-settings import alone never builds the registry. The helpers read the module globals that refresh_category_pcats
+first import. It imports settings, never the reverse, so a settings import alone never builds the registry. The helpers read the module globals that refresh_category_pcats
 rebinds, so every name lives here and is read from here: there is no copy in settings. The settings values it uses
-(the env's from_medusa folder, the attributes status flag, the pack-namespaced catalog_source path) are read through
+(the env's from_medusa folder and the attributes status flag) are read through
 the settings module at call time, as they were when this lived there."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from pathlib import Path
 
 from stone_pipeline.config import settings
 from stone_pipeline.config.domain import active_pack
@@ -34,11 +32,9 @@ class Category:
     plural: str                 # inbox folder + tree-build group key
     label: str                  # Medusa category name / backbone "category" value
     pcat_id: str                # Medusa product-category id ("" until created)
-    backbone_filename: str      # under catalog_source/
     base_image: str             # fal.ai base for texture generation ("" = real photo)
     shares_variety_vocab: bool  # shares the stone-variety vocabulary (slab/block/tile)
     fan_out: bool               # a new variety is also created in this category
-    mirror_of: str | None       # backbone mirrors this category's (tile -> slab) else None
     volume_per_kg: str = ""     # static "Volume per kg (m³/kg)" written into every variant
     pcat_env_var: str | None = None  # env override for pcat_id (bootstrap); kept so a post-fetch refresh
                                      # re-derives pcat_id the SAME way construction did (see refresh_category_pcats)
@@ -46,6 +42,8 @@ class Category:
                                 # dimension/freight branch. A domain with no such form leaves this unset everywhere.
     default_form: bool = False  # the form a row falls back to when its format is unresolved; also the finish and
                                 # dimension fallback source. Exactly one category declares it (pack-validated).
+    finishes: tuple[str, ...] = ()        # its own finish set (D7: block's 18); () for the default form
+    finishes_from: str | None = None      # or the category whose finish set it takes (D9: tile -> slab)
 
     @property
     def active(self) -> bool:
@@ -53,9 +51,10 @@ class Category:
         return bool(self.pcat_id)
 
     @property
-    def backbone_path(self) -> Path:
-        # pack-namespaced (stone flat); never stone-fallback
-        return settings._catalog_source_file(self.backbone_filename)
+    def handle(self) -> str:
+        """The category's immutable Medusa HANDLE, the one identifier the sync wire and the ledger carry (PHASE-1-SPEC
+        D11): the pack's plural, never the renameable label."""
+        return self.plural
 
 
 # DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod
@@ -93,11 +92,12 @@ def _build_categories() -> "tuple[Category, ...]":
     return tuple(
         Category(
             c["name"], c["plural"], c["label"],
-            _pcat(c["label"], c.get("pcat_env_var")), c["backbone_filename"], c["base_image"],
+            _pcat(c["label"], c.get("pcat_env_var")), c["base_image"],
             shares_variety_vocab=c["shares_variety_vocab"], fan_out=c["fan_out"],
-            mirror_of=c.get("mirror_of"), volume_per_kg=c.get("volume_per_kg", ""),
+            volume_per_kg=c.get("volume_per_kg", ""),
             pcat_env_var=c.get("pcat_env_var"),
-            bulk_form=c.get("bulk_form", False), default_form=c.get("default_form", False))
+            bulk_form=c.get("bulk_form", False), default_form=c.get("default_form", False),
+            finishes=tuple(c.get("finishes") or ()), finishes_from=c.get("finishes_from"))
         for c in active_pack().categories
     )
 
@@ -116,9 +116,9 @@ def category(name: str) -> "Category | None":
     return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
 
 
-def category_for_key(key: str) -> "Category | None":
-    """The category a variant Key belongs to, by its prefix (slab_..., tile_...)."""
-    return _BY_NAME.get((key or "").split("_", 1)[0].casefold())
+def category_by_handle(handle: str) -> "Category | None":
+    """The category whose handle (D11) is exactly `handle`, or None."""
+    return next((c for c in _BY_NAME.values() if c.handle == handle), None)
 
 
 def default_form_name() -> str:

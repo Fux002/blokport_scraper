@@ -19,9 +19,9 @@ def _seed(path, rows):
     with Ledger.open(path, env=writethrough.ENV_NAME) as lg:
         for key, name, typ in rows:
             lg.upsert("variation", {
-                "key": key, "branch": key.split("_", 1)[0], "type": typ, "name": name,
-                "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-                "volume": "", "medusa_id": None, "payload_hash": "", "state": "pending",
+                "key": key, "type": typ, "name": name,
+                "aliases": "[]",
+                "medusa_id": None, "payload_hash": "", "state": "pending",
                 "first_seen": _NOW, "last_synced": None, "created_at": _NOW, "updated_at": _NOW,
             }, pk=("key",))
 
@@ -30,14 +30,14 @@ def _seed(path, rows):
 def ledger_with_varieties(tmp_path, monkeypatch):
     p = tmp_path / "dev.ledger"
     _seed(p, [
-        ("slab_marble_carrara_0001", "Carrara", "Marble"),
-        ("block_marble_carrara_0002", "Carrara", "Marble"),      # same variety, other branch -> ONE target
-        ("slab_granite_nero_0003", "Nero Assoluto", "Granite"),
-        ("slab_quartzite_retired_0004", "Old Retired", "Quartzite"),
+        ("marble__carrara_0001", "Carrara", "Marble"),
+        ("marble__carrara_0002", "Carrara", "Marble"),      # same variety, other branch -> ONE target
+        ("granite__nero_0003", "Nero Assoluto", "Granite"),
+        ("quartzite__retired_0004", "Old Retired", "Quartzite"),
     ])
     monkeypatch.setattr(writethrough, "ledger_path", lambda: p)
     monkeypatch.setattr("stone_pipeline.stages.decisions.load_retired",
-                        lambda: {"slab_quartzite_retired_0004"})
+                        lambda: {"quartzite__retired_0004"})
     return p
 
 
@@ -83,9 +83,9 @@ def test_multi_type_name_keeps_both_types_as_distinct_alias_targets(tmp_path, mo
     # branches still collapses to one.
     p = tmp_path / "dev.ledger"
     _seed(p, [
-        ("slab_marble_coffee_0001", "Coffee", "Marble"),
-        ("tile_marble_coffee_0002", "Coffee", "Marble"),   # same name+type, other branch -> ONE target
-        ("slab_onyx_coffee_0003", "Coffee", "Onyx"),        # same name, DIFFERENT type -> a SECOND target
+        ("marble__coffee_0001", "Coffee", "Marble"),
+        ("marble__coffee_0002", "Coffee", "Marble"),   # same name+type, other branch -> ONE target
+        ("onyx__coffee_0003", "Coffee", "Onyx"),        # same name, DIFFERENT type -> a SECOND target
     ])
     monkeypatch.setattr(writethrough, "ledger_path", lambda: p)
     monkeypatch.setattr("stone_pipeline.stages.decisions.load_retired", lambda: set())

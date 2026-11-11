@@ -32,9 +32,7 @@ category's id.
             "<fal.ai base image url>", shares_variety_vocab=True, fan_out=True,
             mirror_of="slab")   # or mirror_of=None to author its own backbone
    ```
-2. Build its backbone: if `mirror_of` is set,
-   `python -m stone_pipeline.stages.build_tile_backbone` builds every mirror category.
-   Otherwise author `catalog_source/backbone_xforms.json` like blocks.
+2. Build its backbone: author `catalog_source/backbone_xforms.json` like blocks.
 3. Done. Matching, fan-out, the tree, image generation, the inbox folder and
    validation are all handled automatically. Scraped products tagged with this
    format flow through exactly like slabs.

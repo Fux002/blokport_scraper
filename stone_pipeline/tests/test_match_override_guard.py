@@ -28,7 +28,7 @@ def _stage(override_id):
     eng = VariationEngine(idx, auto_accept=92, review_floor=84)
     ref = SimpleNamespace(
         overrides=Overrides(by_key={("polonine", "620"): {"variation_id": override_id}}),
-        variants={"slab": SimpleNamespace(by_id={"v_real": SimpleNamespace(key="slab_marble_carrara_1")})},
+        variants={"slab": SimpleNamespace(by_id={"v_real": SimpleNamespace(key="marble__carrara_1")})},
         decisions=Decisions.empty(),   # a real ReferenceData always carries this; the stub must too
         attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
     )
@@ -54,4 +54,4 @@ def test_override_id_that_is_a_candidate_still_wins():
     _stage("v_real").resolve_row(row)
     assert row.variation_method == "override"
     assert row.variation_id == "v_real"
-    assert row.variation_key == "slab_marble_carrara_1"        # the stable Key, not None
+    assert row.variation_key == "marble__carrara_1"        # the stable Key, not None

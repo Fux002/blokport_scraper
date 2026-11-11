@@ -23,8 +23,8 @@ from stone_pipeline.reference import sync_variants_base as svb
 
 # BOM, CRLF, a quoted newline and a non-ASCII header: any re-encoding or newline translation changes the bytes.
 _BASE = ("﻿Key,Name,Image,Aliases,Volume per kg (m³/kg)\r\n"
-         'slab_marble_a_1,Árabescato,,"A\nB",0.00037\r\n'
-         "slab_granite_b_2,Bianco,,,\r\n").encode("utf-8")
+         'marble__a_1,Árabescato,,"A\nB",0.00037\r\n'
+         "granite__b_2,Bianco,,,\r\n").encode("utf-8")
 
 
 class _S3:
@@ -119,7 +119,6 @@ def test_the_catalog_copies_the_base_after_the_sync_settles_it(tmp_path, monkeyp
     monkeypatch.setattr(catalog.curate, "run", lambda rows, ref: types.SimpleNamespace(counts={}))
     monkeypatch.setattr("stone_pipeline.stages.decisions.heal_drifted_membership", noop)
     monkeypatch.setattr(catalog, "collect_products", lambda root: {})
-    monkeypatch.setattr(catalog.build_tile_backbone, "build", noop)
     monkeypatch.setattr(catalog.emit_catalog, "build", noop)
     monkeypatch.setattr(catalog, "collect_inventory", lambda root: 0)
     monkeypatch.setattr(catalog, "collect_discontinued", lambda root: 0)
@@ -156,7 +155,7 @@ def _produce(tmp_path: Path, keys: list[str]) -> Path:
 
 
 def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_path):
-    base = _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2", "block_granite_c_3"])
+    base = _produce(tmp_path, ["marble__a_1", "marble__b_2", "granite__c_3"])
     s3 = _S3()
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "dev/scraper/to_upload", run_id="r1")
     entry = out["manifest"]["files"][VARIANTS_BASE_FILE]
@@ -170,14 +169,14 @@ def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_p
 
 def test_an_unchanged_base_is_not_re_uploaded_and_a_changed_one_is(tmp_path):
     s3, key = _S3(), f"p/{VARIANTS_BASE_FILE}"
-    _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2"])
+    _produce(tmp_path, ["marble__a_1", "marble__b_2"])
     ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r1")
     s3.uploads.clear()
-    _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2"])          # the same base again
+    _produce(tmp_path, ["marble__a_1", "marble__b_2"])          # the same base again
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r2")
     assert VARIANTS_BASE_FILE in out["unchanged"] and key not in s3.uploads
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[key]
-    base = _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2", "slab_onyx_c_3"])   # a mint grows it
+    base = _produce(tmp_path, ["marble__a_1", "marble__b_2", "onyx__c_3"])   # a mint grows it
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r3")
     assert VARIANTS_BASE_FILE in out["uploaded"] and s3.objects[key] == base.read_bytes()
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["rows"] == 3

@@ -87,12 +87,12 @@ def _ref(scoped=None):
     return SimpleNamespace(
         overrides=Overrides(by_key={}),
         variants={"slab": SimpleNamespace(by_id={
-            "v_blue": SimpleNamespace(key="slab_granite_amazon_blue_1"),
-            "v_amazonia": SimpleNamespace(key="slab_granite_amazonia_2"),
-            "v_golden": SimpleNamespace(key="slab_granite_golden_lightning_3"),
-            "v_star": SimpleNamespace(key="slab_granite_star_black_4"),
-            "v_azul_onyx": SimpleNamespace(key="slab_onyx_azul_white_5"),
-            "v_azul_qtz": SimpleNamespace(key="slab_quartzite_azul_white_6")})},
+            "v_blue": SimpleNamespace(key="granite__amazon_blue_1"),
+            "v_amazonia": SimpleNamespace(key="granite__amazonia_2"),
+            "v_golden": SimpleNamespace(key="granite__golden_lightning_3"),
+            "v_star": SimpleNamespace(key="granite__star_black_4"),
+            "v_azul_onyx": SimpleNamespace(key="onyx__azul_white_5"),
+            "v_azul_qtz": SimpleNamespace(key="quartzite__azul_white_6")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in ({}).items()}, scoped or {}),
         attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
         country_codes={"iran": "IR", "brazil": "BR"},
@@ -121,7 +121,7 @@ def test_origin_evidence_prefers_the_scraped_field_over_the_vendor_declaration()
 def test_stage_binds_the_iranian_listing_to_the_variety_that_documents_iran():
     row = _row("Amazon Green Granite")
     _stage().resolve_row(row)
-    assert row.variation_id == "v_golden" and row.variation_key == "slab_granite_golden_lightning_3"
+    assert row.variation_id == "v_golden" and row.variation_key == "granite__golden_lightning_3"
 
 
 def test_stage_holds_the_brazilian_listing_for_review_instead_of_a_phonetic_bind():
@@ -187,7 +187,7 @@ def test_type_open_listing_binds_the_variety_whose_origin_the_vendor_corroborate
     row = CanonicalRow(src_site="marenostone", surrogate_key="1", variety_match_key="Azul White Quartzite",
                        raw_type="", raw_format="Slab")
     _stage().resolve_row(row)
-    assert row.variation_id == "v_azul_onyx" and row.variation_key == "slab_onyx_azul_white_5"
+    assert row.variation_id == "v_azul_onyx" and row.variation_key == "onyx__azul_white_5"
     assert row.variation_method.endswith("_origin")
 
 

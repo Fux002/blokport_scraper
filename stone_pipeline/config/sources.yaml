@@ -6,7 +6,7 @@
 #   owner; it is live in the ledger + sync payload, the Medusa upsert, the validate gate, and the CSV.)
 # company_id and sales_channel_id own the products from a site. ports_default = the
 # SUPPLIER's shipping ports BY NAME or UN/LOCODE (resolved against catalog_source/ports.csv,
-# the master list of 601 ports); always applied, the product ships from the supplier.
+# the master list of ports); always applied, the product ships from the supplier.
 # origin_default = ISO-2 country of the SUPPLIER, the origin fallback when the scrape
 # has no country and origin_map doesn't cover the variety. Backend ids are dev-staging
 # defaults; replace per source when real accounts exist. VERIFY each origin_default.

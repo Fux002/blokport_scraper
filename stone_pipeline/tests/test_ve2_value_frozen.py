@@ -62,9 +62,9 @@ def test_acked_products_only_includes_medusa_held(tmp_path):
     assert out == {"ZUCCHI-1": {("color", norm("Beige")), ("finish", norm("Polished"))}}
 
 
-def test_acked_products_includes_category(tmp_path):
+def test_acked_products_carry_the_category_label_of_the_stored_handle(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _ledger_product(lg, "ZUCCHI-1", category="Tiles", medusa_id="M1")
+        _ledger_product(lg, "ZUCCHI-1", category="tiles", medusa_id="M1")   # stored by handle (D11)
         out = acked_products(lg)
     assert out == {"ZUCCHI-1": {("category", norm("Tiles"))}}
 
@@ -270,7 +270,7 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
     idx.add("a", "Kashmir Golda", surfaces=[], block_type="granite", origins={"BR"})
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(_stage().ref), "variants": {"slab": SimpleNamespace(
-            by_id={"a": SimpleNamespace(key="slab_granite_kashmir_golda_1", archived=True)})}}),
+            by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1", archived=True)})}}),
         engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=wb.WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Goldx",
@@ -282,7 +282,7 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
 
 # --- VE2 PR5: the variety Key as a frozen dimension (item 6) ------------------
 
-_ARCH_KEY = "slab_marble_carrara_1"
+_ARCH_KEY = "marble__carrara_1"
 
 
 def _vrow():
@@ -291,9 +291,9 @@ def _vrow():
 
 def _variation_row(lg, key):
     now = now_iso()
-    lg.upsert("variation", {"key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": "x",
-                            "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-                            "volume": "", "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced",
+    lg.upsert("variation", {"key": key, "type": "Marble", "name": "x",
+                            "aliases": "[]",
+                            "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced",
                             "archived": 0, "first_seen": now, "last_synced": now, "created_at": now,
                             "updated_at": now}, pk=("key",))
 
@@ -322,7 +322,7 @@ def test_an_existing_product_staying_on_its_archived_variety_is_exempt():
 def test_an_existing_product_moving_onto_an_archived_variety_is_held():
     row = _vrow()   # resolved to the archived Key, but acked on a DIFFERENT key -> a move -> held
     validate.validate_row(row, frozen={"variation_key": {norm(_ARCH_KEY)}},
-                          acked={"ZUCCHI-1": {("variation_key", norm("slab_marble_other_2"))}},
+                          acked={"ZUCCHI-1": {("variation_key", norm("marble__other_2"))}},
                           source_code="zucchi")
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
 

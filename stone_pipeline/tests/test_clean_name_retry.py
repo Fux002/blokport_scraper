@@ -44,14 +44,14 @@ def _stage(seed_types=None):
     ref = SimpleNamespace(
         overrides=Overrides(by_key={}),
         variants={"slab": SimpleNamespace(by_id={
-            "v_cw": SimpleNamespace(key="slab_granite_crystal_white_1"),
-            "v_bianco": SimpleNamespace(key="slab_granite_bianco_2"),
-            "v_storen": SimpleNamespace(key="slab_granite_storen_3"),
-            "v_ib": SimpleNamespace(key="slab_granite_imperial_blue_4"),
-            "v_pg": SimpleNamespace(key="slab_onyx_pakistan_green_5"),
-            "v_gd": SimpleNamespace(key="slab_onyx_green_dark_6"),
-            "v_pw": SimpleNamespace(key="slab_onyx_pure_white_7"),
-            "v_wo": SimpleNamespace(key="slab_onyx_white_onyx_8")})},
+            "v_cw": SimpleNamespace(key="granite__crystal_white_1"),
+            "v_bianco": SimpleNamespace(key="granite__bianco_2"),
+            "v_storen": SimpleNamespace(key="granite__storen_3"),
+            "v_ib": SimpleNamespace(key="granite__imperial_blue_4"),
+            "v_pg": SimpleNamespace(key="onyx__pakistan_green_5"),
+            "v_gd": SimpleNamespace(key="onyx__green_dark_6"),
+            "v_pw": SimpleNamespace(key="onyx__pure_white_7"),
+            "v_wo": SimpleNamespace(key="onyx__white_onyx_8")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in (seed_types or {}).items()}, {}),
         attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
     )
@@ -69,7 +69,7 @@ def test_type_token_query_binds_canonical_via_clean_retry():
     row = _row("Crystal White Granite", "Granite")
     _stage().resolve_row(row)
     assert row.variation_id == "v_cw"
-    assert row.variation_key == "slab_granite_crystal_white_1"
+    assert row.variation_key == "granite__crystal_white_1"
     assert row.variation_method.startswith("clean_variety_")
     assert not any(g.gap_kind == GapKind.missing_variation for g in row.tree_gaps)
 

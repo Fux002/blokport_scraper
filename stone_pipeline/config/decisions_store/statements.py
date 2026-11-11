@@ -23,7 +23,8 @@ def scope_key(source: str, spelling: str) -> tuple[str, str]:
     return (_norm(source), _norm(spelling))
 
 
-_STATEMENT_COLS = "source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, widen, asked_by"
+_STATEMENT_COLS = ("source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, widen, asked_by, "
+                   "decided_at")
 
 
 def _statement_rows() -> list[dict]:
@@ -34,7 +35,7 @@ def _statement_rows() -> list[dict]:
 
 def statement_rows() -> list[dict]:
     """Every stored operator statement as a row dict (source, spelling_norm, spelling, verdict, name,
-    stone_type, color, origin_iso, widen, asked_by). The public reader other packages use; the review
+    stone_type, color, origin_iso, widen, asked_by, decided_at). The public reader other packages use; the review
     API's VE2 re-confirm check reads it to compare a decision against what is already stored."""
     return _statement_rows()
 
@@ -300,16 +301,16 @@ def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: 
         if resolved_alias:
             outcome["resolved_alias"] = True
         return outcome
-    renamed = _norm(name) != _norm(spelling)
     meaning = _global_meaning(conn, spelling, stone_type, exists_as, alias_target, clean)
     if meaning and _norm(meaning[0]) == _norm(name) and _norm(meaning[1]) == _norm(stone_type):
         outcome["result"], outcome["level"] = "minted", "global"      # restates the global meaning: nothing new
-        if origin:                                                    # ...but the vendor's origin is recorded
+        if origin or color:                       # ...but the vendor's origin and its listings' colour are recorded
             _write_statement(conn, src, spelling, "is", name=name, stone_type=stone_type, color=color,
                              origin_iso=origin, widen=widen, asked_by=src)
         return outcome
     level = src if meaning else ""
-    _write_statement(conn, level, spelling, "is", name=name if renamed or level else None, stone_type=stone_type,
+    # the stated name is always stored: Statement.renamed is the one definition of a rename
+    _write_statement(conn, level, spelling, "is", name=name, stone_type=stone_type,
                      color=color, origin_iso=origin, widen=widen, asked_by=src)
     outcome["result"], outcome["level"] = "minted", ("vendor" if level else "global")
     if widen and origin:

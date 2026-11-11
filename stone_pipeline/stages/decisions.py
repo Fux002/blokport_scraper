@@ -21,9 +21,13 @@ from pathlib import Path
 from stone_pipeline.config import decisions_store
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS
-from stone_pipeline.core.text import title_case
+from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import UnfoldableName, title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.reference.medusa_files import AttributeValue, append_attributes, read_attributes
+
+log = logfmt.get_logger("decisions")
 
 # Field names the catalog stages build/read. Kept here so curate.py and emit stay unchanged; the store
 # persists these same fields as the pending-queue payload.
@@ -34,10 +38,21 @@ ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "actio
 CONFIRM_COLUMNS = ["confirm", "kind", "variant", "reason", "stone_type", "color", "nearest_existing",
                    "score", "model_prob", "src", "scraped", "src_url", "image", "description"]
 _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
-# scrape-derived display names title-cased at the write boundary (uniform casing regardless of curate path).
-# nearest_existing is included: the code-shaped hold writes a raw supplier-cased base there while the
-# alias-review/typeless holds write a canonical existing-variety Name -- same column, so normalize it too.
-_DISPLAY_CASE_FIELDS = frozenset({"variant", "color", "nearest_existing"})
+# scrape-derived display names written by their field's rule at the write boundary (uniform no matter which
+# curate path built the card). nearest_existing is NOT cleaned: it lists existing Names with their types,
+# 'Copacabana (Granite); Panda Black (Granite)', which the name rule would flatten; it keeps its casing step.
+_CARD_NAME_FIELDS = {"variant": field_kinds.VARIATION_NAME, "color": field_kinds.COLOR_NAME}
+# a colour_unconfirmed card's own fields (stages.curate.review.colour_cards), carried only by that card
+_COLOUR_CARD_FIELDS = ("colours", "skus", "count")
+
+
+def _card_text(field: str, value: str) -> str:
+    """A card name by its field's rule; a spelling with no ASCII form stays as scraped (on a card it is evidence
+    for the operator, never a stored name)."""
+    try:
+        return field_kinds.display(field, value)
+    except UnfoldableName:
+        return value
 # The backbone-leaf suggestion: a value Medusa already has, not yet allowed on this variety. Same fields
 # in the CSV audit artifact and the review-queue payload, one source of truth.
 LEAF_COLUMNS = ["variety", "stone_type", "attribute", "add_value", "currently_allowed",
@@ -60,15 +75,18 @@ def write_confirm_file(pending: list[dict]) -> int:
     """Replace the pending VARIETY queue with this run's still-undecided varieties. Returns the count.
     A decided variety is simply absent from `pending`, so it stops appearing.
 
-    Title-case the display names (variant + colour) HERE, at the one boundary every builder funnels through,
-    so the queue is uniformly cased no matter which curate path produced the row. The curate builders were
-    inconsistent -- the mint/typeless paths title-cased, but the code-shaped and alias-review holds wrote the
-    raw supplier casing, so a source shouting 'VENATTO BLUE' showed up in caps. The `ref` stays norm(variant)
-    (case-insensitive), so a decision keyed by norm still routes regardless of display casing. stone_type is
-    left as-is (already the resolved canonical value; title_case would mangle a hyphenated/multi-word type)."""
+    Write the display names (variant + colour) by their field's rule HERE, at the one boundary every builder
+    funnels through, so the queue is uniform no matter which curate path produced the row (a source shouting
+    'VENATTO BLUE' shows 'Venatto Blue'; 'S\u00e3o Gabriel' shows 'Sao Gabriel'). The `ref` stays norm(variant), so a
+    decision keyed by norm still routes regardless of display. stone_type is left as-is (already the resolved
+    canonical value)."""
     def _payload(row: dict) -> dict:
-        return {c: (title_case(str(row.get(c) or "")) if c in _DISPLAY_CASE_FIELDS else row.get(c, ""))
-                for c in _PENDING_VARIETY_FIELDS}
+        def value(c: str):
+            if c in _CARD_NAME_FIELDS:
+                return _card_text(_CARD_NAME_FIELDS[c], str(row.get(c) or ""))
+            return title_case(str(row.get(c) or "")) if c == "nearest_existing" else row.get(c, "")
+        return {**{c: value(c) for c in _PENDING_VARIETY_FIELDS},
+                **{c: row[c] for c in _COLOUR_CARD_FIELDS if c in row}}
     # one card per identity; every (vendor, scraped spelling) listing behind it rides along as `listings`, so
     # ONE statement on the card is applied to each listing under ITS vendor (decisions are keyed by vendor +
     # spelling; a card shared by two vendors must never decide the second vendor's listings as the first's).
@@ -76,7 +94,9 @@ def write_confirm_file(pending: list[dict]) -> int:
     # one card per IDENTITY (name, type): the same name under two stone types is two varieties, so two
     # cards, each carrying only its own listings (a statement on one must never re-type the other's vendor).
     # The ref is `<norm name>|<norm type>` for a typed card and the bare name for a type-less one; the
-    # reject PUT keys the reject on the name part, so a card ref and a bare name both work there.
+    # reject PUT keys the reject on the name part, so a card ref and a bare name both work there. A card that
+    # is one vendor's own question (`ref_scope`, a colour hold) adds `|<norm vendor>`, so it never merges with
+    # another vendor's card of the same variety.
     by_ref: dict[str, dict] = {}
     for row in pending:
         name = _norm(row.get("variant", ""))
@@ -84,9 +104,14 @@ def write_confirm_file(pending: list[dict]) -> int:
             continue
         stone_type = _norm(row.get("stone_type", "") or "")
         ref = f"{name}|{stone_type}" if stone_type else name
+        if (scope := _norm(row.get("ref_scope", "") or "")):
+            ref = f"{name}|{stone_type}|{scope}"
         card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
-        if row.get("scraped") and row.get("src"):
-            listing = {"source": row["src"], "scraped": row["scraped"]}
+        # a card that names its listings itself (a colour card: every spelling of the vendor's variety) brings
+        # them; any other card is one listing, its own (src, scraped)
+        own = row.get("listings") or ([{"source": row["src"], "scraped": row["scraped"]}]
+                                      if row.get("scraped") and row.get("src") else [])
+        for listing in own:
             listings = card["payload"].setdefault("listings", [])
             if listing not in listings:
                 listings.append(listing)
@@ -132,7 +157,8 @@ def write_origin_confirm_file(rows) -> int:
         imgs = (getattr(row, "raw_image_urls", None) or []) or (getattr(row, "image_keys", None) or [])
         pending[ref] = {
             "ref": ref,
-            "payload": {"source": source, "variety": title_case(variety), "stone_type": stone_type,
+            "payload": {"source": source, "variety": _card_text(field_kinds.VARIATION_NAME, variety),
+                        "stone_type": stone_type,
                         # the vendor's own spelling: what a re-bind (alias_of) is keyed on, per vendor
                         "scraped": (getattr(row, "variety_match_key", "") or getattr(row, "raw_name", "") or ""),
                         "map_country": (flag.raw_value if flag else ""),
@@ -176,11 +202,23 @@ def load_attribute_ids() -> dict[tuple[str, str], tuple[str, str]]:
 
 
 def write_attributes_to_add(pending: list[dict]) -> int:
-    """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count."""
-    rows = [{"ref": f"{(r.get('kind') or '').strip().lower()}:{_norm(r.get('value', ''))}",
-             "payload": {c: r.get(c, "") for c in ATTR_COLUMNS},
-             "sources": r.get("sources")}
-            for r in pending if (r.get("kind") and r.get("value"))]
+    """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count.
+    A card carries its value by its kind's field rule, the name the attribute will have in Medusa ('Marble
+    (translucent)' shows 'Marble Translucent'; the quality 'PINK' keeps its case). A value with no ASCII form
+    raises no card: it can never be a Medusa attribute. The ref stays kind:norm(value)."""
+    rows = []
+    for r in pending:
+        kind, raw = (r.get("kind") or "").strip().lower(), r.get("value") or ""
+        if not (kind and raw):
+            continue
+        try:
+            value = field_kinds.display(field_kinds.ATTRIBUTE_FIELDS[kind], raw)
+        except UnfoldableName:
+            log.warning("attribute card dropped: no ASCII form", extra={"extra_fields": {"kind": kind, "value": raw}})
+            continue
+        rows.append({"ref": f"{kind}:{_norm(raw)}",
+                     "payload": {**{c: r.get(c, "") for c in ATTR_COLUMNS}, "value": value},
+                     "sources": r.get("sources")})
     decisions_store.replace_pending("attribute", rows)
     return len(rows)
 
@@ -204,32 +242,32 @@ def write_backbone_leaf_pending(pending: list[dict]) -> int:
         # casing it comes from is not reliably title-cased). The `ref` stays norm-keyed, so routing is
         # unaffected. add_value/currently_allowed are canonical resolved values already; stone_type left as-is.
         payload = {c: r.get(c, "") for c in LEAF_COLUMNS}
-        payload["variety"] = title_case(str(payload.get("variety") or ""))
+        payload["variety"] = _card_text(field_kinds.VARIATION_NAME, str(payload.get("variety") or ""))
         rows.append({"ref": "|".join(keytuple), "payload": payload, "sources": r.get("sources")})
     decisions_store.replace_pending("backbone_leaf", rows)
     return len(rows)
 
 
-def write_minted_membership(backbone_new: dict[str, list[dict]]) -> int:
+def write_minted_membership(backbone_new: list[dict]) -> int:
     """Persist each variety minted THIS run with its own colour/finish/quality, as durable approved leaf
     decisions (config.db), so its backbone membership survives past this produce. The backbone_additions
     FILE stays per-run (the texture queue reads it to find new-this-run varieties); durability lives in the
-    overlay, which apply_leaf_overlay turns into a created record. Deduped across branches (one variety, one
-    membership). No new value is guessed: only the mint's own observed/seed attributes."""
+    overlay, which apply_leaf_overlay turns into a created record. One post per variety; a repeated
+    (variety, type, attribute, value) is written once. No new value is guessed: only the mint's own observed/seed
+    attributes."""
     _attr = {"color": "color", "finishes": "finish", "qualities": "quality"}   # post key -> leaf attribute
     seen: set[tuple[str, str, str, str]] = set()
     membership: list[tuple[str, str, str, str]] = []
-    for posts in backbone_new.values():
-        for p in posts:
-            variety, stone_type = p.get("variant", ""), p.get("stone_type", "")
-            if not (variety and stone_type):
-                continue
-            for post_key, attribute in _attr.items():
-                for value in p.get(post_key) or []:
-                    k = (_norm(variety), _norm(stone_type), attribute, _norm(value))
-                    if k not in seen:
-                        seen.add(k)
-                        membership.append((variety, stone_type, attribute, value))
+    for p in backbone_new:
+        variety, stone_type = p.get("variant", ""), p.get("stone_type", "")
+        if not (variety and stone_type):
+            continue
+        for post_key, attribute in _attr.items():
+            for value in p.get(post_key) or []:
+                k = (_norm(variety), _norm(stone_type), attribute, _norm(value))
+                if k not in seen:
+                    seen.add(k)
+                    membership.append((variety, stone_type, attribute, value))
     return decisions_store.record_minted_membership(membership)
 
 
