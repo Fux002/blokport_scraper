@@ -53,6 +53,10 @@ _RETRY_AFTER_MAX = 300.0
 class ScraperBase:
     # subclass sets these
     source: str = ""
+    # The supplier's public site host, derived from the module's own site URL (as written: a leading "www." is kept,
+    # the market-price match drops it on both sides). The competitor-price register flags a site of this domain as
+    # the owner's supplier (market_prices/register.py check_suppliers); scrapers.run.supplier_domains reads it.
+    site_domain: str = ""
     category: Optional[str] = None          # constant format if every product is one kind
     columns: list[str] = []                 # the site-specific CSV columns (no image/format cols)
     id_field: str = "product_id"            # the row column that uniquely ids a product
