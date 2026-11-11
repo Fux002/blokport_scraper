@@ -1,0 +1,173 @@
+"""The per-brand site register, and the gate: a site is collected only on a recorded, complete decision."""
+
+from __future__ import annotations
+
+import re
+from datetime import date, datetime, timezone
+from enum import Enum
+from pathlib import Path
+from typing import Annotated, Optional
+from urllib.parse import urlparse
+
+import yaml
+from pydantic import (
+    BaseModel, BeforeValidator, ConfigDict, StringConstraints, ValidationError, field_validator, model_validator,
+)
+
+from market_prices import config
+from market_prices.collectors import COLLECTORS
+from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
+
+SLUG = re.compile(r"[a-z0-9_]+")
+
+
+def _refuse_number(value: object) -> object:
+    if isinstance(value, (int, float)):
+        raise ValueError("a date must be written as a date, not a number")
+    return value
+
+
+Day = Annotated[date, BeforeValidator(_refuse_number)]
+Words = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Country = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+
+
+class RegisterError(Exception):
+    """The register cannot be used. Nothing is collected from a register that does not validate."""
+
+
+class Decision(str, Enum):
+    approved = "approved"
+    pending = "pending"
+    refused = "refused"
+
+
+class Terms(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    terms_url: Optional[str] = None
+    checked_on: Optional[Day] = None
+    summary: Optional[Words] = None
+
+    @field_validator("terms_url")
+    @classmethod
+    def _terms_url_is_https(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not (urlparse(value).scheme == "https" and urlparse(value).hostname):
+            raise ValueError(f"terms_url {value!r} must be an https URL")
+        return value
+
+    @property
+    def complete(self) -> bool:
+        return all((self.terms_url, self.checked_on, self.summary))
+
+
+class SiteStatements(BaseModel):
+    """What a site says once for all its listings, such as "all prices include VAT"."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    vat_basis: Optional[VatBasis] = None
+    unit_text: Optional[Words] = None
+    delivery_text: Optional[Words] = None
+    delivery_included: Optional[DeliveryIncluded] = None
+
+
+class Site(BaseModel):
+    """One storefront. A site selling into several markets is one entry per market."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    site_id: str
+    seller_name: Words
+    seller_type: SellerType
+    seller_country: Optional[Country] = None
+    served_market: Optional[Country] = None
+    platform: str
+    base_url: str
+    query: dict[str, str] = {}
+    terms: Terms
+    decision: Decision
+    decided_by: Optional[Words] = None
+    decided_on: Optional[Day] = None
+    statements: SiteStatements = SiteStatements()
+    grade_labels: tuple[Words, ...] = ()
+
+    @field_validator("site_id")
+    @classmethod
+    def _site_id_is_a_slug(cls, value: str) -> str:
+        if not SLUG.fullmatch(value):
+            raise ValueError(f"site_id {value!r} must match {SLUG.pattern}")
+        return value
+
+    @field_validator("base_url")
+    @classmethod
+    def _base_url_is_a_bare_https_origin(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if not parsed.hostname or "@" in parsed.netloc or value != f"https://{parsed.netloc}":
+            raise ValueError(f"base_url {value!r} must be a bare https origin")
+        return value
+
+    @model_validator(mode="after")
+    def _platform_and_gate(self) -> "Site":
+        collector = COLLECTORS.get(self.platform)
+        if collector is None:
+            raise ValueError(f"unknown platform {self.platform!r}; known: {sorted(COLLECTORS)}")
+        if reserved := sorted(collector.reserved_query & set(self.query)):
+            raise ValueError(f"query may not set {reserved}: the collector owns them")
+        if self.decision is Decision.approved:
+            self._require_full_record()
+        return self
+
+    def _require_full_record(self) -> None:
+        if not self.terms.complete:
+            raise ValueError("approved needs terms_url, checked_on and summary")
+        if not self.decided_by or not self.decided_on:
+            raise ValueError("approved needs decided_by and decided_on")
+        if self.decided_on < self.terms.checked_on:
+            raise ValueError("approved needs decided_on on or after checked_on")
+        if self.decided_on > datetime.now(timezone.utc).date():
+            raise ValueError("approved needs dates that are not in the future")
+        if not self.seller_country or not self.served_market:
+            raise ValueError("approved needs seller_country and served_market")
+
+    @property
+    def collectable(self) -> bool:
+        return self.decision is Decision.approved
+
+    @property
+    def robots_url(self) -> str:
+        return f"{self.base_url}{config.ROBOTS_PATH}"
+
+
+class Register(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    brand: str
+    sites: tuple[Site, ...]
+
+    @model_validator(mode="after")
+    def _site_ids_unique(self) -> "Register":
+        ids = [site.site_id for site in self.sites]
+        if duplicates := sorted({site_id for site_id in ids if ids.count(site_id) > 1}):
+            raise ValueError(f"duplicate site_id: {duplicates}")
+        return self
+
+
+def load_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
+    """The validated register of one brand. Any problem raises, so no site runs on a half-read register."""
+    if not SLUG.fullmatch(brand):
+        raise RegisterError(f"brand {brand!r} must match {SLUG.pattern}")
+    path = sites_dir / f"{brand}.yaml"
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RegisterError(f"no site register for brand {brand!r} at {path}") from exc
+    except yaml.YAMLError as exc:
+        raise RegisterError(f"{path} is not valid YAML: {exc}") from exc
+    try:
+        register = Register.model_validate(document)
+    except ValidationError as exc:
+        raise RegisterError(f"{path} does not validate: {exc}") from exc
+    if register.brand != brand:
+        raise RegisterError(f"{path} declares brand {register.brand!r}")
+    return register
