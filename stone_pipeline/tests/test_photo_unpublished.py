@@ -34,7 +34,7 @@ from stone_pipeline.stages import images
 _OLD = "2026-11-04T12:12:47+00:00"
 _SHA = "c041fed8d1cf8da7f2978da668607e3b6119f93ebcefeefaa83eaeb4c0f1d5f8"
 _BASE = "https://bucket.s3.eu-west-1.amazonaws.com/"
-_VARIATION = "tile_marble_abadeh_amvaj_1"
+_VARIATION = "marble__abadeh_amvaj_1"
 _FILES = [imagestore.standard_key("marenostone", _SHA, view) for view in ("main", "white", "studio")]
 _CUTOUT = imagestore.cutout_key("marenostone", _SHA, "webp")
 PUBLISHED = frozenset([*_FILES, _CUTOUT])
@@ -46,9 +46,9 @@ def _open(path) -> Ledger:
     ledger = Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint())
     if ledger.get("variation", "key", _VARIATION) is None:
         ledger.execute(
-            "INSERT INTO variation (key, branch, type, name, aliases, image_url, in_full, payload_hash, state, "
+            "INSERT INTO variation (key, type, name, aliases, in_full, payload_hash, state, "
             "medusa_id, first_seen, last_synced, created_at, updated_at) "
-            "VALUES (?, 'tile', 'Marble', 'Abadeh Amvaj', '[]', 'https://s3/tex.png', 1, '', 'synced', 'V', ?, ?, ?, ?)",
+            "VALUES (?, 'Marble', 'Abadeh Amvaj', '[]', 1, '', 'synced', 'V', ?, ?, ?, ?)",
             (_VARIATION, _OLD, _OLD, _OLD, _OLD))
     return ledger
 
