@@ -268,19 +268,22 @@ def test_the_fact_is_not_served_content(ledger_path):
     assert _row(ledger_path, "MAR-P/03/01")["payload_hash"] == hashed
 
 
-def test_a_v14_ledger_gains_photo_unpublished_and_keeps_its_data(tmp_path):
+def test_a_phase_1_v15_ledger_gains_photo_unpublished_in_place_and_keeps_its_data(tmp_path):
+    # SC-4's store migration writes v15 stores (dev's .v2 ledger among them): the v16 column is added in place,
+    # never by the store migration again, and the row and the ledger's own version follow
     path = tmp_path / "mig.ledger"
     with Ledger.open(path, env="development") as ledger:
         ledger.execute("INSERT INTO product (sku, source, state, created_at, updated_at) "
                        "VALUES ('MAR-1', 'mar', 'synced', 'x', 'x')")
-    raw = sqlite3.connect(path)                                                     # simulate a v14 ledger
+    raw = sqlite3.connect(path)                                                     # simulate a v15 ledger
     raw.execute("ALTER TABLE product DROP COLUMN photo_unpublished")
-    raw.execute("PRAGMA user_version = 14")
-    raw.execute("UPDATE ledger_meta SET schema_version = 14")
+    raw.execute("PRAGMA user_version = 15")
+    raw.execute("UPDATE ledger_meta SET schema_version = 15")
     raw.commit()
     raw.close()
     for _ in range(2):                                                              # the second open is a no-op
         with Ledger.open(path, env="development") as ledger:
-            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
+            assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 16
+            assert ledger.get("ledger_meta", "id", 1)["schema_version"] == 16
             row = ledger.get("product", "sku", "MAR-1")
             assert row["photo_unpublished"] is None and row["state"] == "synced"
