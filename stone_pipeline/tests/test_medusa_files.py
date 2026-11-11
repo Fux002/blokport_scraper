@@ -274,9 +274,11 @@ def test_the_loader_names_the_base_file_in_an_error(tmp_path):
 
 def test_own_variants_keeps_the_status_column_whole(tmp_path):
     from stone_pipeline.io.medusa_inputs import own_variants
-    p = _export(tmp_path, "Id,Key,Name,Type,status\nv1,slab_a_1,A,Marble,archived\nv9,np-cattle-1,Cow,Cattle,active\n")
+    # the scraper's own rows are the export's owner = scraper rows (D5); filtering keeps every other column whole
+    p = _export(tmp_path, "Id,Key,Name,Type,status,owner\nv1,marble__a_1,A,Marble,archived,scraper\n"
+                          "v9,np-cattle-1,Cow,Cattle,active,\n")
     assert own_variants(p) == 1
-    assert p.read_text(encoding="utf-8") == "Id,Key,Name,Type,status\nv1,slab_a_1,A,Marble,archived\n"
+    assert p.read_text(encoding="utf-8") == "Id,Key,Name,Type,status,owner\nv1,marble__a_1,A,Marble,archived,scraper\n"
     assert read_variants_export(p, require_status=True)[0].archived
 
 
