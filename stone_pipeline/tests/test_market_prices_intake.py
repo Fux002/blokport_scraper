@@ -359,8 +359,9 @@ def test_a_row_with_cells_past_the_headers_is_malformed():
 
 
 def test_an_over_long_cell_makes_its_row_malformed(monkeypatch):
-    monkeypatch.setattr(config, "MAX_CELL_CHARS", 40)
-    data = _csv(["StoneCorp Ltd"], ["Code", "Product", "Finish", "Price", "Unit"], ["SC-1", "N" * 41, "", "9", "m2"],
+    # above every cell an ordinary row carries (its provenance JSON is about 210 characters), below the long one
+    monkeypatch.setattr(config, "MAX_CELL_CHARS", 500)
+    data = _csv(["StoneCorp Ltd"], ["Code", "Product", "Finish", "Price", "Unit"], ["SC-1", "N" * 501, "", "9", "m2"],
                 ["SC-2", "Bianco", "", "9", "m2"])
     assert [row.listing_key for row in _absorb(data).observations] == ["SC-2"]
 
