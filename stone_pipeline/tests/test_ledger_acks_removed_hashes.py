@@ -210,21 +210,22 @@ def _dead_stock(path):
         for sku in ("S-1", "S-2"):
             _product(ledger, sku, state="synced", medusa_id="P-" + sku)
             _stock(ledger, sku, 0)
+            ledger.execute("UPDATE inventory SET reason = 'replaced_by_lot' WHERE sku = ?", (sku,))   # purgeable
         _product(ledger, "S-3", state="synced", medusa_id="P-S-3")
         _stock(ledger, "S-3", 4)                                              # on sale: not purged
 
 
-@pytest.mark.parametrize("reason", ["discontinued", "vendor_removed"])
 @pytest.mark.parametrize("fail_on", ["DELETE FROM product", "DELETE FROM inventory"])
-def test_purge_never_deletes_a_product_without_its_tombstone(tmp_path, reason, fail_on):
+def test_purge_never_deletes_a_product_without_its_tombstone(tmp_path, fail_on):
+    reason = "discontinued"
     path = tmp_path / "l.db"
     _dead_stock(path)
-    _interrupted(path, fail_on, lambda lg: sync.purge_discontinued(lg, reason=reason))
+    _interrupted(path, fail_on, lambda lg: sync.purge_discontinued(lg))
     with Ledger.open(path, env="development") as ledger:                     # (b): everything rolled back
         assert ledger.execute("SELECT COUNT(*) FROM removed").fetchone()[0] == 0
         assert sorted(r["sku"] for r in ledger.execute("SELECT sku FROM product")) == ["S-1", "S-2", "S-3"]
         assert ledger.execute("SELECT COUNT(*) FROM inventory").fetchone()[0] == 3
-        out = sync.purge_discontinued(ledger, reason=reason)                  # the re-run purges
+        out = sync.purge_discontinued(ledger)                                 # the re-run purges
     with Ledger.open(path, env="development") as ledger:
         assert sorted(out["external_ids"]) == ["S-1", "S-2"]
         tombstones = [tuple(r) for r in ledger.execute("SELECT external_id, kind, reason FROM removed ORDER BY 1")]

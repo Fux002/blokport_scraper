@@ -229,32 +229,33 @@ def test_reset_scoped_to_one_source_leaves_the_others(tmp_path):
         assert ledger.get("variation", "key", "marble__v1")["state"] == "synced"   # shared layer untouched
 
 
-def test_purge_discontinued_deletes_only_qty0_products(tmp_path):
-    # dead stock (qty 0) is hard-deleted so the graveyard stops growing; in-stock products stay; the
-    # returned external_ids are exactly what Medusa deletes (the ②③ half). A purged sku, having no
-    # prior ledger row, recreates as NEW on reappearance (the prev-is-None rule, covered by cold_start).
+def test_purge_discontinued_deletes_only_bundles_replaced_by_their_lot(tmp_path):
+    # the purge hard-deletes only a bundle its lot replaced; a gone listing (any other stock 0) stays published as sold
+    # out (owner 11-11, table 505); in-stock products stay; the returned external_ids are exactly what Medusa deletes
     from stone_pipeline.ledger.sync import purge_discontinued
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         _variation(ledger, "marble__v1", state="synced", medusa_id="V1")
-        for sku, src, qty in (("POL-1", "pol", 0), ("POL-2", "pol", 5), ("ZUC-1", "zuc", 0)):
+        for sku, src, qty, reason in (("POL-1", "pol", 0, "replaced_by_lot"), ("POL-2", "pol", 5, None),
+                                      ("POL-3", "pol", 0, "sold_out"), ("ZUC-1", "zuc", 0, "replaced_by_lot")):
             ledger.upsert("product", {"category": "slabs", "sku": sku, "source": src, "variation_key": "marble__v1",
                                       "medusa_id": "M-" + sku, "state": "synced",
                                       "created_at": now, "updated_at": now}, pk=("sku",))
-            ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
+            ledger.upsert("inventory", {"sku": sku, "qty": qty, "reason": reason, "last_synced_qty": qty,
                                         "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
 
         out = purge_discontinued(ledger)
-        assert set(out["external_ids"]) == {"POL-1", "ZUC-1"} and out["product"] == 2   # both qty-0 sources
+        assert set(out["external_ids"]) == {"POL-1", "ZUC-1"} and out["product"] == 2   # both sources' replaced bundles
         assert ledger.get("product", "sku", "POL-1") is None and ledger.get("inventory", "sku", "POL-1") is None
         assert ledger.get("product", "sku", "POL-2") is not None                       # in-stock kept
+        assert ledger.get("product", "sku", "POL-3") is not None                       # sold out: stays published
 
         # scoped purge touches only that source's dead stock
         for sku in ("POL-1", "ZUC-1"):   # re-seed both qty-0 again
             ledger.upsert("product", {"category": "slabs", "sku": sku, "source": sku[:3].lower(), "variation_key": "marble__v1",
                                       "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
-            ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": 0, "last_synced_made_to_order": 0,
-                                        "updated_at": now}, pk=("sku",))
+            ledger.upsert("inventory", {"sku": sku, "qty": 0, "reason": "replaced_by_lot", "last_synced_qty": 0,
+                                        "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
         out = purge_discontinued(ledger, source_codes=["pol"])
         assert out["external_ids"] == ["POL-1"]                  # zuc untouched by a pol-scoped purge
         assert ledger.get("product", "sku", "ZUC-1") is not None
