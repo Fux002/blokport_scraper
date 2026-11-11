@@ -131,8 +131,8 @@ def test_names_are_kept_unmangled(products):
         fed = by_sku[sku]
         assert row["Product Title"] == f"{fed['name']} {fed['finish']}"
         assert row["STN Type Name"] == fed["species"]
-        assert row["STN Variation Id"].startswith(f"{fed['form']}_{fed['species'].lower()}_"
-                                                  f"{fed['name'].lower().replace(' ', '_')}_")
+        # the phase 1 Key: one per (type, name), whatever the form (variety_key.new_key)
+        assert row["STN Variation Id"].startswith(f"{fed['species'].lower()}__{fed['name'].lower().replace(' ', '_')}_")
 
 
 def test_dimensions_and_density_are_wood(products):
@@ -182,10 +182,6 @@ def test_the_per_material_data_stays_in_the_packs_own_folders(wood):
     assert not (wood / "catalog_source" / "backbone_additions").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="fix owner: the Phase 1 ledger schema bump (blokport_research/2026-11-03-"
-                   "attribute-logistics-audit/PHASE-1-SPEC.md:249 drops `branch` and its CHECK): today the ledger's "
-                   "variation.branch only admits the stone categories (ledger/schema.sql:61), so seeding a wood variety "
-                   "fails and write-through cannot record a wood product")
 def test_the_ledger_records_the_wood_products(tmp_path):
     root = build_workspace(tmp_path)
     _completed(run_wood(root, writethrough=True))
