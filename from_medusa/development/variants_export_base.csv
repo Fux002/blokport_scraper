@@ -6354,6 +6354,7 @@ marble__brazil_cappuccino_55549daa-936f-5efb-807c-a7cd35d460b9,Brazil Cappuccino
 marble__brazil_chocolate_b90046cd-2373-53e7-8eef-6d1f3ff28858,Brazil Chocolate,Marble,Brazil Chocolate Marble
 marble__brazil_green_12a29e89-a14f-59bb-a24f-9723f5462948,Brazil Green,Marble,Amazon Green Marble|Verde Amazonas Marble|Amazon Green|Verde Amazonas
 marble__brazil_multicolor_d82f02b9-cbc9-592c-8172-861e182b8399,Brazil Multicolor,Marble,Brazil Multicolor Marble
+marble__brazilian_white_5775d738-8fbf-50dc-952d-285bfae7d6ba,Brazilian White,Marble,Brazil Arabescato Marble|Brazil Arabescato|Yudu Hui
 marble__breccia_adonis_8b53b3df-17f1-56c9-822a-bd6bb18327b2,Breccia Adonis,Marble,Marble Breccia Adonis|Adana Konglomera Mermeri|Adana Conglomerate Marble|Karaisali Konglomera|Karaisali Conglomerate Marble|Adana Conglomerate|Karaisali Conglomerate
 marble__breccia_antica_3098b127-75b6-5563-8b04-b0702147ac7b,Breccia Antica,Marble,Breccia Antica Marble
 marble__breccia_asia_8ade3a48-7b6d-5c68-ac2a-e39040ea0a5e,Breccia Asia,Marble,Breccia Asia Marble
@@ -9415,7 +9416,6 @@ marble__sunset_pink_a7b182d7-9f51-563d-a15d-09cfa5696ca8,Sunset Pink,Marble,Bile
 marble__sunset_wood_5411372d-5124-5424-91bb-a80d6f1a063f,Sunset Wood,Marble,Sunrise Wood Marble|Sunset Wooden Beige Marble|Sunrise Wood Grain Marble|Sunrise Wood|Sunset Wooden Beige|Sunrise Wood Grain|Wanxia Mu Wen
 marble__sunshine_fdb7fa64-6870-541d-8c49-d3c5803aff4b,Sunshine,Marble,Sunshine Yellow Marble|Sunshine Gold Marble|Balikesir Gold Marble|Sunshine Yellow|Sunshine Gold|Balikesir Gold
 marble__super_lilac_2c1da929-4398-5682-bb5b-3cf8e2a181b0,Super Lilac,Marble,Royal Violet|Firuze Marble|Lotus Violet Marble|Firuze|Lotus Violet|Mora Lilac Marble|Milas Lilac Dark Marble|Dark Violet Marble|Mora Lilac|Milas Lilac Dark|Dark Violet
-marble__super_white_f4805cc7-872b-57ed-828a-49ae49668460,Super White,Marble,Super White Marble|Brazil Arabescato Marble|Brazil Arabescato|Yudu Hui|Brazilian White|White Super|White Super Es
 marble__superior_86720854-3d86-546b-b3fe-b1b5876166b6,Superior,Marble,Superior White Marble|Superior Flower Marble|Superior Cd Marble|Superior Rainfall Marble|Superior Rain Fall Marble|Superior Pb Marble|Superior White|Superior Flower|Superior Cd|Superior Rainfall|Superior Rain Fall|Superior Pb|Superior Marble|Superior Crest
 marble__superior_altius_6de6fabd-f353-5a6b-9642-f479e57d7564,Superior Altius,Marble,Superior Marble|Superior Hermes Marble|Sivec Hermes Marble|Superior White Marble|Bianco Superior Marble|Superior|Superior Hermes|Sivec Hermes|Superior White|Bianco Superior
 marble__superior_dove_39ae0412-7002-5aa8-bc44-71c8c253e2f5,Superior Dove,Marble,Superior Dove Marble|Superior Marble|Superior White Marble|Superior Flower Marble|Superior|Superior White|Superior Flower
@@ -9977,6 +9977,7 @@ onyx__blue_traonyx_4d044986-9d8f-5ed2-83f0-a63251f09ba4,Blue Traonyx,Onyx,Blue T
 onyx__bolagh_green_f5fcdeef-e9e4-5e9c-805b-fdf158c2aa61,Bolagh Green,Onyx,Bolagh Onyx|Bolaq Green Onyx|Bolagh
 onyx__bolourin_19d44426-4742-58a1-9222-f7704e94115f,Bolourin,Onyx,Bolourin Mashhad Onyx|Mashhad Orange Onyx|Bolourin Honey Onyx|Bolourin Mashhad|Mashhad Orange|Bolourin Honey
 onyx__brazilian_5407bf76-9ead-518f-a7ae-db6ee71088c5,Brazilian,Onyx,
+onyx__brazilian_white_b0bac96b-457e-5d50-b9d2-662ea3d44b7a,Brazilian White,Onyx,Brazilian White Onyx|Brazilian Bianco|Brazilian Bianco Onyx|Brazilian Blanco|Brazilian Blanco Onyx|Brazilian Branco|Brazilian Branco Onyx|White Brazilian|White Brazilian Onyx|Brazilian White Quartzite
 onyx__brown_6c89fc85-c6ef-5aca-974f-9079a9d36768,Brown,Onyx,Brown Onyx|Marron|Marron Onyx|Marrone|Marrone Onyx|Bruno|Bruno Onyx
 onyx__brown_bubble_897d57a3-45db-5ec5-b7f0-d2c5f0a11305,Brown Bubble,Onyx,Iron Tree Blossom Onyx|Sago Palm Flower Onyx|Sago Palm Blossom Onyx|Iron Tree Blossom|Sago Palm Flower|Sago Palm Blossom|Tieshukaihua
 onyx__brown_fantasy_traonyx_8559057e-6a0b-5ebf-948c-21ff3aa8292b,Brown Fantasy Traonyx,Onyx,Brown Traonyx|Fantasy Traonyx|Onice Travertino|Jade Travertine|Tra-onyx Travertine|Traonyx Stone|Brown Onyx Travertine|Brown Tra Onyx|Traonyx Travertine|Tra-travertine|Brown Travertine|Brown Tra|Onice|Jade|Tra|Traonyx|Brown|Yu Dong Shi
@@ -10257,7 +10258,6 @@ onyx__sultan_264ca119-6f64-5999-a210-79f5de3bc6e2,Sultan,Onyx,Sultan Onyx
 onyx__sunset_8911a7ec-0e9d-5eac-9765-32257d9d43d4,Sunset,Onyx,Sunset Onyx
 onyx__sunset_cloud_914c871f-e518-5c02-bea9-92a7f1e86a33,Sunset Cloud,Onyx,Manisa Sky Onyx|Demirci Sky Onyx|Manisa Sky|Demirci Sky
 onyx__sunshine_99a87ca1-f4b7-5243-9347-df25a38fca01,Sunshine,Onyx,Kepsut Onyx|Balikesir Gold Onyx|Sunshine Marble|Kepsut|Balikesir Gold|Sunshine White
-onyx__super_white_4ca8502b-2392-5bd9-a5c4-8c6407ba3d9f,Super White,Onyx,Brazilian White Onyx|Brazilian Bianco|Brazilian Bianco Onyx|Brazilian Blanco|Brazilian Blanco Onyx|Brazilian Branco|Brazilian Branco Onyx|White Brazilian|White Brazilian Onyx|Brazilian White Quartzite|Brazilian White|White Super|White Super Es
 onyx__surreal_4d4a0b93-5d4c-5ea6-a1aa-dc4f5c7d7035,Surreal,Onyx,Crystal Surreal
 onyx__tanzania_8c179a4a-b875-546c-84f1-a73f39341dee,Tanzania,Onyx,Tanzania Purple Onyx|Tanzania Lilac Onyx|Onice Tanzania|Tanzania Bordeaux Onyx|Tanzania Purple|Tanzania Lilac|Tanzania Bordeaux|Tanzania Red
 onyx__teana_buddha_37d33c18-0fd3-55d3-b323-5b3cd0f0ead6,Teana Buddha,Onyx,Teana Buddha Onyx
@@ -10419,6 +10419,7 @@ quartzite__blue_treasure_00f9df04-826a-5518-8459-c905601aebe0,Blue Treasure,Quar
 quartzite__bordeaux_13347159-f6d4-5058-b2a1-3d9f3f2ab582,Bordeaux,Quartzite,Bordeaux Quartzite
 quartzite__botanic_green_5c9e0892-752b-533e-b290-c3e49fa0936c,Botanic Green,Quartzite,Botanic Green Quartzite|Botanic Verde|Botanic Verde Quartzite|Green Botanic|Green Botanic Quartzite
 quartzite__bramante_db567ce0-adc8-5f47-84c1-6f04451a0061,Bramante,Quartzite,Bramante Quartzite
+quartzite__brazilian_white_b2e0a536-7b53-5d1d-8f55-42ac11bf18d9,Brazilian White,Quartzite,Brazilian White Quartzite
 quartzite__brilliant_black_a4d766ca-22ce-5e72-b625-2c56e015f262,Brilliant Black,Quartzite,Preto Brilliant Black
 quartzite__brilliant_grey_a3ce6cdc-5e45-5640-91dc-143eddb14e7d,Brilliant Grey,Quartzite,Cinza Brilliant White
 quartzite__brilliant_white_d0815ba5-89d1-56aa-a09e-8400d3a2cb07,Brilliant White,Quartzite,Brilliant White Quartzite|Brilliant Bianco|Brilliant Bianco Quartzite|Brilliant Blanco|Brilliant Blanco Quartzite|Brilliant Branco|Brilliant Branco Quartzite|White Brilliant|White Brilliant Quartzite
@@ -10557,7 +10558,7 @@ quartzite__spectra_crystal_02320203-1d51-5ca2-9181-7179f2ee7b76,Spectra Crystal,
 quartzite__spider_black_3b36f07f-d973-577f-844a-1971c39571ce,Spider Black,Quartzite,Spider Black Quartzite|Spider Nero|Spider Nero Quartzite|Spider Negro|Spider Negro Quartzite|Spider Noir|Spider Noir Quartzite|Black Spider|Black Spider Quartzite
 quartzite__splendido_brown_8784f4c0-120b-51c4-aa22-ac62965f6019,Splendido Brown,Quartzite,Splendido Brown Quartzite|Splendido Marron|Splendido Marron Quartzite|Splendido Marrone|Splendido Marrone Quartzite|Splendido Bruno|Splendido Bruno Quartzite|Brown Splendido|Brown Splendido Quartzite
 quartzite__super_black_00ec8bba-f8dc-59e3-aae3-eb173b0baf15,Super Black,Quartzite,Super Black Quartzite|Super Nero|Super Nero Quartzite|Super Negro|Super Negro Quartzite|Super Noir|Super Noir Quartzite|Black Super|Black Super Quartzite
-quartzite__super_white_d1607218-a6f8-5203-acd3-a940b45b5d69,Super White,Quartzite,Brazilian White Quartzite|Brazilian White|White Super|White Super Es|Super White Quartzite|Fjord White Quartzite
+quartzite__super_white_d1607218-a6f8-5203-acd3-a940b45b5d69,Super White,Quartzite,Super White Quartzite|Fjord White Quartzite
 quartzite__supreme_ee9691a2-2481-543b-b1b9-47bd948ba2ea,Supreme,Quartzite,Crystal Supreme
 quartzite__symphony_67d58a49-75de-5b8c-b8f3-2f33b4dbd791,Symphony,Quartzite,Symphony Quartzite
 quartzite__taj_mahal_7fa510cc-6be6-51d3-ae1e-a7692af25694,Taj Mahal,Quartzite,Taj Mahal Quartzite|Tajmahal Quartzite|Brazilian Taj Mahal|Tajmahal|Z Tajmahal

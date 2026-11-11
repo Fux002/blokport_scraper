@@ -271205,6 +271205,44 @@
       "merged_from": []
     },
     {
+      "key": "marble__brazilian_white_5775d738-8fbf-50dc-952d-285bfae7d6ba",
+      "variant": "Brazilian White",
+      "stone_type": "Marble",
+      "color": [
+        "White",
+        "Grey"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Leathered",
+        "Sandblasted",
+        "Bush Hammered",
+        "Tumbled",
+        "Acid Washed",
+        "Sawn Cut",
+        "Split Face",
+        "Chiseled",
+        "Waterjet",
+        "Honed and Brushed",
+        "Sandblasted and Brushed",
+        "Bush Hammered and Brushed",
+        "Brushed and Tumbled",
+        "Antique",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazil Arabescato Marble",
+        "Brazil Arabescato",
+        "Yudu Hui"
+      ],
+      "merged_from": []
+    },
+    {
       "key": "marble__breccia_adonis_8b53b3df-17f1-56c9-822a-bd6bb18327b2",
       "variant": "Breccia Adonis",
       "stone_type": "Marble",
@@ -404668,45 +404706,6 @@
       "merged_from": []
     },
     {
-      "key": "marble__super_white_f4805cc7-872b-57ed-828a-49ae49668460",
-      "variant": "Super White",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Super White Marble",
-        "Brazil Arabescato Marble",
-        "Brazil Arabescato",
-        "Yudu Hui"
-      ],
-      "merged_from": []
-    },
-    {
       "key": "marble__superior_86720854-3d86-546b-b3fe-b1b5876166b6",
       "variant": "Superior",
       "stone_type": "Marble",
@@ -428128,6 +428127,42 @@
       "merged_from": []
     },
     {
+      "key": "onyx__brazilian_white_b0bac96b-457e-5d50-b9d2-662ea3d44b7a",
+      "variant": "Brazilian White",
+      "stone_type": "Onyx",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Leathered",
+        "Sandblasted",
+        "Sawn Cut",
+        "Split Face",
+        "Tumbled",
+        "Honed and Brushed",
+        "Antique",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Onyx",
+        "Brazilian Bianco",
+        "Brazilian Bianco Onyx",
+        "Brazilian Blanco",
+        "Brazilian Blanco Onyx",
+        "Brazilian Branco",
+        "Brazilian Branco Onyx",
+        "White Brazilian",
+        "White Brazilian Onyx"
+      ],
+      "merged_from": []
+    },
+    {
       "key": "onyx__brown_6c89fc85-c6ef-5aca-974f-9079a9d36768",
       "variant": "Brown",
       "stone_type": "Onyx",
@@ -437650,42 +437685,6 @@
       "merged_from": []
     },
     {
-      "key": "onyx__super_white_4ca8502b-2392-5bd9-a5c4-8c6407ba3d9f",
-      "variant": "Super White",
-      "stone_type": "Onyx",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Honed and Brushed",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Brazilian White Onyx",
-        "Brazilian Bianco",
-        "Brazilian Bianco Onyx",
-        "Brazilian Blanco",
-        "Brazilian Blanco Onyx",
-        "Brazilian Branco",
-        "Brazilian Branco Onyx",
-        "White Brazilian",
-        "White Brazilian Onyx"
-      ],
-      "merged_from": []
-    },
-    {
       "key": "onyx__surreal_4d4a0b93-5d4c-5ea6-a1aa-dc4f5c7d7035",
       "variant": "Surreal",
       "stone_type": "Onyx",
@@ -443407,6 +443406,42 @@
       "merged_from": []
     },
     {
+      "key": "quartzite__brazilian_white_b2e0a536-7b53-5d1d-8f55-42ac11bf18d9",
+      "variant": "Brazilian White",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Leathered",
+        "Bush Hammered and Brushed",
+        "Chiseled",
+        "Antique",
+        "Flamed and Waterjet",
+        "Sandblasted and Brushed",
+        "Flamed and Brushed",
+        "Raw",
+        "Flamed",
+        "Sawn Cut",
+        "Honed",
+        "Bush Hammered",
+        "Sandblasted",
+        "Polished",
+        "Brushed and Tumbled",
+        "Tumbled",
+        "Waterjet",
+        "Split Face",
+        "Brushed"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Quartzite"
+      ],
+      "merged_from": []
+    },
+    {
       "key": "quartzite__brilliant_black_a4d766ca-22ce-5e72-b625-2c56e015f262",
       "variant": "Brilliant Black",
       "stone_type": "Quartzite",
@@ -448211,8 +448246,7 @@
         "A"
       ],
       "aliases": [
-        "Super White Quartzite",
-        "Brazilian White Quartzite"
+        "Super White Quartzite"
       ],
       "merged_from": [
         {
