@@ -167,5 +167,6 @@ def test_the_reset_wipes_with_the_ledger_s_kept_set(tmp_path, monkeypatch):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         _product(ledger, "SEN-GONE", reason="sold_out", gone_at="2026-11-01T00:00:00Z",
                  thumb=f"{URL}/improved/sentas/{A}.jpg")
-        lifecycle._wipe_product_images(ledger)
+        from stone_pipeline.ledger import sync
+        lifecycle._wipe_product_images(ledger, sync)
     assert seen["keep"] == {("sentas", A)}

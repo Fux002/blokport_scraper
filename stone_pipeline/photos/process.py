@@ -787,7 +787,7 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     decisions = read_decisions(s3, root, listings)
-    kept = publish.read_kept(s3)                       # read before anything is paid: no publish without it
+    kept_photos = publish.read_kept(s3)                # read before anything is paid: no publish without it
     frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
@@ -807,7 +807,7 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     kept_as_was = restandardise_kept(s3, restandardise, lambda src: round_prefix(C.RUN_TAG, src))
     problems += [f"re-standardise {r['source']} {r['sha'][:12]} kept as it was: {r['why']}" for r in kept_as_was]
     try:
-        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned, held=held_photos(frozen, kept))
+        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned, held=held_photos(frozen, kept_photos))
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}

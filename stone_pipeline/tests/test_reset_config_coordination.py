@@ -21,6 +21,9 @@ def _fake_ledger_op(name, work):
 
         def reconcile_variations_to_seed(self, lg, seed_keys, protected=None, seed_identities=None):
             return {}
+
+        def kept_photos(self, lg):
+            return {}                                  # no listing left sale keeping its record (table 505)
     return work(None, _Sync()), 200
 
 
