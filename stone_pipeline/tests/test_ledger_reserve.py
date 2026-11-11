@@ -23,8 +23,7 @@ _OLD = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state="synced", *, archived=0, in_full=1, type_="Marble", payload_hash="h"):
     ledger.upsert("variation", {
-        "key": key, "branch": "slab", "type": type_, "name": "x", "aliases": "[]",
-        "image_url": "https://s3/tex.png", "image_sha256": None, "image_model": None, "volume": "",
+        "key": key, "type": type_, "name": "x", "aliases": "[]",
         "medusa_id": "V" if state != "pending" else None, "in_full": in_full, "payload_hash": payload_hash,
         "state": state, "archived": archived, "first_seen": _OLD, "last_synced": None,
         "created_at": _OLD, "updated_at": _OLD}, pk=("key",))
@@ -44,24 +43,24 @@ def test_the_bound_is_a_contract_value_beside_the_body_cap():
 
 def test_a_reserved_synced_row_is_served_exactly_once(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        _variation(ledger, "slab_b_2")                      # not sent: never marked
+        _variation(ledger, "marble__a_1")
+        _variation(ledger, "marble__b_2")                      # not sent: never marked
         assert ready(ledger, "variations") == []
-        assert _reserve(ledger, ["slab_a_1"]) == (200, {"reserved": ["slab_a_1"], "unknown": [], "frozen": []})
-        assert _state(ledger, "slab_b_2") == "synced"
+        assert _reserve(ledger, ["marble__a_1"]) == (200, {"reserved": ["marble__a_1"], "unknown": [], "frozen": []})
+        assert _state(ledger, "marble__b_2") == "synced"
         served = ready(ledger, "variations")
-        assert [i["external_id"] for i in served] == ["slab_a_1"]
-        ack(ledger, "variations", "slab_a_1", "V", payload_hash=served[0]["payload_hash"])
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert [i["external_id"] for i in served] == ["marble__a_1"]
+        ack(ledger, "variations", "marble__a_1", "V", payload_hash=served[0]["payload_hash"])
+        assert _state(ledger, "marble__a_1") == "synced"
         assert ready(ledger, "variations") == []            # once, not on every pull
 
 
 def test_unknown_is_reported_and_never_created(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        assert _reserve(ledger, ["slab_zz_9", "slab_a_1"]) == (
-            200, {"reserved": ["slab_a_1"], "unknown": ["slab_zz_9"], "frozen": []})
-        assert ledger.get("variation", "key", "slab_zz_9") is None
+        _variation(ledger, "marble__a_1")
+        assert _reserve(ledger, ["marble__zz_9", "marble__a_1"]) == (
+            200, {"reserved": ["marble__a_1"], "unknown": ["marble__zz_9"], "frozen": []})
+        assert ledger.get("variation", "key", "marble__zz_9") is None
 
 
 def _abandon(ledger, key):
@@ -72,61 +71,61 @@ def _abandon(ledger, key):
 def _frozen_alone(tmp_path, abandoned=False, **row) -> list[dict]:
     """Reserve one row built with `row`; assert it is frozen, nothing else, and wholly untouched. Returns frozen."""
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1", **row)
+        _variation(ledger, "marble__a_1", **row)
         if abandoned:
-            _abandon(ledger, "slab_a_1")
-        before = dict(ledger.get("variation", "key", "slab_a_1"))
-        code, answer = _reserve(ledger, ["slab_a_1"])
+            _abandon(ledger, "marble__a_1")
+        before = dict(ledger.get("variation", "key", "marble__a_1"))
+        code, answer = _reserve(ledger, ["marble__a_1"])
         assert code == 200 and answer["reserved"] == [] and answer["unknown"] == []
-        assert dict(ledger.get("variation", "key", "slab_a_1")) == before     # never marked, never stamped
+        assert dict(ledger.get("variation", "key", "marble__a_1")) == before     # never marked, never stamped
         return answer["frozen"]
 
 
 def test_an_abandoned_row_is_frozen_abandoned_and_never_revived(tmp_path):
     # an operator-abandoned dead-letter is terminal: a reserve that revived it would, on a further failure, strand it
     # (requeue skips an abandoned row and abandon answers "already"), so the operator's verdict is respected
-    assert _frozen_alone(tmp_path, abandoned=True) == [{"external_id": "slab_a_1", "reason": "abandoned"}]
+    assert _frozen_alone(tmp_path, abandoned=True) == [{"external_id": "marble__a_1", "reason": "abandoned"}]
 
 
 def test_an_archived_row_is_frozen_archived(tmp_path):
-    assert _frozen_alone(tmp_path, archived=1) == [{"external_id": "slab_a_1", "reason": "archived"}]
+    assert _frozen_alone(tmp_path, archived=1) == [{"external_id": "marble__a_1", "reason": "archived"}]
 
 
 def test_a_retiring_row_is_frozen_retiring(tmp_path):
-    assert _frozen_alone(tmp_path, state="retiring") == [{"external_id": "slab_a_1", "reason": "retiring"}]
+    assert _frozen_alone(tmp_path, state="retiring") == [{"external_id": "marble__a_1", "reason": "retiring"}]
 
 
 def test_a_row_outside_the_produced_set_is_frozen_not_in_full(tmp_path):
-    assert _frozen_alone(tmp_path, in_full=0) == [{"external_id": "slab_a_1", "reason": "not_in_full"}]
+    assert _frozen_alone(tmp_path, in_full=0) == [{"external_id": "marble__a_1", "reason": "not_in_full"}]
 
 
 def test_an_untyped_row_is_frozen_no_type(tmp_path):
-    assert _frozen_alone(tmp_path, type_="") == [{"external_id": "slab_a_1", "reason": "no_type"}]
+    assert _frozen_alone(tmp_path, type_="") == [{"external_id": "marble__a_1", "reason": "no_type"}]
 
 
 def test_the_frozen_reason_is_the_first_that_applies(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1", "retiring", archived=1, in_full=0, type_="")
-        _variation(ledger, "slab_b_2", "retiring", in_full=0, type_="")
-        _variation(ledger, "slab_c_3", in_full=0, type_="")
-        _variation(ledger, "slab_d_4", "syncing", archived=1)            # archived beats a live lease too
-        _variation(ledger, "slab_e_5", archived=1, in_full=0)
-        _abandon(ledger, "slab_e_5")                                      # the operator's ruling outranks the rest
-        assert _reserve(ledger, ["slab_e_5", "slab_d_4", "slab_c_3", "slab_b_2", "slab_a_1"])[1]["frozen"] == [
-            {"external_id": "slab_a_1", "reason": "archived"}, {"external_id": "slab_b_2", "reason": "retiring"},
-            {"external_id": "slab_c_3", "reason": "not_in_full"}, {"external_id": "slab_d_4", "reason": "archived"},
-            {"external_id": "slab_e_5", "reason": "abandoned"}]
-        assert _state(ledger, "slab_d_4") == "syncing"
+        _variation(ledger, "marble__a_1", "retiring", archived=1, in_full=0, type_="")
+        _variation(ledger, "marble__b_2", "retiring", in_full=0, type_="")
+        _variation(ledger, "marble__c_3", in_full=0, type_="")
+        _variation(ledger, "marble__d_4", "syncing", archived=1)            # archived beats a live lease too
+        _variation(ledger, "marble__e_5", archived=1, in_full=0)
+        _abandon(ledger, "marble__e_5")                                      # the operator's ruling outranks the rest
+        assert _reserve(ledger, ["marble__e_5", "marble__d_4", "marble__c_3", "marble__b_2", "marble__a_1"])[1]["frozen"] == [
+            {"external_id": "marble__a_1", "reason": "archived"}, {"external_id": "marble__b_2", "reason": "retiring"},
+            {"external_id": "marble__c_3", "reason": "not_in_full"}, {"external_id": "marble__d_4", "reason": "archived"},
+            {"external_id": "marble__e_5", "reason": "abandoned"}]
+        assert _state(ledger, "marble__d_4") == "syncing"
 
 
 def test_a_row_waiting_out_a_failed_apply_is_reserved_and_serves_after_the_wait(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
+        _variation(ledger, "marble__a_1")
         ledger.execute("UPDATE variation SET retry_after = '2999-01-01T00:00:00+00:00'")
-        assert _reserve(ledger, ["slab_a_1"])[1]["reserved"] == ["slab_a_1"]
+        assert _reserve(ledger, ["marble__a_1"])[1]["reserved"] == ["marble__a_1"]
         assert ready(ledger, "variations") == []                         # only delayed
         ledger.execute("UPDATE variation SET retry_after = ?", (_OLD,))
-        assert [i["external_id"] for i in ready(ledger, "variations")] == ["slab_a_1"]
+        assert [i["external_id"] for i in ready(ledger, "variations")] == ["marble__a_1"]
 
 
 def test_every_reserved_row_is_stamped_and_each_held_state_is_marked_dirty(tmp_path):
@@ -135,15 +134,15 @@ def test_every_reserved_row_is_stamped_and_each_held_state_is_marked_dirty(tmp_p
     # their state. Every reserved row is stamped reserved_at, so no lease issued before the reserve can ack it away
     # (a dirty row may still have a reaped lease out).
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        for key, state in [("slab_a_1", "synced"), ("slab_b_2", "needs_resync"), ("slab_c_3", "gap_held"),
-                           ("slab_d_4", "syncing"), ("slab_e_5", "pending"), ("slab_f_6", "dirty")]:
+        for key, state in [("marble__a_1", "synced"), ("marble__b_2", "needs_resync"), ("marble__c_3", "gap_held"),
+                           ("marble__d_4", "syncing"), ("marble__e_5", "pending"), ("marble__f_6", "dirty")]:
             _variation(ledger, key, state)
-        keys = ["slab_a_1", "slab_b_2", "slab_c_3", "slab_d_4", "slab_e_5", "slab_f_6"]
+        keys = ["marble__a_1", "marble__b_2", "marble__c_3", "marble__d_4", "marble__e_5", "marble__f_6"]
         assert _reserve(ledger, keys) == (200, {"reserved": keys, "unknown": [], "frozen": []})
         rows = {r["key"]: r for r in ledger.execute("SELECT key, state, reserved_at FROM variation")}
         assert {k: r["state"] for k, r in rows.items()} == {
-            "slab_a_1": "dirty", "slab_b_2": "dirty", "slab_c_3": "dirty", "slab_d_4": "dirty",
-            "slab_e_5": "pending", "slab_f_6": "dirty"}
+            "marble__a_1": "dirty", "marble__b_2": "dirty", "marble__c_3": "dirty", "marble__d_4": "dirty",
+            "marble__e_5": "pending", "marble__f_6": "dirty"}
         assert all(r["reserved_at"] for r in rows.values())
 
 
@@ -152,48 +151,48 @@ def test_reserve_outranks_a_lease_issued_before_it(tmp_path):
     # BEFORE the reserve, echoing the same hash, would set the just-reserved row back to synced, silently. The
     # reserve outranks it: that ack records what Medusa did but leaves the row dirty, and the next pull serves it.
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1", "dirty")
+        _variation(ledger, "marble__a_1", "dirty")
         leased = ready(ledger, "variations")                         # the lease, issued before the reserve
-        assert [i["external_id"] for i in leased] == ["slab_a_1"] and _state(ledger, "slab_a_1") == "syncing"
-        assert _reserve(ledger, ["slab_a_1"])[1]["reserved"] == ["slab_a_1"]
-        assert ack(ledger, "variations", "slab_a_1", "V-2", payload_hash=leased[0]["payload_hash"]) == 1
-        row = ledger.get("variation", "key", "slab_a_1")
+        assert [i["external_id"] for i in leased] == ["marble__a_1"] and _state(ledger, "marble__a_1") == "syncing"
+        assert _reserve(ledger, ["marble__a_1"])[1]["reserved"] == ["marble__a_1"]
+        assert ack(ledger, "variations", "marble__a_1", "V-2", payload_hash=leased[0]["payload_hash"]) == 1
+        row = ledger.get("variation", "key", "marble__a_1")
         assert row["state"] == "dirty" and row["medusa_id"] == "V-2" and row["last_synced"]   # recorded, not synced
         served = ready(ledger, "variations")                         # the next pull serves it
-        assert [i["external_id"] for i in served] == ["slab_a_1"]
-        assert ack(ledger, "variations", "slab_a_1", "V-2", payload_hash=served[0]["payload_hash"]) == 1
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert [i["external_id"] for i in served] == ["marble__a_1"]
+        assert ack(ledger, "variations", "marble__a_1", "V-2", payload_hash=served[0]["payload_hash"]) == 1
+        assert _state(ledger, "marble__a_1") == "synced"
         assert ready(ledger, "variations") == []                     # once
 
 
 def test_a_lease_issued_after_a_reserve_acks_to_synced(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        _reserve(ledger, ["slab_a_1"])
+        _variation(ledger, "marble__a_1")
+        _reserve(ledger, ["marble__a_1"])
         leased = ready(ledger, "variations")                         # carries the reserved payload
-        assert [i["external_id"] for i in leased] == ["slab_a_1"]
-        assert ledger.get("variation", "key", "slab_a_1")["reserved_at"] is None   # the lease cleared the stamp
-        ack(ledger, "variations", "slab_a_1", "V", payload_hash=leased[0]["payload_hash"])
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert [i["external_id"] for i in leased] == ["marble__a_1"]
+        assert ledger.get("variation", "key", "marble__a_1")["reserved_at"] is None   # the lease cleared the stamp
+        ack(ledger, "variations", "marble__a_1", "V", payload_hash=leased[0]["payload_hash"])
+        assert _state(ledger, "marble__a_1") == "synced"
         assert ready(ledger, "variations") == []
 
 
 def test_a_second_reserve_before_the_next_pull_changes_nothing_more(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        _variation(ledger, "slab_b_2", "pending")
-        first = _reserve(ledger, ["slab_a_1", "slab_b_2"])
+        _variation(ledger, "marble__a_1")
+        _variation(ledger, "marble__b_2", "pending")
+        first = _reserve(ledger, ["marble__a_1", "marble__b_2"])
         after_first = [dict(r) for r in ledger.execute("SELECT * FROM variation ORDER BY key")]
-        assert _reserve(ledger, ["slab_a_1", "slab_b_2"]) == first
+        assert _reserve(ledger, ["marble__a_1", "marble__b_2"]) == first
         assert [dict(r) for r in ledger.execute("SELECT * FROM variation ORDER BY key")] == after_first
-        assert [i["external_id"] for i in ready(ledger, "variations")] == ["slab_a_1", "slab_b_2"]
+        assert [i["external_id"] for i in ready(ledger, "variations")] == ["marble__a_1", "marble__b_2"]
         assert ready(ledger, "variations") == []
 
 
 def test_a_v14_ledger_gains_reserved_at_and_keeps_its_data(tmp_path):
     p = tmp_path / "mig.ledger"
     with Ledger.open(p, env="development") as lg:
-        _variation(lg, "slab_a_1")
+        _variation(lg, "marble__a_1")
     raw = sqlite3.connect(p)                                         # simulate a v14 ledger
     raw.execute("ALTER TABLE variation DROP COLUMN reserved_at")
     raw.execute("PRAGMA user_version = 14")
@@ -203,15 +202,15 @@ def test_a_v14_ledger_gains_reserved_at_and_keeps_its_data(tmp_path):
     for _ in range(2):                                               # the second open is a no-op
         with Ledger.open(p, env="development") as lg:
             assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
-            row = lg.get("variation", "key", "slab_a_1")
+            row = lg.get("variation", "key", "marble__a_1")
             assert row["reserved_at"] is None and row["state"] == "synced"
 
 
 def test_reserve_is_idempotent(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        _variation(ledger, "slab_arch_2", archived=1)
-        sent = ["slab_a_1", "slab_arch_2", "slab_zz_9"]
+        _variation(ledger, "marble__a_1")
+        _variation(ledger, "marble__arch_2", archived=1)
+        sent = ["marble__a_1", "marble__arch_2", "marble__zz_9"]
         first = _reserve(ledger, sent)
         after_first = [dict(r) for r in ledger.execute("SELECT * FROM variation ORDER BY key")]
         assert _reserve(ledger, sent) == first
@@ -220,16 +219,16 @@ def test_reserve_is_idempotent(tmp_path):
 
 def test_the_lists_are_disjoint_and_exactly_the_deduped_ids_sent(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        _variation(ledger, "slab_b_2", "pending")
-        _variation(ledger, "slab_arch_3", archived=1)
-        _variation(ledger, "slab_ret_4", "retiring")
-        _variation(ledger, "slab_out_5", in_full=0)
-        _variation(ledger, "slab_untyped_6", type_="")
-        _variation(ledger, "slab_dead_7")
-        _abandon(ledger, "slab_dead_7")
-        sent = ["slab_zz_9", "slab_a_1", "slab_arch_3", "slab_a_1", "slab_ret_4", "slab_b_2", "slab_out_5",
-                "slab_untyped_6", "slab_dead_7", "slab_zz_9"]
+        _variation(ledger, "marble__a_1")
+        _variation(ledger, "marble__b_2", "pending")
+        _variation(ledger, "marble__arch_3", archived=1)
+        _variation(ledger, "marble__ret_4", "retiring")
+        _variation(ledger, "marble__out_5", in_full=0)
+        _variation(ledger, "marble__untyped_6", type_="")
+        _variation(ledger, "marble__dead_7")
+        _abandon(ledger, "marble__dead_7")
+        sent = ["marble__zz_9", "marble__a_1", "marble__arch_3", "marble__a_1", "marble__ret_4", "marble__b_2", "marble__out_5",
+                "marble__untyped_6", "marble__dead_7", "marble__zz_9"]
         code, answer = _reserve(ledger, sent)
         assert code == 200 and set(answer) == {"reserved", "unknown", "frozen"}
         assert all(set(f) == {"external_id", "reason"} for f in answer["frozen"])
@@ -244,31 +243,31 @@ def test_the_lists_are_disjoint_and_exactly_the_deduped_ids_sent(tmp_path):
 
 def test_1000_distinct_ids_are_accepted_and_duplicates_count_once(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        ids = ["slab_a_1"] + [f"slab_zz_{i:04d}" for i in range(999)]
-        code, answer = _reserve(ledger, ids + ["slab_a_1"])     # 1,001 entries, 1,000 distinct
-        assert code == 200 and answer["reserved"] == ["slab_a_1"] and len(answer["unknown"]) == 999
-        assert _state(ledger, "slab_a_1") == "dirty"
+        _variation(ledger, "marble__a_1")
+        ids = ["marble__a_1"] + [f"marble__zz_{i:04d}" for i in range(999)]
+        code, answer = _reserve(ledger, ids + ["marble__a_1"])     # 1,001 entries, 1,000 distinct
+        assert code == 200 and answer["reserved"] == ["marble__a_1"] and len(answer["unknown"]) == 999
+        assert _state(ledger, "marble__a_1") == "dirty"
 
 
 def test_1001_distinct_ids_are_refused_whole_and_nothing_is_marked(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        ids = ["slab_a_1"] + [f"slab_zz_{i:04d}" for i in range(1000)]
+        _variation(ledger, "marble__a_1")
+        ids = ["marble__a_1"] + [f"marble__zz_{i:04d}" for i in range(1000)]
         code, answer = _reserve(ledger, ids)
         assert code == 400 and "1000" in answer["error"]
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert _state(ledger, "marble__a_1") == "synced"
 
 
 def test_a_malformed_body_or_another_type_is_a_400_and_nothing_is_marked(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-        for body in [None, [], {"external_ids": ["slab_a_1"]}, {"type": "products", "external_ids": ["slab_a_1"]},
-                     {"type": "variations"}, {"type": "variations", "external_ids": "slab_a_1"},
-                     {"type": "variations", "external_ids": ["slab_a_1", 7]}]:
+        _variation(ledger, "marble__a_1")
+        for body in [None, [], {"external_ids": ["marble__a_1"]}, {"type": "products", "external_ids": ["marble__a_1"]},
+                     {"type": "variations"}, {"type": "variations", "external_ids": "marble__a_1"},
+                     {"type": "variations", "external_ids": ["marble__a_1", 7]}]:
             code, answer = dispatch(ledger, "POST", "reserve", {}, body)
             assert code == 400 and answer["error"], body
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert _state(ledger, "marble__a_1") == "synced"
 
 
 def _handler(tmp_path, token_sent: str, body: dict) -> tuple[SyncHandler, list]:
@@ -285,15 +284,15 @@ def _handler(tmp_path, token_sent: str, body: dict) -> tuple[SyncHandler, list]:
 
 def test_reserve_takes_the_same_bearer_auth_as_every_sync_route(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_a_1")
-    body = {"type": "variations", "external_ids": ["slab_a_1"]}
+        _variation(ledger, "marble__a_1")
+    body = {"type": "variations", "external_ids": ["marble__a_1"]}
     h, out = _handler(tmp_path, "Bearer nope", body)
     h._handle("POST")
     assert out == [(401, {"error": "unauthorized"})]
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        assert _state(ledger, "slab_a_1") == "synced"
+        assert _state(ledger, "marble__a_1") == "synced"
     h, out = _handler(tmp_path, "Bearer sekret", body)
     h._handle("POST")
-    assert out == [(200, {"reserved": ["slab_a_1"], "unknown": [], "frozen": []})]
+    assert out == [(200, {"reserved": ["marble__a_1"], "unknown": [], "frozen": []})]
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        assert _state(ledger, "slab_a_1") == "dirty"
+        assert _state(ledger, "marble__a_1") == "dirty"
