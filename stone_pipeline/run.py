@@ -638,25 +638,30 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
                                                 "detail_failure_ratio": round(_detail_fail_ratio, 3),
                                                 "floor": SETTINGS.thresholds.delist_detail_failure_floor}})
         discontinued = []
+    # the products Medusa holds that this run held (rejects and review holds): hidden until a produce emits them again
+    held = product_state.held(validation.rejects + validation.review_only, source_cfg, known) if known else []
     # SAFETY: a partial scrape (truncated Cloudflare page, transient block) passes the DEGRADED
-    # health gate yet would delist every product it failed to fetch. Refuse to mass-delist: if a
-    # single run would take down >30% of this source's LIVE products, drop the delist and flag
-    # it loudly -- almost certainly an incomplete scrape, not a real bulk discontinuation.
-    _would_delist, _src_live = product_state.delist_exposure(discontinued, source_cfg, known) if known else (0, 0)
-    if _src_live and _would_delist > SETTINGS.thresholds.delist_max_fraction * _src_live:
-        run_log.warning("delist refused: a single run would discontinue too much of the catalog "
-                        "(likely a partial scrape) -- keeping products listed",
-                        extra={"extra_fields": {"would_delist": _would_delist, "source_live": _src_live,
-                                                "fraction": round(_would_delist / _src_live, 3)}})
-        discontinued = []
+    # health gate yet would delist every product it failed to fetch, and a broken stage that holds every row would
+    # hide them all. Both take stock off sale, so they are counted TOGETHER: if a single run would take down >30% of
+    # this source's LIVE products, drop the delist AND the hide and flag it loudly -- almost certainly an incomplete
+    # scrape or a fault, not a real bulk discontinuation. (A held SKU was scraped, a discontinued one was not: the two
+    # lists never share a SKU.)
+    _would_take_down, _src_live = (product_state.delist_exposure(discontinued + held, source_cfg, known)
+                                   if known else (0, 0))
+    if _src_live and _would_take_down > SETTINGS.thresholds.delist_max_fraction * _src_live:
+        run_log.warning("delist refused: a single run would take too much of the catalog off sale "
+                        "(likely a partial scrape or a stage holding every row) -- keeping products listed, "
+                        "none discontinued and none hidden",
+                        extra={"extra_fields": {"would_delist": len(discontinued), "would_hide": len(held),
+                                                "would_take_down": _would_take_down, "source_live": _src_live,
+                                                "fraction": round(_would_take_down / _src_live, 3)}})
+        discontinued, held = [], []
     # a discontinued bundle whose pieces now form a lot was REPLACED, not dropped: its delist names the lot
     # (Blokport deactivates it and redirects its page there). After the guards, so a refused delist refuses both.
     lot_of = lots.replacements(rows, source_cfg)
     replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
     ctx.manifest.totals["products_discontinued"] = len(discontinued)
     ctx.manifest.totals["bundles_replaced_by_lots"] = len(replaced)
-    # the products Medusa holds that this run held (rejects and review holds): hidden until a produce emits them again
-    held = product_state.held(validation.rejects + validation.review_only, source_cfg, known) if known else []
     return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced,
                   held=held)
 
