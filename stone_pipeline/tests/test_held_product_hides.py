@@ -114,3 +114,13 @@ def test_a_run_that_holds_a_few_live_products_hides_them(caplog):
     delist = _decide(rows, rows[:2], _known(*(str(i) for i in range(10))), caplog)
     assert delist.held == [(_sku("0"), "h-0"), (_sku("1"), "h-1")]
     assert not any("refused" in r.getMessage() for r in caplog.records)
+
+
+def test_an_unrelated_hold_never_blocks_a_real_delist(caplog):
+    # dev varsha's shape (11-11): 13 live, 2 held, 3 really dropped by the supplier. Each stock-off action passes the
+    # guard on its own count (2/13 and 3/13 are under the fraction), so the hold never refuses the delist.
+    rows = [_row(str(i)) for i in range(10)]                     # the scrape: 0..9; 10, 11 and 12 are gone
+    delist = _decide(rows, rows[:2], _known(*(str(i) for i in range(13))), caplog)
+    assert delist.held == [(_sku("0"), "h-0"), (_sku("1"), "h-1")]
+    assert sorted(sku for sku, _ in delist.discontinued) == [_sku("10"), _sku("11"), _sku("12")]
+    assert not any("refused" in r.getMessage() for r in caplog.records)
