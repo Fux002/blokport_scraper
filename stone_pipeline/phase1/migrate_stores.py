@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 # --- config ---------------------------------------------------------------------------------------------------------
 KEY_MAP_COLUMNS = ("old_key", "new_key", "category_rank", "type_name")
+RETIRED_KEYS_COLUMNS = ("old_key", "step")    # the env's committed retired-Keys file
 UNSAFE_STATES = ("retiring", "gap_held")        # section 3, C4: a copy in these states is never collapsed
 SURVIVOR_STATE = "dirty"                        # C4: the surviving row re-serves once
 PENDING_STATE = "pending"                       # G8: a variety with no Medusa record is pulled after the roll
@@ -70,6 +71,30 @@ def read_key_map(data: bytes, sha256: str) -> KeyMap:
     if tuple(reader.fieldnames or ()) != KEY_MAP_COLUMNS:
         raise MigrationRefused(f"key map: columns {reader.fieldnames} are not {list(KEY_MAP_COLUMNS)}")
     return KeyMap({r["old_key"]: (r["new_key"], int(r["category_rank"]), r["type_name"]) for r in reader})
+
+
+def read_retired_keys(data: bytes, sha256: str, key_map: KeyMap) -> dict[str, str]:
+    """old Key -> the step that retired it, from the env's committed retired-Keys file, read only at its pinned digest:
+    the Keys retired before phase 1 that no store records (a ledger variation tombstone is the other record). Every
+    line names a Key outside the key map and cites its step; anything else refuses, so a mapping fault is never
+    recorded as a retirement."""
+    _digest_checked(data, sha256, "retired keys")
+    reader = csv.DictReader(io.StringIO(data.decode("utf-8")))
+    if tuple(reader.fieldnames or ()) != RETIRED_KEYS_COLUMNS:
+        raise MigrationRefused(f"retired keys: columns {reader.fieldnames} are not {list(RETIRED_KEYS_COLUMNS)}")
+    out: dict[str, str] = {}
+    for row in reader:
+        key, step = (row["old_key"] or "").strip(), (row["step"] or "").strip()
+        if not key:
+            raise MigrationRefused(f"retired keys: a line with no Key ({row})")
+        if key in out:
+            raise MigrationRefused(f"retired keys: {key} is listed twice")
+        if not step:
+            raise MigrationRefused(f"retired keys: {key} cites no step that retired it")
+        if key_map.new_key(key) is not None:
+            raise MigrationRefused(f"retired keys: {key} is in the key map, so it is a live Key, not a retired one")
+        out[key] = step
+    return out
 
 
 def read_survivor_map(data: bytes, sha256: str, key_map_sha256: str) -> dict[str, str]:
