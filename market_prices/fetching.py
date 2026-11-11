@@ -1,7 +1,7 @@
 """The rules every request obeys: robots.txt first, paced, and a block ends the site's collection at once.
 
-A Transport does the HTTP. This module holds no client on purpose: the live transport arrives with the fetch-layer
-split, so until then nothing in this package can reach a real site.
+A Transport does the HTTP. This module holds no client on purpose: the one live transport is market_prices.transport,
+and everything here runs the same on a test's scripted transport.
 """
 
 from __future__ import annotations

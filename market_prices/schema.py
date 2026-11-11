@@ -16,6 +16,13 @@ class MalformedListing(ValueError):
     """One listing cannot be read. It is counted against the site; the other listings still count."""
 
 
+class Source(str, Enum):
+    """Where a row came from: a site this path read, or a price sheet the owner supplied (contract v2)."""
+
+    site = "site"
+    file = "file"
+
+
 class SellerType(str, Enum):
     merchant = "merchant"
     wholesaler = "wholesaler"
@@ -62,12 +69,15 @@ class Observation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str
+    source: Source
     brand: str
     site_id: str
     seller_name: str
     seller_type: SellerType
     seller_country: str = Field(pattern=r"^[A-Z]{2}$")
     served_market: str = Field(pattern=r"^[A-Z]{2}$")
+    seller_is_our_supplier: bool
+    supplier_key: Optional[str]
     listing_key: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
@@ -95,6 +105,12 @@ class Observation(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _supplier_flag_has_its_key(self) -> "Observation":
+        if self.seller_is_our_supplier != (self.supplier_key is not None):
+            raise ValueError("supplier_key is set exactly when seller_is_our_supplier is true")
+        return self
+
+    @model_validator(mode="after")
     def _cells_are_deliverable(self) -> "Observation":
         """A row that could not be written or read back is this listing's problem, never the whole run's."""
         for cell in csv_values(self):
@@ -110,6 +126,7 @@ class SiteStatus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: str
+    source: Source
     brand: str
     site_id: str
     status: SiteRunStatus
@@ -152,6 +169,8 @@ def csv_values(row: BaseModel) -> list[str]:
 def _cell(value: object) -> str:
     if value is None:
         return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, Enum):
         return str(value.value)
     if isinstance(value, dict):
