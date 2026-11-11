@@ -410,3 +410,39 @@ def test_the_run_refuses_a_retired_keys_file_not_at_its_pinned_digest(tmp_path):
     inputs["retired_keys"]["sha256"] = "0" * 64
     with pytest.raises(MigrationRefused, match="retired keys"):
         migrate_run.run(s3, inputs, write=False)
+
+
+def test_the_run_refuses_an_env_with_no_committed_retired_keys_file(tmp_path, monkeypatch):
+    # prod's case until its own file is built from prod's measurement: the run refuses; it never reads "no file" as
+    # "no retired Keys"
+    s3, inputs = _stack(tmp_path)
+    monkeypatch.setattr(migrate_run, "RETIRED_KEYS_PATH", tmp_path / "production.csv")
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="retired keys: .*production.csv is not committed"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []                       # refused before any store or map is read
+
+
+def test_the_run_refuses_a_retired_keys_file_off_its_pin_before_reading_a_store(tmp_path):
+    s3, inputs = _stack(tmp_path)
+    inputs["retired_keys"]["sha256"] = "0" * 64
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="retired keys: sha256 .* is not the expected"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"sha256": ""}, "1fe1"])
+def test_the_run_refuses_inputs_without_the_retired_keys_pin_before_reading_a_store(tmp_path, entry):
+    s3, inputs = _stack(tmp_path)
+    if entry is None:
+        del inputs["retired_keys"]
+    else:
+        inputs["retired_keys"] = entry
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="MIGRATE_INPUTS has no retired_keys"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []
