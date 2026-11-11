@@ -210,6 +210,37 @@ def test_a_seed_drop_keeps_a_variety_a_gone_listing_shows(tmp_path):
         assert ledger.get("variation", "key", "marble__live_2") is None
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_a_variety_a_gone_listing_shows_cannot_be_retired_and_nothing_is_deleted(tmp_path, force):
+    # manager's ruling on #634: one rule, fails loud, the operator decides first (force does not override it)
+    from stone_pipeline.ledger.sync import GoneListingsShowVariety, retire_variation
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-GONE", qty=0, reason="sold_out", gone_at=FIRST)
+        with pytest.raises(GoneListingsShowVariety, match="SEN-GONE"):
+            retire_variation(ledger, "marble__v_1", force=force)
+        assert ledger.get("product", "sku", "SEN-GONE") is not None
+        assert ledger.get("variation", "key", "marble__v_1") is not None
+        assert ledger.execute("SELECT COUNT(*) FROM removed").fetchone()[0] == 0
+
+
+def test_the_retire_verb_answers_409_naming_the_gone_listings(tmp_path, monkeypatch):
+    from stone_pipeline import lifecycle
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _prod(ledger, "SEN-GONE", qty=0, reason="sold_out", gone_at=FIRST)
+    body, code = lifecycle.retire_variation("marble__v_1")
+    assert code == 409 and "SEN-GONE" in body["error"]
+
+
+def test_a_variety_whose_gone_listing_came_back_retires_as_before(tmp_path):
+    from stone_pipeline.ledger.sync import retire_variation
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-1", qty=0)                                     # stock 0, not gone
+        retire_variation(ledger, "marble__v_1")
+        assert ledger.get("product", "sku", "SEN-1") is None
+
+
 # --- what Blokport receives ------------------------------------------------------------------------------------------
 def test_the_delta_carries_sold_out_and_gone_at_and_a_hidden_one_keeps_its_reason(tmp_path):
     with _open(tmp_path) as ledger:
