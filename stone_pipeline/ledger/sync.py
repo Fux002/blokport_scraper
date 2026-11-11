@@ -885,6 +885,12 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
             params).rowcount if scoped else ledger.execute("DELETE FROM inventory WHERE gone_at IS NULL").rowcount
         out["product"] = ledger.execute(
             f"DELETE FROM product{where}{' AND ' if where else ' WHERE '}{not_gone}", params).rowcount
+        # the spared gone listings re-serve once from zero, as a soft reset does: a coordinated factory reset wipes
+        # Medusa too, so a record kept with its old sync overlay would never be sent again
+        gone_scope = f"{where}{' AND ' if where else ' WHERE '}sku IN ({GONE_SKUS_SQL})"
+        _reset_overlay(ledger, "product", now, gone_scope, params)
+        ledger.execute(f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL}, updated_at = ? WHERE gone_at IS NOT NULL"
+                       + (f" AND sku IN (SELECT sku FROM product{where})" if scoped else ""), (now, *params))
     else:                                      # keep the rows, just re-serve them from zero
         out["product"] = _reset_overlay(ledger, "product", now, where, params)
         inv_where = " WHERE sku IN (SELECT sku FROM product%s)" % where if scoped else ""

@@ -232,15 +232,16 @@ GET `/sync/v1/inventory` item payloads:
 { "sku": "<SKU>", "quantity": <N>, "made_to_order": false }
     // reappeared: a plain stock, no reason, no gone_at
 ```
-- `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone. It is absent on a
+- `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone (a listing already
+  gone before ledger v18 gets the first v18 run's date). It is absent on a
   listing that is not gone. Blokport v1 accepts it and does not store it, so it rides the listing's next served stock:
   a hidden listing whose reason does not change is not served again for `gone_at` alone.
-- Hide reasons: `no_photo`, `delisted` (`held` once #632 lands). Any other reason at stock 0 is shown (sold out) once the
+- Hide reasons: `no_photo`, `delisted`, `held` (#632, stock unknown). Any other reason at stock 0 is shown (sold out) once the
   backend lane change lands. Today a stock 0 with NO reason is hidden (measured by M4), and the scraper always sends a
   gone listing with its reason.
 - Never deleted: the scraper never sends a tombstone for a gone listing. The purge (S-1) skips it, a vendor removal
   unpublishes every product as `delisted` instead of tombstoning, and a hard or factory reset and a seed variety drop
-  spare it.
+  spare it. A reset re-serves a spared gone listing once from zero (Medusa is wiped too on a factory reset).
 - Condition of done (505): the backend lanes never unpublish or hard-delete a `sold_out` listing. The inventory lane
   stops rejecting it when it is not on sale, and `held` joins the hide set. The scraper half reaches a pull only with or
   after that change.

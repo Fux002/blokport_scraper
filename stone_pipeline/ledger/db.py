@@ -35,13 +35,15 @@ SCHEMA_VERSION = 18  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per 
 #                           published (never served while any); null on every existing row until its next produce.
 #                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
 #                      v18: inventory.gone_at -- when a listing was first missing at its supplier (table 505: it stays
-#                           published as sold out); null on every existing row until a run finds it gone.
+#                           published as sold out); null on every existing row until a run finds it gone, so a
+#                           listing gone before v18 gets the first v18 run's date.
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 # The stock reasons that HIDE a product on Blokport (agreed with M4, table 505): a gone listing that carried one keeps
-# it (it keeps the publish state it had); every other gone listing is 'sold_out', shown and not buyable.
-HIDDEN_REASONS = ("no_photo", "delisted")
+# it (it keeps the publish state it had); every other gone listing is 'sold_out', shown and not buyable. 'held' is the
+# stock-unknown hide (#632): listed here before it lands, so a held listing that later goes gone stays hidden.
+HIDDEN_REASONS = ("no_photo", "delisted", "held")
 # The products a gone listing is (populate_discontinued stamped it): their records are never deleted or tombstoned.
 GONE_SKUS_SQL = "SELECT sku FROM inventory WHERE gone_at IS NOT NULL"
 
