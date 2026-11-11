@@ -310,7 +310,7 @@ class Resolved:
 class Delist:
     """The stock decisions: existing products, the ones whose supplier stock moved, the products the scrape dropped
     (after both delist guards), the dropped bundles their lot replaced ({sku: (lot_code, pieces)}) and the products
-    Medusa holds that this run held (after the mass-delist guard), hidden until a produce emits them again."""
+    Medusa holds that this run held, hidden until a produce emits them again."""
     existing_rows: list[CanonicalRow]
     changed: list[CanonicalRow]
     discontinued: list[tuple[str, str]]
@@ -655,29 +655,10 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
     ctx.manifest.totals["products_discontinued"] = len(discontinued)
     ctx.manifest.totals["bundles_replaced_by_lots"] = len(replaced)
-    held = _guarded_held(ctx, validation, known)
+    # the products Medusa holds that this run held (rejects and review holds): hidden until a produce emits them again
+    held = product_state.held(validation.rejects + validation.review_only, source_cfg, known) if known else []
     return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced,
                   held=held)
-
-
-def _guarded_held(ctx: RunContext, validation: validate.ValidationResult,
-                  known: product_state.KnownProducts) -> list[tuple[str, str]]:
-    """The products Medusa holds that this run held (rejects and review holds), to hide (stock 0, reason 'held'), after
-    the mass-delist guard: a run that would hide more than delist_max_fraction of the source's LIVE products is
-    almost certainly broken (an adapter or reference fault), so nothing is hidden and the refusal is named in the run
-    summary. Fills the held totals."""
-    held = product_state.held(validation.rejects + validation.review_only, ctx.source_cfg, known) if known else []
-    would_hide, src_live = product_state.delist_exposure(held, ctx.source_cfg, known) if known else (0, 0)
-    refused = 0
-    if src_live and would_hide > SETTINGS.thresholds.delist_max_fraction * src_live:
-        ctx.run_log.warning("hide refused: a single run would hide too much of the catalog as held "
-                            "(likely a broken run) -- keeping products listed",
-                            extra={"extra_fields": {"would_hide": would_hide, "source_live": src_live,
-                                                    "fraction": round(would_hide / src_live, 3)}})
-        refused, held = len(held), []
-    ctx.manifest.totals["products_held_hidden"] = len(held)
-    ctx.manifest.totals["held_hide_refused"] = refused
-    return held
 
 
 def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
@@ -863,7 +844,6 @@ def print_summary(manifest: Manifest) -> None:
         f"  rows in           {t.get('rows', 0)}",
         f"  emitted           {t.get('emitted', 0)}",
         f"  rejected          {t.get('rejected', 0)}",
-        f"  held hidden       {_held_line(t)}",
         f"  variation matched {t.get('variation_resolved', 0)}",
         f"  distinct gaps     {sum(manifest.gap_kind_counts.values())}",
         f"  match methods     {manifest.match_method_distribution}",
@@ -872,13 +852,6 @@ def print_summary(manifest: Manifest) -> None:
         "",
     ]
     print("\n".join(lines))
-
-
-def _held_line(totals: dict) -> str:
-    """The held products hidden this run, and a refused burst named (the mass-delist guard)."""
-    refused = totals.get("held_hide_refused", 0)
-    hidden = f"{totals.get('products_held_hidden', 0)}"
-    return f"{hidden} (refused {refused}: a broken run, products kept listed)" if refused else hidden
 
 
 def expected_sources(sources: Optional[list[str]] = None) -> list[str]:

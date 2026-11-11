@@ -2,22 +2,15 @@
 others, or keeps it for review) is HIDDEN: its stock is served as quantity 0 with reason 'held', so no buyer can order
 a stock the scraper can no longer state. BlokPort already hides a stock that is not on sale (status rejected, as a
 sell-out) and reads an unknown reason as a plain stock update, so the hide needs no change on its side. A held product
-is not dead stock: the purge keeps it, and the produce that emits it again serves its real stock. The mass-delist
-guard caps a held burst as it caps a delist (a broken scrape that holds most of a source must not hide it all), and the
-run summary names the refusal. No em dashes."""
+is not dead stock: the purge keeps it, and the produce that emits it again serves its real stock. No em dashes."""
 from __future__ import annotations
 
-import logging
-from types import SimpleNamespace
-
 from stone_pipeline.config.sources import load_source
-from stone_pipeline.core.manifest import Manifest
 from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline.ledger import sync, writethrough
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_inventory
-from stone_pipeline.run import decide_delist, print_summary
-from stone_pipeline.stages import product_state, validate
+from stone_pipeline.stages import product_state
 
 CFG = load_source("marenostone")
 
@@ -94,24 +87,3 @@ def test_a_held_product_emitted_again_serves_its_real_stock(tmp_path, monkeypatc
         populate_inventory(lg, [_row("1", qty=5)], CFG)             # the next produce emits it again
         assert sync.ready_inventory(lg) == [{"external_id": _sku("1"),
                                              "payload": {"sku": _sku("1"), "quantity": 5, "made_to_order": False}}]
-
-
-def _decide(held_n: int, live_n: int = 10):
-    ns = [str(i) for i in range(live_n)]
-    rows = [_row(n) for n in ns]
-    validation = validate.ValidationResult(emit=rows[held_n:], rejects=rows[:held_n])
-    ctx = SimpleNamespace(run_log=logging.LoggerAdapter(logging.getLogger("held-test"), {}), source_cfg=CFG,
-                          scrape_path=None,
-                          manifest=Manifest(run_id="r", source="marenostone", code_version="x", environment="dev"))
-    return ctx, decide_delist(ctx, rows, validation, _known(*ns))
-
-
-def test_the_mass_delist_guard_caps_a_held_burst_and_the_summary_names_it(capsys):
-    ctx, delist = _decide(held_n=2)                                   # 2 of 10 live: hidden
-    assert [sku for sku, _ in delist.held] == [_sku("0"), _sku("1")]
-    assert ctx.manifest.totals["products_held_hidden"] == 2
-    ctx, delist = _decide(held_n=5)                                   # 5 of 10 live: a broken scrape, refused
-    assert delist.held == []
-    assert (ctx.manifest.totals["products_held_hidden"], ctx.manifest.totals["held_hide_refused"]) == (0, 5)
-    print_summary(ctx.manifest)
-    assert "held hidden       0 (refused 5" in capsys.readouterr().out
