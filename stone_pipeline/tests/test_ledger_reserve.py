@@ -189,19 +189,22 @@ def test_a_second_reserve_before_the_next_pull_changes_nothing_more(tmp_path):
         assert ready(ledger, "variations") == []
 
 
-def test_a_v14_ledger_gains_reserved_at_and_keeps_its_data(tmp_path):
+def test_a_v16_ledger_gains_reserved_at_in_place_and_keeps_its_data(tmp_path):
+    # the column after photo_unpublished's v16: a phase 1 ledger at v16 gains it in place, its rows and its own
+    # version kept in step
     p = tmp_path / "mig.ledger"
     with Ledger.open(p, env="development") as lg:
         _variation(lg, "marble__a_1")
-    raw = sqlite3.connect(p)                                         # simulate a v14 ledger
+    raw = sqlite3.connect(p)                                         # simulate a v16 ledger
     raw.execute("ALTER TABLE variation DROP COLUMN reserved_at")
-    raw.execute("PRAGMA user_version = 14")
-    raw.execute("UPDATE ledger_meta SET schema_version = 14")
+    raw.execute("PRAGMA user_version = 16")
+    raw.execute("UPDATE ledger_meta SET schema_version = 16")
     raw.commit()
     raw.close()
     for _ in range(2):                                               # the second open is a no-op
         with Ledger.open(p, env="development") as lg:
-            assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
+            assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 17
+            assert lg.get("ledger_meta", "id", 1)["schema_version"] == 17
             row = lg.get("variation", "key", "marble__a_1")
             assert row["reserved_at"] is None and row["state"] == "synced"
 
