@@ -186,14 +186,12 @@ def record_catalog(path: str | Path | None = None) -> bool:
             return True
         with open_ledger(path) as ledger:
             n = populate.populate_variations_full(ledger, full)
-            typed = populate.fill_variation_types(ledger)
             # VE2: re-mirror the archived flag onto the variation ROWS THIS STEP CREATES (populate adds the
             # produced variants here). The primary mirror runs at fetch time (produce._mirror_archived, before
             # any record_source write); this second call catches rows that did not exist yet at fetch.
             archived_changed = mirror_archived_variations(ledger)
         log.info("ledger write-through recorded catalog variations",
-                 extra={"extra_fields": {"variants_full": n, "types_filled": typed,
-                                         "archived_changed": archived_changed}})
+                 extra={"extra_fields": {"variants_full": n, "archived_changed": archived_changed}})
         return True
     except Exception:
         log.exception("ledger catalog write-through FAILED: produced variations did NOT reach the ledger; "

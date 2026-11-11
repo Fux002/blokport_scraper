@@ -28,24 +28,24 @@ def _write(path, header, rows):
 def test_idfree_base_indexes_by_key_not_empty_id(tmp_path):
     """The base (no Id column) loads every variety, keyed distinctly by its Key -- no empty-id collision."""
     p = tmp_path / "variants_export_base.csv"
-    _write(p, ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"], [
-        ["slab_granite_black_absolut_aaa", "Black Absolut", "", "Absolut Black", ""],
-        ["slab_marble_acquamare_bbb", "Acquamare", "", "Verde Acquamare", ""],
+    _write(p, ["Key", "Name", "Type", "Aliases"], [
+        ["granite__black_absolut_aaa", "Black Absolut", "Granite", "Absolut Black"],
+        ["marble__acquamare_bbb", "Acquamare", "Marble", "Verde Acquamare"],
     ])
-    table = load_variants(p, "slab", key_prefix="slab")
+    table = load_variants(p)
     assert len(table.by_id) == 2  # both loaded, not collapsed onto one empty id
-    v = table.by_id["slab_granite_black_absolut_aaa"]
-    assert v.variation_id == v.key == "slab_granite_black_absolut_aaa"
+    v = table.by_id["granite__black_absolut_aaa"]
+    assert v.variation_id == v.key == "granite__black_absolut_aaa"
 
 
 def test_live_export_still_uses_the_id(tmp_path):
     """The live export path is unchanged: when an Id is present, it stays the variation_id."""
     p = tmp_path / "variants_export.csv"
-    _write(p, ["Id", "Key", "Name", "Image", "Aliases"], [
-        ["01MEDUSAID", "slab_granite_black_absolut_aaa", "Black Absolut", "", "Absolut Black"],
+    _write(p, ["Id", "Key", "Name", "Type", "Aliases"], [
+        ["01MEDUSAID", "granite__black_absolut_aaa", "Black Absolut", "Granite", "Absolut Black"],
     ])
-    table = load_variants(p, "slab", key_prefix="slab")
+    table = load_variants(p)
     v = next(iter(table.by_id.values()))
     assert v.variation_id == "01MEDUSAID"
-    assert v.key == "slab_granite_black_absolut_aaa"
+    assert v.key == "granite__black_absolut_aaa"
 

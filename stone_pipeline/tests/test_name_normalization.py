@@ -143,10 +143,10 @@ def test_one_slug_rule_for_handles_keys_and_identity():
     # and a straight apostrophe, and '&' and 'and', give one Key and one handle.
     from stone_pipeline.core.text import slugify
     from stone_pipeline.reference.loaders.identity import variety_identity
-    from stone_pipeline.stages.curate.keys import gen_key
-    assert gen_key("slab", "Marble", "Valle D’Aosta") == gen_key("slab", "Marble", "Valle D'Aosta")
-    assert gen_key("slab", "Marble", "Black & Gold") == gen_key("slab", "Marble", "Black and Gold")
+    from stone_pipeline.phase1.variety_key import new_key
+    assert new_key("Marble", "Valle D’Aosta") == new_key("Marble", "Valle D'Aosta")
+    assert new_key("Marble", "Black & Gold") == new_key("Marble", "Black and Gold")
     assert slugify("Black & Gold Polished") == "black-and-gold-polished"
     assert slugify("Absolute Black™") == "absolute-black"
-    key = "slab_granite_x_1"
+    key = "granite__x_1"
     assert variety_identity(key, "Valle D’Aosta") == variety_identity(key, "Valle D'Aosta")

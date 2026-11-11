@@ -145,13 +145,23 @@ def test_the_upgrade_drip_reads_the_best_model_marker_and_its_cap(produce, tmp_p
     assert asked == {"refreshed": {"slab_done"}, "cap": 5} and produce["dispatched"][0][0] == 2
 
 
+# icon pair ids (`{Key}/{category}`): a texture is one pair (spec rev 8 section 4); NEW and OLD sort in queue order
+_K = "marble__carrara_00000000-1111-5222-8333-944455556666"
+NEW, EXISTS, OLD, UP = f"{_K}/block", f"{_K}/slab", f"{_K}/tile", "onyx__honey_11111111-1111-5222-8333-944455556666/slab"
+
+
+def _pair(pid: str) -> tuple[str, str]:
+    key, _, name = pid.partition("/")
+    return key, name
+
+
 # --- the GPU texture job (RUN_MODE=generate-textures -> prepare_variant_images.run) -----------------------
 @pytest.fixture
 def job(tmp_path, monkeypatch):
     """The GPU job's world: the produce's published queue (two mints, one already on S3, and one upgrade), the
     generator stack present, and fakes for the runner, the upload and the best-model marker."""
-    items = [{"output_name": "slab_new"}, {"output_name": "slab_exists"},
-             {"output_name": "slab_old", "mode": image_prompts.UPGRADE_MODE}]
+    items = [{"output_name": NEW}, {"output_name": EXISTS},
+             {"output_name": OLD, "mode": image_prompts.UPGRADE_MODE}]
 
     def fetch(key, client=None):
         assert key == "dev/scraper/texture_queues/job.json"           # exactly the dispatched queue
@@ -161,8 +171,7 @@ def job(tmp_path, monkeypatch):
     monkeypatch.setattr(pvi, "PROMPTS_LOCAL", tmp_path / "prompts_to_generate.json")
     monkeypatch.setattr(pvi, "_fetch_published_prompts", fetch)
     monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/job.json")
-    from stone_pipeline.stages import emit_catalog
-    monkeypatch.setattr(emit_catalog, "_s3_variation_keys", lambda: {"slab_exists", "slab_old"})
+    monkeypatch.setattr(pvi, "_existing_icons", lambda: {EXISTS, OLD})
     monkeypatch.setattr(pvi, "_generator_blockers", lambda: [])
     seen = {"failed": [], "missing": [], "marked": []}
     monkeypatch.setattr(pvi, "_generate_queued_images", lambda: list(seen["failed"]))
@@ -175,18 +184,18 @@ def job(tmp_path, monkeypatch):
 
 def test_the_gpu_job_generates_the_queue_minus_mints_already_on_s3_and_marks_a_clean_run(job):
     assert pvi.run() == 2
-    assert job["uploaded"] == ["slab_new", "slab_old"]               # the existing mint dropped, the upgrade kept
-    assert job["marked"] == [["slab_new", "slab_old"]]
-    assert [i["output_name"] for i in json.loads(pvi.PROMPTS_LOCAL.read_text())] == ["slab_new", "slab_old"]
+    assert job["uploaded"] == [NEW, OLD]                             # the existing mint dropped, the upgrade kept
+    assert job["marked"] == [[NEW, OLD]]
+    assert [i["output_name"] for i in json.loads(pvi.PROMPTS_LOCAL.read_text())] == [NEW, OLD]
 
 
 def test_a_partial_gpu_job_marks_only_what_landed_and_exits_partial(job, monkeypatch):
     # loud (the failed-job alert) without a re-charge: what landed is marked best-model, so neither a retry nor
     # the upgrade drip pays for it again; the failed Key stays unmarked for the next produce's queue
-    job["missing"] = ["slab_new"]
+    job["missing"] = [NEW]
     with pytest.raises(pvi.TexturesIncomplete, match="1 of 2"):
         pvi.run()
-    assert job["marked"] == [["slab_old"]]
+    assert job["marked"] == [[OLD]]
     monkeypatch.setattr(pvi, "run", lambda: (_ for _ in ()).throw(pvi.TexturesIncomplete("1 of 2")))
     assert pvi.main() == pvi.EXIT_PARTIAL
 
@@ -201,12 +210,11 @@ def test_the_job_exit_codes_are_distinct(monkeypatch):
 
 def test_what_a_partial_job_left_unmarked_is_queued_again_by_the_next_produce(monkeypatch):
     # the failed upgrade (unmarked) leads the next drip; the failed mint (still imageless) is a mint again
-    marked = {"slab_old"}                                            # the partial job marked what landed
-    monkeypatch.setattr(image_prompts, "product_backed_keys", lambda: {"slab_new", "slab_old", "slab_up"})
-    monkeypatch.setattr(image_prompts, "_variants", lambda: {
-        "slab_new": {"Image": ""}, "slab_old": {"Image": "u"}, "slab_up": {"Image": "u"}})
-    assert image_prompts.upgrade_candidates(marked, cap=1) == ["slab_up"]
-    assert "slab_new" not in image_prompts.upgrade_candidates(marked, cap=10)   # imageless: build() mints it
+    marked = {OLD}                                                   # the partial job marked what landed
+    monkeypatch.setattr(image_prompts, "product_backed_pairs", lambda: {_pair(NEW), _pair(OLD), _pair(UP)})
+    icons = {OLD, UP}                                                # NEW never landed: no icon on S3
+    assert image_prompts.upgrade_candidates(marked, cap=1, icons=icons) == [UP]
+    assert NEW not in image_prompts.upgrade_candidates(marked, cap=10, icons=icons)   # no icon: build() mints it
 
 
 # --- one way: the texture code never imports the produce back ----------------------------------------------

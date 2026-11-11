@@ -179,7 +179,7 @@ def test_type_overridden_by_variety(ref):
     row = CanonicalRow(
         src_site="polonine", surrogate_key="x",
         variation_id="vid",
-        variation_key="slab_marble_arabescato_00000000-0000-0000-0000-000000000000",
+        variation_key="marble__arabescato_00000000-0000-0000-0000-000000000000",
         variation_name="Arabescato",
         type_name="Granite", color_name="White", finish_name="Polished", quality_name="A",
     )
@@ -199,7 +199,7 @@ def test_type_name_fallback_when_key_carries_no_known_type_slug(ref):
     row = CanonicalRow(
         src_site="polonine", surrogate_key="x",
         variation_id="vid",
-        variation_key="slab_notarealtype_azul_white_00000000-0000-0000-0000-000000000000",
+        variation_key="notarealtype__azul_white_00000000-0000-0000-0000-000000000000",
         variation_name="Azul White",
         type_name="Quartzite", color_name="White", finish_name="Polished", quality_name="A",
     )
@@ -260,9 +260,11 @@ def test_colour_from_multicolour_variety_is_flagged(ref):
     )
     stats = reconcile_tree.ReconcileStats()
     reconcile_tree.reconcile_row(row, ref, stats)
-    assert row.color_name == multi.colors[0]  # primary
-    assert row.color_method == "from_variety_primary"
-    assert any(f.code == FlagCode.attr_from_variety for f in row.review_flags)
+    # no colour is guessed from the variety's list (test_colour_unconfirmed): the colour a published listing
+    # carries is kept, but it is UNCONFIRMED (a new listing is held at validate, a published one queued)
+    assert row.color_name == multi.colors[0]
+    assert row.color_method == "colour_unconfirmed"
+    assert any(f.code == FlagCode.colour_unconfirmed for f in row.review_flags)
 
 
 def test_scrape_colour_is_not_overridden_by_variety(ref):

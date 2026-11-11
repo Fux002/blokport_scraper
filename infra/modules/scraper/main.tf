@@ -144,8 +144,10 @@ resource "aws_iam_role" "task" {
 
 data "aws_iam_policy_document" "task" {
   statement {
-    sid       = "StagingBucketRW"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    sid = "StagingBucketRW"
+    # GetObjectVersion: the store migration (RUN_MODE=phase1-migrate) reads its inputs and the step-1 stores BY
+    # VersionId. Read-only.
+    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:DeleteObject"]
     resources = [local.object_arn]
   }
   statement {

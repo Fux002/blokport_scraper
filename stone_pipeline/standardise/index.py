@@ -49,6 +49,17 @@ def parse_photos(text):
     return out
 
 
+def parse_defaulted(text):
+    """frozenset of the handles the defaulted-sizes list names (STANDARDISE.DEFAULTED_FILE: a sorted JSON list of distinct,
+    non-empty handles, as the produce writes it). ValueError on anything else: read wrong, a guessed size would be drawn."""
+    value = json.loads(text)                          # JSONDecodeError is a ValueError
+    if not (isinstance(value, list) and all(isinstance(h, str) and h for h in value)):
+        raise ValueError("the defaulted-sizes list is not a list of handles")
+    if value != sorted(set(value)):
+        raise ValueError("the defaulted-sizes list is not sorted and distinct, as the produce writes it")
+    return frozenset(value)
+
+
 def rows(sheet_text, photos):
     """(row, format, [(source, sha)] of the product's own photos in its order) per product row, the photos from the
     photo list (parse_photos). Fails loud on an unknown category (a guessed format would put a tile on a slab's stand)
@@ -65,13 +76,16 @@ def rows(sheet_text, photos):
         yield row, fmt, photos[handle]
 
 
-def build(sheet_text, photos):
-    """{sha: {"source", "key", "format", "size"}} from the product sheet's text and its photo list."""
+def build(sheet_text, photos, defaulted):
+    """{sha: {"source", "key", "format", "size"}} from the product sheet's text, its photo list and the handles whose size
+    was defaulted (parse_defaulted): theirs reads None, unknown, as the sheet's numbers are the pack's guess."""
     found = {}
     for row, fmt, shown in rows(sheet_text, photos):
+        handle = row["Product Handle"]
+        size = None if handle in defaulted else _size(row)
         for src, sha in shown:
             if sha not in found:
-                found[sha] = {"source": src, "key": row["Product Handle"], "format": fmt, "size": _size(row)}
+                found[sha] = {"source": src, "key": handle, "format": fmt, "size": size}
     return found
 
 

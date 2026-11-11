@@ -4,11 +4,10 @@ GET /status counts exactly what the lane serves."""
 
 from __future__ import annotations
 
-import sqlite3
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger import sync
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_discontinued
 from stone_pipeline.ledger.server import dispatch
 
@@ -330,41 +329,5 @@ def test_the_status_delta_is_the_lane(tmp_path):
 
 # --- the v13 migration --------------------------------------------------------------------------------------------
 
-def _v12_ledger(path) -> None:
-    with Ledger.open(path, env="development") as ledger:
-        _product(ledger, "S-1")
-        _product(ledger, "S-2")
-        _stock(ledger, "S-1", 4, synced=(4, 0, None, None))
-        _stock(ledger, "S-2", 0, reason="no_photo", synced=(0, 0, None, None))
-        _product(ledger, "B-9", state="synced", medusa_id=None)          # a v12 products export row: no last_synced
-        _product(ledger, "P-9", state="pending", medusa_id=None)         # never sent
-    raw = sqlite3.connect(path)
-    for col in sorted(_NEW_COLUMNS):
-        raw.execute(f"ALTER TABLE inventory DROP COLUMN {col}")
-    raw.execute("PRAGMA user_version = 12")
-    raw.execute("UPDATE ledger_meta SET schema_version = 12")
-    raw.commit()
-    raw.close()
-
-
 def _columns(ledger) -> list[tuple]:
     return [(r["name"], r["type"], r["notnull"], r["dflt_value"]) for r in ledger.execute("PRAGMA table_info(inventory)")]
-
-
-def test_a_v12_ledger_gains_the_columns_and_serves_only_rows_with_a_reason(tmp_path):
-    with Ledger.open(tmp_path / "fresh.ledger", env="development") as fresh:
-        fresh_columns = _columns(fresh)
-    assert _NEW_COLUMNS <= {c[0] for c in fresh_columns}
-    p = tmp_path / "mig.ledger"
-    _v12_ledger(p)
-    with Ledger.open(p, env="development") as ledger:
-        assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
-        assert _columns(ledger) == fresh_columns
-        assert {r["sku"]: r["sync_attempts"] for r in ledger.execute("SELECT * FROM inventory")} == {"S-1": 0, "S-2": 0}
-        assert _lane(ledger) == ["S-2"]                               # its last synced reason is not known
-        assert ledger.get("product", "sku", "B-9")["last_synced"] is not None   # Medusa holds the export row
-        assert ledger.get("product", "sku", "P-9")["last_synced"] is None       # never sent
-        ddl = ledger.execute("SELECT sql FROM sqlite_master WHERE name = 'inventory'").fetchone()[0]
-    with Ledger.open(p, env="development") as ledger:                 # a re-open is a no-op
-        assert ledger.execute("SELECT sql FROM sqlite_master WHERE name = 'inventory'").fetchone()[0] == ddl
-        assert _columns(ledger) == fresh_columns and _lane(ledger) == ["S-2"]

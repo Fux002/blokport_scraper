@@ -25,6 +25,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS, THIN_COPY_MIN_FRACTION
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import storage
+from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS
 
 log = logfmt.get_logger("sync_variants_base")
 
@@ -35,7 +36,7 @@ BASE = SETTINGS.paths.from_medusa_dir / "variants_export_base.csv"
 FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 DELIVERABLE = SETTINGS.paths.variants_base_deliverable_csv
 # base carries exactly the upload columns and NO Medusa Id (Medusa mints ids on import)
-COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+COLS = VARIETY_FILE_COLUMNS
 # Corruption guard: the base is the source of truth and a cold start seeds FROM it, so 1_variants_full can
 # only grow or churn slightly (a retire drops a few). A large collapse (below settings.THIN_COPY_MIN_FRACTION) means
 # the produce ran on a thin input (e.g. an empty live export), not a real catalog shrink -- refuse to overwrite the

@@ -1,9 +1,11 @@
 """Valid-combination build. Every imported variation is priceable; the output is the
 flat 6-tuple set (category, type, variation, finish, color, quality) for the relational
-`valid_combination` table. Each variation gets its category's PRODUCT-USED finishes
-(tiles mirror slabs) x the colour(s) we know; colour/type come from the best source:
-the product that sold it, its backbone post, a same-variety product in another category
-(fan-out mirrors), or the type parsed from the Key/Name + the catalogue default colour.
+`valid_combination` table. Phase 1: a variety is ONE record per (type, name) with no
+category, so each one is priced in EVERY fan-out category under its one id, with that
+category's finishes (the default form's: its variety posts' and products'; block's: the
+pack's declared set; tile's: slab's) x the colour(s) and qualities we know. The type is
+the Key's type slug, else its own post's, else the operator's assignment; colour and
+quality come from its products (any category), its post, or the operator's decisions.
 """
 
 from __future__ import annotations
@@ -11,12 +13,17 @@ from __future__ import annotations
 import csv
 import json
 
+from stone_pipeline.config.categories import category
+from stone_pipeline.core.text import match_key
 from stone_pipeline.stages import tree_build
 
 _PCOLS = ["Product Category 1", "STN Type Id", "STN Variation Id",
           "STN Finish Id", "STN Color Id", "STN Quality Id"]
 # combination tuple positions
 CAT, TYPE, VAR, FIN, COL, QUAL = range(6)
+_FINISH_IDS = {"Polished": "f_pol", "Honed": "f_hon", "Raw": "f_raw"}
+BLOCK_FINISH_IDS = {_FINISH_IDS.get(f, f"f_{match_key(f)}") for f in category("block").finishes}
+ALL_CATS = {"cat_slab", "cat_block", "cat_tile"}
 
 
 def _attrs(tmp_path):
@@ -24,8 +31,9 @@ def _attrs(tmp_path):
     rows = [("category", "Slabs", "cat_slab"), ("category", "Blocks", "cat_block"),
             ("category", "Tiles", "cat_tile"), ("type", "Marble", "t_marble"),
             ("type", "Quartzite", "t_quartz"),
-            ("finish", "Polished", "f_pol"), ("finish", "Honed", "f_hon"), ("finish", "Raw", "f_raw"),
             ("color", "White", "c_white"), ("color", "Grey", "c_grey"), ("quality", "A", "q_a")]
+    finishes = set(_FINISH_IDS) | set(category("block").finishes)    # the vocabulary holds every declared finish
+    rows += [("finish", f, _FINISH_IDS.get(f, f"f_{match_key(f)}")) for f in sorted(finishes)]
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
         w.writerow(["category", "value", "sourceid"])
@@ -43,19 +51,9 @@ def _export(tmp_path, rows):  # rows: (Id, Key, Name)
     p = tmp_path / "export.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
         for vid, key, nm in rows:
-            w.writerow([vid, key, nm, "", "", ""])
-    return p
-
-
-def _export_no_volume(tmp_path, rows):  # 5-column export: Blokport's file after packing_factor removal
-    p = tmp_path / "export_5col.csv"
-    with p.open("w", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases"])   # NO "Volume per kg (m³/kg)" column
-        for vid, key, nm in rows:
-            w.writerow([vid, key, nm, "", ""])
+            w.writerow([vid, key, nm, "Marble", ""])
     return p
 
 
@@ -72,37 +70,39 @@ def _prow(cat="cat_slab", typ="t_marble", vid="v1", fin="f_pol", col="c_white", 
     return dict(zip(_PCOLS, [cat, typ, vid, fin, col, qual]))
 
 
-def _post(key, variant, finishes, category="Slabs", stone_type="Marble",
-          color=("White",), qualities=("A",)):
-    return {"key": key, "variant": variant, "category": category, "stone_type": stone_type,
+def _post(key, variant, finishes, stone_type="Marble", color=("White",), qualities=("A",)):
+    return {"key": key, "variant": variant, "stone_type": stone_type,
             "finishes": list(finishes), "color": list(color), "qualities": list(qualities)}
 
 
-def _for(combos, vid):
-    return [c for c in combos if c[VAR] == vid]
+def _for(combos, vid, cat=None):
+    return [c for c in combos if c[VAR] == vid and (cat is None or c[CAT] == cat)]
 
 
-def test_every_variation_gets_all_category_finishes(tmp_path):
-    # category finishes = ALL the backbone's finishes (Polished, Raw) UNION any its
-    # products use (Honed). An UN-SOLD variation is priceable in every one of them.
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished", "Raw"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+def test_one_variety_is_priced_in_every_category_with_that_category_s_finishes(tmp_path):
+    # the default form: its posts' finishes (Polished, Raw) UNION what its products use (Honed); tile takes
+    # slab's; block takes the pack's declared set. An UN-SOLD variation is priceable in every one of them.
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished", "Raw"])])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="sold1", fin="f_pol"), _prow(vid="sold2", fin="f_hon")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert {c[FIN] for c in _for(combos, "v1")} == {"f_pol", "f_raw", "f_hon"}
-    assert not unc
+    assert {c[CAT] for c in _for(combos, "v1")} == ALL_CATS
+    assert {c[FIN] for c in _for(combos, "v1", "cat_slab")} == {"f_pol", "f_raw", "f_hon"}
+    assert {c[FIN] for c in _for(combos, "v1", "cat_tile")} == {"f_pol", "f_raw", "f_hon"}
+    assert {c[FIN] for c in _for(combos, "v1", "cat_block")} == BLOCK_FINISH_IDS
+    assert not unc and stats["covered"] == 1
 
 
 def test_retired_key_gets_no_combinations(tmp_path):
     # T3-4: a retired variety is excluded by its stable KEY, not the churn-prone export Id. Retired Keys
     # are a DISTINCT namespace from exclude_ids (Ids); the export Id differs from the Key (as in Medusa).
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"]),
-                              _post("slab_marble_statuario_1", "Statuario", ["Polished"])])
-    exp = _export(tmp_path, [("v_id_1", "slab_marble_carrara_1", "Carrara"),
-                             ("v_id_2", "slab_marble_statuario_1", "Statuario")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"]),
+                              _post("marble__statuario_1", "Statuario", ["Polished"])])
+    exp = _export(tmp_path, [("v_id_1", "marble__carrara_1", "Carrara"),
+                             ("v_id_2", "marble__statuario_1", "Statuario")])
     prod = _products(tmp_path, [_prow()])
     combos, _, _ = tree_build.build_combinations(
-        exp, _attrs(tmp_path), [bb], prod, retired_keys={"slab_marble_statuario_1"})
+        exp, _attrs(tmp_path), [bb], prod, retired_keys={"marble__statuario_1"})
     assert _for(combos, "v_id_1")          # Carrara still priced
     assert not _for(combos, "v_id_2")      # retired Statuario gets NO combinations
 
@@ -110,29 +110,17 @@ def test_retired_key_gets_no_combinations(tmp_path):
 def test_retired_key_wrongly_placed_in_the_id_set_does_not_exclude(tmp_path):
     # Guards the exact bug: a retired KEY folded into exclude_ids (the Id namespace) never matches the
     # export Id, so the variety keeps every combination -- which is why retired must be its own Key set.
-    bb = _backbone(tmp_path, [_post("slab_marble_statuario_1", "Statuario", ["Polished"])])
-    exp = _export(tmp_path, [("v_id_2", "slab_marble_statuario_1", "Statuario")])
+    bb = _backbone(tmp_path, [_post("marble__statuario_1", "Statuario", ["Polished"])])
+    exp = _export(tmp_path, [("v_id_2", "marble__statuario_1", "Statuario")])
     prod = _products(tmp_path, [_prow()])
     combos, _, _ = tree_build.build_combinations(
-        exp, _attrs(tmp_path), [bb], prod, exclude_ids={"slab_marble_statuario_1"})
+        exp, _attrs(tmp_path), [bb], prod, exclude_ids={"marble__statuario_1"})
     assert _for(combos, "v_id_2")          # NOT excluded: the Key-in-Id-set was inert (the old bug)
 
 
-def test_build_tolerates_export_without_volume_column(tmp_path):
-    # Blokport drops the 'Volume per kg (m³/kg)' column (freight volume is computed from dimensions now).
-    # tree_build reads the export by header (Id/Key/Name), so the catalog builds IDENTICALLY from the
-    # 5-column file -- no reader requires the dropped column.
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
-    prod = _products(tmp_path, [_prow()])
-    rows = [("v1", "slab_marble_carrara_1", "Carrara")]
-    six, _, _ = tree_build.build_combinations(_export(tmp_path, rows), _attrs(tmp_path), [bb], prod)
-    five, _, _ = tree_build.build_combinations(_export_no_volume(tmp_path, rows), _attrs(tmp_path), [bb], prod)
-    assert five and five == six      # the dropped column changes nothing
-
-
 def test_combination_tuple_shape_and_csv(tmp_path):
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], _products(tmp_path, [_prow()]))
     assert combos and all(len(c) == 6 for c in combos)
     # every field is a string id -- run() relies on this to reuse the built set as the CSV-diff baseline
@@ -147,44 +135,31 @@ def test_combination_tuple_shape_and_csv(tmp_path):
 
 
 def test_product_backed_unions_backbone_and_scraped_colour(tmp_path):
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=["White"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"], color=["White"])])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="v1", col="c_grey")])  # scraped Grey, backbone White
     combos, stats, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert {c[COL] for c in _for(combos, "v1")} == {"c_white", "c_grey"}  # both -- widest valid set
     assert stats["covered"] == 1
 
 
-def test_tiles_mirror_slab_finishes(tmp_path):
-    # slabs sold in Polished+Honed; a tile (no tile products) is priceable in BOTH
-    bb = _backbone(tmp_path, [_post("tile_marble_carrara_1", "Carrara", ["Polished"], category="Tiles")])
-    exp = _export(tmp_path, [("vt", "tile_marble_carrara_1", "Carrara")])
-    prod = _products(tmp_path, [_prow(vid="s1", fin="f_pol"), _prow(vid="s2", fin="f_hon")])
-    combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert {c[FIN] for c in _for(combos, "vt")} == {"f_pol", "f_hon"}
-
-
-def test_mirror_inherits_colour_from_variety_sold_elsewhere(tmp_path):
-    # a slab variety sold in Grey; its block mirror (no block product/backbone) inherits Grey
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"]),
-                              _post("block_marble_x_9", "X", ["Raw"], category="Blocks")])
-    exp = _export(tmp_path, [("vs", "slab_marble_carrara_1", "Carrara"),
-                             ("vb", "block_marble_carrara_2", "Carrara")])
-    prod = _products(tmp_path, [_prow(vid="vs", col="c_grey")])
-    combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
+def test_a_colour_sold_in_one_category_prices_the_variety_in_every_category(tmp_path):
+    # the variety sold in Grey as a block: it is ONE record, so Grey is valid for its slabs and tiles too
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
+    prod = _products(tmp_path, [_prow(cat="cat_block", vid="v1", fin="f_raw", col="c_grey")])
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert not unc
-    blk = _for(combos, "vb")
-    assert {c[CAT] for c in blk} == {"cat_block"}      # category is the variation's own
-    assert {c[FIN] for c in blk} == {"f_raw"}          # block finishes, not slab
-    assert {c[COL] for c in blk} == {"c_white", "c_grey"}  # backbone White + inherited scraped Grey
+    for cat in ALL_CATS:
+        assert {c[COL] for c in _for(combos, "v1", cat)} == {"c_white", "c_grey"}
 
 
 def test_unbackboned_variation_with_no_key_type_is_uncovered_with_its_reasons(tmp_path):
     # no product, no backbone, no known type slug in the Key: nothing states its type, colour or quality.
     # It used to be typed from its Name and priced under the catalogue's default colour (wave 3c).
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
-    exp = _export(tmp_path, [("vs", "slab_marble_carrara_1", "Carrara"),
-                             ("vq", "slab_everest_quartzite_2", "Everest Quartzite")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
+    exp = _export(tmp_path, [("vs", "marble__carrara_1", "Carrara"),
+                             ("vq", "everest__quartzite_2", "Everest Quartzite")])
     prod = _products(tmp_path, [_prow(vid="vs", col="c_grey")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert not _for(combos, "vq")
@@ -192,10 +167,10 @@ def test_unbackboned_variation_with_no_key_type_is_uncovered_with_its_reasons(tm
 
 
 def test_truly_unresolvable_variation_is_uncovered(tmp_path):
-    # type not derivable from Key or Name -> can't be placed
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
-    exp = _export(tmp_path, [("vs", "slab_marble_carrara_1", "Carrara"),
-                             ("vm", "slab_zzz_mystery_2", "Mystery")])
+    # type not derivable from the Key, its post or the operator -> can't be placed
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
+    exp = _export(tmp_path, [("vs", "marble__carrara_1", "Carrara"),
+                             ("vm", "zzz__mystery_2", "Mystery")])
     prod = _products(tmp_path, [_prow(vid="vs")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert [u["Id"] for u in unc] == ["vm"]
@@ -203,8 +178,8 @@ def test_truly_unresolvable_variation_is_uncovered(tmp_path):
 
 
 def test_build_is_deterministic(tmp_path):
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
+    exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="v1")])
     a, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     b, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
@@ -216,14 +191,14 @@ def test_partial_export_row_is_warned_not_silently_dropped(tmp_path, caplog):
     # surfaced (fail-loud), while a blank line and a thin/header-only cold-start export stay silent and
     # never abort. Distinguishes the two.
     import logging
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
+    bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"])])
     exp = tmp_path / "export.csv"
     with exp.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
-        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "", "", ""])
-        w.writerow(["", "", "Orphan Marble", "", "", ""])   # data present, no Id/Key -> warned
-        w.writerow(["", "", "", "", "", ""])                # blank line -> silent
+        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
+        w.writerow(["v1", "marble__carrara_1", "Carrara", "Marble", ""])
+        w.writerow(["", "", "Orphan Marble", "Marble", ""])   # data present, no Id/Key -> warned
+        w.writerow(["", "", "", "", ""])                      # blank line -> silent
     with caplog.at_level(logging.WARNING):
         combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], _products(tmp_path, [_prow()]))
     assert _for(combos, "v1")                               # the good row still built, no abort
@@ -264,9 +239,9 @@ def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
     tree_build.write_combinations({("c", "t", "old", "f", "k", "q")}, to_upload / "2_valid_combinations.csv")
     fake = types.SimpleNamespace(paths=types.SimpleNamespace(
         export_file=export, to_upload_dir=to_upload, review_dir=review, attributes_csv=attrs,
-        backbone_additions_dir=tmp_path / "catalog_source" / "backbone_additions"))
+        backbone_json=tmp_path / "catalog_source" / "backbone_varieties.json",
+        backbone_additions_file=tmp_path / "catalog_source" / "backbone_additions" / "varieties.json"))
     monkeypatch.setattr(tree_build, "SETTINGS", fake)
-    monkeypatch.setattr(tree_build, "CATEGORIES", ())
     monkeypatch.setattr(decisions, "load_retired", lambda: set())
     monkeypatch.setattr(decisions_store, "backbone_leaf_overlay", lambda: {})
     built = {("c", "t", "v1", "f", "k", "q")}
@@ -283,8 +258,8 @@ def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
 def test_a_variation_nothing_describes_is_uncovered_not_priced_under_the_common_colour(tmp_path):
     # v1 is described (product row: White / A); v2 has NO product, NO backbone post: nothing says its colour
     # or quality. It used to inherit the catalogue's most common colour and quality as a "last resort".
-    bb = _backbone(tmp_path, [_post("slab_marble_alpha_1", "Alpha", ["Polished"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_alpha_1", "Alpha"), ("v2", "slab_marble_beta_2", "Beta")])
+    bb = _backbone(tmp_path, [_post("marble__alpha_1", "Alpha", ["Polished"])])
+    exp = _export(tmp_path, [("v1", "marble__alpha_1", "Alpha"), ("v2", "marble__beta_2", "Beta")])
     prod = _products(tmp_path, [_prow(vid="v1")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert _for(combos, "v1")
@@ -295,11 +270,10 @@ def test_a_variation_nothing_describes_is_uncovered_not_priced_under_the_common_
 
 
 def test_a_same_name_post_of_another_type_lends_no_colour(tmp_path):
-    # the block backbone has a QUARTZITE 'Gamma' post (Grey); the MARBLE slab 'Gamma' has no slab post and
-    # no product. A name-only join used to give the marble the quartzite's colour: a different stone. It is
-    # uncovered instead (a same-name post of the SAME type still lends, see the mirror test above).
-    bb = _backbone(tmp_path, [_post("", "Gamma", ["Raw"], category="Blocks", stone_type="Quartzite", color=["Grey"])])
-    exp = _export(tmp_path, [("v1", "slab_marble_gamma_1", "Gamma")])
+    # a QUARTZITE 'Gamma' post (Grey); the MARBLE 'Gamma' has no post of its own and no product. A name-only
+    # join would give the marble the quartzite's colour: a different stone. It is uncovered instead.
+    bb = _backbone(tmp_path, [_post("quartzite__gamma_9", "Gamma", ["Raw"], stone_type="Quartzite", color=["Grey"])])
+    exp = _export(tmp_path, [("v1", "marble__gamma_1", "Gamma")])
     combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
     assert not _for(combos, "v1")
     assert [u["Id"] for u in unc] == ["v1"]
@@ -308,7 +282,7 @@ def test_a_same_name_post_of_another_type_lends_no_colour(tmp_path):
 def test_a_type_word_in_the_name_is_not_the_type(tmp_path):
     # Key carries no known type slug, no post, no operator assignment: 'Everest Quartzite' used to be typed
     # Quartzite from its NAME. Type comes from the Key, the Key-matched post or the operator, never a guess.
-    exp = _export(tmp_path, [("v1", "slab_unknownstone_everest_quartzite_1", "Everest Quartzite")])
+    exp = _export(tmp_path, [("v1", "unknownstone__everest_quartzite_1", "Everest Quartzite")])
     prod = _products(tmp_path, [_prow(vid="v1", typ="")])
     combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [], prod)
     assert not _for(combos, "v1")
@@ -317,59 +291,22 @@ def test_a_type_word_in_the_name_is_not_the_type(tmp_path):
     assert {c[1] for c in _for(assigned, "v1")} == {"t_quartz"}     # the operator's assignment covers it
 
 
-def test_block_inherits_colour_quality_from_same_name_default_form(tmp_path):
-    # Cause A: block's backbone is keyless and its posts' NAMES have drifted from the export (slab covers
-    # its export row by KEY to a differently-named post, e.g. post 'Carrara (Bianco Carrara)' keyed to the
-    # 'Bianco Carrara' row). So a block export row finds no post by key OR by (type,name) and drops
-    # uncovered. It must inherit colour/quality from the SAME (type, variety) DEFAULT-FORM (slab) export
-    # row's resolved values. Type-matched (never a same-name different stone) and fills ONLY an empty
-    # dimension (a block row with its own colour is never widened).
-    posts = [
-        # slab post NAME is drifted, but it is KEYED to the clean 'Bianco Carrara' export row:
-        _post("slab_marble_bianco_carrara_1", "Carrara (Bianco Carrara)", ["Polished"], color=["White", "Grey"]),
-        _post("block_marble_x_1", "X", ["Raw"], category="Blocks", color=["Black"]),   # gives block a finish set
-        # a block variety WITH its own keyed post/colour, to prove no widening:
-        _post("slab_marble_statuario_1", "Statuario Drift", ["Polished"], color=["White"]),
-        _post("block_marble_statuario_1", "Statuario", ["Raw"], category="Blocks", color=["Grey"]),
-        # a QUARTZITE slab 'Titan' (drifted name), to prove a MARBLE block does not inherit it:
-        _post("slab_quartzite_titan_1", "Titan Q", ["Polished"], stone_type="Quartzite", color=["White"]),
-    ]
-    bb = _backbone(tmp_path, posts)
-    exp = _export(tmp_path, [
-        ("s1", "slab_marble_bianco_carrara_1", "Bianco Carrara"),
-        ("b1", "block_marble_bianco_carrara_1", "Bianco Carrara"),   # no post by key OR (type,name) -> inherits slab
-        ("s2", "slab_marble_statuario_1", "Statuario"),
-        ("b2", "block_marble_statuario_1", "Statuario"),             # own keyed colour -> not widened
-        ("st", "slab_quartzite_titan_1", "Titan"),
-        ("bt", "block_marble_titan_1", "Titan"),                     # MARBLE block, slab Titan is QUARTZITE
-    ])
-    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
-    b1 = _for(combos, "b1")
-    assert b1, "block should inherit colour/quality from the same (type, name) default-form export row"
-    assert {c[COL] for c in b1} == {"c_white", "c_grey"}
-    assert {c[QUAL] for c in b1} == {"q_a"}
-    assert {c[COL] for c in _for(combos, "b2")} == {"c_grey"}       # no widening
-    assert not _for(combos, "bt")                                    # type-safe: no cross-type inherit
-    assert "bt" in {u["Id"] for u in unc}
-
-
 def test_leaf_overlay_covers_a_decided_variety(tmp_path):
     # An operator-APPROVED colour/quality (config.db leaf overlay) makes a variety priceable even when it is
     # minted-and-drifted out of the backbone files (no post) with no product -- otherwise it is re-flagged
     # UNCOVERED although the decision already exists (the bug: tree_build read the files, not the overlay
     # reference_data grows the matching backbone with). Type-scoped: a same-name different stone must not
     # inherit it.
-    bb = _backbone(tmp_path, [_post("block_marble_other_1", "Other", ["Raw"], category="Blocks")])  # block finish
     exp = _export(tmp_path, [
-        ("b1", "block_marble_crystal_vitro_1", "Crystal Vitro"),     # no post, no product
-        ("b2", "block_quartzite_crystal_vitro_1", "Crystal Vitro"),  # SAME name, DIFFERENT type
+        ("b1", "marble__crystal_vitro_1", "Crystal Vitro"),     # no post, no product
+        ("b2", "quartzite__crystal_vitro_1", "Crystal Vitro"),  # SAME name, DIFFERENT type
     ])
     overlay = {("crystal vitro", "marble"): {"color": ["White"], "quality": ["A"]}}
     # without the overlay -> uncovered
-    combos0, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
+    combos0, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [], None)
     assert not _for(combos0, "b1")
     # with the overlay -> the marble one is covered from the decision; the quartzite same-name is NOT
-    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None, leaf_overlay=overlay)
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [], None, leaf_overlay=overlay)
     b1 = _for(combos, "b1")
     assert b1, "a decided variety must be covered by the leaf overlay"
     assert {c[COL] for c in b1} == {"c_white"}
