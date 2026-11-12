@@ -1,6 +1,6 @@
-"""An alias never equals another variety's name (Mas, 11-11): the rule on small cases, then over the WHOLE committed
-vocabulary (both bases and the backbones). A failure lists every collision, each with its variety and the variety it
-names: that list is the report Mas rules on. No em dashes."""
+"""An alias never equals the name of another variety of the SAME type (Mas, 11-11): the rule on small cases, then
+over the WHOLE committed vocabulary (both bases and the backbones). A failure lists every collision, each with its
+variety and the variety it names. No em dashes."""
 from __future__ import annotations
 
 import csv
@@ -35,6 +35,11 @@ def test_its_own_name_and_its_own_copies_are_not_collisions():
                     _v("block_q", "Quartzite", "Super White", "Super White Quartzite")]) == []
 
 
+def test_the_same_name_under_another_type_is_not_a_collision():
+    # a granite 'Silver Grey' alias and a slate 'Silver Grey' variety are two stones matching keeps apart (Mas, 11-11)
+    assert ac.find([_v("g1", "Granite", "Bianco Sardo", "Silver Grey"), _v("s1", "Slate", "Silver Grey")]) == []
+
+
 def _committed():
     out = []
     for base in BASES:
@@ -52,5 +57,5 @@ def _committed():
 
 def test_no_committed_alias_names_another_variety():
     collisions = ac.find(_committed())
-    assert not collisions, (f"{len(collisions)} committed alias(es) name another variety:\n"
+    assert not collisions, (f"{len(collisions)} committed alias(es) name another variety of the same type:\n"
                             + "\n".join(str(c) for c in collisions))

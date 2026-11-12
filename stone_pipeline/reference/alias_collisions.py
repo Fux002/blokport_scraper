@@ -1,7 +1,9 @@
-"""An alias may never equal the name of ANOTHER variety (Mas, 11-11): compared case-insensitively after the same name
-cleaning (adapters.tokens.clean_variety under each side's own stone type). Such an alias binds a listing of one stone
-to a different stone, and nothing merges by name without the owner's word. A variety is one identity (type, cleaned
-name): its own copies in other categories, and an alias that only repeats its own name, are not collisions.
+"""An alias may never equal the name of ANOTHER variety of the SAME stone type (Mas, 11-11): compared
+case-insensitively after the same name cleaning (adapters.tokens.clean_variety under the type). Such an alias binds a
+listing of one stone to a different stone, and nothing merges by name without the owner's word. A variety is one
+identity (type, cleaned name): its own copies in other categories, and an alias that only repeats its own name, are not
+collisions. The same name under ANOTHER type is a different stone that matching keeps apart (type first): legitimate
+(Mas, 11-11).
 
 `find` lists every collision; `check` fails loud with all of them, naming each alias, its variety and the variety it
 collides with. No em dashes."""
@@ -49,7 +51,7 @@ def _clean(text: str, stone_type: str) -> str:
 
 
 def find(varieties: Iterable[Variety]) -> list[Collision]:
-    """Every alias, of any variety, whose cleaned form is the cleaned name of a different identity. Sorted, each
+    """Every alias whose cleaned form is the cleaned name of a different identity of the same type. Sorted, each
     (alias, carrying identity, other identity) once."""
     rows = list(varieties)
     identity = {}                      # cleaned name -> {(type, cleaned name): (type, name, key)}
@@ -61,7 +63,7 @@ def find(varieties: Iterable[Variety]) -> list[Collision]:
         own = (v.stone_type.casefold(), _clean(v.name, v.stone_type))
         for alias in v.aliases:
             for other_id, (o_type, o_name, o_key) in identity.get(_clean(alias, v.stone_type), {}).items():
-                if other_id == own:
+                if other_id == own or other_id[0] != own[0]:      # itself, or another type's stone
                     continue
                 c = Collision(alias, (v.stone_type, v.name), (o_type, o_name), v.key, o_key)
                 out.setdefault((alias.casefold(), own, other_id), c)
