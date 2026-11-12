@@ -18,9 +18,9 @@ def _variants_csv(tmp_path, rows):        # rows: (Id, Key, Name)
     p = tmp_path / "variants.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Type", "Aliases"])
+        w.writerow(["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"])   # Medusa's export (P2-7)
         for vid, key, nm in rows:
-            w.writerow([vid, key, nm, "Marble", ""])
+            w.writerow([vid, key, nm, "", "", "Marble"])
     return p
 
 

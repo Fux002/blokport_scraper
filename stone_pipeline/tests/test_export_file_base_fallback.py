@@ -42,8 +42,8 @@ def test_idfree_base_indexes_by_key_not_empty_id(tmp_path):
 def test_live_export_still_uses_the_id(tmp_path):
     """The live export path is unchanged: when an Id is present, it stays the variation_id."""
     p = tmp_path / "variants_export.csv"
-    _write(p, ["Id", "Key", "Name", "Type", "Aliases"], [
-        ["01MEDUSAID", "granite__black_absolut_aaa", "Black Absolut", "Granite", "Absolut Black"],
+    _write(p, ["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"], [   # Medusa's export (P2-7)
+        ["01MEDUSAID", "granite__black_absolut_aaa", "Black Absolut", "Absolut Black", "", "Granite"],
     ])
     table = load_variants(p, Stores())
     v = next(iter(table.by_id.values()))
