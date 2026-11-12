@@ -101,6 +101,7 @@ def test_a_learned_alias_lands_on_the_one_row_of_the_matched_type(ref):
     result = curate.build_curation([row], ref, Decisions.empty())
     assert result.learned_proposals == [{
         "identity_key": GRANITE_ALPINE, "value": "Alpine Qx9", "method": "curate_confirmed", "source": "polonine",
+        "score": None,
     }]
 
 
