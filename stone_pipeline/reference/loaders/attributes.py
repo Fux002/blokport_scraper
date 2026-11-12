@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,11 @@ from stone_pipeline.reference.medusa_files import AttributeValue, read_attribute
 # (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
 # is immaterial.
 VOCAB_CATEGORIES = tuple(active_pack().attributes)
+
+# The seed's types for the one backbone file version they were read from (_seed_types), replaced when the file changes;
+# the lock keeps the config server's request threads from reading it half-replaced.
+_SEED_TYPES: dict[tuple[str, int, int], frozenset[str]] = {}
+_SEED_TYPES_LOCK = threading.Lock()
 
 
 @dataclass
@@ -90,10 +96,19 @@ def _pack_handles() -> frozenset[str]:
 
 def _seed_types() -> frozenset[str]:
     """norm of every type a variety of the pack's committed seed carries (its backbone, read live through the one
-    backbone reader). An absent seed raises: the pack's types cannot be judged without it."""
-    from stone_pipeline.reference.loaders.backbone import read_posts
-    return frozenset(norm(p["stone_type"]) for p in read_posts(env().SETTINGS.paths.backbone_json)
-                     if p.get("stone_type"))
+    backbone reader). An absent seed raises: the pack's types cannot be judged without it. Parsed once per file
+    version (path, size, mtime), as C3's seed cache does: the config server loads the vocabulary per request, and the
+    backbone is 12,156 posts."""
+    from stone_pipeline.reference.loaders import backbone
+    path = Path(env().SETTINGS.paths.backbone_json)
+    stat = path.stat()                                    # an absent seed raises FileNotFoundError, naming the path
+    version = (str(path), stat.st_size, stat.st_mtime_ns)
+    with _SEED_TYPES_LOCK:
+        if version not in _SEED_TYPES:
+            _SEED_TYPES.clear()
+            _SEED_TYPES[version] = frozenset(norm(p["stone_type"]) for p in backbone.read_posts(path)
+                                             if p.get("stone_type"))
+        return _SEED_TYPES[version]
 
 
 def _in_pack(value: AttributeValue, pack_handles: frozenset[str], seed_types: frozenset[str]) -> bool:

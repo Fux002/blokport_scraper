@@ -46,6 +46,8 @@ _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
 OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
+# The reason of the last refused attributes.csv fetch, kept beside the file until a fetch succeeds (require_attributes).
+ATTRIBUTES_UNAVAILABLE_SUFFIX = ".unavailable"
 # Medusa's downloads, checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv
 # at import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
@@ -132,14 +134,60 @@ def _incoming(target: Path) -> Path:
     return Path(name)
 
 
+class AttributesUnavailable(RuntimeError):
+    """attributes.csv could not be taken from S3 (an S3 error, a thin copy or a malformed one): the reason is recorded
+    beside the file, so the config server's vocabulary routes answer 503 naming it until a fetch succeeds."""
+
+    def __init__(self, reason: str):
+        super().__init__(f"attributes.csv unavailable: {reason}")
+        self.reason = reason
+
+
+def _unavailable_record(target: Path) -> Path:
+    """Where the last refused attributes fetch's reason is kept: beside the file, on the disk the config server and its
+    produce share, so a fetch in either process records or clears it."""
+    return target.with_name(target.name + ATTRIBUTES_UNAVAILABLE_SUFFIX)
+
+
+def _refuse_attributes(target: Path, reason: str) -> AttributesUnavailable:
+    """Record `reason` (written whole, then swapped in, so a request thread never reads half of it) and return the
+    refusal for the caller to raise."""
+    record = _unavailable_record(target)
+    tmp = _incoming(record)
+    try:
+        tmp.write_text(reason, encoding="utf-8")
+        os.replace(tmp, record)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return AttributesUnavailable(reason)
+
+
+def _replace_attributes(tmp: Path, target: Path) -> None:
+    """Swap a checked download in; the file is fresh, so any recorded refusal is cleared."""
+    os.replace(tmp, target)
+    _unavailable_record(target).unlink(missing_ok=True)
+
+
+def require_attributes() -> None:
+    """Raise AttributesUnavailable, with the recorded reason, when the last attributes fetch was refused (the config
+    server's boot records instead of crash-looping): the vocabulary on disk is not Medusa's current one."""
+    record = _unavailable_record(Path(SETTINGS.paths.attributes_csv))
+    try:
+        reason = record.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    raise AttributesUnavailable(reason)
+
+
 def fetch_attributes(client=None, target=None) -> None:
     """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, by the produce fetch's own
     checks: the thin-copy floor and check_readable (table 569's category_handles column included). Callers: the config
     server's boot (the review-decision endpoint validates against Medusa's CURRENT set from container start), the
     photos run and the hidden-photos page. ONE refusing path (34's rev 2, F vs G10): an S3 failure, a thin copy and a
-    malformed copy each RAISE, naming the file, and the local file is left as it was; it is never kept and served as if
-    it were the fresh vocab. Downloads to a temp then atomically replaces. `target` overrides the destination for tests
-    (defaults to the live attributes_csv path)."""
+    malformed copy each RAISE AttributesUnavailable, naming the file, and the local file is left as it was; it is never
+    kept and served as if it were the fresh vocab. The refusal is recorded (require_attributes) and a later success
+    clears it. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults to
+    the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -149,13 +197,16 @@ def fetch_attributes(client=None, target=None) -> None:
         try:
             client.download_file(S3_BUCKET, key, str(tmp))
         except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
-            raise RuntimeError(f"could not fetch s3://{S3_BUCKET}/{key} (attributes.csv): {exc}") from exc
+            raise _refuse_attributes(target, f"could not fetch s3://{S3_BUCKET}/{key}: {exc}") from exc
         # protected base: a thin S3 copy (Medusa mid-reset) is refused, never written over the fuller local file
         if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
-            raise RuntimeError(f"refusing attributes.csv from S3: it looks thin ({incoming} lines against {current} "
-                               "in the local copy); Medusa's export looks partial (mid-reset?). Re-export it.")
-        check_readable("attributes.csv", tmp)      # malformed (a missing category_handles column included): raises
-        os.replace(tmp, target)
+            raise _refuse_attributes(target, f"the S3 copy looks thin ({incoming} lines against {current} in the "
+                                             "local copy); Medusa's export looks partial (mid-reset?). Re-export it.")
+        try:
+            check_readable("attributes.csv", tmp)  # malformed (a missing category_handles column included): raises
+        except ValueError as exc:
+            raise _refuse_attributes(target, f"the S3 copy is malformed: {exc}") from exc
+        _replace_attributes(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -249,7 +300,10 @@ def fetch_all() -> int:
                         _refuse_thin(name, incoming, current, basis)
                         continue
                 check_readable(name, tmp)       # malformed: raise, the produce stops loud with the local file kept
-                os.replace(tmp, target)
+                if name == "attributes.csv":
+                    _replace_attributes(tmp, target)    # a fresh vocab clears the config server's recorded refusal
+                else:
+                    os.replace(tmp, target)
             finally:
                 tmp.unlink(missing_ok=True)
             if dropped:

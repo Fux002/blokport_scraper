@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from stone_pipeline.config import store
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.medusa_inputs import AttributesUnavailable
 
 log = logfmt.get_logger("config.server")
 
@@ -35,17 +36,23 @@ _MAX_BODY_BYTES = 1 << 20
 def _color_vocab() -> dict[str, str]:
     """norm(colour) -> canonical colour name, from the Medusa attribute vocab. Backs the mint colour
     picker (GET /config/v1/colors) and validates an operator's seed colour (never seed one Medusa lacks).
-    Loaded per call (admin low-QPS), mirroring config/varieties.py; empty if attributes.csv is absent."""
+    Loaded per call (admin low-QPS), mirroring config/varieties.py. AttributesUnavailable (a 503) while the last
+    attributes fetch stands refused: the file on disk is not Medusa's current vocab."""
+    from stone_pipeline.io.medusa_inputs import require_attributes
     from stone_pipeline.matching import projections as proj
     from stone_pipeline.reference.loaders import load_attributes
+    require_attributes()
     return {proj.norm(c): c for c in load_attributes().canonical_names("color")}
 
 
 def _type_vocab() -> dict[str, str]:
     """norm(type) -> canonical stone-type name, from the Medusa attribute vocab. Backs the mint type
-    picker (GET /config/v1/types) and validates an operator's seed type (never seed one Medusa lacks)."""
+    picker (GET /config/v1/types) and validates an operator's seed type (never seed one Medusa lacks).
+    AttributesUnavailable (a 503) while the last attributes fetch stands refused, as _color_vocab."""
+    from stone_pipeline.io.medusa_inputs import require_attributes
     from stone_pipeline.matching import projections as proj
     from stone_pipeline.reference.loaders import load_attributes
+    require_attributes()
     return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
 
 
@@ -1090,6 +1097,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 return handler(params, body, query)
             except _BadRequest as exc:
                 return 400, {"error": str(exc)}
+            except AttributesUnavailable as exc:      # a route that reads the vocabulary, while its fetch is refused
+                return 503, {"error": str(exc)}
         allowed.append(route_method)
     if allowed:
         return 405, {"error": f"{method} is not allowed on /config/v1/{'/'.join(segments)}; "
@@ -1322,11 +1331,16 @@ def boot(config_db, ledger_path) -> None:
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
     # just-added colour is rejected at mint until the next full produce, and a REPUBLISH does not fetch inputs. A
-    # failed fetch (S3 error, thin or malformed copy, table 569's category_handles missing) stops the boot loud: the
-    # server never runs on a stale local vocab as if it were Medusa's (34's rev 2, F vs G10).
+    # refused fetch (S3 error, thin or malformed copy, table 569's category_handles missing) is RECORDED, not fatal
+    # (the manager's ruling on SC #663): a crash-looping boot would take /reset, /run and every other route down with
+    # it. The vocabulary routes answer 503 naming the reason, so the server never serves a stale local vocab as
+    # Medusa's (34's rev 2, F vs G10), and a later successful fetch (a photos page, the produce, the next boot) clears it.
     from stone_pipeline.io import medusa_inputs
-    medusa_inputs.fetch_attributes()
-    log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    try:
+        medusa_inputs.fetch_attributes()
+        log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    except AttributesUnavailable as exc:
+        log.warning("boot: %s; the vocabulary routes answer 503 until a fetch succeeds", exc)
     # The name-field kinds: a boot failure is logged, not fatal. The routes that clean a name read the map per
     # request and answer 503 until a later boot or produce fetch has written a valid one.
     try:
