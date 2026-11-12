@@ -672,10 +672,12 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
 
 # Why the scraper does not serve an existing variation, the first that applies (NULL = it serves). The reserve answers
 # it as `frozen` and never marks the row. The operator's terminal verdict (an abandoned dead-letter) outranks the rest;
-# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays.
+# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays. 'uncomputed' comes LAST (Mas, 11-12):
+# its alias_rows or codes are NULL, not computed yet (ledger v18), and the remedy is to run a produce.
 _FROZEN_REASON_SQL = ("CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned' "
                       "WHEN archived = 1 THEN 'archived' WHEN state = 'retiring' THEN 'retiring' "
-                      "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' END")
+                      "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' "
+                      "WHEN alias_rows IS NULL OR codes IS NULL THEN 'uncomputed' END")
 
 
 def reserve_variations(ledger: Ledger, external_ids: Iterable[str]) -> dict[str, list]:

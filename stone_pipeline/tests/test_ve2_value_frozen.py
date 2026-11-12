@@ -292,7 +292,7 @@ def _vrow():
 def _variation_row(lg, key):
     now = now_iso()
     lg.upsert("variation", {"key": key, "type": "Marble", "name": "x",
-                            "aliases": "[]",
+                            "alias_rows": "[]", "codes": "[]",
                             "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced",
                             "archived": 0, "first_seen": now, "last_synced": now, "created_at": now,
                             "updated_at": now}, pk=("key",))

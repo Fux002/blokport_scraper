@@ -15,7 +15,7 @@ from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
 from stone_pipeline.stages.curate.aliasing import collision_owners
 from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
-                                                  variety_identity)
+                                                  variety_identity, surface_owners)
 from stone_pipeline.stages.curate.minting import mint
 from stone_pipeline.stages.curate.review import (hold_archived_variety, hold_code, hold_collision,
                                                  hold_for_type, hold_new, hold_new_type, hold_similar,
@@ -142,7 +142,7 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
     # never lose to them. Consulting them only when the cleaned surface had none let a narrower surface (the
     # type-stripped spelling owned by ONE of two same-type varieties) turn an explicit collision into an alias
     # that already existed: no card, no mint, the row held on every produce with nothing to decide.
-    owners = set(c.existing_surface.get(proj.norm(clean), set())) | collision_owners(c, row, gap)
+    owners = surface_owners(c, clean) | collision_owners(c, row, gap)
     if not owners:
         return False
     st = proj.norm(stone_type)

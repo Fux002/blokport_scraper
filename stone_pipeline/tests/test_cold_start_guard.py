@@ -20,7 +20,7 @@ def _type_vocab(ledger, *values):
 def _variation(ledger, key, type_):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": type_, "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": None,
                                 "in_full": 1, "payload_hash": "", "state": "pending",
                                 "first_seen": now, "last_synced": None,

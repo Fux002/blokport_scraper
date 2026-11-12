@@ -52,7 +52,7 @@ def _seed(path: Path, key: str) -> None:
     now = now_iso()
     with Ledger.open(path, env="development") as lg:
         lg.upsert("variation", {"key": key, "type": "Marble", "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "MID-1", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))

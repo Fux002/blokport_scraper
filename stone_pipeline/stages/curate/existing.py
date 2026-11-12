@@ -22,8 +22,8 @@ class ImportFile:
     # collapsed them to one arbitrary type (last row wins), so a type-less scrape was silently tied to the
     # wrong type and the mint-dedup went blind to the hidden types. Keep every variety and index by
     # (norm name, norm type); `type` on each variety is derived from its Key (the authority).
-    # each: {Key,Name,Type,Aliases,type,archived}; Aliases = every known surface of the variety (its aliases and
-    # codes from the alias stores and the export's hand rows: the matcher's set), never a file's own column
+    # each: {Key,Name,Type,Aliases,Codes,type,archived}; Aliases and Codes = the variety's surfaces from the alias
+    # stores and the export's hand rows (the matcher's set), never a file's own column
     varieties: list[dict] = field(default_factory=list)
     by_name_type: dict[tuple[str, str], dict] = field(default_factory=dict)  # (norm name, norm type) -> variety
     by_name: dict[str, dict] = field(default_factory=dict)           # norm name -> variety (name-only lookup)
@@ -49,7 +49,8 @@ def load_existing() -> ImportFile:
             "Key": r.key,
             "Name": r.name,
             "Type": r.type,                                     # the canonical type NAME a variety row carries
-            "Aliases": "|".join(value for value, _ in (*found.aliases, *found.codes)),
+            "Aliases": "|".join(value for value, _ in found.aliases),
+            "Codes": "|".join(value for value, _ in found.codes),   # found by compact key (context.surface_owners)
             "type": proj.norm(type_slug_from_key(r.key)),       # the identity's stone type, from its Key
             # VE2 PR5: the export's archived flag. An archived variety STAYS in the index (a scrape still
             # recognizes it, no re-mint); classify uses the flag to surface a card when a gapped scrape

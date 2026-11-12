@@ -193,8 +193,9 @@ def test_curate_s_existing_index_carries_each_variety_s_surfaces_from_the_stores
     monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores(
         seed={GALAXY: (["Galaxy Nero"], ["G603"])}, learned=[(GALAXY, "Blak Galaxy")]))
     imp = existing.load_existing()
-    surfaces = imp.by_name_type[("black galaxy", "granite")]["Aliases"].split("|")
-    assert sorted(surfaces) == sorted(["Galaxy Nero", "Blak Galaxy", "Star Galaxy", "G603", "G654"])
+    variety = imp.by_name_type[("black galaxy", "granite")]
+    assert sorted(variety["Aliases"].split("|")) == sorted(["Galaxy Nero", "Blak Galaxy", "Star Galaxy"])
+    assert sorted(variety["Codes"].split("|")) == ["G603", "G654"]           # codes by compact key (L3)
 
 
 def test_a_delta_row_the_export_already_holds_is_not_republished():

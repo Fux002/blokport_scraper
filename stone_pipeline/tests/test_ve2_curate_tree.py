@@ -143,7 +143,7 @@ def test_an_acked_product_absent_from_this_runs_emit_keeps_its_restricted_tuple(
                      backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
         lg.upsert("variation", {"key": key, "type": "Marble", "name": "Carrara",
-                                "aliases": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
         lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1", "color": "White",
@@ -331,7 +331,7 @@ def test_an_acked_product_that_cannot_be_rebuilt_is_counted(tmp_path, monkeypatc
                      backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
         lg.upsert("variation", {"key": key, "type": "Marble", "name": "Carrara",
-                                "aliases": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": "V", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "archived": 0, "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
         lg.upsert("product", {"sku": "ZUCCHI-1", "source": "zucchi", "surrogate_key": "1",

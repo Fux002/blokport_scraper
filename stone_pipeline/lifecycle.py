@@ -489,16 +489,18 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
                 # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
-                # variation content (type/name/aliases) from the freshly-clean base -- upserts
-                # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
-                # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
+                # variation content from the freshly-clean base: populate upserts type and name, SETS alias_rows and
+                # codes NULL (the base carries no alias sidecar, so no stale spelling is served: they are held until
+                # the next produce computes them from the stores, P2-10 C4), preserves medusa_id, and flips a changed
+                # row 'dirty' so the update pull corrects Medusa. Best-effort + LOUD (the ledger/base are already
+                # reset).
                 try:
                     from stone_pipeline.config.settings import SETTINGS as _S
                     from stone_pipeline.ledger.populate import populate_variations_full
                     out["base_reseed_content"] = populate_variations_full(lg, _S.paths.variants_export_base_csv)
                 except Exception as exc:
                     log.exception("reset: re-deriving variation content from the clean base FAILED; a seed "
-                                  "variety may keep stale aliases")
+                                  "variety may keep stale alias_rows")
                     out["base_reseed_content"] = {"error": f"content re-derive failed: {exc}"}
                 # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots) unless
                 # keep_scrape: a factory reset returns to the seed, and without the cache a cold boot cannot

@@ -8,6 +8,7 @@ import csv
 import dataclasses
 import sqlite3
 
+from stone_pipeline.tests._alias_sidecar import write_alias_sidecar
 import pytest
 
 from stone_pipeline.config.settings import SETTINGS
@@ -25,7 +26,7 @@ PAST = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state="synced", medusa_id="V-1"):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "aliases": "[]",
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": medusa_id, "in_full": 1, "payload_hash": "h",
                                 "state": state, "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
@@ -292,7 +293,7 @@ def _variants_full(path, rows):
         w.writeheader()
         for key, name, aliases in rows:
             w.writerow({"Key": key, "Name": name, "Type": "Marble", "Aliases": aliases})
-    return path
+    return write_alias_sidecar(path)
 
 
 def _typed_synced_variation(ledger, path):

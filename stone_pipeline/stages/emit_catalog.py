@@ -68,21 +68,25 @@ def _write_name(row: dict) -> None:
 def _alias_rows(rows: list[dict], seed_only: bool) -> tuple[dict[str, list[tuple[str, str]]],
                                                              dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
     """Each row's aliases (value, method) and codes from the alias stores (aliases.surfaces), the scraper's own
-    methods only, each alias written by its field's rule (clean_alias_list with the alias display rule: one value can
-    split into pieces, each keeping its method; the Name and repeats dropped). Returns (aliases by Key, codes by Key,
+    methods only: each value written by the alias field's rule (clean_alias_list with the alias display rule: one
+    value can split into pieces, each keeping its method; the Name and repeats dropped), then each piece a code when
+    the brand's code pattern accepts it, else an alias. Returns (aliases by Key, codes by Key,
     each (value, method), and the (Key, alias) pairs dropped for having no ASCII form). seed_only reads the committed
     seed alone (the backbone), so the seed projection stays hermetic: no config.db."""
     from stone_pipeline.reference.loaders.backbone import load_backbone
     stores = (Stores(seed=alias_stores.seed_of(load_backbone())) if seed_only else alias_stores.scraper_stores())
-    surfaces, unbound = surfaces_by_key([Variety(r["Key"], r["Name"], r["Type"]) for r in rows], stores,
-                                        alias_stores.is_code())
+    is_code = alias_stores.is_code()
+    surfaces, unbound = surfaces_by_key([Variety(r["Key"], r["Name"], r["Type"]) for r in rows], stores, is_code)
     alias_stores.log_unbound(unbound)
     aliases: dict[str, list[tuple[str, str]]] = {}
     codes: dict[str, list[tuple[str, str]]] = {}
     dropped: list[tuple[str, str]] = []
     for r in rows:
-        found, kept, seen = surfaces[r["Key"]], [], set()
-        for value, method in found.aliases:
+        found, seen = surfaces[r["Key"]], set()
+        aliases[r["Key"]], codes[r["Key"]] = [], []
+        # ONE order: every value is cleaned into its pieces first ('Star Galaxy (G603)' -> 'Star Galaxy', 'G603'),
+        # then EVERY piece is split by the code pattern, so a code piece is a code under its method, never an alias
+        for value, method in (*found.aliases, *found.codes):
             if method not in alias_payload.SENT_METHODS:
                 continue
             pieces, lost = clean_alias_list(r["Name"], [value], _alias_display)
@@ -90,9 +94,7 @@ def _alias_rows(rows: list[dict], seed_only: bool) -> tuple[dict[str, list[tuple
             for piece in pieces:
                 if (key := match_key(piece)) not in seen:
                     seen.add(key)
-                    kept.append((piece, method))
-        aliases[r["Key"]] = kept
-        codes[r["Key"]] = [(v, m) for v, m in found.codes if m in alias_payload.SENT_METHODS]
+                    (codes if is_code(piece) else aliases)[r["Key"]].append((piece, method))
     return aliases, codes, dropped
 
 

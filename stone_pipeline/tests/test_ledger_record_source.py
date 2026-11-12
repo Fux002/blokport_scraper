@@ -38,15 +38,13 @@ def _write_export(path):
 def _open_seeded(ledger_path):
     """Open the ledger the same way record_source's open_ledger does (matching fingerprint) and pre-seed
     one variation, so a later record_source sees a non-empty variation table and skips its own seeding."""
-    import json
-
     from stone_pipeline.ledger.db import now_iso
     ledger = Ledger.open(ledger_path, env=ENV_NAME,
                          backend_id_fingerprint=writethrough.backend_fingerprint())
     now = now_iso()
     ledger.upsert("variation", {
         "key": _VARIATION_KEY, "type": "Marble", "name": "Carrara",
-        "aliases": json.dumps([]),
+        "alias_rows": "[]", "codes": "[]",
         "medusa_id": "V1", "payload_hash": "", "state": "synced",
         "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
     }, pk=("key",))
@@ -68,12 +66,13 @@ def test_seed_variations_loads_synthetic_export(tmp_path):
         n = bootstrap.seed_variations(ledger, path=export)
         assert n == 2
         row = ledger.execute(
-            "SELECT name, type, aliases, medusa_id FROM variation WHERE key = ?",
+            "SELECT name, type, alias_rows, codes, medusa_id FROM variation WHERE key = ?",
             (_VARIATION_KEY,)).fetchone()
     assert row["name"] == "Carrara"
     assert row["medusa_id"] == "V1"
     assert row["type"] == "Marble"                                     # the export's Type column
-    assert "Statuario" in row["aliases"] and "Bianco" in row["aliases"]   # piped -> json list
+    # the export carries no scraper alias (P2-7): alias_rows and codes wait for the next produce (NULL, held)
+    assert (row["alias_rows"], row["codes"]) == (None, None)
 
 
 def test_record_source_disabled_is_a_noop(tmp_path, monkeypatch):

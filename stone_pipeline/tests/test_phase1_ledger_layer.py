@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 
+from stone_pipeline.tests._alias_sidecar import write_alias_sidecar
 import pytest
 
 from stone_pipeline.config.categories import category_by_handle
@@ -40,7 +41,8 @@ def _sidecar(d, pairs):
 
 def _arabescato(d, pairs):
     _sidecar(d, pairs)
-    return _full(d, [{"Key": KEY, "Name": "Arabescato", "Type": "Marble", "Aliases": "Arabescato Vagli"}])
+    return write_alias_sidecar(_full(d, [{"Key": KEY, "Name": "Arabescato", "Type": "Marble",
+                                          "Aliases": "Arabescato Vagli"}]))
 
 
 def _row(ledger, key=KEY):
@@ -79,7 +81,8 @@ def test_the_variation_payload_has_no_category_and_carries_its_icons_in_handle_o
         populate_variations_full(lg, full)
         payload = ready(lg, "variations")[0]["payload"]
     assert payload == {
-        "type": "Marble", "name": "Arabescato", "aliases": ["Arabescato Vagli"],
+        "type": "Marble", "name": "Arabescato",
+        "alias_rows": [{"value": "Arabescato Vagli", "method": "seed"}], "codes": [],
         "category_images": [{"category": "slabs", "s3_key": f"{PREFIX}{KEY}/slab.png", "etag": "e-s"},
                             {"category": "tiles", "s3_key": f"{PREFIX}{KEY}/tile.png", "etag": "e-t"}]}
 
@@ -182,8 +185,8 @@ def test_the_product_payload_has_no_bundle_size_but_the_ledger_keeps_it_for_the_
 
 
 def test_a_variation_payload_never_carries_a_category_or_an_image_url():
-    v = {"type": "Marble", "name": "Arabescato", "aliases": "[]"}
-    assert set(variation_payload(v, [])) == {"type", "name", "aliases", "category_images"}
+    v = {"type": "Marble", "name": "Arabescato", "alias_rows": "[]", "codes": "[]"}
+    assert set(variation_payload(v, [])) == {"type", "name", "alias_rows", "codes", "category_images"}
 
 
 # --- emit: the listing and the side file -----------------------------------------------------------------------

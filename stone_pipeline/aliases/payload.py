@@ -33,8 +33,9 @@ def write_sidecar(directory: Path, by_key: dict[str, tuple[list[dict], list[str]
 
 
 def read_sidecar(directory: Path) -> dict[str, dict] | None:
-    """The sidecar beside a variety file, or None when there is none (the base a reset populates from): its varieties
-    stay not computed (NULL) until a produce writes one."""
+    """The sidecar beside a variety file, or None when there is none (the base a reset populates from): populate then
+    SETS its varieties' alias_rows and codes NULL, not computed, overwriting any earlier value, until a produce
+    writes a sidecar."""
     path = Path(directory) / ALIAS_SIDECAR
     if not path.exists():
         return None

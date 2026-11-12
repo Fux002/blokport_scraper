@@ -21,7 +21,7 @@ PAST = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state, medusa_id=None):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "aliases": "[]",
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": medusa_id, "in_full": 1, "payload_hash": "",
                                 "state": state, "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))

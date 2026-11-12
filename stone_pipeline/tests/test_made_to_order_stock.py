@@ -46,7 +46,7 @@ def _row(sku: str, *, made_to_order: bool, count: str = "5") -> CanonicalRow:
 def _seed(ledger: Ledger) -> None:
     now = now_iso()
     ledger.upsert("variation", {
-        "key": KEY, "type": "Marble", "name": "Pietra Grey", "aliases": "[]",
+        "key": KEY, "type": "Marble", "name": "Pietra Grey", "alias_rows": "[]", "codes": "[]",
         "medusa_id": "V1", "payload_hash": "", "state": "synced", "first_seen": now,
         "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
     add_icon(ledger, KEY)

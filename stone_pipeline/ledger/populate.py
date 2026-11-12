@@ -53,7 +53,8 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     as pending (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state
     and first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves.
     alias_rows and codes come from the alias sidecar emit writes beside the file (aliases.payload); with no sidecar
-    (the base a reset populates from) they are NULL, not computed, and held until a produce computes them. A sidecar
+    (the base a reset populates from) populate SETS both NULL, overwriting any earlier value: not computed, held from
+    the serve until a produce computes them, so no stale spelling is served. A sidecar
     without a produced variety fails loud: a NULL there would hold a variety the produce did compute."""
     _key, _name, _type, _ = _VARIANTS_FULL_COLS
     now = now_iso()

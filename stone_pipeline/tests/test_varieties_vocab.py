@@ -20,7 +20,7 @@ def _seed(path, rows):
         for key, name, typ in rows:
             lg.upsert("variation", {
                 "key": key, "type": typ, "name": name,
-                "aliases": "[]",
+                "alias_rows": "[]", "codes": "[]",
                 "medusa_id": None, "payload_hash": "", "state": "pending",
                 "first_seen": _NOW, "last_synced": None, "created_at": _NOW, "updated_at": _NOW,
             }, pk=("key",))

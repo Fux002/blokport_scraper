@@ -21,7 +21,7 @@ def _variation(ledger, key, *, state="synced", medusa_id="V", archived=0, in_ful
     """A variation row; with `icon`, its slab icon too (the product gate needs an icon in the product's category)."""
     now = now_iso()
     ledger.upsert("variation", {
-        "key": key, "type": type_, "name": "x", "aliases": "[]",
+        "key": key, "type": type_, "name": "x", "alias_rows": "[]", "codes": "[]",
         "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "", "state": state,
         "archived": archived, "first_seen": now, "last_synced": now if medusa_id else None,
         "created_at": now, "updated_at": now}, pk=("key",))
