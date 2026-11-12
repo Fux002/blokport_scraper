@@ -259,6 +259,9 @@ GONE = "granite__retired_one_0001"
 
 
 def _ledger(path):
+    """The ledger the migration resolves against; built once per path, so a second produce sees the same ledger."""
+    if path.exists():
+        return path
     with closing(sqlite3.connect(str(path))) as conn:
         conn.execute("CREATE TABLE variation (key TEXT PRIMARY KEY, type TEXT, name TEXT, medusa_id TEXT, "
                      "in_full INTEGER, state TEXT)")
