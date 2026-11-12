@@ -248,3 +248,24 @@ def test_after_the_mint_run_its_operator_rename_reaches_the_index_and_the_payloa
     assert sidecar[oro]["alias_rows"] == [{"value": clean, "method": "operator"}]
     with out.open(encoding="utf-8-sig", newline="") as h:
         assert [r["Aliases"] for r in csv.DictReader(h)] == [clean]
+
+
+def test_a_mint_row_and_the_operator_store_state_one_value_when_the_stated_type_differs(monkeypatch):
+    # ONE helper (aliases.stores.operator_alias) makes the value both places: the operator states another type than
+    # the scrape's, and the mint row's alias is still exactly the operator store's alias (manager, 11-12)
+    from stone_pipeline.aliases.stores import operator_aliases
+    from stone_pipeline.config.decisions_model import Decisions
+    from stone_pipeline.reference import loaders
+    from stone_pipeline.stages import curate, decisions
+    from stone_pipeline.tests.test_mint_rename import _empty_imports, _row
+    scraped = "Super White Marble Slab"
+    monkeypatch.setattr(curate, "load_existing", _empty_imports)
+    monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
+    monkeypatch.setattr(decisions, "load_decisions", lambda: Decisions.from_legacy({("", scraped.lower()): {
+        "action": "mint", "spelling": scraped, "seed_name": "Super Blanco", "seed_type": "Quartzite"}}))
+    res = curate.build_curation([_row(scraped, "t1", stone_type="Marble")], loaders.load_all())
+    (minted,) = res.new_variants
+    [stated] = operator_aliases([{"source": "", "spelling": scraped, "verdict": "is", "name": "Super Blanco",
+                                  "stone_type": "Quartzite"}])
+    assert (minted["Name"], minted["Type"]) == ("Super Blanco", "Quartzite")
+    assert minted["Aliases"].split("|") == [stated.spelling]
