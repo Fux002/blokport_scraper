@@ -309,7 +309,8 @@ class VariationStage:
                 # the learning method and the vendor are recorded as provenance for the review. VE2: never learn a
                 # new alias onto an archived (frozen) variety -- it still RECOGNIZES the scrape (the bind above
                 # stands), but a guessed spelling must not stick to a frozen variety.
-                self.writeback.add_alias(row.variation_key, query, method=match.method, source=row.src_site)
+                self.writeback.add_alias(row.variation_key, query, method=match.method, source=row.src_site,
+                                         score=match.score)
             return
 
         if match.method in ("review", "semantic_review"):

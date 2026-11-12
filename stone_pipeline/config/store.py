@@ -293,13 +293,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # Learned aliases (P2-10 C2; shape frozen by the scraper manager 11-12): a spelling the pipeline GUESSED for a
     # variety, keyed by its identity Key and norm = core.text.match_key(value). The matcher and curate write
     # 'proposed'; only an 'active' row is a matcher input; a 'rejected' norm is never proposed again for that Key
-    # (the primary key holds it). `method` is how it was learned, `source` the vendor whose listing proposed it.
-    # No reset clears it: only a review decision changes a row.
+    # (the primary key holds it). `method` is how it was learned, `source` the vendor whose listing proposed it,
+    # `score` the proposing arm's own score on 0..100 for the review card (PHASE-2-SPEC:176), NULL where the arm has
+    # none and for a migrated row. No reset clears it: only a review decision changes a row.
     conn.execute("CREATE TABLE IF NOT EXISTS learned_alias ("
                  "identity_key TEXT NOT NULL, value TEXT NOT NULL, norm TEXT NOT NULL, method TEXT NOT NULL, "
                  "source TEXT NOT NULL, "
                  "status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'rejected')), "
-                 "first_seen TEXT NOT NULL, decided_by TEXT, decided_at TEXT, PRIMARY KEY (identity_key, norm))")
+                 "first_seen TEXT NOT NULL, decided_by TEXT, decided_at TEXT, score REAL, "
+                 "PRIMARY KEY (identity_key, norm))")
     conn.commit()
 
 
