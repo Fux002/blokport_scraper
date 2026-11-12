@@ -16,7 +16,6 @@ Hermetic: tmp files, a patched registry. No em dashes.
 from __future__ import annotations
 
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
