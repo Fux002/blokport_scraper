@@ -142,13 +142,20 @@ def test_the_produce_s_fetch_refuses_a_thin_copy_loud_and_leaves_the_local_file(
 
 @pytest.mark.parametrize("production", [True, False])
 def test_a_refused_attributes_fetch_stops_the_produce_in_every_environment(monkeypatch, production):
-    # produce._fetch_inputs keeps development best-effort for an S3 outage, but a refused vocabulary is no outage
+    # produce._fetch_inputs keeps development best-effort for an S3 outage, but a refused vocabulary is no outage. The
+    # later fetches succeed here, so the stop can only be the refusal's own (each is fatal by itself: test_field_kinds,
+    # test_dimension_overrides), and none of them is reached.
     from stone_pipeline import produce
+    from stone_pipeline.config import categories
+    reached = []
 
     def refused():
         raise medusa_inputs.AttributesUnavailable("the S3 copy looks thin (2 lines against 101 in the local copy)")
     monkeypatch.setattr(medusa_inputs, "fetch_all", refused)
+    monkeypatch.setattr(medusa_inputs, "fetch_field_kinds", lambda: reached.append("field_kinds"))
+    monkeypatch.setattr(medusa_inputs, "fetch_overrides", lambda: reached.append("overrides") or False)
+    monkeypatch.setattr(categories, "refresh_category_pcats", lambda: reached.append("pcats"))
     monkeypatch.setattr(produce, "IS_PRODUCTION", production, raising=False)
     with pytest.raises(SystemExit) as stop:
         produce._fetch_inputs()
-    assert stop.value.code == 2
+    assert stop.value.code == 2 and reached == []
