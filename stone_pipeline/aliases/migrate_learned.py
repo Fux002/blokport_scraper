@@ -71,7 +71,8 @@ def plan(records: Iterable[tuple[str, str, str]], ledger_rows: list[dict], conte
 def run_once(writeback_path: Optional[Path] = None, ledger_path: Optional[Path] = None,
              review_dir: Optional[Path] = None) -> Optional[dict]:
     """Migrate alias_writeback.csv once: {active, dropped} counts, or None when config.db already records the
-    migration (the csv is then not read). An absent csv migrates nothing and still records the marker."""
+    migration (the csv is then not read). An absent csv migrates nothing and still records the marker, ledger or none;
+    records with no ledger to resolve them raise, unmarked."""
     if decisions_store.learned_migration_done(MIGRATION):
         return None
     from stone_pipeline.ledger import writethrough
@@ -79,7 +80,8 @@ def run_once(writeback_path: Optional[Path] = None, ledger_path: Optional[Path] 
     ledger_path = Path(ledger_path or writethrough.ledger_path())
     review_dir = Path(review_dir or SETTINGS.paths.review_dir)
     records = load_alias_writeback_records(writeback_path)
-    ledger_rows = _ledger_rows(ledger_path)
+    # the ledger only resolves records: with none (a new environment, no csv and no ledger yet) the migration is empty
+    ledger_rows = _ledger_rows(ledger_path) if records else []
     contexts = build_contexts((r["key"], r["type"], r["name"]) for r in ledger_rows
                               if r["in_full"] and r["state"] != "retiring")
     active, dropped = plan(records, ledger_rows, contexts, code_matcher(active_pack().name_code_pattern))
