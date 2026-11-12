@@ -13,9 +13,10 @@ A base Key with no post (base-only, SC-3: it gets none) keeps no seed value: eac
 other is listed `no_post` (it leaves the seed when C4 derives the base), and a Key with no such value gets one
 `no_post` row with an empty Value, so every one is named (the manager's ruling, 11-12).
 
-The judgement's basis (the manager, 11-12): the variety's own name is its committed base Name (the post's variant
-only for a post with no base row); the same-type names are the committed base's (what the ledger mirrors), so the two
-bases must agree on every Key's Name and Type; the vocabulary is development's committed attributes.csv.
+The judgement's basis (the manager, 11-12), built by C2's one context builder (aliases.context.build_contexts): the
+variety's own name is its committed base Name (the post's variant only for a post with no base row); the same-type
+names are the committed base's (what the ledger mirrors), so the two bases must agree on every Key's Name and Type;
+the vocabulary is the live names of development's committed attributes.csv.
 
 The difference list (`seed_alias_differences.csv`) is the owner's list and an INPUT as well as the output: a value
 removed from a post exists nowhere else afterwards, so its row is kept from the previous list and only new
@@ -31,8 +32,9 @@ import io
 import json
 from pathlib import Path
 
-from stone_pipeline.aliases.cleanup import alias_context, seed_refusal, vocabulary
-from stone_pipeline.core.alias_problem import code_matcher
+from stone_pipeline.aliases.cleanup import seed_refusal
+from stone_pipeline.aliases.context import build_contexts
+from stone_pipeline.core.alias_problem import AliasContext, code_matcher
 from stone_pipeline.core.text import clean_variety_name, match_key
 from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -66,9 +68,11 @@ def render(root: Path = REPO_ROOT) -> dict[Path, bytes]:
     """The bytes of every file in WRITES, from the committed files under `root`. Reads only."""
     _require_vocabulary_basis()
     from stone_pipeline.config.domain import active_pack
-    type_words, vocabulary_keys = vocabulary()
-    judge = _Judge(_identities(root), type_words, vocabulary_keys, code_matcher(active_pack().name_code_pattern))
+    identities = _identities(root)
     doc = json.loads((root / BACKBONE).read_text(encoding="utf-8"))
+    post_only = {post["key"]: (post.get("variant") or "", post.get("stone_type") or "")
+                 for post in doc["posts"] if post.get("key") and post["key"] not in identities}
+    judge = _Judge(identities, _contexts(identities, post_only), code_matcher(active_pack().name_code_pattern))
     differences = _read_differences(root / DIFFERENCES)
     base_values = _base_values(root)
     posted = {post["key"] for post in doc["posts"] if post.get("key")}
@@ -80,25 +84,29 @@ def render(root: Path = REPO_ROOT) -> dict[Path, bytes]:
             DIFFERENCES: _differences_bytes(differences)}
 
 
-class _Judge:
-    def __init__(self, identities: dict[str, tuple[str, str]], type_words: frozenset[str],
-                 vocabulary_keys: frozenset[str], is_code):
-        self.identities = identities
-        self.names_by_type: dict[str, set[str]] = {}
-        for name, type_ in identities.values():
-            self.names_by_type.setdefault(match_key(type_), set()).add(match_key(name))
-        self.type_words, self.vocabulary_keys, self.is_code = type_words, vocabulary_keys, is_code
+def _contexts(identities: dict[str, tuple[str, str]],
+              post_only: dict[str, tuple[str, str]]) -> dict[str, AliasContext]:
+    """Every Key's alias-check context, from C2's one builder (aliases.context.build_contexts, the builder C5 judges
+    with). A base Key is judged among the base's varieties (what the ledger mirrors). A post with no base row is judged
+    under its own variant among the same varieties: each is built with only itself added, so no post-only name widens
+    another Key's same-type set."""
+    base = [(key, type_, name) for key, (name, type_) in sorted(identities.items())]
+    contexts = build_contexts(base)
+    for key, (name, type_) in sorted(post_only.items()):
+        contexts[key] = build_contexts([*base, (key, type_, name)])[key]
+    return contexts
 
-    def _context(self, key: str, name: str, type_: str):
-        name, type_ = self.identities.get(key, (name, type_))
-        return alias_context(name, type_, self.names_by_type, self.type_words, self.vocabulary_keys)
+
+class _Judge:
+    def __init__(self, identities: dict[str, tuple[str, str]], contexts: dict[str, AliasContext], is_code):
+        self.identities, self.contexts, self.is_code = identities, contexts, is_code
 
     def post(self, post: dict, base_values: list[str], differences: dict) -> dict:
         """The post with its values judged and the base's missing values joined; `codes` written right after
         `aliases`."""
         key = post["key"]
         post = self._named(post, differences)
-        context = self._context(key, post.get("variant") or "", post.get("stone_type") or "")
+        context = self.contexts[key]
         held = [*(post.get("aliases") or []), *(post.get("codes") or [])]
         held_keys = {match_key(value) for value in held}
         joining: dict[str, str] = {}                    # one value per match_key: its least spelling
@@ -137,8 +145,7 @@ class _Judge:
         return {**post, "variant": name}
 
     def no_post(self, key: str, values: list[str], differences: dict) -> None:
-        name, type_ = self.identities[key]
-        context = self._context(key, name, type_)
+        context = self.contexts[key]
         kept = False
         for value in sorted(set(values), key=lambda v: (match_key(v), v)):
             if why := seed_refusal(value, context, self.is_code):

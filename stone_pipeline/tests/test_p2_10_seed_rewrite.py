@@ -64,19 +64,19 @@ def test_the_no_post_list_names_exactly_the_base_keys_without_a_post():
 
 
 def test_the_removed_list_is_exactly_the_shared_c1_judgement():
-    """Every listed value is refused by cleanup.seed_refusal in its Key's context (the committed base names, the
-    same call C5 classes `removed` by), and every base value it refuses is listed."""
-    from stone_pipeline.aliases.cleanup import alias_context, seed_refusal, vocabulary
-    names = {r["Key"]: (r["Name"], r["Type"]) for _, r in _base_rows()}
+    """Every listed value is refused by cleanup.seed_refusal in its Key's context (C2's build_contexts over the
+    committed base varieties, the same judgement C5 classes `removed` by), and every base value it refuses is
+    listed."""
+    from stone_pipeline.aliases.cleanup import seed_refusal
+    from stone_pipeline.aliases.context import build_contexts
+    base = sorted({(r["Key"], r["Type"], r["Name"]) for _, r in _base_rows()})
+    contexts = build_contexts(base)
     posts = _posts()
-    by_type: dict[str, set[str]] = {}
-    for name, type_ in names.values():
-        by_type.setdefault(match_key(type_), set()).add(match_key(name))
-    type_words, vocabulary_keys = vocabulary()
 
     def refusal(key: str, value: str):
-        name, type_ = names.get(key) or (posts[key]["variant"], posts[key]["stone_type"])
-        return seed_refusal(value, alias_context(name, type_, by_type, type_words, vocabulary_keys), IS_CODE)
+        if key not in contexts:                      # a post with no base row: its variant among the base's names
+            contexts[key] = build_contexts([*base, (key, posts[key]["stone_type"], posts[key]["variant"])])[key]
+        return seed_refusal(value, contexts[key], IS_CODE)
 
     listed = _differences("removed")
     assert listed, "no removed list"
