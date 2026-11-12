@@ -21,9 +21,13 @@ from stone_pipeline.core.text import match_key
 REPO = Path(__file__).resolve().parents[2]
 BACKBONE = REPO / "catalog_source" / "backbone_varieties.json"
 DIFFERENCES = REPO / "catalog_source" / "seed_alias_differences.csv"
-BASES = [REPO / "from_medusa" / env / "variants_export_base.csv" for env in ("development", "production")]
+# the committed bases, then what dev's LIVE base adds to them (reviewer 2's L2 on C3, the manager's requirement 11-12)
+LIVE_ADDITIONS = REPO / "catalog_source" / "seed_live_additions_development.csv"
+BASES = [REPO / "from_medusa" / env / "variants_export_base.csv" for env in ("development", "production")] + \
+    [LIVE_ADDITIONS]
 IS_CODE = code_matcher(r"[Gg]\d+[A-Za-z]?")
-NO_POST_KEYS = 67                      # SC-3 rev 2.3: the base-only Keys, measured 11-12, the same in both bases
+# Keys with no backbone post (SC-3 rev 2.3), measured 11-12: 67 in both committed bases, plus 46 dev minted since
+NO_POST_KEYS = 113
 
 
 def _posts() -> dict[str, dict]:
@@ -41,8 +45,35 @@ def _base_rows() -> list[tuple[str, dict]]:
     out = []
     for base in BASES:
         with base.open(encoding="utf-8-sig", newline="") as handle:
-            out += [(base.parent.name, r) for r in csv.DictReader(handle)]
+            out += [(base.name, r) for r in csv.DictReader(handle)]
     return out
+
+
+# --- dev's live base: only what it adds is committed, pinned by its S3 VersionId ------------------------------------
+_COMMITTED = "Key,Name,Type,Aliases\nk1,Alpha,Granite,Old|Kept\nk3,Gamma,Marble,\n"
+_LIVE = "Key,Name,Type,Aliases\nk1,Alpha,Granite,old|New One\nk2,Beta,Granite,B One|B Two\nk3,Gamma,Marble,\n"
+
+
+def test_the_live_additions_are_only_what_the_live_base_adds():
+    from stone_pipeline.aliases import seed_rewrite
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    committed = read_variants_export(_COMMITTED, require_status=False, name="committed")
+    assert seed_rewrite.live_additions(_LIVE, committed) == (
+        "Key,Name,Type,Aliases\nk1,Alpha,Granite,New One\nk2,Beta,Granite,B One|B Two\n")
+
+
+def test_a_live_row_that_renames_a_committed_key_refuses():
+    from stone_pipeline.aliases import seed_rewrite
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    committed = read_variants_export(_COMMITTED, require_status=False, name="committed")
+    with pytest.raises(seed_rewrite.BasesDisagree, match="k1"):
+        seed_rewrite.live_additions("Key,Name,Type,Aliases\nk1,Alfa,Granite,\n", committed)
+
+
+def test_the_live_snapshot_is_pinned_and_committed():
+    from stone_pipeline.aliases import seed_rewrite
+    assert seed_rewrite.LIVE_BASE_VERSION_ID and len(seed_rewrite.LIVE_BASE_SHA256) == 64
+    assert LIVE_ADDITIONS.read_text(encoding="utf-8").startswith("Key,Name,Type,Aliases\n")
 
 
 # --- (a) every committed base alias is on its Key's post, or on a named list ---------------------------------------
