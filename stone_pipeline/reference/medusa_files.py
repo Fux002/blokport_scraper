@@ -23,6 +23,9 @@ from stone_pipeline.core.text import match_key
 ATTRIBUTE_COLUMNS = ("category", "value", "sourceid", "handle")
 CATEGORY_KIND = "category"
 _STATUS_COLUMNS = ("status", "internal")
+# Table 569: on a `type` row, the product_category handles (D11) the type has a valid combination in, '|'-joined
+# ('' when it has none); empty on every other row. load_attributes scopes the type vocabulary to the pack with it.
+CATEGORY_HANDLES_COLUMN = "category_handles"
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
 # Key, Name and Type are the variation's identity (phase 1: a Key names one stone of one type, and Type is its
@@ -45,6 +48,8 @@ class AttributeValue:
     status: str        # "active" | "archived"
     internal: bool
     handle: str = ""   # a category row's D11 handle, exactly as served; '' for every other kind
+    # the type's product_category handles (table 569), sorted; None when the file has no category_handles column
+    category_handles: tuple[str, ...] | None = None
 
     @property
     def assignable(self) -> bool:
@@ -52,17 +57,20 @@ class AttributeValue:
         return self.status == "active" and not self.internal
 
 
-def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeValue]:
+def read_attributes(src: Path | str, *, require_status: bool,
+                    require_category_handles: bool = False) -> list[AttributeValue]:
     """attributes.csv -> its values, in file order. `src` is the file's Path, or a str holding the file's TEXT
     (a str is never taken as a path). A row without category or value is skipped; an empty sourceid is kept
     (each caller decides what an id-less value means). Without a status/internal column every value is active
-    and not internal, unless `require_status`, which makes the absent column an error. A conflicting duplicate
-    raises: two values of one category that match_key to the same name with different ids, across all statuses,
-    since the value->id map would otherwise silently keep the last one."""
+    and not internal, unless `require_status`, which makes the absent column an error; `require_category_handles`
+    does the same for category_handles (table 569: the fetch's check and the type vocabulary require it). A
+    conflicting duplicate raises: two values of one category that match_key to the same name with different ids,
+    across all statuses, since the value->id map would otherwise silently keep the last one."""
     label = str(src) if isinstance(src, Path) else "attributes.csv"
     out: list[AttributeValue] = []
     ids: dict[tuple[str, str], AttributeValue] = {}
-    required = ATTRIBUTE_COLUMNS + (_STATUS_COLUMNS if require_status else ())
+    required = (ATTRIBUTE_COLUMNS + (_STATUS_COLUMNS if require_status else ())
+                + ((CATEGORY_HANDLES_COLUMN,) if require_category_handles else ()))
     for line, row, fields in _rows(src, label, required):
         category = (row.get("category") or "").strip()
         value = (row.get("value") or "").strip()
@@ -70,7 +78,7 @@ def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeV
             continue
         item = AttributeValue(category, value, (row.get("sourceid") or "").strip(),
                               _status(row, fields, label, line), _internal(row, fields, label, line),
-                              _handle(row, category, label, line))
+                              _handle(row, category, label, line), _category_handles(row, fields))
         _guard_duplicate(ids, item, label)
         out.append(item)
     return out
@@ -158,6 +166,12 @@ def _handle(row: dict, category: str, label: str, line: int) -> str:
     if category != CATEGORY_KIND and handle:
         raise ValueError(f"{label} line {line}: only a category row carries a handle, not a {category!r} row")
     return handle
+
+
+def _category_handles(row: dict, fields: set[str]) -> tuple[str, ...] | None:
+    if CATEGORY_HANDLES_COLUMN not in fields:
+        return None
+    return tuple(sorted({h.strip() for h in (row.get(CATEGORY_HANDLES_COLUMN) or "").split("|") if h.strip()}))
 
 
 def _status(row: dict, fields: set[str], label: str, line: int) -> str:
