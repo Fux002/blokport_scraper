@@ -332,10 +332,6 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
     _snap("assembled")
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
-    from stone_pipeline.stages import decisions
-    retired = set() if seed_only else decisions.load_retired()   # seed_only: no config.db retired filter
-    if retired:
-        rows = [r for r in rows if r["Key"] not in retired]
     _snap("retired")
     # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
     # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
