@@ -11,7 +11,7 @@ from stone_pipeline.io import staging
 from stone_pipeline.run import run_all, run_source
 
 
-def test_multi_source_isolation(tmp_path, scrape_data_dir):
+def test_multi_source_isolation(tmp_path, scrape_data_dir, seeded_config_store):
     out = tmp_path / "out"
     out.mkdir()
     results = run_all(["polonine", "marenostone"], outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
@@ -19,7 +19,7 @@ def test_multi_source_isolation(tmp_path, scrape_data_dir):
     assert all(m.health_status in ("OK", "DEGRADED") for m in results.values())
 
 
-def test_row_fingerprint_stable_across_runs(tmp_path, scrape_data_dir):
+def test_row_fingerprint_stable_across_runs(tmp_path, scrape_data_dir, seeded_config_store):
     out = tmp_path / "out"
     out.mkdir()
     run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
