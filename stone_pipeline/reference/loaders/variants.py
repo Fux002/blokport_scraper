@@ -109,7 +109,7 @@ def _table(records: list[ExportVariation]) -> VariantTable:
     # that stamp. Excluding retired keys at the matcher (like delete_keys) is what actually stops a product
     # re-linking onto a retiring Key (which would FK-fail the eventual ack-done). One durable source: config.db.
     from stone_pipeline.stages import decisions
-    delete_keys = env()._delete_keys() | decisions.load_retired()
+    delete_keys = env()._delete_keys()
     # DEDUP the reference to survivors only: the live Medusa export can still list a re-key OLD SIDE that
     # is being deleted. If the matcher can stamp that Key onto a product, the product re-links onto a
     # variety emit will have collapsed away (an orphan / FK-fail on ack). Exclude every non-survivor of a
