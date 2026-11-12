@@ -78,6 +78,13 @@ class CandidateIndex:
                 candidate.surfaces.append(surface)
                 self._add_surface(cid, surface)
 
+    def add_code(self, cid: str, code: str) -> None:
+        """A code (the brand's name_code_pattern, 'G603') is a surface of the EXACT tier only: never a candidate
+        surface, which the fuzzy and overlap tiers score against, and never a projection or phonetic key, so a code
+        one character off ('G630') is another stone, never a near match (P2-10 C3)."""
+        if cid in self.candidates and (key := proj.norm(code)):
+            self.by_norm.setdefault(key, set()).add(cid)
+
     def add_surface_alias(self, cid: str, surface: str) -> None:
         """Write-back: register a newly confirmed spelling (section 8.4)."""
         candidate = self.candidates.get(cid)
@@ -136,16 +143,17 @@ def build_variation_index(variant_table, backbone, origin_map=None) -> "Candidat
         # blocking never depends on the backbone's display FORM of the type. `variety` stays for block_colors.
         block_type = key_type
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
-        surfaces = set(variant.aliases)
         rule = origin_map.exact(variant.name, key_type) if origin_map is not None else None
         index.add(
             cid=variant.variation_id,
             canonical=variant.name,
-            surfaces=list(surfaces),
+            surfaces=list(variant.aliases),
             block_type=block_type,
             block_colors=block_colors,
             origins=set(rule.countries) if rule else set(),
         )
+        for code in variant.codes:
+            index.add_code(variant.variation_id, code)
     return index
 
 

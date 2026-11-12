@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 
+from stone_pipeline.aliases.surfaces import Stores
 from stone_pipeline.reference.loaders import load_variants
 
 
@@ -32,7 +33,7 @@ def test_idfree_base_indexes_by_key_not_empty_id(tmp_path):
         ["granite__black_absolut_aaa", "Black Absolut", "Granite", "Absolut Black"],
         ["marble__acquamare_bbb", "Acquamare", "Marble", "Verde Acquamare"],
     ])
-    table = load_variants(p)
+    table = load_variants(p, Stores())
     assert len(table.by_id) == 2  # both loaded, not collapsed onto one empty id
     v = table.by_id["granite__black_absolut_aaa"]
     assert v.variation_id == v.key == "granite__black_absolut_aaa"
@@ -44,7 +45,7 @@ def test_live_export_still_uses_the_id(tmp_path):
     _write(p, ["Id", "Key", "Name", "Type", "Aliases"], [
         ["01MEDUSAID", "granite__black_absolut_aaa", "Black Absolut", "Granite", "Absolut Black"],
     ])
-    table = load_variants(p)
+    table = load_variants(p, Stores())
     v = next(iter(table.by_id.values()))
     assert v.variation_id == "01MEDUSAID"
     assert v.key == "granite__black_absolut_aaa"

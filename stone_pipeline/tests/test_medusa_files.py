@@ -265,11 +265,12 @@ def test_export_text_form_errors_name_the_file_it_came_from(tmp_path):
 
 
 def test_the_loader_names_the_base_file_in_an_error(tmp_path):
+    from stone_pipeline.aliases.surfaces import Stores
     from stone_pipeline.reference.loaders import load_existing_variants
     base = tmp_path / "variants_export_base.csv"
     base.write_text("Key\na__1\n", encoding="utf-8")
     with pytest.raises(ValueError, match=re.escape(str(base))):
-        load_existing_variants(base, ["slab"])
+        load_existing_variants(base, ["slab"], Stores())
 
 
 def test_own_variants_keeps_the_status_column_whole(tmp_path):

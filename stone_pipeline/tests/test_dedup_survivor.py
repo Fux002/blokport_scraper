@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 
+from stone_pipeline.aliases.surfaces import Stores
 from stone_pipeline.reference import loaders
 
 
@@ -32,7 +33,7 @@ def test_rekey_old_side_survivor_does_not_strand_the_new_key(tmp_path, monkeypat
 
     path = _variants_csv(tmp_path, [("id_old", old_key, "Super White"),
                                     ("id_new", new_key, "Super White")])
-    table = loaders.load_variants(path)
+    table = loaders.load_variants(path, Stores())
 
     # the good new key survives (its product can resolve) and the deleted old side is excluded
     assert "id_new" in table.by_id, "the eligible new key must survive, not vanish with the deleted old side"
@@ -47,6 +48,6 @@ def test_normal_duplicate_still_collapses_to_one_survivor(tmp_path, monkeypatch)
     monkeypatch.setattr(loaders, "pristine_seed_keys", lambda: frozenset())
     path = _variants_csv(tmp_path, [("id_a", "marble__carrara_0001", "Carrara"),
                                     ("id_b", "marble__carrara_0002", "Carrara")])
-    table = loaders.load_variants(path)
+    table = loaders.load_variants(path, Stores())
     kept = [vid for vid in ("id_a", "id_b") if vid in table.by_id]
     assert kept == ["id_a"]      # exactly one survivor, the deterministic pick

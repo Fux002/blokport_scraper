@@ -17,18 +17,21 @@ the file went stale.
 If no produce has ever run on this host (no ledger yet), the vocab is empty and every alias is refused --
 a safe, explicit failure, not a fallback that accepts an alias that would resolve to nothing.
 
-The ledger scan is cached behind a fingerprint of the ledger (+ its WAL) and config.db, so the many name
-lookups of one load_decisions do ONE scan, not one per name (the O(names x ledger) hang otherwise). The
+A variety's aliases are NOT the ledger's: they are the alias stores' surfaces (aliases.surfaces), the same ones
+the matcher indexes, so alias_target and the matcher agree on every known alias and code (P2-10 C3).
+
+The ledger scan is cached behind a fingerprint of the ledger (+ its WAL), config.db, the backbone and the export,
+so the many name lookups of one load_decisions do ONE scan, not one per name (the O(names x ledger) hang otherwise). The
 fingerprint keeps it from ever serving stale data: any produce (ledger) or decision/reset (config.db)
 changes it and the next read rebuilds.
 """
 
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 
+from stone_pipeline.aliases.surfaces import Stores, Variety, surfaces_by_key
 from stone_pipeline.matching import projections as proj
 
 _CACHE_LOCK = threading.Lock()
@@ -59,8 +62,12 @@ def _fingerprint():
             return Path(str(p) + "-wal").stat().st_size
         except OSError:
             return 0
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.config.settings import SETTINGS
     lp, cp = writethrough.ledger_path(), store.config_db_path()
-    return (_main(lp), _frames(lp), _main(cp), _frames(cp))
+    # the alias surfaces also read the backbone (seed) and the export (the hand rows)
+    return (_main(lp), _frames(lp), _main(cp), _frames(cp), _main(SETTINGS.paths.backbone_json),
+            _main(alias_stores.export_file()))
 
 
 def _index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], set[tuple[str, str]]]:
@@ -94,10 +101,10 @@ def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], se
     retired = decisions.load_retired()
     seen: set[tuple[str, str]] = set()
     rows: list[dict] = []
-    alias_hits: dict[tuple[str, str], set[str]] = {}
+    live: list[Variety] = []
     arch_flags: dict[tuple[str, str], list[int]] = {}
     with writethrough.connect(bind=False) as lg:
-        for r in lg.execute("SELECT key, name, type, aliases, archived FROM variation "
+        for r in lg.execute("SELECT key, name, type, archived FROM variation "
                             "WHERE name IS NOT NULL AND name != '' ORDER BY name COLLATE NOCASE"):
             if r["key"] in retired:                   # retired varieties are not valid targets
                 continue
@@ -112,18 +119,32 @@ def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], se
             if key not in seen:
                 seen.add(key)
                 rows.append({"name": r["name"], "stone_type": r["type"] or ""})
-            if r["aliases"]:
-                try:
-                    aliases = json.loads(r["aliases"])
-                except (ValueError, TypeError):
-                    aliases = []
-                for a in aliases:
-                    na = proj.norm(a)
-                    if na:
-                        alias_hits.setdefault((na, nt), set()).add(r["name"])
-    alias = {k: (next(iter(v)) if len(v) == 1 else None) for k, v in alias_hits.items()}
+            live.append(Variety(r["key"], r["name"], r["type"] or ""))
+    alias = _alias_map(live)
     archived = {k for k, flags in arch_flags.items() if flags and all(flags)}
     return _index_from_rows(rows, alias, archived)
+
+
+def _alias_map(live: list[Variety]) -> dict[tuple[str, str], str | None]:
+    """(norm alias or code, norm type) -> canonical NAME, over the SAME surfaces the matcher indexes
+    (aliases.surfaces: seed, operator, the export's hand rows), so "is this a known alias" has one answer. None
+    where the value sits on two distinct same-type varieties (ambiguous, never guessed)."""
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    path = alias_stores.export_file()
+    # the export's own reader decides its columns; a host with no export yet has no hand rows to add
+    records = read_variants_export(path, require_status=False) if path.exists() else []
+    scraper = alias_stores.scraper_stores()
+    stores = Stores(seed=scraper.seed, operator=scraper.operator, learned=scraper.learned,
+                    admin=alias_stores.admin_of(records))
+    surfaces, _ = surfaces_by_key(live, stores, alias_stores.is_code())
+    hits: dict[tuple[str, str], set[str]] = {}
+    for v in live:
+        found = surfaces[v.key]
+        for value, _ in (*found.aliases, *found.codes):
+            if na := proj.norm(value):
+                hits.setdefault((na, proj.norm(v.stone_type)), set()).add(v.name)
+    return {k: (next(iter(names)) if len(names) == 1 else None) for k, names in hits.items()}
 
 
 def _rows(q: str | None = None) -> list[dict]:

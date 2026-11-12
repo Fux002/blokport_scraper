@@ -18,6 +18,7 @@ class BackboneVariety:
     finishes: list[str]
     qualities: list[str]
     aliases: list[str]
+    codes: list[str] = field(default_factory=list)   # the brand's code names of the variety ('G603'), P2-10
 
 
 @dataclass
@@ -165,6 +166,7 @@ def load_backbone(path: Path | None = None) -> Backbone:
             qualities=[q for q in (post.get("qualities") or []) if q],
             # one alias per entry, as the writers' alias rule committed it (clean_alias_list)
             aliases=list(post.get("aliases") or []),
+            codes=list(post.get("codes") or []),
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
         if key := (post.get("key") or "").strip():
