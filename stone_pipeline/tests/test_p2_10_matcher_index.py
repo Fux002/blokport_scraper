@@ -162,3 +162,39 @@ def test_alias_target_and_the_matcher_agree_on_every_store(tmp_path, monkeypatch
         assert varieties.alias_target(value, typ) == name, value
         assert engine.match(value).canonical == name, value
 
+
+
+# --- review (reviewer 2, 11-12) ---------------------------------------------------------------------------------------
+def test_a_spaced_or_hyphenated_listing_still_binds_its_code_in_the_exact_tier():
+    # L1 (blocking): before C3 'G-603' and 'G 603' bound the seed's 'G603' through the compact projection. The exact
+    # tier looks a query up by its compact key against the codes, so they still bind; the code VALUE rule is unchanged
+    from stone_pipeline.adapters.tokens import clean_variety
+    _, eng = _engine()
+    for listing in ("G-603", "G 603", clean_variety("G-603 Granite", "Granite")):
+        m = eng.match(listing, block_type="granite")
+        assert (m.cid, m.method) == ("g1", "exact"), listing
+    assert eng.match("G-630").cid is None                       # still never a near code
+
+
+def test_the_seed_is_parsed_once_per_backbone_file(tmp_path, monkeypatch):
+    # L5: load_all parses the backbone; alias_target's rebuild (every config.db write) reuses that parse while the
+    # file is unchanged, and parses again only when the file changes
+    import dataclasses
+    import json
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.config import settings
+    from stone_pipeline.reference.loaders import backbone as bb
+    path = tmp_path / "backbone_varieties.json"
+    path.write_text(json.dumps({"posts": [{"key": "granite__x_1", "variant": "X", "stone_type": "Granite",
+                                           "aliases": ["Ex"]}]}), encoding="utf-8")
+    monkeypatch.setattr(settings, "SETTINGS", dataclasses.replace(
+        settings.SETTINGS, paths=dataclasses.replace(settings.SETTINGS.paths, backbone_json=path)))
+    parses = []
+    real = bb.load_backbone
+    monkeypatch.setattr(bb, "load_backbone", lambda p=None: parses.append(p) or real(path))
+    loaded = bb.load_backbone()                                   # load_all's own parse
+    first = alias_stores.scraper_stores(loaded).seed
+    assert alias_stores.scraper_stores().seed == first and len(parses) == 1   # alias_target reuses it
+    path.write_text(json.dumps({"posts": [{"key": "granite__x_1", "variant": "X", "stone_type": "Granite",
+                                           "aliases": ["Ex", "Ecks"]}]}), encoding="utf-8")
+    assert alias_stores.scraper_stores().seed["granite__x_1"][0] == ("Ex", "Ecks") and len(parses) == 2
