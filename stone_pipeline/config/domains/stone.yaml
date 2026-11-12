@@ -518,6 +518,16 @@ dimension_ranges:
   block: {weight: [18.0, 23.0],  length: [1.5, 3.0], width: [1.5, 3.0],   height: [1.5, 3.0]}
   tile:  {weight: [0.005, 0.012], length: [0.3, 0.6], width: [0.3, 0.6],   height: [0.01, 0.02]}
 
+# The longest a plan face (length or width) of each category can really be, in METRES: a face over it is a data error
+# (dev's POL-755 'Alpine' slab at 19.75 m), flagged dimension_implausible in derive and HELD at validate, published
+# or not. Measured on the dev ledger (2026-11-12 17:09Z, every product), the largest real face plus ~7.5%: slab
+# 3.534 m (p99.9 3.528, n=5,469; above it only the 6.44 m and 19.75 m errors) -> 3.80; block 3.53 m (n=78) -> 3.80;
+# tile 1.45 m (n=136) -> 1.60. A category with no entry has no maximum. Re-measure before changing a value.
+face_max:
+  slab: 3.80
+  block: 3.80
+  tile: 1.60
+
 # Fallback dimensions in METRES, applied by the shared derive stage (stages/derive.derive_dimensions) ONLY
 # when a real scraped value is missing / unparseable / ambiguous. Every fill is provenance-flagged
 # (FlagCode.dimension_defaulted) -- never silent. A real parsed value ALWAYS wins; a parsed 0 is a data

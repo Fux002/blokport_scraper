@@ -122,6 +122,9 @@ class DomainPack:
     # its free side stays a defaulted size, as before.
     free_size_words: tuple[str, ...] = ()
     free_size_shapes: dict[str, FreeSizeShapes] = dataclasses.field(default_factory=dict)
+    # category -> the longest a plan face (length or width) can really be, metres, measured on real data: a face
+    # over it is flagged dimension_implausible and the row held. A category with no entry has no maximum.
+    face_max: dict[str, float] = dataclasses.field(default_factory=dict)
 
 
 def _pack_path(name: str) -> Path:
@@ -240,6 +243,14 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         for side in ("long_side", "max_length"):
             if not number(spec[side]) or spec[side] <= 0:
                 bad(f"{where}.{side} must be a positive number (metres), got {spec[side]!r}")
+    face_max = data.get("face_max") or {}
+    if not isinstance(face_max, dict):
+        bad("'face_max' must be a mapping of category -> metres")
+    for fmt, metres in face_max.items():
+        if fmt not in cat_names:
+            bad(f"face_max[{fmt!r}] is not in the declared categories {sorted(cat_names)}")
+        if not number(metres) or metres <= 0:
+            bad(f"face_max[{fmt!r}] must be a positive number (metres), got {metres!r}")
     if "spelling_variants" in data and not isinstance(data["spelling_variants"], dict):
         bad("'spelling_variants' must be a mapping of variant -> canonical word")
     if "color_attribute" in data and data["color_attribute"] not in data["attributes"]:
@@ -350,6 +361,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         free_size_shapes={fmt: FreeSizeShapes(tuple(float(r) for r in spec["ratios"]), float(spec["long_side"]),
                                               float(spec["max_length"]))
                           for fmt, spec in (data.get("free_size_shapes") or {}).items()},
+        face_max={fmt: float(metres) for fmt, metres in (data.get("face_max") or {}).items()},
     )
 
 
