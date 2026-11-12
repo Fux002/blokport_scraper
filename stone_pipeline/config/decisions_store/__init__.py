@@ -13,6 +13,7 @@ into one module per table so a storage bug stays local:
   - leaves      -- backbone leaf-growth verdicts (approve/reject a value onto a variety's allowed set).
   - lots        -- lot sold answers: which scanned slabs of a lot are sold, for a given stock figure.
   - queue       -- the pending review queue produce WRITES and the API READS, plus the card projection.
+  - learned     -- learned aliases (P2-10 C2): proposed by the pipeline, decided active or rejected.
 
 This module is the FACADE: callers use `decisions_store.<name>` and nothing imports the submodules directly,
 so a test that patches `decisions_store.load_decisions` is honored by every internal caller (which resolves
@@ -25,6 +26,8 @@ from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
 from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
                      list_decided_leaves, record_minted_membership, revise_leaf_decision,
                      set_backbone_leaf_decision)
+from .learned import (active_learned_aliases, decide_learned_alias, learned_migration_done,
+                      propose_learned_aliases, record_learned_migration)
 from .lots import answer_lot, lot_answers
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
                       set_variety_origin, variety_origins)
@@ -51,6 +54,9 @@ __all__ = [
     "backbone_leaf_overlay", "leaf_decided", "set_backbone_leaf_decision", "approve_leaf_pending",
     "decide_leaf_pending", "list_decided_leaves", "revise_leaf_decision", "clear_leaf_decisions",
     "record_minted_membership", "_LEAF_ATTRIBUTES",
+    # learned aliases (P2-10 C2)
+    "active_learned_aliases", "propose_learned_aliases", "decide_learned_alias",
+    "learned_migration_done", "record_learned_migration",
     # lot sold answers
     "answer_lot", "lot_answers",
     # pending review queue

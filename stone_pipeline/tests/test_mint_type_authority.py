@@ -67,9 +67,9 @@ def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other
                        variation_name="Arabescato", variation_method="fuzzy")   # a learned guess -> alias path
     result = curate.build_curation([row], ref)
 
-    slab_aliases = result.alias_additions
-    on_granite = [a for a in slab_aliases if a["Key"] == GRANITE_KEY and "Arabesk" in (a.get("_added") or "")]
-    on_marble = [a for a in slab_aliases if a["Key"] == MARBLE_KEY]
+    slab_aliases = result.learned_proposals
+    on_granite = [a for a in slab_aliases if a["identity_key"] == GRANITE_KEY and a["value"] == "Arabesk"]
+    on_marble = [a for a in slab_aliases if a["identity_key"] == MARBLE_KEY]
     assert on_granite, f"spelling should alias onto the Granite variety, got {slab_aliases}"
     assert not on_marble, f"spelling must NOT touch the same-name Marble variety, got {on_marble}"
 
@@ -104,7 +104,7 @@ def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp
                        variation_method="exact_name_ambiguous", tree_gaps=[g])
     result = curate.build_curation([row], ref)
     assert any(p["variant"].lower() == "solo stone" for p in result.pending_confirm), "type-less must hold for a type"
-    assert not result.alias_additions, "must NOT auto-complete to the single existing type"
+    assert not result.learned_proposals, "must NOT auto-complete to the single existing type"
 
 
 def test_alias_family_surfaces_to_review_not_a_hidden_side_file(tmp_path, monkeypatch):
@@ -144,8 +144,8 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
                             variation_name="Arabescato", variation_method="fuzzy")
 
     def aliased(result) -> set[str]:
-        return {a["Key"] for a in result.alias_additions
-                if a["Key"] in (MARBLE_KEY, GRANITE_KEY) and "Arabesk" in (a.get("_added") or "")}
+        return {a["identity_key"] for a in result.learned_proposals
+                if a["identity_key"] in (MARBLE_KEY, GRANITE_KEY) and a["value"] == "Arabesk"}
 
     # the row DOES reach the name-only routing: with its own type it is aliased onto that type's variety
     assert aliased(curate.build_curation([keyless("Granite")], ref)) == {GRANITE_KEY}
@@ -188,9 +188,9 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
                        raw_type="Onyx", variation_method="exact_name_ambiguous", tree_gaps=[g])
     res = curate.build_curation([row], ref)
 
-    on_exact = [a for a in res.alias_additions if a["Key"] == VERDE_SCURO_KEY]
-    on_alias_owner = [a for a in res.alias_additions if a["Key"] == VERDE_ONYX_SCURO_KEY]
-    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions}"
+    on_exact = [a for a in res.learned_proposals if a["identity_key"] == VERDE_SCURO_KEY]
+    on_alias_owner = [a for a in res.learned_proposals if a["identity_key"] == VERDE_ONYX_SCURO_KEY]
+    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.learned_proposals}"
     assert not on_alias_owner, "must NOT alias onto 'Verde Onyx Scuro' (it only carries the name as a spelling)"
 
 
@@ -241,7 +241,7 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     res = curate.build_curation([_typed_gap_row("Arabescato", "Marble")], ref)
     minted = [r["Key"] for r in res.new_variants]
     assert any(k.startswith("agate__") for k in minted), f"operator's Agate must mint, got {minted}"
-    on_marble = [a for a in res.alias_additions if a["Key"] == MARBLE_KEY]
+    on_marble = [a for a in res.learned_proposals if a["identity_key"] == MARBLE_KEY]
     assert not on_marble, "must NOT alias onto the existing Marble variety when the operator picked Agate"
 
 

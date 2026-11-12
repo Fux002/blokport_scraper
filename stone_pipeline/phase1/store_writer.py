@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stone_pipeline.config.categories import category
-from stone_pipeline.config.store import SCHEMA_VERSION as CONFIG_SCHEMA_VERSION
+from stone_pipeline.config.store import PHASE1_SCHEMA_VERSION as CONFIG_SCHEMA_VERSION
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX, icon_key, icon_pair, pair_id
 from stone_pipeline.ledger.db import _SCHEMA_PATH, SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
 from stone_pipeline.ledger.payloads import variation_hash
