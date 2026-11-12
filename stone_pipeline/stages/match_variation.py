@@ -34,7 +34,7 @@ from stone_pipeline.matching.engine import VariationEngine, VariationMatch
 from stone_pipeline.matching.index import build_variation_index
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
-from stone_pipeline.state.writeback import WriteBack, is_learned, load_alias_writeback
+from stone_pipeline.state.writeback import WriteBack, is_learned
 
 log = logfmt.get_logger("match_variation")
 
@@ -47,9 +47,14 @@ log = logfmt.get_logger("match_variation")
 STANDALONE_MATCHERS: dict = {}   # category name -> fn(row, ref)
 
 
-def _apply_writeback(index, entries: list[tuple[str, str]]) -> None:
-    for vid, alias in entries:
-        index.add_surface_alias(vid, alias)
+def _apply_learned(index, table, learned: list[dict]) -> None:
+    """The ACTIVE learned aliases (config.db learned_alias, P2-10 C2) onto the index: each row names its variety by
+    the identity Key, the index by the variety's id, so the table maps one to the other. A Key this table does not
+    hold (a variety outside this run's export) adds nothing."""
+    cid_of = {variant.key: cid for cid, variant in table.by_id.items()}
+    for row in learned:
+        if (cid := cid_of.get(row["identity_key"])) is not None:
+            index.add_surface_alias(cid, row["value"])
 
 
 def origin_evidence(row: CanonicalRow, source_cfg, ref: ReferenceData) -> str:
@@ -112,17 +117,18 @@ class VariationStage:
 
     @classmethod
     def build(cls, ref: ReferenceData, writeback: WriteBack | None = None,
-              writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> "VariationStage":
+              generic_descriptor: bool = False, source_cfg=None) -> "VariationStage":
         thresholds = SETTINGS.thresholds
         # One engine per registry category; a new category gets its engine automatically from ref.variants.
         # Every stone-vocabulary category's table is the same varieties (phase 1), so each engine binds the
         # same Keys.
-        persisted = load_alias_writeback(writeback_path)  # confirmed spellings -> exact hits
+        from stone_pipeline.config import decisions_store
+        learned = decisions_store.active_learned_aliases()   # approved guesses -> exact hits; a proposal is not one
         auto, floor = thresholds.variation_auto_accept, thresholds.variation_review_floor
         engines: dict[str, VariationEngine] = {}
         for name, table in ref.variants.items():
             index = build_variation_index(table, ref.backbone, ref.origin_map)
-            _apply_writeback(index, persisted)
+            _apply_learned(index, table, learned)
             engines[name] = VariationEngine(index, auto, floor, suggester=_build_suggester(index))
         return cls(
             ref=ref, engines=engines,
@@ -293,17 +299,18 @@ class VariationStage:
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = match.method
-            # write-back: a confirmed GUESS (phonetic/fuzzy, writeback.is_learned) learns the scraped spelling,
-            # PERSISTED for the next run (section 8.4). A bind the seed already decides (exact, narrowed by
-            # name/type/colour/origin, projection, override) is re-derived every run, so it is never saved: a
-            # saved pick would outlive a later seed correction. NOT added to the live index mid-run: doing so
-            # made a later identical query resolve via 'exact'(high) instead of 'fuzzy'(medium) purely by
-            # batch order. Same-run repeats resolve identically; the persisted alias takes effect next run.
+            # write-back: a confirmed GUESS (phonetic/fuzzy, writeback.is_learned) PROPOSES the scraped spelling
+            # as a learned alias of the variety's Key (P2-10 C2): only once a review makes it active does it reach
+            # the index. A bind the seed already decides (exact, narrowed by name/type/colour/origin, projection,
+            # override) is re-derived every run, so it is never proposed: a saved pick would outlive a later seed
+            # correction. NOT added to the live index mid-run: doing so made a later identical query resolve via
+            # 'exact'(high) instead of 'fuzzy'(medium) purely by batch order.
             if is_learned(match.method) and not self._is_archived(match.cid):
-                # the learning method is recorded as provenance -> auditable and reversible (forget_alias).
-                # VE2: never LEARN a new alias onto an archived (frozen) variety -- it still RECOGNIZES the
-                # scrape (the bind above stands), but a guessed spelling must not stick to a frozen variety.
-                self.writeback.add_alias(match.cid, query, method=match.method)
+                # the learning method and the vendor are recorded as provenance for the review. VE2: never learn a
+                # new alias onto an archived (frozen) variety -- it still RECOGNIZES the scrape (the bind above
+                # stands), but a guessed spelling must not stick to a frozen variety.
+                self.writeback.add_alias(row.variation_key, query, method=match.method, source=row.src_site,
+                                         score=match.score)
             return
 
         if match.method in ("review", "semantic_review"):
@@ -415,9 +422,9 @@ def _fmt_candidates(candidates: list[tuple[str, str, float]]) -> str:
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData, writeback: WriteBack | None = None,
-        writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> StageMetric:
-    stage = VariationStage.build(ref, writeback=writeback, writeback_path=writeback_path,
-                                 generic_descriptor=generic_descriptor, source_cfg=source_cfg)
+        generic_descriptor: bool = False, source_cfg=None) -> StageMetric:
+    stage = VariationStage.build(ref, writeback=writeback, generic_descriptor=generic_descriptor,
+                                 source_cfg=source_cfg)
     isolated = isolate_rows(rows, "match_variation", stage.resolve_row, log)
     # The Resolve layer is the essential-complexity core: surface its own health. A high UNMATCHED share
     # on an established source signals a tree/index/vocab drift (not just new varieties), caught here.

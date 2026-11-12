@@ -305,6 +305,14 @@ def _post_curation_rebuild(params, body, query):
     return code, result
 
 
+def _post_alias_classification(params, body, query):
+    # P2-10 C5: the alias classification file and its manifest field, from the live ledger, read-only (409 unless
+    # every variation is synced, naming the Keys). The backend operator calls it right after the draining Publish.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.alias_classification()
+    return code, result
+
+
 def _post_purge(params, body, query):
     # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
     # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
@@ -1020,6 +1028,7 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("POST", ("reset",), _post_reset),
     ("POST", ("curation", "rebuild"), _post_curation_rebuild),
     ("POST", ("purge",), _post_purge),
+    ("POST", ("aliases", "classification"), _post_alias_classification),
     ("POST", ("clean",), _post_clean),
     ("POST", ("delist",), _post_delist),
     ("POST", ("pause",), _post_pause),
