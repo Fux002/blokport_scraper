@@ -97,6 +97,58 @@ def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produc
     assert emit_catalog.alias_collisions_dropped() == 1        # the count the run summary states
 
 
+def _emit_with_a_collision(tmp_path, monkeypatch, *, stamp, collide=True, seed_only=False):
+    """One build over a base with marble Casa Blue carrying 'Calcite Blue' and, when `collide`, marble Calcite Blue
+    in the same base; the review dir is tmp and the per-run stamp is `stamp`. Returns (emit_catalog, review dir)."""
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.phase1.variety_key import new_key
+    from stone_pipeline.stages import emit_catalog
+    review = tmp_path / "review"
+    paths = dataclasses.replace(SETTINGS.paths, review_dir=review, variants_export_csv=tmp_path / "no_export.csv",
+                                curate_delta_csv=tmp_path / "no_delta.csv")   # no live export, no delta
+    monkeypatch.setattr(emit_catalog, "SETTINGS", dataclasses.replace(SETTINGS, paths=paths))
+    monkeypatch.setattr(emit_catalog, "_run_stamp", lambda: stamp)
+    base = tmp_path / f"base_{stamp}.csv"
+    rows = [[new_key("Marble", "Casa Blue"), "Casa Blue", "Marble", "Calcite Blue|Casa Blue Marble"]]
+    if collide:
+        rows.append([new_key("Marble", "Calcite Blue"), "Calcite Blue", "Marble", ""])
+    with base.open("w", newline="", encoding="utf-8") as h:
+        csv.writer(h).writerows([emit_catalog._COLS, *rows])
+    out = tmp_path / f"out_{stamp}.csv"
+    emit_catalog.build(base, icons={}, seed_only=seed_only, out_path=out)
+    return emit_catalog, review
+
+
+def _listed(path):
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        return [r["alias"] for r in csv.DictReader(h)]
+
+
+def test_every_run_s_dropped_list_survives_the_next_run(tmp_path, monkeypatch):
+    # the base keeps only the emitted aliases (base := 1_variants_full), so a dropped alias is gone for good: each
+    # run's list is kept under its own name, while the current list holds the latest run's (Scraper L2)
+    emit_catalog, review = _emit_with_a_collision(tmp_path, monkeypatch, stamp="20261112T010000Z")
+    emit_catalog, review = _emit_with_a_collision(tmp_path, monkeypatch, stamp="20261112T020000Z", collide=False)
+    runs = review / emit_catalog.ALIAS_COLLISIONS_RUNS
+    assert sorted(p.name for p in runs.iterdir()) == ["20261112T010000Z.csv"]   # a run that drops none adds none
+    assert _listed(runs / "20261112T010000Z.csv") == ["Calcite Blue"]
+    assert _listed(review / emit_catalog.ALIAS_COLLISIONS_REVIEW) == []
+
+
+def test_the_seed_projection_drops_but_never_rewrites_the_review_list(tmp_path, monkeypatch):
+    # seed.verify's hermetic rebuild (seed_only) must leave the produce's review list as it is (Scraper L1)
+    from stone_pipeline.stages import emit_catalog
+    review = tmp_path / "review"
+    review.mkdir()
+    (review / emit_catalog.ALIAS_COLLISIONS_REVIEW).write_text("the produce's list\n", encoding="utf-8")
+    emit_catalog, review = _emit_with_a_collision(tmp_path, monkeypatch, stamp="20261112T030000Z", seed_only=True)
+    assert (review / emit_catalog.ALIAS_COLLISIONS_REVIEW).read_text(encoding="utf-8") == "the produce's list\n"
+    assert not (review / emit_catalog.ALIAS_COLLISIONS_RUNS).exists()
+    with (tmp_path / "out_20261112T030000Z.csv").open(encoding="utf-8-sig", newline="") as h:
+        aliases = {r["Name"]: r["Aliases"] for r in csv.DictReader(h)}
+    assert aliases["Casa Blue"] == "Casa Blue Marble"                 # the projection still drops it
+
+
 def test_the_run_summary_states_the_dropped_aliases_and_where_they_are_listed(tmp_path, monkeypatch):
     from stone_pipeline.config.settings import ENV_NAME, SETTINGS
     from stone_pipeline.core import layout
