@@ -332,11 +332,15 @@ class Paths:
     # committed base itself is pristine, so lifecycle falls back to it.
     variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
-    # the ONE variety backbone every category reads (the pack's backbone_file, spec rev 8 section 3)
+    # the ONE variety backbone every category reads (the pack's backbone_file, spec rev 8 section 3). A pack naming none
+    # has no seed, so there is no path to read: asking for one raises, naming the pack, never a guessed file.
     @property
     def backbone_json(self) -> Path:
         from stone_pipeline.config.domain import active_pack
-        return _catalog_source_file(active_pack().backbone_file)
+        pack = active_pack()
+        if pack.backbone_file is None:
+            raise FileNotFoundError(f"domain pack {pack.name!r} names no backbone_file: it ships no variety seed")
+        return _catalog_source_file(pack.backbone_file)
 
     @property
     def type_density_csv(self) -> Path:
