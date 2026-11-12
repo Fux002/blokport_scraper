@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from stone_pipeline.aliases.context import build_contexts
 from stone_pipeline.core.alias_problem import AliasContext, alias_refusal, code_matcher
 from stone_pipeline.core.text import match_key
 
@@ -45,8 +46,6 @@ KEYS_TEXT = "every served Key and pending tombstone"
 VALUES_TEXT = "current acked set"
 SYNCED = "synced"
 RETIRING = "retiring"                      # held until its pending variation tombstone is acked: named by its last set
-# The vocabulary a bare word is judged against (table 171: every live stone-type, colour, finish and quality name).
-VOCABULARY_KINDS = ("type", "color", "finish", "quality")
 KEYS_SHOWN = 20                            # how many Keys a refusal's message names (the full list is in `keys`)
 NO_OWNER = "no owner store"
 EMPTY_KEY = "empty key"
@@ -74,12 +73,10 @@ class Unclassifiable(RuntimeError):
 @dataclass(frozen=True)
 class Stores:
     """The alias owners, keyed for the lookups: seed and learned by Key, operator by (match_key(name), match_key(type)),
-    every value as its match_key; plus the alias check's vocabulary and the brand's code test."""
+    every value as its match_key; plus the brand's code test."""
     seed: dict[str, frozenset[str]]
     operator: dict[tuple[str, str], frozenset[str]]
     learned: dict[str, frozenset[str]]
-    type_words: frozenset[str]
-    vocabulary_keys: frozenset[str]
     is_code: Callable[[str], bool]
 
 
@@ -104,15 +101,12 @@ def classify(ledger, stores: Stores) -> Classification:
     reading any value; every other problem is a `refused` difference (require_whole raises on them)."""
     if keys := unsynced_keys(ledger):
         raise NotAllSynced(keys)
-    variations = [dict(r) for r in ledger.execute("SELECT key, type, name, aliases, state FROM variation")]
-    live_names: dict[str, set[str]] = {}
-    for v in variations:
-        if v["state"] != RETIRING:
-            live_names.setdefault(match_key(v["type"]), set()).add(match_key(v["name"]))
+    variations = [dict(r) for r in ledger.execute("SELECT key, type, name, aliases, state, in_full FROM variation")]
+    contexts = alias_contexts(variations)
     rows: list[tuple[str, str, str]] = []
     differences: list[tuple[str, str, str, str]] = []
     for v in variations:
-        _classify_variety(v, stores, live_names, rows, differences)
+        _classify_variety(v, stores, contexts[v["key"]], rows, differences)
     held = {v["key"] for v in variations}
     for r in ledger.execute("SELECT external_id FROM removed WHERE kind = 'variation' ORDER BY external_id"):
         if r["external_id"] not in held:
@@ -129,13 +123,15 @@ def _order(row: tuple) -> tuple:
     return row[0], match_key(row[1]), row[1]
 
 
-def alias_context(name: str, type_: str, names_by_type: dict[str, set[str]], type_words: frozenset[str],
-                  vocabulary_keys: frozenset[str]) -> AliasContext:
-    """The alias check's context for one variety. `names_by_type` = {match_key(type): {match_key(name)}} of every live
-    variety, the variety's own included: it is dropped here, so every caller passes the whole map (C5 from the
-    ledger, the seed rewrite from the committed base)."""
-    return AliasContext(own_name=name, type_words=type_words, vocabulary_keys=vocabulary_keys,
-                        same_type_name_keys=frozenset(names_by_type.get(match_key(type_), set()) - {match_key(name)}))
+def alias_contexts(variations: list[dict]) -> dict[str, AliasContext]:
+    """{Key: its alias-check context}, built by C2's one builder (aliases.context.build_contexts) over the varieties
+    C2's migration judges against: the live ones (in the full set, not retiring). A Key outside them (retiring, or an
+    export-only row) is judged against every variety, its own type's names included."""
+    def triple(v: dict) -> tuple[str, str, str]:
+        return v["key"], v["type"], v["name"]
+    live = build_contexts(triple(v) for v in variations if v["in_full"] and v["state"] != RETIRING)
+    rest = build_contexts(triple(v) for v in variations)
+    return {v["key"]: live.get(v["key"]) or rest[v["key"]] for v in variations}
 
 
 def seed_refusal(value: str, context: AliasContext, is_code: Callable[[str], bool]) -> Optional[str]:
@@ -145,7 +141,7 @@ def seed_refusal(value: str, context: AliasContext, is_code: Callable[[str], boo
     return None if refusal == "is_code" else refusal
 
 
-def _classify_variety(v: dict, stores: Stores, live_names: dict[str, set[str]], rows: list, differences: list) -> None:
+def _classify_variety(v: dict, stores: Stores, context: AliasContext, rows: list, differences: list) -> None:
     key = v["key"]
     name_key, type_key = match_key(v["name"]), match_key(v["type"])
     values = json.loads(v["aliases"] or "[]")
@@ -155,7 +151,6 @@ def _classify_variety(v: dict, stores: Stores, live_names: dict[str, set[str]], 
     by_norm: dict[str, list[str]] = {}
     for value in values:
         by_norm.setdefault(match_key(value), []).append(value)
-    context = alias_context(v["name"], v["type"], live_names, stores.type_words, stores.vocabulary_keys)
     operator = stores.operator.get((name_key, type_key), frozenset()) | stores.operator.get((name_key, ""), frozenset())
     for norm, spellings in by_norm.items():
         value = min(spellings)                          # one row per (Key, norm): the least spelling, deterministic
@@ -215,14 +210,6 @@ def _seed_files() -> tuple[Path, list[Path]]:
             [SETTINGS.paths.backbone_json, SETTINGS.paths.backbone_additions_dir / "varieties.json"])
 
 
-def vocabulary() -> tuple[frozenset[str], frozenset[str]]:
-    """(the single-word type words, the vocabulary keys) the alias check judges against: public, so the seed rewrite
-    builds exactly the same pair."""
-    from stone_pipeline.adapters.tokens import _clear_type_words, known_values
-    return (_clear_type_words(),
-            frozenset(match_key(value) for kind in VOCABULARY_KINDS for value in known_values(kind)))
-
-
 def load_stores() -> Stores:
     """The owners as this env holds them now: the base and the backbone (seed), config.db's global renamed `is`
     statements (operator) and its ACTIVE learned rows (learned). Read-only."""
@@ -250,9 +237,8 @@ def load_stores() -> Stores:
     learned: dict[str, set[str]] = {}
     for row in decisions_store.active_learned_aliases():
         learned.setdefault(row["identity_key"], set()).add(row["norm"])
-    type_words, vocabulary_keys = vocabulary()
-    return Stores(seed=_frozen(seed), operator=_frozen(operator), learned=_frozen(learned), type_words=type_words,
-                  vocabulary_keys=vocabulary_keys, is_code=code_matcher(active_pack().name_code_pattern))
+    return Stores(seed=_frozen(seed), operator=_frozen(operator), learned=_frozen(learned),
+                  is_code=code_matcher(active_pack().name_code_pattern))
 
 
 def _frozen(d: dict) -> dict:
