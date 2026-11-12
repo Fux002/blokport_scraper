@@ -20,44 +20,32 @@ from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 from stone_pipeline.stages.curate import ImportFile
+from stone_pipeline.tests._existing_index import existing_index
 
 # Arabescato is single-type Marble in the real backbone; we introduce a synthetic Granite twin to model the
 # same-name-different-stone collision that is the crux of the cross-type bug.
-MARBLE_KEY = "slab_marble_arabescato_A"
-GRANITE_KEY = "slab_granite_arabescato_B"
+MARBLE_KEY = "marble__arabescato_A"
+GRANITE_KEY = "granite__arabescato_B"
 
 
-def _slab_imports() -> dict[str, ImportFile]:
-    """A minimal existing catalog: two same-name ('Arabescato') varieties of different stones on the slab
-    branch, empty block/tile. Built via the real load_existing over a stub export so the (name,type) index
-    is populated by production code, not by hand."""
-    branches = {}
-    for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None)
-        if b == "slab":
-            # Granite first, MARBLE last, so the name-only fallback (by_name, last-wins) resolves to MARBLE.
-            # The keyed path must still land on Granite -- so if line 359 ever regressed to a name-only owner,
-            # the alias would wrongly hit Marble and this test would fail. Discriminating, not correct-by-luck.
-            for key, name in ((GRANITE_KEY, "Arabescato"), (MARBLE_KEY, "Arabescato")):
-                v = {"Key": key, "Name": name, "Image": "", "Aliases": "", "Volume": "",
-                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
-                imp.varieties.append(v)
-                imp.by_name_type[(curate.proj.norm(name), v["type"])] = v
-                imp.by_name[curate.proj.norm(name)] = v   # name-only fallback: last-wins -> Marble
-        branches[b] = imp
-    return branches
+def _slab_imports():
+    """A minimal existing catalog: two same-name ('Arabescato') varieties of different stones. Granite first,
+    MARBLE last, so the name-only fallback (by_name, last-wins) resolves to MARBLE: the keyed path must still
+    land on Granite, so if the owner ever regressed to a name-only lookup the alias would wrongly hit Marble and
+    the test would fail. Discriminating, not correct-by-luck."""
+    return existing_index((GRANITE_KEY, "Arabescato", ""), (MARBLE_KEY, "Arabescato", ""))
 
 
 def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkeypatch):
     exp = tmp_path / "variants_export.csv"
     with exp.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
+        w = csv.DictWriter(h, fieldnames=["Id", "Key", "Name", "Type", "Aliases"])
         w.writeheader()
-        w.writerow({"Id": "1", "Key": MARBLE_KEY, "Name": "Arabescato"})
-        w.writerow({"Id": "2", "Key": GRANITE_KEY, "Name": "Arabescato"})
+        w.writerow({"Id": "1", "Key": MARBLE_KEY, "Name": "Arabescato", "Type": "Marble"})
+        w.writerow({"Id": "2", "Key": GRANITE_KEY, "Name": "Arabescato", "Type": "Granite"})
     monkeypatch.setattr(curate.existing, "existing_varieties_file", lambda: exp)
 
-    imp = curate.load_existing("slab")
+    imp = curate.load_existing()
     # both stones survive under one name, addressed by (name, TYPE) -- not collapsed to a single variety
     assert imp.by_name_type[("arabescato", "marble")]["Key"] == MARBLE_KEY
     assert imp.by_name_type[("arabescato", "granite")]["Key"] == GRANITE_KEY
@@ -69,7 +57,7 @@ def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkey
 def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other_type(monkeypatch):
     # A scrape fuzzy-matched to the GRANITE Arabescato (variation_key carries its type) must attach its
     # spelling to the Granite variety, never bleed onto the same-name Marble one.
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
+    monkeypatch.setattr(curate, "load_existing", _slab_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -79,7 +67,7 @@ def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other
                        variation_name="Arabescato", variation_method="fuzzy")   # a learned guess -> alias path
     result = curate.build_curation([row], ref)
 
-    slab_aliases = result.alias_additions["slab"]
+    slab_aliases = result.alias_additions
     on_granite = [a for a in slab_aliases if a["Key"] == GRANITE_KEY and "Arabesk" in (a.get("_added") or "")]
     on_marble = [a for a in slab_aliases if a["Key"] == MARBLE_KEY]
     assert on_granite, f"spelling should alias onto the Granite variety, got {slab_aliases}"
@@ -102,19 +90,9 @@ def _gap_row(name: str) -> CanonicalRow:
 def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp_path, monkeypatch):
     # A type the scrape did not make clear is set via REVIEW -- even when the name exists under exactly ONE
     # type. The code no longer auto-completes it to that single type (that was the code guessing the type).
-    branches = {}
-    for b in ("slab", "block", "tile"):
-        imp = curate.ImportFile(branch=b, path=None)
-        if b == "slab":
-            key, nm = "slab_marble_solo_stone_1", "Solo Stone"
-            v = {"Key": key, "Name": nm, "Image": "", "Aliases": "", "Volume": "",
-                 "type": curate.proj.norm(loaders.type_slug_from_key(key))}
-            imp.varieties.append(v)
-            imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
-            imp.by_name[curate.proj.norm(nm)] = v
-        branches[b] = imp
+    existing = existing_index(("marble__solo_stone_1", "Solo Stone", ""))
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: branches)
+    monkeypatch.setattr(curate, "load_existing", lambda: existing)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -126,26 +104,16 @@ def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp
                        variation_method="exact_name_ambiguous", tree_gaps=[g])
     result = curate.build_curation([row], ref)
     assert any(p["variant"].lower() == "solo stone" for p in result.pending_confirm), "type-less must hold for a type"
-    assert not result.alias_additions["slab"], "must NOT auto-complete to the single existing type"
+    assert not result.alias_additions, "must NOT auto-complete to the single existing type"
 
 
 def test_alias_family_surfaces_to_review_not_a_hidden_side_file(tmp_path, monkeypatch):
     # A type-less scrape whose surface is an ALIAS of SEVERAL different-named varieties is an uncertain
     # identity -> it must appear on the review list (pick which / mint new), never be filed away silently.
-    branches = {}
-    for b in ("slab", "block", "tile"):
-        imp = curate.ImportFile(branch=b, path=None)
-        if b == "slab":
-            # two DIFFERENT varieties (Alpha, Beta) that both carry 'Shared Surface' as an alias
-            for key, nm in (("slab_marble_alpha_1", "Alpha"), ("slab_granite_beta_2", "Beta")):
-                v = {"Key": key, "Name": nm, "Image": "", "Aliases": "Shared Surface", "Volume": "",
-                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
-                imp.varieties.append(v)
-                imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
-                imp.by_name[curate.proj.norm(nm)] = v
-        branches[b] = imp
+    # two DIFFERENT varieties (Alpha, Beta) that both carry 'Shared Surface' as an alias
+    existing = existing_index(("marble__alpha_1", "Alpha", "Shared Surface"), ("granite__beta_2", "Beta", "Shared Surface"))
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: branches)
+    monkeypatch.setattr(curate, "load_existing", lambda: existing)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -165,7 +133,7 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
     # A match that carries NO stable Key (keyless -- e.g. a forced override at a stale id, or an operator
     # alias-by-name) on a name that exists as SEVERAL stones must NOT silently attach to an arbitrary one.
     # _by_name_owner refuses the ambiguous name, so no alias is emitted on either variety (the caller HOLDs).
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
+    monkeypatch.setattr(curate, "load_existing", _slab_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -176,7 +144,7 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
                             variation_name="Arabescato", variation_method="fuzzy")
 
     def aliased(result) -> set[str]:
-        return {a["Key"] for a in result.alias_additions["slab"]
+        return {a["Key"] for a in result.alias_additions
                 if a["Key"] in (MARBLE_KEY, GRANITE_KEY) and "Arabesk" in (a.get("_added") or "")}
 
     # the row DOES reach the name-only routing: with its own type it is aliased onto that type's variety
@@ -187,33 +155,21 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
 
 
 def _minted_any(res) -> bool:
-    return any(res.new_variants[b] for b in ("slab", "block", "tile"))
+    return bool(res.new_variants)
 
 
 
 
 
 
-VERDE_SCURO_KEY = "slab_onyx_verde_scuro_A"
-VERDE_ONYX_SCURO_KEY = "slab_onyx_verde_onyx_scuro_B"
+VERDE_SCURO_KEY = "onyx__verde_scuro_A"
+VERDE_ONYX_SCURO_KEY = "onyx__verde_onyx_scuro_B"
 
 
-def _verde_imports() -> dict[str, ImportFile]:
-    """Two SAME-TYPE (onyx) varieties on slab: one literally NAMED 'Verde Scuro', and 'Verde Onyx Scuro'
-    which lists 'Verde Scuro' as an ALIAS. So the surface 'verde scuro' resolves to BOTH owners."""
-    branches = {}
-    for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None)
-        if b == "slab":
-            for key, nm, al in ((VERDE_ONYX_SCURO_KEY, "Verde Onyx Scuro", "Verde Scuro"),  # alias-owner FIRST
-                                (VERDE_SCURO_KEY, "Verde Scuro", "")):                       # exact-name owner
-                v = {"Key": key, "Name": nm, "Image": "", "Aliases": al, "Volume": "",
-                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
-                imp.varieties.append(v)
-                imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
-                imp.by_name[curate.proj.norm(nm)] = v
-        branches[b] = imp
-    return branches
+def _verde_imports():
+    """Two SAME-TYPE (onyx) varieties: one literally NAMED 'Verde Scuro', and 'Verde Onyx Scuro' which lists
+    'Verde Scuro' as an ALIAS (listed FIRST). So the surface 'verde scuro' resolves to BOTH owners."""
+    return existing_index((VERDE_ONYX_SCURO_KEY, "Verde Onyx Scuro", "Verde Scuro"), (VERDE_SCURO_KEY, "Verde Scuro", ""))
 
 
 def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatch):
@@ -221,7 +177,7 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
     # scuro', so a typed-onyx 'Verde Scuro' scrape would alias onto 'Verde Onyx Scuro' (which merely lists
     # 'Verde Scuro' as a spelling) instead of the variety literally named 'Verde Scuro'. Prefer the exact-
     # name owner.
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _verde_imports())
+    monkeypatch.setattr(curate, "load_existing", _verde_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -232,14 +188,14 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
                        raw_type="Onyx", variation_method="exact_name_ambiguous", tree_gaps=[g])
     res = curate.build_curation([row], ref)
 
-    on_exact = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_SCURO_KEY]
-    on_alias_owner = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_ONYX_SCURO_KEY]
-    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions['slab']}"
+    on_exact = [a for a in res.alias_additions if a["Key"] == VERDE_SCURO_KEY]
+    on_alias_owner = [a for a in res.alias_additions if a["Key"] == VERDE_ONYX_SCURO_KEY]
+    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions}"
     assert not on_alias_owner, "must NOT alias onto 'Verde Onyx Scuro' (it only carries the name as a spelling)"
 
 
-def _empty_imports() -> dict[str, ImportFile]:
-    return {b: ImportFile(branch=b, path=None) for b in ("slab", "block", "tile")}
+def _empty_imports() -> ImportFile:
+    return ImportFile(path=None)
 
 
 def _typed_gap_row(name: str, raw_type: str) -> CanonicalRow:
@@ -258,16 +214,16 @@ def test_operator_mint_type_overrides_the_scraped_type(tmp_path, monkeypatch):
     # is Agate, never Crystal. (The bug: seed_type only filled a BLANK type, so the scrape's Crystal won.)
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
+    monkeypatch.setattr(curate, "load_existing", _empty_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_decisions",            # operator minted it ... as Agate
                         lambda: Decisions.from_legacy({("", "lumiere"): {"action": "mint", "seed_type": "Agate"}}))
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Lumiere", "Crystal")], ref)
-    minted = [k for b in ("slab", "block", "tile") for k in (r["Key"] for r in res.new_variants[b])]
-    assert any("_agate_" in k for k in minted), f"must mint as the operator-picked Agate, got {minted}"
-    assert not any("_crystal_" in k for k in minted), f"must NOT mint as the scraped Crystal type, got {minted}"
+    minted = [r["Key"] for r in res.new_variants]
+    assert any(k.startswith("agate__") for k in minted), f"must mint as the operator-picked Agate, got {minted}"
+    assert not any(k.startswith("crystal__") for k in minted), f"must NOT mint as the scraped Crystal type, got {minted}"
 
 
 def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_variety(tmp_path, monkeypatch):
@@ -276,16 +232,16 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     # variety; it does NOT silently alias onto the Marble one (which is what happened when the scrape type won).
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
+    monkeypatch.setattr(curate, "load_existing", _slab_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_decisions",
                         lambda: Decisions.from_legacy({("", "arabescato"): {"action": "mint", "seed_type": "Agate"}}))
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Arabescato", "Marble")], ref)
-    minted = [k for b in ("slab", "block", "tile") for k in (r["Key"] for r in res.new_variants[b])]
-    assert any("_agate_" in k for k in minted), f"operator's Agate must mint, got {minted}"
-    on_marble = [a for a in res.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
+    minted = [r["Key"] for r in res.new_variants]
+    assert any(k.startswith("agate__") for k in minted), f"operator's Agate must mint, got {minted}"
+    on_marble = [a for a in res.alias_additions if a["Key"] == MARBLE_KEY]
     assert not on_marble, "must NOT alias onto the existing Marble variety when the operator picked Agate"
 
 
@@ -296,12 +252,12 @@ def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp
     # mint is honoured ONCE at the top (3c-bis), before any heuristic can override it.
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())   # existing 'Arabescato'
+    monkeypatch.setattr(curate, "load_existing", _slab_imports)   # existing 'Arabescato'
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
     def minted(res):
-        return {(p.get("Name") or "").lower() for posts in res.new_variants.values() for p in posts}
+        return {(p.get("Name") or "").lower() for p in res.new_variants}
 
     # (a) UNDECIDED 'Arabescato Royal' (near existing 'Arabescato') -> HELD for review, never auto-minted
     monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)

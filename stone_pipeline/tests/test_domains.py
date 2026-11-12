@@ -76,9 +76,10 @@ def _valid_pack_dict():
     import copy
     return copy.deepcopy({
         "name": "bad", "attributes": ["a", "b"], "disambiguator": "a", "leaf_attributes": ["b"],
-        "categories": [{"name": "x", "plural": "xs", "label": "Xs", "backbone_filename": "b.json",
+        "backbone_file": "b.json",
+        "categories": [{"name": "x", "plural": "xs", "label": "Xs",
                         "base_image": "", "shares_variety_vocab": True, "fan_out": True,
-                        "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None, "default_form": True}],
+                        "volume_per_kg": "", "pcat_env_var": None, "default_form": True}],
         "ambiguous_type_words": ["z"], "generic_descriptors": ["g"], "generic_material_word": "m",
         "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
@@ -152,13 +153,16 @@ def test_disambiguator_inside_leaf_attributes_fails_loud(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
-def test_mirror_of_unknown_category_fails_loud(tmp_path, monkeypatch):
+def test_finishes_from_an_unknown_category_fails_loud(tmp_path, monkeypatch):
     pack = _valid_pack_dict()
-    pack["categories"][0]["mirror_of"] = "ghost"              # names no declared category
+    pack["categories"].append({"name": "y", "plural": "ys", "label": "Ys", "base_image": "",
+                               "shares_variety_vocab": True, "fan_out": True, "finishes_from": "ghost"})
+    pack["dimension_ranges"]["y"] = pack["dimension_ranges"]["x"]
+    pack["dimension_defaults"]["y"] = pack["dimension_defaults"]["x"]
     _write_pack(tmp_path, pack)
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
     domain.active_pack.cache_clear()
-    with pytest.raises(ValueError, match="mirror_of"):
+    with pytest.raises(ValueError, match="finishes_from"):
         domain.load_pack("bad")
 
 
@@ -240,11 +244,11 @@ def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
 
 def test_stone_declares_the_category_roles():
     # the stone pack's roles: slab is the default/fallback form, block is the uncut/bulk form (drives is_block),
-    # tile mirrors slab. This is what makes the historical slab/block/tile behaviour pack-driven, not hardcoded.
+    # tile takes slab's finishes. This is what makes the historical slab/block/tile behaviour pack-driven, not hardcoded.
     from stone_pipeline.config import categories
     assert categories.default_form_name() == "slab"
     assert categories.bulk_form_name() == "block"
-    assert categories.category("tile").mirror_of == "slab"
+    assert categories.category("tile").finishes_from == "slab"
 
 
 def test_name_heuristics_are_pack_driven(monkeypatch):
@@ -293,11 +297,12 @@ name: apparel
 attributes: [type, color, finish]
 disambiguator: type
 leaf_attributes: [color, finish]
+backbone_file: backbone_varieties.json
 categories:
-  - {name: shirt, plural: shirts, label: Shirts, backbone_filename: backbone_shirts.json,
-     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null, default_form: true}
-  - {name: pants, plural: pants, label: Pants, backbone_filename: backbone_pants.json,
-     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
+  - {name: shirt, plural: shirts, label: Shirts,
+     base_image: "", shares_variety_vocab: true, fan_out: true, volume_per_kg: "", pcat_env_var: null, default_form: true}
+  - {name: pants, plural: pants, label: Pants,
+     base_image: "", shares_variety_vocab: true, fan_out: true, volume_per_kg: "", pcat_env_var: null, finishes: []}
 ambiguous_type_words: [blend]
 generic_descriptors: [garment, the]
 generic_material_word: garment

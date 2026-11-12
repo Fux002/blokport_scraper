@@ -18,8 +18,7 @@ def _open(tmp_path):
 
 def _variation(ledger, key, state, medusa_id=None):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "x", "aliases": "[]",
-                                "image_url": "", "image_sha256": None, "image_model": None, "volume": "",
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "aliases": "[]",
                                 "medusa_id": medusa_id, "in_full": 1, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None, "created_at": now,
                                 "updated_at": now}, pk=("key",))
@@ -50,11 +49,11 @@ def _removed(ledger, external_id, kind="product"):
 def test_entity_success_with_id_marks_synced(tmp_path, lane, status):
     with _open(tmp_path) as ledger:
         if lane == "variations":
-            _variation(ledger, "slab_a_1", state="pending")
-            xid, table, pk = "slab_a_1", "variation", "key"
+            _variation(ledger, "marble__a_1", state="pending")
+            xid, table, pk = "marble__a_1", "variation", "key"
         else:
-            _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-            _product(ledger, "P-1", "slab_a_1", state="pending")
+            _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+            _product(ledger, "P-1", "marble__a_1", state="pending")
             xid, table, pk = "P-1", "product", "sku"
         assert sync.ack(ledger, lane, xid, medusa_id="M", status_=status) == 1
         row = ledger.get(table, pk, xid)
@@ -67,11 +66,11 @@ def test_entity_success_with_id_marks_synced(tmp_path, lane, status):
 def test_entity_failed_reserves_dirty(tmp_path, lane):
     with _open(tmp_path) as ledger:
         if lane == "variations":
-            _variation(ledger, "slab_a_1", state="syncing")
-            xid, table, pk = "slab_a_1", "variation", "key"
+            _variation(ledger, "marble__a_1", state="syncing")
+            xid, table, pk = "marble__a_1", "variation", "key"
         else:
-            _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-            _product(ledger, "P-1", "slab_a_1", state="syncing")
+            _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+            _product(ledger, "P-1", "marble__a_1", state="syncing")
             xid, table, pk = "P-1", "product", "sku"
         assert sync.ack(ledger, lane, xid, status_="failed", reason=None) == 1
         row = ledger.get(table, pk, xid)
@@ -84,11 +83,11 @@ def test_entity_failed_reserves_dirty(tmp_path, lane):
 def test_entity_unknown_status_is_a_failed_attempt(tmp_path, lane):
     with _open(tmp_path) as ledger:
         if lane == "variations":
-            _variation(ledger, "slab_a_1", state="syncing")
-            xid, table, pk = "slab_a_1", "variation", "key"
+            _variation(ledger, "marble__a_1", state="syncing")
+            xid, table, pk = "marble__a_1", "variation", "key"
         else:
-            _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-            _product(ledger, "P-1", "slab_a_1", state="syncing")
+            _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+            _product(ledger, "P-1", "marble__a_1", state="syncing")
             xid, table, pk = "P-1", "product", "sku"
         assert sync.ack(ledger, lane, xid, medusa_id="M", status_="weird") == 1
         row = ledger.get(table, pk, xid)
@@ -99,11 +98,11 @@ def test_entity_unknown_status_is_a_failed_attempt(tmp_path, lane):
 def test_entity_success_without_id_is_a_failed_attempt(tmp_path, lane):
     with _open(tmp_path) as ledger:
         if lane == "variations":
-            _variation(ledger, "slab_a_1", state="syncing")
-            xid, table, pk = "slab_a_1", "variation", "key"
+            _variation(ledger, "marble__a_1", state="syncing")
+            xid, table, pk = "marble__a_1", "variation", "key"
         else:
-            _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-            _product(ledger, "P-1", "slab_a_1", state="syncing")
+            _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+            _product(ledger, "P-1", "marble__a_1", state="syncing")
             xid, table, pk = "P-1", "product", "sku"
         assert sync.ack(ledger, lane, xid, medusa_id=None, status_="created") == 1
         row = ledger.get(table, pk, xid)
@@ -115,8 +114,8 @@ def test_entity_success_without_id_is_a_failed_attempt(tmp_path, lane):
 @pytest.mark.parametrize("status", ["updated", "synced"])
 def test_inventory_success_records_synced(tmp_path, status):
     with _open(tmp_path) as ledger:
-        _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-        _product(ledger, "S-1", "slab_a_1", state="synced", medusa_id="M")
+        _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+        _product(ledger, "S-1", "marble__a_1", state="synced", medusa_id="M")
         _stock(ledger, "S-1", 4)
         assert sync.ack(ledger, "inventory", "S-1", status_=status, quantity=4) == 1
         row = ledger.get("inventory", "sku", "S-1")
@@ -126,8 +125,8 @@ def test_inventory_success_records_synced(tmp_path, status):
 @pytest.mark.parametrize("status,error", [("failed", "boom"), ("skipped", "not applied by the consumer (skipped)")])
 def test_inventory_failure_counts_an_attempt(tmp_path, status, error):
     with _open(tmp_path) as ledger:
-        _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-        _product(ledger, "S-1", "slab_a_1", state="synced", medusa_id="M")
+        _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+        _product(ledger, "S-1", "marble__a_1", state="synced", medusa_id="M")
         _stock(ledger, "S-1", 4)
         assert sync.ack(ledger, "inventory", "S-1", status_=status, reason="boom") == 1
         row = ledger.get("inventory", "sku", "S-1")
@@ -137,8 +136,8 @@ def test_inventory_failure_counts_an_attempt(tmp_path, status, error):
 
 def test_inventory_unknown_status_counts_an_attempt(tmp_path):
     with _open(tmp_path) as ledger:
-        _variation(ledger, "slab_a_1", state="synced", medusa_id="VM")
-        _product(ledger, "S-1", "slab_a_1", state="synced", medusa_id="M")
+        _variation(ledger, "marble__a_1", state="synced", medusa_id="VM")
+        _product(ledger, "S-1", "marble__a_1", state="synced", medusa_id="M")
         _stock(ledger, "S-1", 4)
         assert sync.ack(ledger, "inventory", "S-1", status_="weird") == 1
         row = ledger.get("inventory", "sku", "S-1")

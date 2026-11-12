@@ -26,7 +26,7 @@ CODE_IMPORT = re.compile(r"from stone_pipeline\.config\.settings import ([^;\n]+
 CODE_DOTTED = re.compile(r"stone_pipeline\.config\.settings\.(\w+)")
 MOVED = {
     "stone_pipeline.config.categories": (
-        "Category", "CATEGORIES", "_BY_NAME", "_BY_LABEL_CF", "category", "category_for_key", "default_form_name",
+        "Category", "CATEGORIES", "_BY_NAME", "_BY_LABEL_CF", "category", "category_by_handle", "default_form_name",
         "bulk_form_name", "active_categories", "refresh_category_pcats", "_ENV_PCATS", "_pcat", "_env_category_pcats",
         "_build_categories"),
     "stone_pipeline.config.standardise_settings": ("STANDARDISE",),

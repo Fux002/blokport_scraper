@@ -121,6 +121,13 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         setattr(row, f"{vocab}_confidence", _confidence_name(resolution.confidence))
         setattr(row, f"{vocab}_method", resolution.method)
 
+        # a colour LIST naming two or more distinct colours: recorded here, applied by reconcile (rule 1: the pack's
+        # multicolour value). The row keeps the first colour until then, so the matcher narrows by the vendor's own
+        # colour exactly as before; best_guess keeps it, the colour such a listing carried before rule 1.
+        if vocab == "color" and is_multi and len(resolution.evidence.get("resolved") or []) >= 2:
+            row.add_flag(ReviewFlag(field=vocab, code=FlagCode.multicolour_from_vendor, raw_value=raw_value,
+                                    best_guess=canonical, confidence=Confidence.medium, method="multi_value",
+                                    src_url=row.src_url))
         if is_multi:
             row.add_flag(
                 ReviewFlag(

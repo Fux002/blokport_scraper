@@ -15,7 +15,6 @@ from stone_pipeline.ledger.db import (
     LedgerEnvMismatch,
     LedgerError,
     SCHEMA_VERSION,
-    combo_key,
     payload_hash,
 )
 
@@ -24,6 +23,5 @@ __all__ = [
     "LedgerError",
     "LedgerEnvMismatch",
     "SCHEMA_VERSION",
-    "combo_key",
     "payload_hash",
 ]

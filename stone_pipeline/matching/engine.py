@@ -146,7 +146,8 @@ class VocabResolver:
                     return Resolution(value=canon, confidence=Confidence.medium, method="compound")
             return Resolution(value=None, confidence=Confidence.low, method="compound_suggest",
                               evidence={"best": f"{resolved[0]} and {resolved[1]}"})
-        return Resolution(value=resolved[0], confidence=Confidence.low, method="multi_value")
+        return Resolution(value=resolved[0], confidence=Confidence.low, method="multi_value",
+                          evidence={"resolved": resolved})
 
 
 # --- variation engine (Stage 4 tiers 1 to 6, section 5A.2) --------------------

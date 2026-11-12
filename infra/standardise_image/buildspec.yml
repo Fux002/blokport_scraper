@@ -1,0 +1,29 @@
+# STD-IMAGE-BUILD (table 348 section 4): the CodeBuild project's buildspec, loaded by infra/standardise_image.tf.
+# Builds the standardise GPU image at SOURCE_SHA with the unchanged deploy/build_standardise_image.sh.
+version: 0.2
+env:
+  shell: bash
+phases:
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        # C1: checked again here, before any git command; StartBuild can be called by anything holding role (a).
+        [[ "${SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "refused: SOURCE_SHA must be 40 lowercase hex characters"; exit 1; }
+        # A full clone: a shallow one can make the ancestry check below lie.
+        git clone --quiet https://github.com/Fux002/blokport_scraper.git src
+        cd src
+        git merge-base --is-ancestor "$SOURCE_SHA" origin/main || { echo "refused: $SOURCE_SHA is not on main"; exit 1; }
+        git checkout --quiet --detach "$SOURCE_SHA"
+        # C4: the base's size from the repo it lives in, 3x of it free on docker's root, all three numbers printed.
+        BASE=$(sed -n 's/^ARG BASE_IMAGE=.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p' deploy/standardise.Dockerfile)
+        [ -n "$BASE" ] || { echo "refused: no base pinned by digest in deploy/standardise.Dockerfile"; exit 1; }
+        BASE_BYTES=$(aws ecr describe-images --repository-name blokport-scraper --image-ids imageDigest="$BASE" \
+          --query 'imageDetails[0].imageSizeInBytes' --output text) || { echo "refused: could not read the base's size"; exit 1; }
+        [[ "$BASE_BYTES" =~ ^[0-9]+$ ]] || { echo "refused: the base's size read as '$BASE_BYTES'"; exit 1; }
+        ROOT=$(docker info -f '{{.DockerRootDir}}') || { echo "refused: could not read docker's root dir"; exit 1; }
+        FREE=$(df -B1 --output=avail "$ROOT" | tail -1 | tr -d ' ')
+        NEED=$((BASE_BYTES * 3))
+        echo "precheck: base $BASE_BYTES bytes, threshold 3x = $NEED, free on $ROOT = $FREE"
+        [ "$FREE" -ge "$NEED" ] || { echo "refused: free $FREE < threshold $NEED (base $BASE_BYTES)"; exit 1; }
+        bash deploy/build_standardise_image.sh

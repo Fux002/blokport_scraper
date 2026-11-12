@@ -33,6 +33,11 @@ class STANDARDISE:
     QUAD_EPS = (0.01, 0.02, 0.03)  # hull simplification ladder (share of the perimeter), finest first: a chipped
                                    # corner fits at the finest, a rough natural edge needs a coarser one
     EDGE_COVER_MIN = 0.85          # the four longest edges must be this share of the outline: a rectangle slab
+    # The fitted slab must be at least this share stone: below it a corner was cut, not chipped, and four_corners'
+    # extended edges put a corner off the stone (MAR-P/10/05 0.937). Measured 2026-11-10 on the dev diag set: every kept
+    # slab 0.965 or more (chipped corners 0.965-0.99, 39 quads). DEV-DERIVED: the owner-confirmed prod re-run's outline
+    # records confirm the bar, or it moves to theirs.
+    QUAD_FILL_MIN = 0.95
     MAX_TILT_DEG = 35              # a corner fit implying more tilt than this is a misfit: clean-up only
     FLAT_SIGMA = 0.18              # illumination blur, share of the slab's long side
     FLAT_STRENGTH = 0.7            # 0 = no flat-field, 1 = full
@@ -48,6 +53,12 @@ class STANDARDISE:
     SIDE_RATIO_MAX = 2.5           # opposite sides may differ by this factor (a slab shot at an angle): steeper leaves the far
                                    # end too soft to show (19ab0177 at 3.1; 2.4 still sharp, adeebb0f)
     SIDE_RATIO_MEASURED = 1.35     # up to this the sides measure the slab's proportions; steeper, its real size does
+    # A keystone (top and bottom differ: the camera tipped up or down at the standing slab) shortens the slab's height at
+    # a far smaller side ratio than a turn shortens its width. Measured 2026-11-10 on the dev diag set's fitted quads: all
+    # 12 keystones from 1.12 came out too wide (+0.8% to +12.4%: POL-736 1.18 +12.4%, POL-649 1.19 +7.0%); below it the
+    # error has either sign (the outline's own noise). From this, a keystone is squared at its real size. DEV-DERIVED
+    # (39 quads): the owner-confirmed prod re-run's corner records confirm the break point, or this moves to theirs.
+    SIDE_RATIO_KEYSTONE = 1.12
     ASPECT_TOLERANCE = 0.10        # the real proportions may be this much narrower than a foreshortened photo shows
     OCR_CLUSTER = 1.5              # words within this many word-heights of each other form one mark
     OCR_LINE_GAP = 3.0             # a word on a surely-read word's text line, within this many word-heights, joins it
@@ -154,6 +165,12 @@ class STANDARDISE:
     # beside a broken right corner), it is redrawn as a candidate beside it, judged, and promoted over it only on a pass.
     # A later rule change = a new folder name, and every whole slab is checked once again.
     OUTLINE_CHECKED = "outline-v2/"
+    # A photo named in a scoped run's re-standardise list (stone_pipeline.photos.process: SCRAPER_STANDARDISE_SCOPE_KEY)
+    # goes to the GPU once even when finished: a fix the outline recheck cannot see (#605's squaring; drawn_differently
+    # compares the wall and the sawn edge only) reaches it. Its redraw is a candidate under this rule, judged and
+    # promoted over the result only on a pass; settled, it has the note <run folder><this><sha>.json, so a re-run never
+    # redoes it. A later fix that wants another pass = a new folder name.
+    RESTANDARDISED = "restandardise-v1/"
     # On: the runner starts the photo process after each full produce (stage all, the owner's button), never after the
     # republish Blokport's Publish button runs (it must never find the run slot taken).
     AUTO = _env_bool("SCRAPER_STANDARDISE_AUTO", False)
@@ -233,6 +250,11 @@ class STANDARDISE:
     # and its GPU job read the listing's photos from here.
     PHOTOS_FILE = "standardise_photo_list.json"      # outside 3_products_*: no importer glob or source name meets it
     PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
+    # The listings whose length or width the produce filled from the pack's defaults (a sorted JSON list of handles),
+    # written from the photo list's own rows beside it: the sheet carries such a size as if real, and a photo is never
+    # squared to a guessed size (outline.steep_aspect holds it).
+    DEFAULTED_FILE = "standardise_defaulted_sizes.json"
+    DEFAULTED_KEY = "scraper/to_upload/" + DEFAULTED_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
@@ -246,6 +268,15 @@ class STANDARDISE:
     CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab from its photo,
                                        # and whose published 3D slabs are the stone tiles are cut from
     CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum
+    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs, 62
+    # off their listed size by more than 5%, 24 by more than 10%; dev 2026-11-10 (BP3), 24 of 126. Blokport draws the
+    # cut-out's width as the listing's length, so one off the listing's length:width by more than this many percent
+    # (inclusive) is linked to no listing as its 3D slab and is no tile's stone (cutout.aspect_misfit, the one rule).
+    # The same value as the backend renders' PHOTO_ASPECT_TOLERANCE_PCT (blokport_backend src/model/project/renders/
+    # layout.ts:12, RND-3, Mas 10 Nov from the dev p95), measured the same way: kept equal by hand, one constant a side.
+    PHOTO_ASPECT_TOLERANCE_PCT = 5
+    CUTOUT_OUTLINE_READ_WORKERS = 16   # the produce's image stage reads the linked 3D outlines this many at once: a
+                                       # fixed cap (Mas), never unbounded; about 4.9k outlines a full prod produce
     CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
     CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
     CUTOUT_MAX_POINTS = 64             # the contract's outline limit
@@ -371,6 +402,10 @@ Your whole answer is one JSON object and nothing else:
     # (owner 2026-11-05: the cleaning has its own cap). An edit is reserved with its check, so a copy paid for is always
     # checked in the run that paid for it. No default: unset, no photo is sent to an edit (the run says so once).
     CLEAN_BUDGET_USD = _env_float("SCRAPER_STANDARDISE_CLEAN_BUDGET_USD", None)
+    # A scoped run's own cap (process.unconfigured: required with SCRAPER_STANDARDISE_SCOPE_KEY): what the run may
+    # spend in all, its GPU rounds, verdicts, edits and checks together, whatever the monthly budgets above leave
+    # (select.RunCap, reserved by both Spends). None: no run cap (an unscoped run, as before).
+    RUN_CAP_USD = _env_float("SCRAPER_STANDARDISE_RUN_CAP_USD", None)
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
     # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
@@ -600,12 +635,10 @@ Your whole answer is one JSON object and nothing else:
     TILE_FAILED_LISTED = 20            # the run record names at most this many tile listings whose step failed
     TILE_JPEG_QUALITY = 92
     # The stone: the slab's outer rim (sawn edge, mixed edge pixels) and its lamp reflections are never cut. Its scale is
-    # the listed size over the cut-out's px, so the cut-out must be at the listed proportions within this share (a tile
-    # then shows within about half of it of its real size); else the scale would be a guess and the slab is not used.
-    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs,
-    # 62 off by more than 5%, 24 by more than 10%.
+    # the listed size over the cut-out's px, so the cut-out must be at the listed proportions
+    # (PHOTO_ASPECT_TOLERANCE_PCT: a tile then shows within about half of it of its real size); else the scale would be
+    # a guess and the slab is not used.
     TILE_STONE_INSET_M = 0.03
-    TILE_ASPECT_TOLERANCE = 0.05
     # The cut-out check: a regular crosshatch (a mesh, a screen) over the face prints onto every tile, with no judge to
     # catch it. Straight lines along BOTH of the cut-out's axes put the face's fine detail on both axes of its spectrum;
     # stone is never like that (veins and grooves run one way). Measured 2026-11-02 on 510 prod cut-outs: Tiger Black

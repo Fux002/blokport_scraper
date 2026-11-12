@@ -5,9 +5,9 @@ Medusa id, so subsequent runs are deltas, not reloads. These seeders read the
 from_medusa exports (the authoritative id source) and populate the ledger. They are
 read-only against the exports and never write Medusa.
 
-This is the id foundation everything id-bearing builds on: products and
-combinations reference attribute ids (by name) and variation ids (by Key), which
-live here after the seed. No em dashes (design principle 2).
+This is the id foundation everything id-bearing builds on: products reference
+attribute ids (by name) and variation ids (by Key), which live here after the seed.
+No em dashes (design principle 2).
 """
 
 from __future__ import annotations
@@ -15,19 +15,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from stone_pipeline.config.categories import category
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.payloads import variation_hash
+from stone_pipeline.phase1.variety_key import variety_key_problem
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
-
-
-def _branch_of(key: str) -> str:
-    # the Key prefix is the category name; validate it against the ACTIVE PACK's registry (pack-driven), not
-    # a hardcoded stone category set, so a non-stone pack's categories are recognized instead of dropped to "".
-    head = key.split("_", 1)[0]
-    return head if category(head) else ""
 
 
 def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:
@@ -77,11 +70,11 @@ def restore_attribute_ids(ledger: Ledger, path: str | Path | None = None) -> int
 
 
 def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
-    """Load variants_export.csv (Id, Key, Name, Image, Aliases, Volume) into the
-    `variation` table, each `synced` with its Medusa Id (the variation half of the
-    bootstrap full load). branch is parsed from the Key; type is left blank, since
-    the export does not carry the canonical stone type (the canonical-row populate
-    fills it later). Dormant when the export is absent (returns 0): a factory reset
+    """Load variants_export.csv (Id, Key, Name, Type, Aliases) into the `variation`
+    table, each `synced` with its Medusa Id (the variation half of the bootstrap full
+    load). A Key the one parser refuses raises. The export carries no icons: the first
+    produce writes them from the S3 listing, which re-serves a variety once with its
+    icons. Dormant when the export is absent (returns 0): a factory reset
     deletes it so its stale ids can never re-hydrate ghost variations, and the cold
     start after it seeds none until Medusa publishes a fresh one."""
     path = Path(path or SETTINGS.paths.variants_export_csv)
@@ -92,25 +85,17 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
     for v in read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
         if not v.key:
             continue
-        aliases = list(v.aliases)
-        branch = _branch_of(v.key)
+        if (problem := variety_key_problem(v.key)) is not None:
+            raise ValueError(f"{path.name}: {v.key!r} is not a variety Key ({problem})")
+        aliases = json.dumps(list(v.aliases))
         ledger.upsert("variation", {
             "key": v.key,
-            "branch": branch,
-            "type": "",
+            "type": v.type,
             "name": v.name,
-            "aliases": json.dumps(aliases),
-            "image_url": v.image,
-            "image_sha256": None,
-            "image_model": None,
-            "volume": v.volume,
+            "aliases": aliases,
             "medusa_id": v.id or None,
-            # the one hash of populate_variations_full (payloads.variation_hash). image_sha256 is None here
-            # (the export carries no fingerprint); the first produce fills the real fingerprint from S3, which
-            # re-serves any variant Medusa holds without its now-existing texture.
-            "payload_hash": variation_hash({"branch": branch, "type": "", "name": v.name,
-                                            "aliases": json.dumps(aliases), "image_url": v.image,
-                                            "image_sha256": None}),
+            # the one hash of populate_variations_full (payloads.variation_hash), with no icons yet (above)
+            "payload_hash": variation_hash({"type": v.type, "name": v.name, "aliases": aliases}, []),
             "state": "synced",
             "first_seen": now,
             "last_synced": now,

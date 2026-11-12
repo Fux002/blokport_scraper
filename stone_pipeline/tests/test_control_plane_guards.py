@@ -66,27 +66,6 @@ def _raw_state(conn, source):
     return (r["enabled"], r["lifecycle"])
 
 
-def test_the_migration_labels_every_disabled_row_paused_once(tmp_path):
-    from contextlib import closing
-    db = tmp_path / "legacy.db"
-    rows = {"null_off": (0, None), "active_off": (0, "active"), "null_on": (1, None), "active_on": (1, "active"),
-            "delisted": (0, "delisted"), "paused": (0, "paused")}
-    with closing(store.open_store(db)) as conn:
-        for name, (enabled, label) in rows.items():
-            conn.execute("INSERT INTO source (source, enabled, lifecycle, updated_at) VALUES (?, ?, ?, 'x')",
-                         (name, enabled, label))
-        conn.execute("PRAGMA user_version = 9")
-        conn.commit()
-    expected = {**rows, "null_off": (0, "paused"), "active_off": (0, "paused")}
-    with closing(store.open_store(db)) as conn:
-        assert {name: _raw_state(conn, name) for name in rows} == expected
-    with closing(store.open_store(db)) as conn:            # the step run again changes nothing
-        conn.execute("PRAGMA user_version = 9")
-        conn.commit()
-    with closing(store.open_store(db)) as conn:
-        assert {name: _raw_state(conn, name) for name in rows} == expected
-
-
 def test_disabling_without_a_label_stores_paused_and_never_relabels_a_delisted_source():
     from contextlib import closing
     store.set_state("varsha", enabled=False)
@@ -155,12 +134,12 @@ def _ledger_product(source_code: str) -> None:
     from stone_pipeline.ledger.db import Ledger, now_iso
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": "slab_v1", "branch": "slab", "type": "Marble", "name": "x",
-                                "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": None, "in_full": 1, "payload_hash": "",
+        lg.upsert("variation", {"key": "marble__v1", "type": "Marble", "name": "x",
+                                "aliases": "[]",
+                                "medusa_id": None, "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
-        lg.upsert("product", {"sku": f"{source_code.upper()}-1", "source": source_code, "variation_key": "slab_v1",
+        lg.upsert("product", {"sku": f"{source_code.upper()}-1", "source": source_code, "variation_key": "marble__v1",
                               "medusa_id": "PID", "state": "synced", "created_at": now, "updated_at": now},
                   pk=("sku",))
 
@@ -255,7 +234,7 @@ _DECIDE = {"source": "varsha", "scraped": "Bonsai", "name": "Bonsai", "type": "G
     ("POST", ["reset"], {"hard": "false"}, "hard"),
     ("POST", ["reset"], {"pristine": 1}, "pristine"),
     ("POST", ["variations", "unmint"], {"all_minted": "yes"}, "all_minted"),
-    ("POST", ["variations", "slab_x", "retire"], {"force": "true"}, "force"),
+    ("POST", ["variations", "marble__x", "retire"], {"force": "true"}, "force"),
     ("PUT", ["review", "decide"], {**_DECIDE, "source": 5}, "source"),
     ("PUT", ["review", "decide"], {**_DECIDE, "scraped": [5]}, "scraped"),
     ("PUT", ["review", "decide"], {**_DECIDE, "name": 5}, "name"),

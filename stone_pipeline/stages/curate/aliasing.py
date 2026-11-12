@@ -1,17 +1,13 @@
 """Alias routing: which scraped spellings attach to which EXISTING variety, by its (name, type) owner --
 from the rows the matcher already resolved (phase 1) and from the classification's resolve arms -- and the
-emission of the alias additions in the import-file shape (phase 3)."""
+emission of the alias additions in the variety-file shape, one row per variety (phase 3)."""
 
 from __future__ import annotations
 
-from stone_pipeline.config.categories import category
-from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of
 from stone_pipeline.stages.curate.existing import alias_list
-from stone_pipeline.stages.curate.keys import active_branches, image_filename, image_url
-from stone_pipeline.stages.curate.review import attr_surface, review_evidence
 from stone_pipeline.state.writeback import is_learned
 
 
@@ -62,29 +58,6 @@ def collision_owners(c: Curation, row, gap) -> set[tuple[str, str]]:
             for o in c.existing_surface.get(proj.norm(n.strip()), set())}
 
 
-def alias_and_backfill(c: Curation, owner: tuple[str, str], spelling: str, clean: str, stype: str,
-                       row, gap) -> None:
-    """Attach a scraped spelling to an EXISTING variety (by its (name, type) owner). If a product backs the
-    variety in a branch where it does NOT yet exist, also mint the missing sibling so the product resolves
-    next round (the existing-cores guard skips branches where it already lives)."""
-    c.alias_new.setdefault(owner, set()).add(spelling)
-    backed = c.variety_branches.get(proj.norm(clean), set())
-    if backed:
-        # Backfill the missing cross-branch sibling of the RESOLVED OWNER, under its OWN canonical name --
-        # never the scraped spelling. Minting under the alias spelling ('Monalisa') gives the sibling a Key
-        # core the existing-cores guard cannot match against the owner ('Mona Lisa'), so it duplicates the
-        # owner in every branch. Using the owner name makes the guard skip every branch where the owner
-        # already lives and fills only a genuinely-missing branch (carrying the scraped spelling as its
-        # alias via sib_aliases, which keys on owner[0] == norm(title)).
-        owner_name = next((c.imports[b].by_name_type[owner]["Name"] for b in active_branches()
-                           if owner in c.imports[b].by_name_type), title_case(owner[0]))
-        c.new_variant_rows.append((owner_name, owner_name, stype,
-                                   title_case(attr_surface(row, "color")),
-                                   (row.quality_name or c.last_resort_quality).strip() or c.last_resort_quality,
-                                   title_case(attr_surface(row, "finish")), gap, backed, review_evidence(row),
-                                   spelling, row.src_site or ""))
-
-
 def drop_confirmed_from_review(c: Curation) -> None:
     # A spelling already CONFIRMED as an alias of its real owner must NOT also be proposed as a needs-review
     # alias onto a different fuzzy-near variety -- or an operator could rubber-stamp a wrong merge.
@@ -97,27 +70,22 @@ def drop_confirmed_from_review(c: Curation) -> None:
 def emit_alias_rows(c: Curation, result: CurationResult) -> None:
     def emit(target, spellings: set[str], confirmed: bool) -> None:
         # target is a (name, type) OWNER (a confirmed alias -> the exact variety) or a bare NAME (a
-        # needs-review suggestion, which has no chosen type). Attach to the matching variety per branch.
-        for branch in active_branches():
-            existing = (c.imports[branch].by_name_type.get(target) if isinstance(target, tuple)
-                        else c.imports[branch].by_name.get(target))
-            if not existing:
-                continue  # variety not in this category's import file
-            current = alias_list(existing["Aliases"])
-            have = {proj.norm(a) for a in current}
-            additions = [s for s in sorted(spellings) if proj.norm(s) not in have]
-            if not additions:
-                continue
-            # re-link the clean deterministic image when the variant has one; never copy the export's
-            # empty/internal value (would send a blank Image and risk a wipe)
-            img = image_url(image_filename(existing["Key"])) if (existing.get("Image") or "").strip() else ""
-            result.alias_additions[branch].append({
-                "Key": existing["Key"], "Name": existing["Name"], "Image": img,
-                "Aliases": "|".join(current + additions),
-                "Volume per kg (m³/kg)": existing.get("Volume") or category(branch).volume_per_kg,
-                "_added": "|".join(additions),
-                "_status": "confirmed" if confirmed else "needs_review",
-            })
+        # needs-review suggestion, which has no chosen type). One row for the one variety it names.
+        existing = (c.existing.by_name_type.get(target) if isinstance(target, tuple)
+                    else c.existing.by_name.get(target))
+        if not existing:
+            return  # no existing variety (a new mint carries its own spellings on its row)
+        current = alias_list(existing["Aliases"])
+        have = {proj.norm(a) for a in current}
+        additions = [s for s in sorted(spellings) if proj.norm(s) not in have]
+        if not additions:
+            return
+        result.alias_additions.append({
+            "Key": existing["Key"], "Name": existing["Name"], "Type": existing["Type"],
+            "Aliases": "|".join(current + additions),
+            "_added": "|".join(additions),
+            "_status": "confirmed" if confirmed else "needs_review",
+        })
     for owner, spellings in c.alias_new.items():                 # owner = (name, type)
         emit(owner, spellings, confirmed=True)
     for name_norm, spellings in c.review_candidates.items():     # bare name (no chosen type)

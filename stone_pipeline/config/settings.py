@@ -332,16 +332,11 @@ class Paths:
     # committed base itself is pristine, so lifecycle falls back to it.
     variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
-    # per-category backbone files derive from the CATEGORIES registry (config/categories.py).
+    # the ONE variety backbone every category reads (the pack's backbone_file, spec rev 8 section 3)
     @property
-    def backbone_json(self) -> Path:        # the DEFAULT-FORM backbone (the pack's primary category), NOT
-        # literally slab -- a non-stone pack whose default form is not named 'slab' would otherwise crash here
-        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path. Imported here, not at
-        # the top: the registry imports settings, so settings reads it only once both are loaded.
-        from stone_pipeline.config.categories import category, default_form_name
-        return category(default_form_name()).backbone_path
-
-    # A specific category's backbone is category(<name>).backbone_path -- no per-product-type accessor.
+    def backbone_json(self) -> Path:
+        from stone_pipeline.config.domain import active_pack
+        return _catalog_source_file(active_pack().backbone_file)
 
     @property
     def type_density_csv(self) -> Path:
@@ -366,6 +361,11 @@ class Paths:
         # the per-run new-variety backbone deltas, PACK-NAMESPACED (stone stays flat). Under this instance's
         # catalog_source_dir, so a Paths pointed at another catalog_source writes its deltas there too
         return _pack_namespaced(self.catalog_source_dir) / "backbone_additions"
+
+    @property
+    def backbone_additions_file(self) -> Path:
+        # curate's per-run delta: one post per new (type, name) variety, whatever its categories (phase 1)
+        return self.backbone_additions_dir / "varieties.json"
 
     @property
     def origin_map_csv(self) -> Path:
