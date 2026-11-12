@@ -99,6 +99,18 @@ def test_an_attributes_file_without_category_handles_is_refused(tmp_path):
         loaders.load_attributes(path)
 
 
+def test_the_fetch_refuses_an_attributes_download_without_category_handles(tmp_path):
+    # at the boundary: a download without the column never replaces the local file (medusa_inputs.check_readable)
+    from stone_pipeline.io import medusa_inputs
+    old = tmp_path / "old.csv"
+    old.write_text("category,value,sourceid,status,internal\ntype,Granite,t_granite,active,false\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="category_handles"):
+        medusa_inputs.check_readable("attributes.csv", old)
+    good = tmp_path / "good.csv"
+    good.write_text(HEADER + ROWS, encoding="utf-8")
+    medusa_inputs.check_readable("attributes.csv", good)
+
+
 _REPO = Path(__file__).resolve().parents[2]
 _COMMITTED = sorted([*(_REPO / "from_medusa").glob("*/attributes.csv"),
                      *(_REPO / "stone_pipeline" / "tests" / "fixtures").rglob("attributes.csv")])
