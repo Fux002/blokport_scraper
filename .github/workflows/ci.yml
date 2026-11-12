@@ -7,7 +7,8 @@ on:
 
 # WHERE IT RUNS (Mas, 12 Nov: hosted minutes are capped, ~$100/day of them were this workflow). A push to main or
 # develop, and a pull request from this repository not opened by a bot, run on the CI boxes' scraper slots (label
-# blokport-ci-sc, one slot per box, registered to this repo; the boxes are the backend repo's terraform/envs/ci-runner).
+# blokport-ci-sc, one slot per box, registered to this repo; the boxes are the backend repo's terraform/envs/ci-runner),
+# except the terraform job (see there).
 # A fork's or a bot's pull request stays on ubuntu-latest, so no outside code reaches a box. The expression is repeated
 # per job because runs-on cannot read env.
 jobs:
@@ -65,7 +66,9 @@ jobs:
   terraform:
     # The infra is code too: formatting drift and a configuration that no longer validates (a removed
     # variable still referenced, a bad attribute) must fail here, not at the next apply.
-    runs-on: ${{ (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && 'blokport-ci-sc' || 'ubuntu-latest' }}
+    # Hosted, unlike the jobs above: setup-terraform needs unzip, which the CI boxes do not carry (run 43250648058), and
+    # this job takes seconds, so it costs about one billed minute per run.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
