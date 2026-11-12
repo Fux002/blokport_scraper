@@ -1,6 +1,11 @@
 """P2-10: the ONE rewrite of the committed seed, so the backbone (`catalog_source/backbone_varieties.json`) is the whole
 seed store and C3 reads the backbone only. `python -m stone_pipeline.aliases.seed_rewrite`, run by hand from the repo
-root; it writes only the files in WRITES.
+root; it writes only LIVE_ADDITIONS and the files in WRITES.
+
+The bases it reads are the two committed ones plus LIVE_ADDITIONS: what dev's LIVE base has grown since the committed
+snapshot (new Keys whole, new aliases on committed Keys), cut by main() from one pinned S3 version (read-only, its
+sha256 checked) and committed, so `render` reads committed files only and CI reproduces it. Re-run before the window
+with the VersionId and sha256 bumped, so dev's changes since are in.
 
 Per backbone post, in this order (C1's judgement, the SAME one C5 classes `removed` by, cleanup.seed_refusal):
 - a variant that is a coded form of its base Name ('Rosal B' for 'Rosal') takes the base Name, listed `renamed`
@@ -28,6 +33,7 @@ read, never written (C4 derives their Aliases). No em dashes.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -36,16 +42,24 @@ from stone_pipeline.aliases.cleanup import seed_refusal
 from stone_pipeline.aliases.context import build_contexts
 from stone_pipeline.core.alias_problem import AliasContext, code_matcher
 from stone_pipeline.core.text import clean_variety_name, match_key
-from stone_pipeline.reference.medusa_files import read_variants_export
+from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, ExportVariation, read_variants_export
 
 # --- config ----------------------------------------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKBONE = Path("catalog_source/backbone_varieties.json")
-BASES = (Path("from_medusa/development/variants_export_base.csv"),
-         Path("from_medusa/production/variants_export_base.csv"))       # judged in this order
+COMMITTED_BASES = (Path("from_medusa/development/variants_export_base.csv"),
+                   Path("from_medusa/production/variants_export_base.csv"))
+# What dev's LIVE base adds to the committed bases (reviewer 2's L2 on C3, the manager 11-12), read once by main()
+# from this exact S3 version. Prod's live base is pre-phase-1 (old Keys): its pass is at prod's P2-12, on an R26 word.
+LIVE_ADDITIONS = Path("catalog_source/seed_live_additions_development.csv")
+LIVE_BASE_BUCKET = "blokport-dev-staging-3e58a6"
+LIVE_BASE_KEY = "dev/scraper/from_medusa/variants_export_base.csv"
+LIVE_BASE_VERSION_ID = "rBPreKupBFRCx0rrcPsSBe04bFiZr1ht"
+LIVE_BASE_SHA256 = "464056207a34a2ae64f00ac5b68b92e02f80324304237d1f4fb94ba88cceaef7"
+BASES = (*COMMITTED_BASES, LIVE_ADDITIONS)                               # judged in this order
 ATTRIBUTES = Path("from_medusa/development/attributes.csv")             # the vocabulary's basis
 DIFFERENCES = Path("catalog_source/seed_alias_differences.csv")
-WRITES = (BACKBONE, DIFFERENCES)
+WRITES = (BACKBONE, DIFFERENCES)                                        # render's files (main() also writes LIVE_ADDITIONS)
 DIFFERENCE_COLUMNS = ("Key", "Value", "Class", "Reason")
 REMOVED = "removed"
 NO_POST = "no_post"
@@ -61,6 +75,10 @@ class BasesDisagree(ValueError):
 
 class WrongVocabulary(RuntimeError):
     """The vocabulary would not be development's committed attributes.csv (the stated basis)."""
+
+
+class LiveBaseMismatch(RuntimeError):
+    """The pinned S3 version of dev's live base does not hash to LIVE_BASE_SHA256."""
 
 
 # --- the rewrite -----------------------------------------------------------------------------------------------------
@@ -183,6 +201,41 @@ def _base_values(root: Path) -> dict[str, list[str]]:
     return values
 
 
+# --- dev's live base -------------------------------------------------------------------------------------------------
+def live_additions(live_text: str, committed: list[ExportVariation]) -> str:
+    """What a live base adds to the committed rows, in the base's columns, sorted by Key: a Key the committed rows
+    lack, whole; a committed Key, with only the aliases whose match_key it does not already hold (left out when there
+    is none). A live row that names or types a committed Key differently refuses (BasesDisagree)."""
+    identities = {row.key: (row.name, row.type) for row in committed}
+    held: dict[str, set[str]] = {}
+    for row in committed:
+        held.setdefault(row.key, set()).update(match_key(a) for a in row.aliases)
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(VARIETY_FILE_COLUMNS)
+    for row in sorted(read_variants_export(live_text, require_status=False, name=LIVE_BASE_KEY), key=lambda r: r.key):
+        have = identities.setdefault(row.key, (row.name, row.type))
+        if have != (row.name, row.type):
+            raise BasesDisagree(f"{LIVE_BASE_KEY}: Key {row.key!r} is {(row.name, row.type)!r}, committed {have!r}")
+        new = held.get(row.key)
+        adds = [a for a in row.aliases if new is None or match_key(a) not in new]
+        if new is None or adds:
+            writer.writerow([row.key, row.name, row.type, "|".join(adds)])
+        held.setdefault(row.key, set()).update(match_key(a) for a in row.aliases)
+    return out.getvalue()
+
+
+def snapshot_live_base(root: Path = REPO_ROOT) -> bytes:
+    """LIVE_ADDITIONS' bytes from the pinned S3 version of dev's live base (read-only; refuses on a hash mismatch)."""
+    from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
+    body = aws_client("s3", config=BOTOCORE_DEFAULTS).get_object(
+        Bucket=LIVE_BASE_BUCKET, Key=LIVE_BASE_KEY, VersionId=LIVE_BASE_VERSION_ID)["Body"].read()
+    if (digest := hashlib.sha256(body).hexdigest()) != LIVE_BASE_SHA256:
+        raise LiveBaseMismatch(f"{LIVE_BASE_KEY} {LIVE_BASE_VERSION_ID} hashes to {digest}, not {LIVE_BASE_SHA256}")
+    committed = [row for base in COMMITTED_BASES for row in read_variants_export(root / base, require_status=False)]
+    return live_additions(body.decode("utf-8-sig"), committed).encode("utf-8")
+
+
 def _require_vocabulary_basis() -> None:
     """The vocabulary is read through the settings (cleanup.vocabulary, as C5 reads it), so they must point at the
     repo's development attributes.csv."""
@@ -208,13 +261,19 @@ def _differences_bytes(differences: dict) -> bytes:
     return out.getvalue().encode("utf-8")
 
 
+def _write(path: Path, data: bytes) -> None:
+    target = REPO_ROOT / path
+    changed = not target.exists() or target.read_bytes() != data
+    if changed:
+        target.write_bytes(data)
+    print(f"{path}: {'written' if changed else 'unchanged'} ({len(data)} bytes)")
+
+
 def main() -> int:
+    """The live snapshot first (render reads it), then the seed."""
+    _write(LIVE_ADDITIONS, snapshot_live_base())
     for path, data in render().items():
-        target = REPO_ROOT / path
-        changed = not target.exists() or target.read_bytes() != data
-        if changed:
-            target.write_bytes(data)
-        print(f"{path}: {'written' if changed else 'unchanged'} ({len(data)} bytes)")
+        _write(path, data)
     return 0
 
 
