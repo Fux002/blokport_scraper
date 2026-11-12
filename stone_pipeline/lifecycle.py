@@ -605,7 +605,7 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
             raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
         try:
             out = sync.retire_variation(lg, key, force=force)
-        except sync.GoneListingsShowVariety as exc:
+        except sync.KeptListingsShowVariety as exc:
             raise _Busy(str(exc)) from exc
         # exclusion memory (never re-mint a retired variety, E8/E10), written INSIDE the slot: a produce
         # starting between the ledger op and this write would read the old memory and re-mint the Key.
@@ -664,11 +664,11 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
                     f"variety {siblings[0][1]!r} has {live} live product(s); delist or move them first "
                     f"(or force)")})
                 continue
-            # a gone listing's record is never deleted (table 505): checked for the whole variety before any removal
-            if gone := [sku for sk, _ in siblings for sku in sync.variation_gone_listings(lg, sk)]:
+            # a kept record (gone or delisted) is never deleted (table 505): checked for the whole variety first
+            if kept := [sku for sk, _ in siblings for sku in sync.variation_kept_listings(lg, sk)]:
                 out["skipped"].append({"key": k, "code": 409, "error": (
-                    f"variety {siblings[0][1]!r} is shown by gone listing(s) {', '.join(gone)}: their records stay; "
-                    "move them to another variety first")})
+                    f"variety {siblings[0][1]!r} is shown by gone or delisted listing(s) {', '.join(kept)}: their "
+                    "records stay; move them to another variety first")})
                 continue
             targets.append(siblings)
         # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.

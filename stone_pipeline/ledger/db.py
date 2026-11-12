@@ -44,10 +44,9 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 # it (it keeps the publish state it had); every other gone listing is 'sold_out', shown and not buyable. 'held' is the
 # stock-unknown hide (#632): listed here before it lands, so a held listing that later goes gone stays hidden.
 HIDDEN_REASONS = ("no_photo", "delisted", "held")
-# The products a gone listing is (populate_discontinued stamped it): their records are never deleted or tombstoned.
-GONE_SKUS_SQL = "SELECT sku FROM inventory WHERE gone_at IS NOT NULL"
-# The records a reset or a seed drop keeps (Mas, table 505): the gone listings and the delisted (vendor-removed or
-# taken offline) ones. No re-scrape brings either back, and their records, photos and textures are permanent.
+# The kept records (Mas, table 505): the gone listings (populate_discontinued stamped gone_at) and the delisted
+# (vendor-removed or taken offline) ones. No re-scrape brings either back, and their records, photos and textures are
+# permanent: a reset and a seed drop spare them, and a retire or unmint of a variety they show refuses.
 KEPT_SKUS_SQL = "SELECT sku FROM inventory WHERE gone_at IS NOT NULL OR reason = 'delisted'"
 
 
