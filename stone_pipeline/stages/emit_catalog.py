@@ -32,6 +32,7 @@ from stone_pipeline.core.text import (
 from stone_pipeline.io import storage
 from stone_pipeline.io.variety_icons import ICON_SIDECAR, VARIATIONS_PREFIX, icon_pair
 from stone_pipeline.phase1.variety_key import variety_key_type
+from stone_pipeline.reference import alias_collisions
 from stone_pipeline.reference.loaders import field_kinds, variants_status_required
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 
@@ -76,6 +77,30 @@ def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
 
 
 _COLS = VARIETY_FILE_COLUMNS
+ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of aliases dropped at emit (Mas, 11-12)
+
+
+def _drop_alias_collisions(rows: list[dict]) -> None:
+    """An alias equal to another live variety's name of the same type (an operator mint equal to a seed alias) would
+    bind one stone's listing to another (Mas, 11-11): it is DROPPED from its row and LISTED for the operator, in the
+    review file and the run log. The produce never stops on it; CI holds the committed vocabulary at 0."""
+    collisions = alias_collisions.find(
+        alias_collisions.Variety(r["Key"], r["Type"], r["Name"], tuple(a for a in r["Aliases"].split("|") if a))
+        for r in rows)
+    gone: dict[str, set[str]] = {}
+    for c in collisions:
+        gone.setdefault(c.key, set()).add(c.alias)
+    for r in rows:
+        if r["Key"] in gone:
+            r["Aliases"] = "|".join(a for a in r["Aliases"].split("|") if a and a not in gone[r["Key"]])
+    listed = [{"Key": c.key, "variety": f"{c.variety[0]} {c.variety[1]}", "alias": c.alias,
+               "collides_with": f"{c.collides_with[0]} {c.collides_with[1]}", "collides_with_key": c.other_key}
+              for c in collisions]
+    csvio.write_dicts(SETTINGS.paths.review_dir / ALIAS_COLLISIONS_REVIEW,
+                      ["Key", "variety", "alias", "collides_with", "collides_with_key"], listed, sanitize=True)
+    if listed:
+        log.warning("aliases dropped: each names another variety of the same type", extra={"extra_fields": {
+            "count": len(listed), "report": ALIAS_COLLISIONS_REVIEW, "aliases": listed[:20]}})
 
 
 def _s3_access_denied(exc) -> bool:
@@ -235,6 +260,7 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     # uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship no matter how it
     # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
+    _drop_alias_collisions(rows)
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
