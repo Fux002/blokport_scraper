@@ -67,7 +67,7 @@ def _fingerprint():
     lp, cp = writethrough.ledger_path(), store.config_db_path()
     # the alias surfaces also read the backbone (seed) and the export (the hand rows)
     return (_main(lp), _frames(lp), _main(cp), _frames(cp), _main(SETTINGS.paths.backbone_json),
-            _main(alias_stores.export_file()))
+            alias_stores.export_version())
 
 
 def _index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], set[tuple[str, str]]]:
