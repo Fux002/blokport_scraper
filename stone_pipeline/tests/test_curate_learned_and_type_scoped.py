@@ -55,7 +55,7 @@ def test_curate_proposes_an_alias_exactly_when_the_writeback_would_learn_it(monk
                        type_name="Marble", variation_id="C", variation_key="marble__bianco_carrara_C",
                        variation_name="Bianco Carrara", variation_method=method)
     res = curate.build_curation([row], ref)
-    proposed = [a["Key"] for a in res.alias_additions if a["_status"] == "confirmed"]
+    proposed = [a["identity_key"] for a in res.learned_proposals if a["method"] == "curate_confirmed"]
     assert proposed == (["marble__bianco_carrara_C"] if wb.is_learned(method) else [])
 
 
@@ -94,13 +94,13 @@ def test_a_typed_near_alias_lands_on_the_nearest_candidates_own_type(monkeypatch
     assert AliasResolver().decide("Aqua Bleu", "", [], "Aqua Blue", "", []).verdict == "alias"
     _aqua(monkeypatch)
     res = curate.build_curation([_gapped("Granite", GRANITE_KEY)], ref)
-    assert [a["Key"] for a in res.alias_additions if a["_status"] == "confirmed"] == [GRANITE_KEY]
+    assert [a["identity_key"] for a in res.learned_proposals if a["method"] == "curate_confirmed"] == [GRANITE_KEY]
 
 
 def test_a_type_less_near_alias_of_a_multi_type_name_is_held(monkeypatch, ref):
     _aqua(monkeypatch)
     res = curate.build_curation([_gapped("", GRANITE_KEY)], ref)
-    assert not res.alias_additions, "a type-less row must never be confirmed onto one of the types"
+    assert not res.learned_proposals, "a type-less row must never be confirmed onto one of the types"
     assert not res.new_variants
     card = next(p for p in res.pending_confirm if p["variant"] == "Aqua Bleu")
     assert card["kind"] == "similar"

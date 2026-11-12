@@ -15,7 +15,7 @@ from stone_pipeline.io import staging
 from stone_pipeline.run import run_source
 
 
-def test_polonine_spine_runs_and_is_deterministic(tmp_path, scrape_data_dir):
+def test_polonine_spine_runs_and_is_deterministic(tmp_path, scrape_data_dir, seeded_config_store):
     out = tmp_path / "outputs"
     out.mkdir()
     manifest_a = run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)

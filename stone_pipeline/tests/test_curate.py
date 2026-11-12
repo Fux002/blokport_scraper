@@ -1,4 +1,4 @@
-"""Curation loop: emit import-format additions (forgotten aliases + new variants)
+"""Curation loop: emit import-format additions (new variants) and learned-alias proposals (P2-10 C2)
 for every category, plus synonym-first attribute curation. Files are never
 rewritten; deterministic uuid5 keys match the existing format.
 """
@@ -9,6 +9,7 @@ import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.config.decisions_model import Decisions
+from stone_pipeline.matching import projections as proj
 from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
@@ -29,27 +30,20 @@ def test_key_is_deterministic_and_matches_format():
     assert len(k1.rsplit("_", 1)[1].split("-")) == 5
 
 
-def test_alias_addition_preserves_and_augments(ref):
-    # a confirmed non-exact match proposes adding the scraped spelling as an alias. A real match carries the
-    # matched variety's stable Key ('Alpine' exists as BOTH Granite and Marble, so the Key -- its type is
-    # the authority -- is what disambiguates which one the spelling attaches to). Use a spelling not already
-    # on the live variant, so the test asserts the ADD path, not an idempotent no-op.
+def test_a_guessed_bind_proposes_its_spelling_on_the_matched_key(ref):
+    # a confirmed non-exact match proposes the scraped spelling as a learned alias (P2-10 C2: a proposal, never an
+    # import row). A real match carries the matched variety's stable Key ('Alpine' exists as BOTH Granite and
+    # Marble, so the Key -- its type is the authority -- is what disambiguates which one the spelling attaches to).
+    # Use a spelling not already on the live variant, so the test asserts the ADD path, not an idempotent no-op.
     alpine_granite = curate.load_existing().by_name_type[("alpine", "granite")]
     row = CanonicalRow(src_site="polonine", surrogate_key="1",
                        variety_match_key="Alpine Qx9", variation_id="x",
                        variation_key=alpine_granite["Key"], variation_name="Alpine",
                        variation_method="fuzzy")
     result = curate.build_curation([row], ref)
-    assert result.alias_additions, "expected an alias addition for Alpine"
-    entry = next(e for e in result.alias_additions if e["Key"] == alpine_granite["Key"])
-    assert "Alpine Qx9" in entry["_added"]
-    assert entry["_status"] == "confirmed"
-    # existing aliases are preserved (not overwritten)
-    assert "|" in entry["Aliases"] and len(entry["Aliases"]) > len("ALPINE")
     # the spelling attaches to the Granite Alpine (matched Key), never the same-named Marble one
-    assert entry["Key"] == alpine_granite["Key"]
-    # the row carries the variety's own canonical type name (the variety files' Type column)
-    assert entry["Type"] == alpine_granite["Type"]
+    assert result.learned_proposals == [{"identity_key": alpine_granite["Key"], "value": "Alpine Qx9",
+                                         "method": "curate_confirmed", "source": "polonine"}]
 
 
 def test_exact_match_is_not_proposed_as_alias(ref):
@@ -57,7 +51,7 @@ def test_exact_match_is_not_proposed_as_alias(ref):
                        variety_match_key="Arabescato", variation_id="x",
                        variation_name="Arabescato", variation_method="exact")
     result = curate.build_curation([row], ref)
-    assert all(e["Name"] != "Arabescato" for e in result.alias_additions)
+    assert result.learned_proposals == []
 
 
 def _novel_row(fmt: str = "slab"):
@@ -119,10 +113,10 @@ def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch
     result = curate.build_curation([row], ref)
     # not proposed as a new variant
     assert all(r["Name"] != "Suppliers Rebrand Xyz" for r in result.new_variants)
-    # proposed as an alias of the nearest existing variety, needs_review
-    target = next(r for r in result.alias_additions if r["Name"] == nearest)
-    assert "Suppliers Rebrand Xyz" in target["_added"]
-    assert target["_status"] == "needs_review"
+    # proposed as a learned alias of the nearest existing variety, for review
+    nearest_key = curate.load_existing().by_name[proj.norm(nearest)]["Key"]
+    assert {"identity_key": nearest_key, "value": "Suppliers Rebrand Xyz", "method": "curate_review",
+            "source": "polonine"} in result.learned_proposals
 
 
 def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, monkeypatch):
