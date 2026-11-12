@@ -253,6 +253,18 @@ variable "prod_standardise_clean_budget_usd" {
   description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD in prod: the month's cap of the clean-up edits and their checks (USD), the owner's number. Empty = no edit is paid."
 }
 
+variable "prod_standardise_scope_key" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_SCOPE_KEY in prod: a scoped photos run's scope (S3 key in the prod bucket). Set for that run only, then back to empty. Empty = not passed."
+}
+
+variable "prod_standardise_run_cap_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_RUN_CAP_USD in prod: the scoped run's own cap (USD), required with prod_standardise_scope_key. Empty = not passed."
+}
+
 variable "gpu_idle_vcpus" {
   type        = number
   default     = 8
