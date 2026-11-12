@@ -76,8 +76,9 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     _match(rows1, ref1)
     assert rows1[0].variation_key is None, "must gap before the mint exists"
 
-    # the operator's mint + rename, stored as a produce reads it (a global statement in config.db)
-    decisions_store.decide("", "Honey Onyx", name="Honey", stone_type="Onyx",
+    # the operator's mint + rename, stored as a produce reads it: on an undefined spelling a vendor's statement defines
+    # the spelling's GLOBAL meaning in config.db
+    decisions_store.decide("zucchi", "Honey Onyx", name="Honey", stone_type="Onyx",
                            exists_as=lambda n, t: False, alias_target=lambda n, t: None)
     res1 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref1)
     minted = res1.new_variants

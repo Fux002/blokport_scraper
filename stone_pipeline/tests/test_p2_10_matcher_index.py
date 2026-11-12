@@ -179,7 +179,6 @@ def test_a_spaced_or_hyphenated_listing_still_binds_its_code_in_the_exact_tier()
 def test_the_seed_is_parsed_once_per_backbone_file(tmp_path, monkeypatch):
     # L5: load_all parses the backbone; alias_target's rebuild (every config.db write) reuses that parse while the
     # file is unchanged, and parses again only when the file changes
-    import dataclasses
     import json
     from stone_pipeline.aliases import stores as alias_stores
     from stone_pipeline.config import settings
@@ -187,8 +186,7 @@ def test_the_seed_is_parsed_once_per_backbone_file(tmp_path, monkeypatch):
     path = tmp_path / "backbone_varieties.json"
     path.write_text(json.dumps({"posts": [{"key": "granite__x_1", "variant": "X", "stone_type": "Granite",
                                            "aliases": ["Ex"]}]}), encoding="utf-8")
-    monkeypatch.setattr(settings, "SETTINGS", dataclasses.replace(
-        settings.SETTINGS, paths=dataclasses.replace(settings.SETTINGS.paths, backbone_json=path)))
+    monkeypatch.setattr(type(settings.SETTINGS.paths), "backbone_json", property(lambda self: path))
     parses = []
     real = bb.load_backbone
     monkeypatch.setattr(bb, "load_backbone", lambda p=None: parses.append(p) or real(path))
