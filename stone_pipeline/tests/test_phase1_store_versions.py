@@ -1,8 +1,9 @@
 """SC-4 (plan SC-3-SC-4-PLAN.md section 2d): the phase 1 stores' versions. A brand-new ledger is created at v15 (one
 variation row per (type, name), no branch, the per-category icon table, no combination table; product.bundle_size
 stays, render-only, plan rev 2.3); a
-ledger from before phase 1 is refused, never migrated in place. A brand-new config.db is stamped 12; one at 1 to 11 is
-refused (only the phase 1 store migration stamps 12)."""
+ledger from before phase 1 is refused, never migrated in place. A brand-new config.db is stamped at the current version
+(13 since P2-10 C2); one at 1 to 11 is refused (only the phase 1 store migration stamps 12, and a 12 upgrades in
+place)."""
 from __future__ import annotations
 
 import sqlite3
@@ -36,10 +37,10 @@ def test_a_ledger_from_before_phase_1_is_refused_never_opened_in_place(tmp_path)
         Ledger.open(path, env="development")
 
 
-def test_a_new_config_db_is_stamped_12(tmp_path, monkeypatch):
+def test_a_new_config_db_is_stamped_at_the_current_version(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     with store._connect(tmp_path / "config.db") as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION == 13
 
 
 @pytest.mark.parametrize("version", [1, 11])
