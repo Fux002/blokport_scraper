@@ -20,7 +20,7 @@ def snapshots(monkeypatch):
     return calls
 
 
-def test_a_decision_written_through_the_api_is_snapshotted_at_once(snapshots):
+def test_a_decision_written_through_the_api_is_snapshotted_at_once(snapshots, seeded_config_store):
     decisions.write_attributes_to_add([
         {"kind": "finish", "value": "Leathered", "count": 12, "suggested_value": "", "action": "", "medusa_id": ""}])
     code, _ = server.dispatch("PUT", ["review", "attributes", "Leathered"], {"kind": "finish", "medusa_id": "pcol_9"})
