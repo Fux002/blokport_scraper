@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import json
 
+from stone_pipeline.aliases.context import build_contexts
 from stone_pipeline.aliases.open_items import OPEN_FILE, read_open_items
 from stone_pipeline.config import decisions_store
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.core.alias_problem import alias_refusal, code_matcher
 
 ID_SEPARATOR = "|"
 
@@ -35,16 +38,33 @@ def parse_id(raw: str) -> tuple[str, str]:
     return key, norm
 
 
-def _varieties(keys: list[str]) -> dict[str, tuple[str, str]]:
-    """Key -> (name, type) from the ledger, in one read. An absent ledger raises LedgerUnavailable."""
+def _variation_rows(sql: str, params: tuple = ()) -> list[dict]:
+    """Rows of the ledger's variation table, read-only. An absent ledger raises LedgerUnavailable."""
     from stone_pipeline.ledger import writethrough
     try:
         with writethrough.connect(bind=False) as lg:
-            return {r["key"]: (r["name"], r["type"]) for r in lg.execute(
-                "SELECT key, name, type FROM variation WHERE key IN (SELECT value FROM json_each(?))",
-                (json.dumps(keys),))}
+            return [dict(r) for r in lg.execute(sql, params)]
     except FileNotFoundError as exc:
         raise LedgerUnavailable(str(exc)) from exc
+
+
+def _varieties(keys: list[str]) -> dict[str, tuple[str, str]]:
+    """Key -> (name, type) from the ledger, in one read."""
+    return {r["key"]: (r["name"], r["type"]) for r in _variation_rows(
+        "SELECT key, name, type FROM variation WHERE key IN (SELECT value FROM json_each(?))", (json.dumps(keys),))}
+
+
+def approval_refusal(identity_key: str, value: str) -> str | None:
+    """Why approving `value` as a learned alias of `identity_key` is refused, or None: C1's alias boundary at the decision
+    itself, judged exactly as C2's migration judges a learned value (aliases.migrate_learned): the Key must be a LIVE
+    variety (in the produced set, not retiring), and core.alias_problem.alias_refusal in the context C2's one builder
+    (aliases.context.build_contexts) makes over every live variety, with the pack's code test. 'no_live_key' or one of
+    alias_refusal's reasons."""
+    live = _variation_rows("SELECT key, type, name FROM variation WHERE in_full != 0 AND state != 'retiring'")
+    contexts = build_contexts((r["key"], r["type"] or "", r["name"]) for r in live)
+    if identity_key not in contexts:
+        return "no_live_key"
+    return alias_refusal(value, contexts[identity_key], code_matcher(active_pack().name_code_pattern))
 
 
 def _card(row: dict, names: dict[str, tuple[str, str]]) -> dict:

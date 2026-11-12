@@ -791,15 +791,26 @@ def _get_review_aliases(params, body, query):
 
 def _put_review_alias(params, body, query):
     # {"action":"approve"|"reject"}: approve makes the learned alias a matcher input, reject withdraws it for good
-    # (on a proposal or on an approved alias); its norm is never proposed again for that variety
+    # (on a proposal or on an approved alias); its norm is never proposed again for that variety. Approve keeps C1's
+    # alias boundary at the decision (review.approval_refusal): a refused value is a 400 naming the reason and the row
+    # is unchanged. Reject is allowed on anything.
     from stone_pipeline.aliases import review
     from stone_pipeline.config import decisions_store
     key, norm = _alias_id(params)
     if not isinstance(body, dict) or _str(body, "action") not in _ALIAS_ACTIONS:
         return 400, {"error": f"body must be a JSON object {{action}}, action one of {sorted(_ALIAS_ACTIONS)}"}
     status = _ALIAS_ACTIONS[_str(body, "action")]
-    if not decisions_store.decide_learned_alias(key, norm, status, decided_by="operator"):
+    row = decisions_store.learned_alias(key, norm)
+    if row is None:
         return 404, {"error": f"no learned alias {review.card_id(key, norm)!r}"}
+    if status == "active":
+        try:
+            reason = review.approval_refusal(key, row["value"])
+        except review.LedgerUnavailable as exc:
+            return 503, {"error": str(exc)}
+        if reason is not None:
+            return 400, {"error": f"{row['value']!r} cannot be an alias of {key}: {reason}", "reason": reason}
+    decisions_store.decide_learned_alias(key, norm, status, decided_by="operator")
     return 200, {"id": review.card_id(key, norm), "status": status}
 
 

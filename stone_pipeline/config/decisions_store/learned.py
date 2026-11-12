@@ -85,6 +85,14 @@ def list_learned_aliases() -> list[dict]:
             f"SELECT {', '.join(_COLUMNS)}, score FROM learned_alias ORDER BY identity_key, norm")]
 
 
+def learned_alias(identity_key: str, norm: str) -> dict | None:
+    """One learned alias by its Key and norm, with all of its columns and its score, or None (read-only)."""
+    with closing(store.read_store()) as conn:
+        row = conn.execute(f"SELECT {', '.join(_COLUMNS)}, score FROM learned_alias WHERE identity_key = ? AND norm = ?",
+                           (identity_key, norm)).fetchone()
+    return dict(row) if row else None
+
+
 def delete_learned_alias(identity_key: str, norm: str) -> bool:
     """Remove one learned alias, found by its Key and norm: the ONLY way a learned value leaves the table (the review
     API's delete). Forgotten, not rejected: the norm may be proposed again. False when no such row exists."""

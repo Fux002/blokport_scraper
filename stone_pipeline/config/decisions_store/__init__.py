@@ -28,7 +28,7 @@ from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisio
                      list_decided_leaves, record_minted_membership, revise_leaf_decision,
                      set_backbone_leaf_decision)
 from .learned import (LEARNED_STATUSES, active_learned_aliases, clear_learned_for_keys, decide_learned_alias,
-                      delete_learned_alias, learned_migration_done, list_learned_aliases,
+                      delete_learned_alias, learned_alias, learned_migration_done, list_learned_aliases,
                       propose_learned_aliases, record_learned_migration)
 from .lots import answer_lot, lot_answers
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
@@ -60,7 +60,7 @@ __all__ = [
     # learned aliases (P2-10 C2)
     "active_learned_aliases", "propose_learned_aliases", "decide_learned_alias",
     "learned_migration_done", "record_learned_migration", "list_learned_aliases", "delete_learned_alias",
-    "clear_learned_for_keys", "LEARNED_STATUSES",
+    "clear_learned_for_keys", "LEARNED_STATUSES", "learned_alias",
     # lot sold answers
     "answer_lot", "lot_answers",
     # pending review queue
