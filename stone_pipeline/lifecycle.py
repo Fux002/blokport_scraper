@@ -234,6 +234,24 @@ def _resolve(sources, *, require_non_empty: bool = True):
     return list(sources), [rows[s].source_code for s in sources], None
 
 
+def alias_classification() -> tuple[dict, int]:
+    """POST /config/v1/aliases/classification (P2-10 C5): write and publish the alias classification file and its
+    manifest field from the LIVE ledger and config.db, read-only, in the exclusive slot (no run, no other op). 409
+    naming the Keys when a variation is not synced, or naming the values no store owns; 409 when busy."""
+    from stone_pipeline.aliases import cleanup
+    from stone_pipeline.ledger import writethrough
+    try:
+        with _exclusive("alias_classification"):
+            with writethrough.connect(bind=False) as ledger:
+                return cleanup.publish(ledger), 200
+    except _Busy as exc:
+        return {"error": str(exc)}, 409
+    except cleanup.NotAllSynced as exc:
+        return {"error": str(exc), "keys": exc.keys}, 409
+    except cleanup.Unclassifiable as exc:
+        return {"error": str(exc), "refused": [{"key": k, "value": v, "reason": why} for k, v, why in exc.refused]}, 409
+
+
 def _ledger_op(name: str, work):
     """Run `work(ledger, sync)` under the exclusive slot + the ledger lease guard, mapping the standard
     failures to http codes. `work` returns the success dict (paired with 200). _Busy -> 409, an in-flight

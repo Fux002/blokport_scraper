@@ -125,11 +125,12 @@ def _publish_file(client, bucket: str, key: str, path: Path, entry: dict, prior:
 
 
 def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None,
-                         only: set[str] | None = None) -> dict:
+                         only: set[str] | None = None, extra: dict | None = None) -> dict:
     """Upload the changed deliverables and side files under `local`, then write the manifest. `only` restricts the
     publish, and so the manifest, to exactly those names whatever else `local` holds (a factory reset: the seed base
     is the one valid deliverable for a wiped Medusa, so no other deliverable and no side file is listed); a name in
-    `only` that `local` lacks raises before anything is written. Returns
+    `only` that `local` lacks raises before anything is written. `extra` adds top-level fields to the manifest (the
+    alias classification's statement, aliases.cleanup); it never replaces one of the manifest's own. Returns
     {"uploaded": [...], "unchanged": [...], "side": [<side files uploaded>], "manifest": <the manifest written>}."""
     if only is not None and (missing := sorted(n for n in only if not (local / n).is_file())):
         raise FileNotFoundError(f"cannot publish {missing}: not in {local}")
@@ -155,6 +156,9 @@ def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: 
     manifest = {"contract": MANIFEST_CONTRACT, "env": ENV_NAME, "run_id": run_id,
                 "produced_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                 **sections}
+    if clash := sorted(set(extra or {}) & set(manifest)):
+        raise ValueError(f"extra manifest field(s) {clash} would replace the manifest's own")
+    manifest.update(extra or {})
     client.put_object(Bucket=bucket, Key=manifest_key, ContentType="application/json",
                       Body=json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
     return {"uploaded": uploaded, "unchanged": unchanged, "side": side, "manifest": manifest}
