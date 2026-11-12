@@ -34,14 +34,20 @@ def seed_of(backbone) -> dict[str, tuple[Sequence[str], Sequence[str]]]:
 
 def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
     """The operator's aliases in `statement` rows: a GLOBAL (vendor '') `is` statement whose stated name is not the
-    spelling. A vendor's binding is match-only (the matcher's override tier), never an alias of the variety."""
+    spelling. The alias is the spelling's variety identity (clean_variety under the stated type, format and type
+    words dropped), the very value curate attaches to a renamed mint (context.variety_identity, minting.py), so a
+    mint's own spelling lives on in this store after its run. A vendor's binding is match-only (the matcher's
+    override tier), never an alias of the variety."""
+    from stone_pipeline.adapters.tokens import clean_variety
     out = []
     for r in rows:
         name, spelling = (r.get("name") or "").strip(), (r.get("spelling") or r.get("spelling_norm") or "").strip()
         if (r.get("source") or "").strip() or r.get("verdict") != "is" or not name or not spelling:
             continue
-        if match_key(name) != match_key(spelling):
-            out.append(OperatorAlias(name, (r.get("stone_type") or "").strip(), spelling))
+        stone_type = (r.get("stone_type") or "").strip()
+        clean = clean_variety(spelling, stone_type)
+        if match_key(name) != match_key(clean):
+            out.append(OperatorAlias(name, stone_type, clean))
     return out
 
 
