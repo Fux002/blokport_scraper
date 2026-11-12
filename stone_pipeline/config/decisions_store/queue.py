@@ -30,7 +30,7 @@ def replace_pending(kind: str, rows: list[dict]) -> None:
     # that normalized name, so the two are ONE queue entry -- collapse them (keep last, matching the old
     # name-keyed dict-overwrite) instead of hitting the (kind, ref) primary key with a duplicate INSERT.
     deduped = {r["ref"]: r for r in rows}
-    with closing(store.open_store()) as conn:
+    with closing(store.open_existing_store()) as conn:
         conn.execute("DELETE FROM review_pending WHERE kind = ?", (kind,))
         conn.executemany(
             "INSERT INTO review_pending (kind, ref, payload, sources, updated_at) VALUES (?, ?, ?, ?, ?)",

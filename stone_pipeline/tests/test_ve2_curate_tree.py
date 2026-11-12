@@ -280,7 +280,7 @@ def test_a_global_mint_is_held_by_any_vendors_ve2_card():
     assert not any(g["decision"] == "mint" for g in held)   # global held by varsha's card -> no duplicate gap
 
 
-def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards():
+def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards(seeded_config_store):
     # fix 3: the archived_variety card's stone_type gives it a (name, type) ref, so write_confirm_file keeps it
     # separate from a type-less listing of the same name (which would otherwise swallow it into one card).
     from stone_pipeline.stages import decisions

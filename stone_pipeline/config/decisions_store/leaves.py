@@ -102,7 +102,7 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
     'produce'), never takes over an approve or a reject from the review API. Returns the count of rows written (each
     inserted OR its own row updated in place -- a re-run rewrites the same rows, changing nothing)."""
     written = 0
-    with closing(store.open_store()) as conn:
+    with closing(store.open_existing_store()) as conn:
         for variety, stone_type, attribute, value in rows:
             attribute = (attribute or "").strip().lower()
             variety, value = (variety or "").strip(), (value or "").strip()

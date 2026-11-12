@@ -30,7 +30,7 @@ def test_protected_variation_roundtrip_is_idempotent():
     assert ds.protected_keys() == set()
 
 
-def test_review_queue_uniformly_title_cases_display_names():
+def test_review_queue_uniformly_title_cases_display_names(seeded_config_store):
     # a supplier shouting 'VENATTO BLUE' must show 'Venatto Blue' in the review queue no matter which curate
     # path surfaced it: the code-shaped + alias-review holds used to write raw supplier casing while the mint
     # path title-cased. Now normalized at the one write boundary. Routing (norm-keyed) is unaffected, and a
@@ -46,7 +46,7 @@ def test_review_queue_uniformly_title_cases_display_names():
     assert views.rejected() == {("", "venatto blue")}
 
 
-def test_backbone_leaf_queue_title_cases_the_variety_name():
+def test_backbone_leaf_queue_title_cases_the_variety_name(seeded_config_store):
     # F2: the backbone-leaf review's variety name must be cased like the variety queue's variant (it comes
     # from the export, whose casing is unreliable) -- else the same variety reads differently across the two
     # adjacent :4200 review lists. Routing keys on the normalized ref, so it is unaffected.
@@ -101,13 +101,13 @@ def test_pending_variety_queue_round_trips_with_current_action():
     assert "confirm" not in pending["Delta Stone"]
 
 
-def test_pending_is_fully_replaced_each_write():
+def test_pending_is_fully_replaced_each_write(seeded_config_store):
     decisions.write_confirm_file([{"confirm": "", "variant": "First"}])
     decisions.write_confirm_file([{"confirm": "", "variant": "Second"}])   # a later produce
     assert [p["variant"] for p in ds.list_pending("variety")] == ["Second"]
 
 
-def test_pending_ref_collision_collapses_instead_of_crashing():
+def test_pending_ref_collision_collapses_instead_of_crashing(seeded_config_store):
     # two spellings that normalize to the SAME identity (punctuation/case, same type) share a ref; the queue
     # keeps ONE entry rather than raising on the (kind, ref) primary key mid-produce. The same name under a
     # DIFFERENT type is another variety: its own card (D-8), never collapsed onto the first.
@@ -123,7 +123,7 @@ def test_pending_ref_collision_collapses_instead_of_crashing():
     assert len(ds.list_pending("attribute")) == 1
 
 
-def test_attribute_ids_round_trip():
+def test_attribute_ids_round_trip(seeded_config_store):
     decisions.write_attributes_to_add([
         {"kind": "finish", "value": "Leathered", "count": 12, "suggested_value": "", "action": "", "medusa_id": ""}])
     assert [a["value"] for a in ds.list_pending("attribute")] == ["Leathered"]
