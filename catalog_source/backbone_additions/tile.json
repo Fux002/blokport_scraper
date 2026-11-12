@@ -1,33 +1,5 @@
 [
   {
-    "key": "tile_marble_calcite_blue_5e07f228-027a-501b-b1b7-2a0b63b7d762",
-    "variant": "Calcite Blue",
-    "category": "Tiles",
-    "stone_type": "Marble",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "tile_marble_calcite_blue_5e07f228-027a-501b-b1b7-2a0b63b7d762.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
     "key": "tile_avocatus_fbf47030-c55a-5c14-a636-d5544f8ff795",
     "variant": "Avocatus",
     "category": "Tiles",

@@ -1,33 +1,5 @@
 [
   {
-    "key": "block_marble_calcite_blue_345ac2fe-aa54-5561-86fd-d896c3fbb5cb",
-    "variant": "Calcite Blue",
-    "category": "Blocks",
-    "stone_type": "Marble",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_marble_calcite_blue_345ac2fe-aa54-5561-86fd-d896c3fbb5cb.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
     "key": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed",
     "variant": "Matarazzo",
     "category": "Blocks",
