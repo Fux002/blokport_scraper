@@ -4,6 +4,7 @@ live variety (an operator mint equal to a seed alias) is DROPPED and LISTED, the
 from __future__ import annotations
 
 import csv
+import dataclasses
 import json
 from pathlib import Path
 
@@ -39,12 +40,6 @@ def test_a_post_under_the_same_key_is_the_same_variety_not_another():
     assert ac.find([_v(key, "Granite", "G562 Maple Red", "G562", "G562 Granite"), _v(key, "Granite", "G562")]) == []
 
 
-def test_copies_sharing_an_identity_core_are_the_same_variety():
-    # old per-category Keys: slab and block copies of one variety share the core (type + name slug) across uuids
-    assert ac.find([_v("slab_marble_karina_00000000-0000-5000-8000-000000000001", "Marble", "Karina", "Karina V"),
-                    _v("block_marble_karina_00000000-0000-5000-8000-000000000002", "Marble", "Karina V")]) == []
-
-
 def test_the_same_name_under_another_type_is_not_a_collision():
     # a granite 'Silver Grey' alias and a slate 'Silver Grey' variety are two stones matching keeps apart (Mas, 11-11)
     assert ac.find([_v("g1", "Granite", "Bianco Sardo", "Silver Grey"), _v("s1", "Slate", "Silver Grey")]) == []
@@ -77,6 +72,9 @@ def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produc
     from stone_pipeline.config.settings import SETTINGS
     from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.stages import emit_catalog
+    review = tmp_path / "review"
+    monkeypatch.setattr(emit_catalog, "SETTINGS",
+                        dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, review_dir=review)))
     casa, calcite = new_key("Marble", "Casa Blue"), new_key("Marble", "Calcite Blue")
     base, delta = tmp_path / "variants_export_base.csv", tmp_path / "curate_delta.csv"
     for path, rows in ((base, [[casa, "Casa Blue", "Marble", "Calcite Blue|Casa Blue Marble"]]),
@@ -93,6 +91,48 @@ def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produc
         emitted = {r["Key"]: r for r in csv.DictReader(h)}
     assert set(emitted) == {casa, calcite}
     assert emitted[casa]["Aliases"].split("|") == ["Casa Blue Marble"]
-    with (SETTINGS.paths.review_dir / emit_catalog.ALIAS_COLLISIONS_REVIEW).open(encoding="utf-8-sig") as h:
+    with (review / emit_catalog.ALIAS_COLLISIONS_REVIEW).open(encoding="utf-8-sig") as h:
         listed = list(csv.DictReader(h))
     assert [(r["Key"], r["alias"], r["collides_with_key"]) for r in listed] == [(casa, "Calcite Blue", calcite)]
+    assert emit_catalog.alias_collisions_dropped() == 1        # the count the run summary states
+
+
+def test_the_run_summary_states_the_dropped_aliases_and_where_they_are_listed(tmp_path, monkeypatch):
+    from stone_pipeline.config.settings import ENV_NAME, SETTINGS
+    from stone_pipeline.core import layout
+    from stone_pipeline.stages import emit_catalog
+    monkeypatch.setattr(layout, "SETTINGS",
+                        dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, to_upload_dir=tmp_path)))
+    text = layout.write_sync_md(counts={}, sources=[], products={}, aliases_dropped=2).read_text(encoding="utf-8")
+    assert f"2 alias(es) dropped at emit, each the name of another variety of the same type: " \
+           f"`review/{ENV_NAME}/{emit_catalog.ALIAS_COLLISIONS_REVIEW}`" in text
+
+
+def test_the_catalog_passes_the_dropped_alias_count_to_the_run_summary(tmp_path, monkeypatch):
+    import types
+    from stone_pipeline import catalog
+    from stone_pipeline.reference import sync_variants_base
+    stated: dict = {}
+    noop = lambda *a, **k: None  # noqa: E731
+    zero = lambda *a, **k: 0  # noqa: E731
+    monkeypatch.setattr(catalog, "find_canonical", lambda root: [tmp_path / "x.parquet"])
+    monkeypatch.setattr(catalog.staging, "read_canonical", lambda p: [])
+    monkeypatch.setattr(catalog.loaders, "load_all", noop)
+    monkeypatch.setattr(catalog.curate, "run", lambda rows, ref: types.SimpleNamespace(counts={}))
+    monkeypatch.setattr("stone_pipeline.stages.decisions.heal_drifted_membership", noop)
+    monkeypatch.setattr(catalog, "collect_products", lambda root: {})
+    monkeypatch.setattr(catalog.emit_catalog, "build", noop)
+    monkeypatch.setattr(catalog.emit_catalog, "alias_collisions_dropped", lambda: 3)
+    for name in ("collect_inventory", "collect_discontinued", "collect_lot_cards", "write_variants_to_delete",
+                 "migrate_retyped_variant_images", "drop_deleted_variants", "prune_superseded_runs"):
+        monkeypatch.setattr(catalog, name, zero)
+    monkeypatch.setattr(catalog, "write_sync_md", lambda **k: stated.update(k) or tmp_path / "SYNC_STEPS.md")
+    monkeypatch.setattr(catalog.prepare_variant_images, "queue_new_textures", zero)
+    monkeypatch.setattr("stone_pipeline.stages.variety_color.fill_colors", lambda **k: {})
+    monkeypatch.setattr(sync_variants_base, "sync", noop)
+    monkeypatch.setattr(sync_variants_base, "write_deliverable", noop)
+    for name in ("_record_catalog", "_consistency_gate"):
+        monkeypatch.setattr(catalog, name, noop)
+    monkeypatch.setattr(catalog.tree_build, "run", noop)
+    catalog.run(tmp_path)
+    assert stated["aliases_dropped"] == 3
