@@ -14,7 +14,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import payloads, sync
 from stone_pipeline.ledger.db import Ledger, now_iso
-from stone_pipeline.ledger.populate import fill_variation_types, populate_products, populate_variations_full
+from stone_pipeline.ledger.populate import populate_products, populate_variations_full
 from stone_pipeline.ledger.server import dispatch
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS
@@ -25,14 +25,13 @@ PAST = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state="synced", medusa_id="V-1"):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "x", "aliases": "[]",
-                                "image_url": "https://s3/tex.png", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": medusa_id, "in_full": 1, "payload_hash": "h",
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "aliases": "[]",
+                                "medusa_id": medusa_id, "in_full": 1, "payload_hash": "h",
                                 "state": state, "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
 
 
-def _product(ledger, sku, variation_key="slab_marble_x_1", state="syncing", medusa_id=None):
+def _product(ledger, sku, variation_key="marble__x_1", state="syncing", medusa_id=None):
     now = now_iso()
     ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": variation_key, "state": state,
                               "medusa_id": medusa_id, "payload_hash": "h", "created_at": now, "updated_at": now},
@@ -53,7 +52,7 @@ def _batch(ledger, *acks):
 @pytest.mark.parametrize("status", ["created", "updated", "skipped"])
 def test_every_success_status_of_the_entity_lanes_applies(tmp_path, status):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1")
+        _variation(ledger, "marble__x_1")
         _product(ledger, "S-1")
         assert _batch(ledger, {"type": "products", "external_id": "S-1", "medusa_id": "P-1", "status": status}) \
             == {"applied": 1, "missed": 0, "skipped": 0}
@@ -70,12 +69,12 @@ _TABLE = {"products": ("product", "sku"), "variations": ("variation", "key"), "i
 ])
 def test_a_status_outside_its_lane_is_a_failed_attempt_never_an_apply(tmp_path, type_, status):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1", state="syncing", medusa_id="V-1")
+        _variation(ledger, "marble__x_1", state="syncing", medusa_id="V-1")
         _product(ledger, "S-1", medusa_id="P-1")
         _stock(ledger, "S-1")
         ledger.execute("UPDATE inventory SET last_synced_qty = 5, last_synced_made_to_order = 0")   # a count move
         sync.record_tombstones(ledger, [("T-1", "s")])
-        xid = {"products": "S-1", "variations": "slab_marble_x_1", "inventory": "S-1", "removed": "T-1"}[type_]
+        xid = {"products": "S-1", "variations": "marble__x_1", "inventory": "S-1", "removed": "T-1"}[type_]
         table, pk = _TABLE[type_]
         for attempt in range(1, SETTINGS.sync.max_attempts + 1):
             _batch(ledger, {"type": type_, "external_id": xid, "medusa_id": "M-9", "status": status})
@@ -90,22 +89,22 @@ def test_a_status_outside_its_lane_is_a_failed_attempt_never_an_apply(tmp_path, 
 @pytest.mark.parametrize("medusa_id", [None, ""])
 def test_a_success_without_an_id_is_a_failed_attempt_and_keeps_the_stored_id(tmp_path, medusa_id):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1", state="syncing", medusa_id="V-1")
-        ack = {"type": "variations", "external_id": "slab_marble_x_1", "status": "updated"}
+        _variation(ledger, "marble__x_1", state="syncing", medusa_id="V-1")
+        ack = {"type": "variations", "external_id": "marble__x_1", "status": "updated"}
         if medusa_id is not None:
             ack["medusa_id"] = medusa_id
         for _ in range(SETTINGS.sync.max_attempts):
             _batch(ledger, ack)
-        row = ledger.get("variation", "key", "slab_marble_x_1")
+        row = ledger.get("variation", "key", "marble__x_1")
         assert (row["medusa_id"], row["state"], row["sync_error"]) == ("V-1", "gap_held", "success ack without medusa_id")
-        assert [f["external_id"] for f in sync.failures(ledger)] == ["slab_marble_x_1"]
+        assert [f["external_id"] for f in sync.failures(ledger)] == ["marble__x_1"]
         # the stored id survives, so a later retire still tells Medusa to delete it (no local-only drop)
-        assert sync.retire_variation(ledger, "slab_marble_x_1")["tombstoned_variation"] is True
+        assert sync.retire_variation(ledger, "marble__x_1")["tombstoned_variation"] is True
 
 
 def test_an_inventory_skipped_is_a_stock_the_consumer_did_not_apply(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1")
+        _variation(ledger, "marble__x_1")
         _product(ledger, "S-1", state="synced", medusa_id="P-1")
         _stock(ledger, "S-1", 3)
         for attempt in range(1, SETTINGS.sync.max_attempts + 1):
@@ -125,7 +124,7 @@ def test_an_unknown_lane_is_skipped(tmp_path):
 
 def test_an_inventory_and_a_removed_ack_carry_no_id_and_still_apply(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1")
+        _variation(ledger, "marble__x_1")
         _product(ledger, "S-1", state="synced", medusa_id="P-1")
         _stock(ledger, "S-1", 3)
         sync.record_tombstones(ledger, [("T-1", "s")])
@@ -149,31 +148,31 @@ def test_a_failed_tombstone_ack_counts_like_a_block(tmp_path):
 
 def test_reconcile_tombstones_the_synced_products_of_a_dropped_variety(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_ghost_1")
-        _product(ledger, "S-1", "slab_marble_ghost_1", state="synced", medusa_id="P-1")   # Medusa holds it
-        _product(ledger, "S-2", "slab_marble_ghost_1", state="pending")                   # never sent
+        _variation(ledger, "marble__ghost_1")
+        _product(ledger, "S-1", "marble__ghost_1", state="synced", medusa_id="P-1")   # Medusa holds it
+        _product(ledger, "S-2", "marble__ghost_1", state="pending")                   # never sent
         _stock(ledger, "S-1")
         out = sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
-        assert out["dropped_keys"] == ["slab_marble_ghost_1"]
+        assert out["dropped_keys"] == ["marble__ghost_1"]
         assert ledger.execute("SELECT COUNT(*) FROM product").fetchone()[0] == 0
         assert [(i["payload"]["kind"], i["external_id"]) for i in sync.ready(ledger, "removed")] == [
-            ("product", "S-1"), ("variation", "slab_marble_ghost_1")]
+            ("product", "S-1"), ("variation", "marble__ghost_1")]
 
 
 def test_reconcile_tombstones_a_products_export_row_a_run_made_dirty(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_ghost_1")
-        _product(ledger, "B-1", "slab_marble_ghost_1", state="dirty")           # no id acked, but ...
+        _variation(ledger, "marble__ghost_1")
+        _product(ledger, "B-1", "marble__ghost_1", state="dirty")           # no id acked, but ...
         ledger.execute("UPDATE product SET last_synced = ? WHERE sku = 'B-1'", (now_iso(),))   # ... the export showed it
         sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
         assert [(i["payload"]["kind"], i["external_id"]) for i in sync.ready(ledger, "removed")] == [
-            ("product", "B-1"), ("variation", "slab_marble_ghost_1")]
+            ("product", "B-1"), ("variation", "marble__ghost_1")]
 
 
 def test_reconcile_refuses_while_a_pull_holds_a_lease(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_ghost_1")
-        _product(ledger, "S-1", "slab_marble_ghost_1", state="syncing")           # leased to a live pull
+        _variation(ledger, "marble__ghost_1")
+        _product(ledger, "S-1", "marble__ghost_1", state="syncing")           # leased to a live pull
         with pytest.raises(sync.ServeInFlight):
             sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
         assert ledger.get("product", "sku", "S-1") is not None
@@ -207,7 +206,7 @@ def _interrupted(path, fail_on, work):
 
 def _dead_stock(path):
     with Ledger.open(path, env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1")
+        _variation(ledger, "marble__x_1")
         for sku in ("S-1", "S-2"):
             _product(ledger, sku, state="synced", medusa_id="P-" + sku)
             _stock(ledger, sku, 0)
@@ -237,8 +236,8 @@ def test_purge_never_deletes_a_product_without_its_tombstone(tmp_path, reason, f
 def test_the_reconcile_never_deletes_a_product_without_its_tombstone(tmp_path, fail_on):
     path = tmp_path / "l.db"
     with Ledger.open(path, env="development") as ledger:
-        _variation(ledger, "slab_marble_ghost_1")
-        _product(ledger, "S-1", "slab_marble_ghost_1", state="synced", medusa_id="P-1")
+        _variation(ledger, "marble__ghost_1")
+        _product(ledger, "S-1", "marble__ghost_1", state="synced", medusa_id="P-1")
         _stock(ledger, "S-1")
     _interrupted(path, fail_on, lambda lg: sync.reconcile_variations_to_seed(lg, set(), seed_identities=set()))
     with Ledger.open(path, env="development") as ledger:                     # rolled back whole
@@ -247,7 +246,7 @@ def test_the_reconcile_never_deletes_a_product_without_its_tombstone(tmp_path, f
         sync.reconcile_variations_to_seed(ledger, set(), seed_identities=set())
     with Ledger.open(path, env="development") as ledger:
         assert [tuple(r) for r in ledger.execute("SELECT external_id, kind FROM removed ORDER BY kind")] == [
-            ("S-1", "product"), ("slab_marble_ghost_1", "variation")]
+            ("S-1", "product"), ("marble__ghost_1", "variation")]
         assert ledger.get("product", "sku", "S-1") is None
 
 
@@ -272,17 +271,17 @@ def test_a_dead_tombstone_is_requeued(tmp_path):
 
 def test_a_done_on_a_variety_that_regained_children_waits_like_a_block(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _variation(ledger, "slab_marble_x_1", state="retiring")
-        sync.record_tombstones(ledger, [("slab_marble_x_1", None)], reason="variation_removed", kind="variation")
-        _product(ledger, "S-1", "slab_marble_x_1")                          # a raced produce re-linked a product
+        _variation(ledger, "marble__x_1", state="retiring")
+        sync.record_tombstones(ledger, [("marble__x_1", None)], reason="variation_removed", kind="variation")
+        _product(ledger, "S-1", "marble__x_1")                          # a raced produce re-linked a product
         for attempt in range(1, SETTINGS.sync.max_attempts + 1):
-            assert sync.ack(ledger, "removed", "slab_marble_x_1", status_="done") == 0
-            row = ledger.get("removed", "external_id", "slab_marble_x_1")
+            assert sync.ack(ledger, "removed", "marble__x_1", status_="done") == 0
+            row = ledger.get("removed", "external_id", "marble__x_1")
             assert row["sync_attempts"] == attempt and row["retry_after"] > now_iso()
             assert sync.ready(ledger, "removed") == []
             ledger.execute("UPDATE removed SET retry_after = ?", (PAST,))
-        assert ledger.get("removed", "external_id", "slab_marble_x_1")["state"] == "dead"
-        assert ledger.get("variation", "key", "slab_marble_x_1") is not None
+        assert ledger.get("removed", "external_id", "marble__x_1")["state"] == "dead"
+        assert ledger.get("variation", "key", "marble__x_1") is not None
 
 
 # --- defect 9: the hash is the served payload; new content clears an abandoned dead-letter --------------------------
@@ -291,9 +290,8 @@ def _variants_full(path, rows):
     with path.open("w", encoding="utf-8", newline="") as h:
         w = csv.DictWriter(h, fieldnames=_COLS)
         w.writeheader()
-        for key, name, aliases, volume in rows:
-            w.writerow({"Key": key, "Name": name, "Image": f"https://s3/{key}.png", "Aliases": aliases,
-                        _COLS[4]: volume})
+        for key, name, aliases in rows:
+            w.writerow({"Key": key, "Name": name, "Type": "Marble", "Aliases": aliases})
     return path
 
 
@@ -302,21 +300,20 @@ def _typed_synced_variation(ledger, path):
     ledger.upsert("attribute", {"category": "type", "value": "Marble", "medusa_id": "T1", "state": "synced",
                                 "created_at": now, "updated_at": now}, pk=("category", "value"))
     populate_variations_full(ledger, path)
-    fill_variation_types(ledger)
     ledger.execute("UPDATE variation SET state = 'synced', medusa_id = 'V-1' WHERE in_full = 1")
 
 
 def test_the_variation_hash_is_the_served_payload(tmp_path):
-    key = "slab_marble_carrara_0001"
+    key = "marble__carrara_0001"
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        _typed_synced_variation(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|B", "0.1")]))
+        _typed_synced_variation(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|B")]))
         ledger.execute("UPDATE variation SET state = 'dirty'")
         served = sync.ready(ledger, "variations")[0]
-        assert served["payload_hash"] == payloads.payload_hash_of(served["payload"], None)
+        assert served["payload_hash"] == payloads.payload_hash_of(served["payload"])
         ledger.execute("UPDATE variation SET state = 'synced'")
-        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|B", "0.2")]))
-        assert ledger.get("variation", "key", key)["state"] == "synced"      # volume is not served
-        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|C", "0.2")]))
+        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|B")]))
+        assert ledger.get("variation", "key", key)["state"] == "synced"      # unchanged content does not re-serve
+        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A|C")]))
         assert ledger.get("variation", "key", key)["state"] == "dirty"       # aliases are
 
 
@@ -345,17 +342,17 @@ def test_new_content_clears_an_abandoned_dead_letter(tmp_path):
     cfg = load_source("polonine")
     rows = _fixture_rows()
     sku = emit._sku(rows[0], cfg)
-    key = "slab_marble_carrara_0001"
+    key = "marble__carrara_0001"
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         _seed_ids(ledger)
         _products(ledger, rows, cfg)
-        _typed_synced_variation(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A", "")]))
+        _typed_synced_variation(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara", "A")]))
         ledger.execute("UPDATE product SET state = 'gap_held', abandoned_at = ? WHERE sku = ?", (now_iso(), sku))
         ledger.execute("UPDATE variation SET state = 'gap_held', abandoned_at = ? WHERE key = ?", (now_iso(), key))
         populate_products(ledger, rows, cfg)                                    # unchanged: stays abandoned
         assert ledger.get("product", "sku", sku)["abandoned_at"] is not None
         populate_products(ledger, [rows[0].model_copy(update={"title": "New title"})] + rows[1:], cfg)
-        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara Renamed", "A", "")]))
+        populate_variations_full(ledger, _variants_full(tmp_path / "f.csv", [(key, "Carrara Renamed", "A")]))
         for table, pk, value in (("product", "sku", sku), ("variation", "key", key)):
             row = ledger.get(table, pk, value)
             assert (row["state"], row["abandoned_at"]) == ("dirty", None)

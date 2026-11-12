@@ -203,8 +203,15 @@ side at most 2048 px) and its meta JSON (`version` 1, `width_px`, `height_px`, `
 from 0 to 1 measured from the cut-out's top-left, `edge_color` = the sawn edge's hex colour). Copy both like
 `image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. A
 product shown by an open book (two bookmatched slabs) carries one of its two slabs, each a whole slab. It is
-`null` for a product with no 3D (a block, a close-up, a product without a standardised photo):
+`null` for a product with no 3D (a block, a close-up, a product without a standardised photo, or one whose slab
+photo is not at its own measured `length`:`width` within 5%, the scraper's `PHOTO_ASPECT_TOLERANCE_PCT`, or a lot
+piece shown from its lot's shared photo rather than its own):
 remove `metadata.model_3d` then. Both files are named after the source photo, like the standardised views.
+A slab's meta also says what its pixels are made from (additive, `version` stays 1; each key is absent when it is not
+known, never false or 0): `source_long_px`, the stone's long side in real pixels before the layout enlarged it, and
+`upscaled`, whether it did (an upscaler's detail then sits on those pixels); a 3D slab published before these were
+recorded carries only `source_long_px_max`, the long side of the photo it was made from, a bound no slab in that photo
+can hold more real pixels than.
 A **tile** product's `model_3d` is one tile rendered from its variety's slab stone, the same two files: the cut-out's
 horizontal axis is the product's `length`, its aspect `length`:`width`, 2048 px on its long side (the real stone
 resampled), a whole rectangle (`outline` its four corners; the WebP may carry no alpha channel: opaque), and the meta

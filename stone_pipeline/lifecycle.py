@@ -319,8 +319,8 @@ def purge(sources=None) -> tuple[dict, int]:
 
 
 def _prune_stale_product_exports() -> dict:
-    """Delete the pre-reset per-source product export CSVs (to_upload/3_products_*.csv) and the photo list beside
-    them (STANDARDISE.PHOTOS_FILE), local AND on S3, so a pristine reset leaves no stale per-source emit behind. They
+    """Delete the pre-reset per-source product export CSVs (to_upload/3_products_*.csv) and the photo list and
+    defaulted sizes beside them (STANDARDISE.PHOTOS_FILE, DEFAULTED_FILE), local AND on S3, so a pristine reset leaves no stale per-source emit behind. They
     refill on the next produce, and the admin reads the ledger (not these files), so this is display/tidy-up only.
     Best-effort + LOUD: never fails the reset."""
     from stone_pipeline.config import settings
@@ -328,7 +328,7 @@ def _prune_stale_product_exports() -> dict:
     out: dict = {"local": 0, "s3": 0}
     try:
         up = settings.SETTINGS.paths.to_upload_dir
-        for f in [*up.glob("3_products_*.csv"), *up.glob(STANDARDISE.PHOTOS_FILE)]:
+        for f in [*up.glob("3_products_*.csv"), *up.glob(STANDARDISE.PHOTOS_FILE), *up.glob(STANDARDISE.DEFAULTED_FILE)]:
             f.unlink()
             out["local"] += 1
     except Exception as exc:
@@ -340,7 +340,8 @@ def _prune_stale_product_exports() -> dict:
         prefix = f"{ENV_SEGMENT}/scraper/to_upload/"
         resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
         def stale(name):
-            return name.startswith("3_products_") and name.endswith(".csv") or name == STANDARDISE.PHOTOS_FILE
+            return (name.startswith("3_products_") and name.endswith(".csv")
+                    or name in (STANDARDISE.PHOTOS_FILE, STANDARDISE.DEFAULTED_FILE))
         keys = [{"Key": o["Key"]} for o in resp.get("Contents", []) if stale(o["Key"].rsplit("/", 1)[-1])]
         if keys:
             s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": keys, "Quiet": True})
@@ -488,7 +489,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
                 # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
-                # variation content (name/aliases/image/volume) from the freshly-clean base -- upserts
+                # variation content (type/name/aliases) from the freshly-clean base -- upserts
                 # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
                 # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
                 try:
@@ -640,7 +641,7 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
         by_ident: dict[tuple, list[tuple[str, str]]] = {}
         for r in lg.execute("SELECT key, name FROM variation").fetchall():
             k, n = (r["key"] or "").strip(), (r["name"] or "").strip()
-            ident = variety_identity(k, n)[1:]         # branch-free: (type-slug, name-slug)
+            ident = variety_identity(k, n)             # (type-slug, name-slug)
             ident_of[k] = ident
             by_ident.setdefault(ident, []).append((k, n))
         out = {"unminted": [], "varieties": [], "skipped": []}

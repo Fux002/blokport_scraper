@@ -27,8 +27,8 @@ def _stage(seed_types):
     ref = SimpleNamespace(
         overrides=Overrides(by_key={}),
         variants={"slab": SimpleNamespace(by_id={
-            "v_granite": SimpleNamespace(key="slab_granite_absolute_black_1"),
-            "v_agate": SimpleNamespace(key="slab_agate_absolute_black_2")})},
+            "v_granite": SimpleNamespace(key="granite__absolute_black_1"),
+            "v_agate": SimpleNamespace(key="agate__absolute_black_2")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in (seed_types).items()}, {}),
         # the matcher gates an operator mint type on the canonical vocabulary, exactly as curate does
         attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx"]),
@@ -46,7 +46,7 @@ def test_contradicting_scraped_type_binds_to_the_operator_minted_variety():
     row = _row("Absolute Black", "Marble")
     _stage({("", "absolute black"): "Agate"}).resolve_row(row)
     assert row.variation_id == "v_agate"
-    assert row.variation_key == "slab_agate_absolute_black_2"
+    assert row.variation_key == "agate__absolute_black_2"
 
 
 def test_contradicting_type_binds_even_when_the_query_carries_the_type_token():

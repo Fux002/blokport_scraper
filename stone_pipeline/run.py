@@ -238,6 +238,7 @@ def _write_diagnostics(manifest, layout) -> None:
         "funnel": _funnel(manifest.stage_metrics),
         "held": manifest.held,          # the "what was skipped and why" worklist (grouped by reject rule)
         "lots": manifest.lots,          # per lot: pieces loaded / sent / held
+        "photo_scale_mismatch": manifest.photo_scale_mismatch,   # each product refused its 3D slab, with both figures
         "stages": [
             {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
              "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
@@ -565,12 +566,13 @@ def finalize_rows(ctx: RunContext, resolved: Resolved,
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=ctx.source_cfg.emit_on_review,
                               require_images=mode.imports_products and SETTINGS.images.require_images,
-                              source_code=ctx.source_cfg.source_code)
+                              source_code=ctx.source_cfg.source_code, published=frozenset(known.by_sku))
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
     if mode.imports_products and (conflicts := images.link_standard(rows, validation.emit,
-                                                               image_pipeline=ctx.source_cfg.image_pipeline)) is not None:
+                                                               image_pipeline=ctx.source_cfg.image_pipeline,
+                                                               mismatches=manifest.photo_scale_mismatch)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks

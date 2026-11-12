@@ -9,6 +9,14 @@ on:
       ref:
         description: "Branch whose run_source golden to regenerate"
         required: true
+      dump:
+        description: "Also dump the rows the golden digests (ledger tables, alias write-back, tree gaps) at ref AND at base"
+        type: boolean
+        default: false
+      base:
+        description: "With dump: the sha to dump the same rows at (the PR's merge-base with main)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -29,8 +37,14 @@ jobs:
       - name: Rewrite the golden
         env:
           RUN_SOURCE_GOLDEN: rewrite
+          DUMP: ${{ inputs.dump }}
         run: |
-          rc=0; pytest -q stone_pipeline/tests/test_run_source_golden.py > /tmp/rewrite.log 2>&1 || rc=$?
+          plugin=""
+          if [ "$DUMP" = "true" ]; then
+            export RUN_SOURCE_GOLDEN_DUMP="$GITHUB_WORKSPACE/golden-dump/head" PYTHONPATH="$GITHUB_WORKSPACE/.github"
+            plugin="-p golden_dump"
+          fi
+          rc=0; pytest -q $plugin stone_pipeline/tests/test_run_source_golden.py > /tmp/rewrite.log 2>&1 || rc=$?
           cat /tmp/rewrite.log
           grep -q "golden REWRITTEN" /tmp/rewrite.log || { echo "the golden was not rewritten (pytest exit $rc)"; exit 1; }
           git diff --stat -- stone_pipeline/tests/fixtures/run_source_golden.json
@@ -38,4 +52,26 @@ jobs:
         with:
           name: run-source-golden
           path: stone_pipeline/tests/fixtures/run_source_golden.json
+          if-no-files-found: error
+      # The same rows at the base sha, by the SAME plugin (.github/golden_dump.py wraps whatever _scenario the base
+      # checkout has), so one artifact holds both sides: golden-dump/base and golden-dump/head.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: inputs.dump && inputs.base != ''
+        with:
+          ref: ${{ inputs.base }}
+          path: base-checkout
+      - name: Dump the same rows at the base sha
+        if: inputs.dump && inputs.base != ''
+        run: |
+          pip install -r base-checkout/stone_pipeline/requirements.txt
+          cd base-checkout
+          RUN_SOURCE_GOLDEN_DUMP="$GITHUB_WORKSPACE/golden-dump/base" PYTHONPATH="$GITHUB_WORKSPACE/.github" \
+            pytest -q -p golden_dump stone_pipeline/tests/test_run_source_golden.py > /tmp/base.log 2>&1 || true
+          tail -5 /tmp/base.log
+          test -d "$GITHUB_WORKSPACE/golden-dump/base" || { echo "the base run wrote no dump"; exit 1; }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.dump
+        with:
+          name: run-source-golden-dump
+          path: golden-dump/
           if-no-files-found: error

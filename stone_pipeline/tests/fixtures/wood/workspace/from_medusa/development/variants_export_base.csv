@@ -1,13 +1,5 @@
-Key,Name,Image,Aliases,Volume per kg (m³/kg)
-plank_oak_rustic_oak_fa846ec9-8953-5d7f-a7a7-b9a8ddea0a04,Rustic Oak,,,0.0014
-beam_oak_rustic_oak_d8d24618-0ef5-510e-a8e4-fed4269c93ec,Rustic Oak,,,0.0014
-panel_oak_rustic_oak_e1429b6b-af00-57df-b2d1-0074150cd9a7,Rustic Oak,,,0.0014
-plank_walnut_black_walnut_f1a008b9-0173-5c3d-81cd-e137936766bd,Black Walnut,,,0.0014
-beam_walnut_black_walnut_137704a9-6f9e-5297-8ebc-81c99435a5eb,Black Walnut,,,0.0014
-panel_walnut_black_walnut_815681ab-7e3b-5d57-9ce2-a3b07725dfff,Black Walnut,,,0.0014
-plank_ash_white_ash_61165db9-7394-52dd-8db8-4688d75a7fc9,White Ash,,,0.0014
-beam_ash_white_ash_e95f1c87-66d7-5fc5-bf4f-5256eb6cf80c,White Ash,,,0.0014
-panel_ash_white_ash_18e3985d-a304-5885-a7d3-029c23bb93a5,White Ash,,,0.0014
-plank_larch_siberian_larch_bf20a7c4-64f6-58e1-a903-600aac5a36b8,Siberian Larch,,,0.0014
-beam_larch_siberian_larch_8174e215-11a4-5cc2-bd17-2c887f16b4ee,Siberian Larch,,,0.0014
-panel_larch_siberian_larch_ec005918-15aa-5b12-9f81-045c52b2e177,Siberian Larch,,,0.0014
+Key,Name,Type,Aliases
+ash__white_ash_4f1ae32c-444f-563a-b998-f32e87c7bb6e,White Ash,Ash,
+larch__siberian_larch_595281f6-bbcb-56b6-974d-aa85e179c57e,Siberian Larch,Larch,
+oak__rustic_oak_746c2028-c94a-5445-85ce-0dff34129f49,Rustic Oak,Oak,
+walnut__black_walnut_03fceba6-37db-59c8-96a5-6bdaed6e3597,Black Walnut,Walnut,

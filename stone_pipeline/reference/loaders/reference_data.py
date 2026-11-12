@@ -164,8 +164,8 @@ def load_all() -> ReferenceData:
         backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
     # products link by Key, not id, so the matcher's candidate index may come from the Id-free base while the
     # live export is absent; the real Medusa id fills in on the pull.
-    # ONE combined export for every category, read ONCE and split by Key prefix into a per-category index,
-    # one per registry entry that shares the stone-variety vocabulary.
+    # ONE combined export, read ONCE into the one variety table, given to every registry entry that shares the
+    # stone-variety vocabulary (phase 1: a variety has no category).
     existing = load_existing_variants(existing_varieties_file(),
                                       [c.name for c in CATEGORIES if c.shares_variety_vocab])
     ref = ReferenceData(

@@ -256,6 +256,9 @@ resource "aws_ecs_task_definition" "this" {
       secrets          = [{ name = "SCRAPER_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
       mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
+      # a stop (a roll, the scale to 0 before the store migration) lets the ledger's last snapshot save finish (it
+      # may wait 60 s, snapshot.py), not the Fargate default of about 30 s: the Fargate maximum, as the config container
+      stopTimeout = 120
     },
     {
       name         = "config"
@@ -302,6 +305,14 @@ resource "aws_ecs_task_definition" "this" {
         # set back to after: the value Terraform creates the pool with, so the two never disagree
         { name = "SCRAPER_STANDARDISE_GPU_VCPUS", value = tostring(var.standardise_gpu_vcpus) },
         { name = "SCRAPER_STANDARDISE_IDLE_GPU_VCPUS", value = tostring(var.standardise_idle_gpu_vcpus) },
+        ],
+        # A scoped photos run (its scope and its own cap), passed only while set, so an env without one keeps its
+        # task definition unchanged.
+        var.standardise_scope_key == "" ? [] : [
+          { name = "SCRAPER_STANDARDISE_SCOPE_KEY", value = var.standardise_scope_key },
+        ],
+        var.standardise_run_cap_usd == "" ? [] : [
+          { name = "SCRAPER_STANDARDISE_RUN_CAP_USD", value = var.standardise_run_cap_usd },
         ],
         # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
         # env default (on in production), so an env that does not pass it keeps its task definition unchanged.

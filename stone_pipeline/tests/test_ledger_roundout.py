@@ -38,9 +38,9 @@ def _seed_ids(ledger: Ledger) -> None:
         ledger.upsert("attribute", {"category": cat, "value": val, "medusa_id": mid,
                                     "state": "synced", "created_at": now, "updated_at": now},
                       pk=("category", "value"))
-    ledger.upsert("variation", {"key": "slab_marble_x_0001", "branch": "slab", "type": "Marble",
-                                "name": "X", "aliases": "[]", "image_url": "", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "V1",
+    ledger.upsert("variation", {"key": "marble__x_0001", "type": "Marble",
+                                "name": "X", "aliases": "[]",
+                                "medusa_id": "V1",
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now},
                   pk=("key",))
@@ -133,25 +133,25 @@ def test_reset_re_derives_variety_aliases_from_clean_base(tmp_path):
     # (Medusa updates, never recreates), and flips the row dirty for the update pull.
     import csv, json
     from stone_pipeline.ledger.render import VARIANTS_FULL_COLS
-    key_c, name_c, image_c, aliases_c, volume_c = VARIANTS_FULL_COLS
+    key_c, name_c, type_c, aliases_c = VARIANTS_FULL_COLS
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {
-            "key": "slab_quartzite_capolavoro_0001", "branch": "slab", "type": "Quartzite",
+            "key": "quartzite__capolavoro_0001", "type": "Quartzite",
             "name": "Capolavoro",
             "aliases": json.dumps(["Capolavoro Quartzite", "Azul Palomino Quartzite"]),  # STALE mis-bind spelling
-            "image_url": "", "image_sha256": None, "image_model": None, "volume": "", "medusa_id": "V9",
+            "medusa_id": "V9",
             "payload_hash": "OLD", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
         base = tmp_path / "variants_export_base.csv"
         with base.open("w", newline="") as h:
             w = csv.DictWriter(h, fieldnames=list(VARIANTS_FULL_COLS))
             w.writeheader()
-            w.writerow({key_c: "slab_quartzite_capolavoro_0001", name_c: "Capolavoro",
-                        image_c: "", aliases_c: "Capolavoro Quartzite", volume_c: ""})   # clean base: no mis-bind
+            w.writerow({key_c: "quartzite__capolavoro_0001", name_c: "Capolavoro",
+                        type_c: "Quartzite", aliases_c: "Capolavoro Quartzite"})   # clean base: no mis-bind
         populate_variations_full(ledger, base)
         row = ledger.execute("SELECT aliases, medusa_id, state FROM variation WHERE key=?",
-                             ("slab_quartzite_capolavoro_0001",)).fetchone()
+                             ("quartzite__capolavoro_0001",)).fetchone()
         assert json.loads(row["aliases"]) == ["Capolavoro Quartzite"]   # stale spelling dropped
         assert row["medusa_id"] == "V9"                                  # id preserved (update, not recreate)
         assert row["state"] == "dirty"                                   # re-serves on the update pull

@@ -409,11 +409,12 @@ def test_thickness_range_defaults_to_standard(ref, cfg):
 
 
 def test_face_range_uses_maximum(ref, cfg):
-    # a face dimension given as a range ('105 to 145cm') resolves to its MAX (1.45 m) -- cut smaller later.
+    # a face dimension given as a range ('105 to 145cm') resolves to its MAX (1.45 m) -- cut smaller later. Beside the
+    # 1.97 m face it is the SHORTER one, so the flat-dims order ships it as the width (test_dimension_face_order).
     row = _slab_row(raw_dimensions="length=105 to 145cm;height=1.97m", raw_thickness="2cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 1.45 and "length:parsed" in row.dimension_method
+    assert (row.length, row.width) == (1.97, 1.45) and "width:parsed" in row.dimension_method
 
 
 def test_multi_thickness_defaults_to_standard_keeps_faces(ref, cfg):
@@ -794,3 +795,15 @@ def test_overrides_pass_their_fields_rules(ref):
     values = {"description": "HOLD FOR SAHIL BHAIYA <br /> do not sell"}
     with pytest.raises(ValueError):
         derive._apply_overrides(_slab_row(), over)
+
+
+def test_a_size_outside_the_category_s_band_is_flagged_with_the_band(ref):
+    # prod POL-755: the vendor typed a width of 19.75 m; the flag carries the band it was checked against, so the 3D
+    # gate can say both (stages.images: size_out_of_band)
+    row = _slab_row(raw_dimensions="length=3.00m;height=19.75m")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    # the longer plan face is the length (flat-dims, #611), so the typo is the length's
+    lo, hi = derive._plausible_band(*derive.active_pack().dimension_ranges[derive.dimension_category(row)]["length"])
+    flag = next(f for f in row.review_flags if f.code == FlagCode.dimension_out_of_range)
+    assert (flag.field, flag.raw_value, flag.detail) == ("length", "19.75", f"band {lo:g} to {hi:g}")

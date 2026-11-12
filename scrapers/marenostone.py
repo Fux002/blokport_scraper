@@ -9,6 +9,7 @@ Run:  python scrapers/marenostone.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import re
 from typing import Any, Iterable, Optional
 
@@ -110,6 +111,7 @@ def _dims_from_html(html: str, default_unit: str = "cm") -> dict:
 
 class MarenoStoneScraper(ScraperBase):
     source = "marenostone"
+    site_domain = urlsplit(API_URL).hostname   # the supplier's public site, from its own URL
     category = None  # format is per-product (attr_format), not a constant
     # Product PAGES (where the real dimensions AND ready-stock live) are behind the site's anti-bot: ~5% of
     # the per-product fetches exhaust all retries ('GET failed after 5 tries'), losing that product's size

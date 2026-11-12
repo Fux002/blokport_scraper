@@ -13,17 +13,17 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
-from stone_pipeline.stages.curate.existing import alias_list
-from stone_pipeline.stages.curate.keys import active_branches
+from stone_pipeline.stages.curate.existing import ImportFile, alias_list
 
 
 @dataclass
 class CurationResult:
-    alias_additions: dict[str, list[dict]] = field(default_factory=dict)   # branch -> rows
-    new_variants: dict[str, list[dict]] = field(default_factory=dict)      # branch -> rows
-    backbone_new: dict[str, list[dict]] = field(default_factory=dict)      # branch -> posts
+    # one entry per (type, name) variety: a variety is one record whatever category its products sit in
+    alias_additions: list[dict] = field(default_factory=list)  # an existing variety's row gaining aliases
+    new_variants: list[dict] = field(default_factory=list)     # a new variety's row
+    backbone_new: list[dict] = field(default_factory=list)     # a new variety's backbone post
     backbone_updates: list[dict] = field(default_factory=list)            # leaf-gap suggestions
-    images_to_generate: list[dict] = field(default_factory=list)          # image checklist
+    images_to_generate: list[dict] = field(default_factory=list)          # one item per (new Key, category)
     suspicious_names: list[dict] = field(default_factory=list)            # code-like names, NOT minted
     pending_confirm: list[dict] = field(default_factory=list)             # uncertain -> variants_to_confirm.csv
     counts: dict[str, int] = field(default_factory=dict)
@@ -43,7 +43,7 @@ class Curation:
     accumulators every phase writes into. One object instead of a dozen closures over a dozen locals."""
     rows: list
     ref: ReferenceData
-    imports: dict
+    existing: ImportFile
     existing_surface: dict          # norm(surface) -> {(owner norm-name, owner norm-type)}
     generic_words: set
     retired_keys: set
@@ -51,6 +51,7 @@ class Curation:
     resolver: object
     near_meta: dict                 # (norm name, norm type) -> (colours, aliases) of each backbone variety
     alias_floor: float
+    type_names: dict                # norm(type) -> its canonical Medusa type NAME
     valid_type_norms: set
     last_resort_quality: str
     alias_new: dict = field(default_factory=dict)          # (name, type) owner -> {spellings} (confirmed)
@@ -60,16 +61,16 @@ class Curation:
     suspicious: list = field(default_factory=list)
     seen_new: set = field(default_factory=set)             # (norm type, norm name, decision level)
     minted_display: set = field(default_factory=set)       # (norm type, norm display name) minted THIS run
-    variety_branches: dict = field(default_factory=dict)   # norm(clean) -> branches a product was seen in
+    variety_categories: dict = field(default_factory=dict)  # norm(clean) -> categories a product was seen in
     variety_images: dict = field(default_factory=dict)     # norm(clean) -> first evidence image
 
 
 def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisions | None = None) -> Curation:
     # The two inputs a curation is built from -- the existing-variety index and the alias model -- are
     # resolved through the PACKAGE at call time: the package facade is the one seam an operator harness or a
-    # test replaces (`curate.load_all_existing`, `curate._alias_model`), so the replacement reaches here.
+    # test replaces (`curate.load_existing`, `curate._alias_model`), so the replacement reaches here.
     from stone_pipeline.stages import curate as pkg
-    imports = pkg.load_all_existing()
+    existing = pkg.load_existing()
     resolver, near_meta = pkg._alias_model() if SETTINGS.curation.enable_alias_model else (None, {})
     # E7: a RETIRED variety is not a resolution target -- its name/aliases must NOT be in the surface, or a
     # scrape matching its spelling would resolve onto a retired Key and the product would get a null
@@ -81,14 +82,13 @@ def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisio
     # (the alias-aware existence check); unambiguous -> confirm the spelling as an alias, ambiguous -> review.
     # Owners are (name, TYPE) so 'Aqua Blue' resolves to FOUR distinct owners (one per type), not one entry.
     existing_surface: dict[str, set[tuple[str, str]]] = {}
-    for b in active_branches():
-        for v in imports[b].varieties:
-            if v.get("Key") in retired_keys:
-                continue
-            owner = (proj.norm(v["Name"]), v["type"])
-            existing_surface.setdefault(owner[0], set()).add(owner)
-            for al in alias_list(v.get("Aliases", "")):
-                existing_surface.setdefault(proj.norm(al), set()).add(owner)
+    for v in existing.varieties:
+        if v.get("Key") in retired_keys:
+            continue
+        owner = (proj.norm(v["Name"]), v["type"])
+        existing_surface.setdefault(owner[0], set()).add(owner)
+        for al in alias_list(v.get("Aliases", "")):
+            existing_surface.setdefault(proj.norm(al), set()).add(owner)
     # vocabulary of pure colour + stone-type words. A name made ONLY of these (e.g. 'Cream Quartzite',
     # 'Black Granite') is an unbranded GENERIC trade name -- its own underdog variety, never to be aliased
     # UP into a premium quarry-specific stone (the backbone lists such generics as aliases of the premium,
@@ -97,18 +97,19 @@ def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisio
     for cat in ("color", "type"):
         for canon, _id in ref.attributes.by_category.get(cat, {}).values():
             generic_words |= set(proj.norm(canon).split())
+    # The canonical Medusa stone types, by norm. A scraped type that is not one of these is not a real type (an
+    # un-normalized supplier spelling like 'Semiprecious') and must NEVER be minted into a Key: it holds for
+    # review instead. The mint identity gates on it, and a minted row carries the canonical NAME.
+    type_names = {proj.norm(t): t for t in ref.attributes.canonical_names("type")}
     return Curation(
-        rows=rows, ref=ref, imports=imports, existing_surface=existing_surface, generic_words=generic_words,
+        rows=rows, ref=ref, existing=existing, existing_surface=existing_surface, generic_words=generic_words,
         retired_keys=retired_keys,
         # the operator's decisions (the durable decision ledger, incl. the reject memory), ONE object: the
         # stage entry passes the one it loaded for the whole produce; a direct caller loads it here
         decisions=operator if operator is not None else decisions.load_decisions(),
         resolver=resolver, near_meta=near_meta,
         alias_floor=SETTINGS.curation.alias_suggest_floor,
-        # The canonical Medusa stone types. A scraped type that is not one of these is not a real type (an
-        # un-normalized supplier spelling like 'Semiprecious') and must NEVER be minted into a Key -- it
-        # holds for review instead. The mint identity gates on it.
-        valid_type_norms={proj.norm(t) for t in ref.attributes.canonical_names("type")},
+        type_names=type_names, valid_type_norms=set(type_names),
         last_resort_quality=active_pack().last_resort_quality,   # pack default when a mint has no observed quality
     )
 
@@ -129,7 +130,7 @@ def level(c: Curation, src_site: str, name: str, clean: str) -> str:
 
 def variety_identity(c: Curation, row: CanonicalRow) -> tuple[str, str, str]:
     """The (name, resolved stone_type, cleaned name) a row's variety is minted under -- computed ONE way so
-    the dedup, variety_branches, obs_union and the mint all agree on the identity (and its (type, name) key).
+    the dedup, variety_categories, obs_union and the mint all agree on the identity (and its (type, name) key).
 
     Type precedence is OPERATOR-AUTHORITATIVE, not scraper-authoritative: the operator's MINT decision type
     (seed_type) WINS (a supplier that names a product 'Lumiere Crystal' only SUGGESTS Crystal; an operator

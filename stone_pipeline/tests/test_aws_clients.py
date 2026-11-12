@@ -163,7 +163,7 @@ def test_the_photo_process_s_clients(built, monkeypatch, tmp_path):
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")                    # what the GPU target reads before its first call
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "j")
     _drive(lambda: process.reap("R1"))
-    monkeypatch.setattr(process, "unconfigured", lambda close_only=False: [])
+    monkeypatch.setattr(process, "unconfigured", lambda close_only=False, scoped=False: [])
     monkeypatch.setattr(process, "stop_on_signal", lambda *spends: None)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLOSE_ONLY", raising=False)
     monkeypatch.delenv("SCRAPER_STANDARDISE_CLICKS_ONLY", raising=False)
@@ -194,10 +194,10 @@ def test_the_variation_image_clients_honour_the_profile(built, monkeypatch):
     from stone_pipeline import catalog, prepare_variant_images, refresh_images
     from stone_pipeline.stages import emit_catalog
     _with_profile(monkeypatch, prepare_variant_images, refresh_images, emit_catalog)
-    catalog._s3_image_copier()
+    catalog._s3_object_copier()
     prepare_variant_images._s3_client()
     refresh_images._s3_client()
-    _drive(emit_catalog._s3_variation_keys)
+    _drive(emit_catalog._s3_icon_pairs)
     assert built == [_s3(BOUNDED, PROFILE)] * 4
 
 

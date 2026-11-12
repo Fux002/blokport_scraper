@@ -37,7 +37,7 @@ def test_the_overlay_gives_a_colourless_variety_its_documented_colour():
     # the overlay creates an absent record (the durable-membership mechanism) and grows a present one; either
     # way the variety a colourless listing binds to now has a colour for it to inherit
     bb = Backbone()
-    bb.by_norm_name["sparta white"] = [BackboneVariety(variant="Sparta White", category="Slabs", stone_type="Granite",
+    bb.by_norm_name["sparta white"] = [BackboneVariety(variant="Sparta White", stone_type="Granite",
                                                        colors=[], finishes=["Polished"], qualities=["A"], aliases=[])]
     dec = Decisions.from_statements(_rows({"source": "polonine", "spelling_norm": "sparta white",
                                            "spelling": "SPARTA WHITE", "name": "Sparta White",

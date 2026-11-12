@@ -56,7 +56,7 @@ BASE_IMAGE = None                     # using the hosted URL below
 BASE_IMAGE_URL = "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg"
 
 PROMPTS_FILE = os.environ.get("PROMPTS_FILE", "prompts_to_generate.json")  # override for targeted runs
-OUTPUT_DIR = Path("./images")               # writes {Key}.png (output_name = variant Key)
+OUTPUT_DIR = Path("./images")               # writes {Key}/{category}.png (output_name = the icon pair id)
 
 # --- MODEL SWITCH -----------------------------------------------------------
 # Pick which FLUX.2 tier to run. All share the same prompt + image_urls
@@ -130,7 +130,7 @@ DROP_PHRASES = [
 # Per-category preservation prompt: each category's base photo has a different
 # form (slabs stand on display stands; blocks/tiles do NOT), so the template must
 # match or the edit hallucinates the wrong shape (e.g. a stand onto a block).
-# Picked by the variant Key prefix (slab_/block_/tile_).
+# Picked by the queue item's own category (item_category), never from the Key.
 PROMPT_TEMPLATES = {
     "slab": (
         "Change only the stone material of this slab to {stone}. This is a "
@@ -251,7 +251,7 @@ def build_prompt(raw_prompt: str, category: str = "slab") -> str:
 
     stone = re.sub(r"\s+", " ", stone) + STONE_ONLY_GUARD   # keep it natural stone, not the literal name
     directives = clean_directives(directives)
-    template = PROMPT_TEMPLATES.get(category, PROMPT_TEMPLATES["slab"])
+    template = PROMPT_TEMPLATES[category]          # item_category checked it: never a silent slab
     return template.format(stone=stone, directives=directives).strip()
 
 
@@ -310,6 +310,7 @@ def save_image(content: bytes, out_path: Path) -> None:
     """Downscale to FINAL_SIZE locally (clean Lanczos) and save, or save as-is. Atomic: write a .tmp
     then os.replace, so a process killed mid-save never leaves a truncated {Key}.png that the resume
     scan (out_path.exists()) would then skip forever, shipping a corrupt image."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)     # a pair's icon is {Key}/{category}.png
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     if not FINAL_SIZE:
         tmp.write_bytes(content)
@@ -323,6 +324,16 @@ def save_image(content: bytes, out_path: Path) -> None:
         # from the REAL output extension (.png/.jpg), not the temp one.
         img.save(tmp, format=Image.registered_extensions().get(out_path.suffix.lower(), "PNG"))
     os.replace(tmp, out_path)
+
+
+def item_category(item: dict) -> str:
+    """The queue item's category (it carries its icon pair, spec rev 8 section 4). One this generator has no prompt
+    template for raises: it is never rendered as a slab."""
+    category = item.get("category") or ""
+    if category not in PROMPT_TEMPLATES:
+        raise ValueError(f"{item.get('output_name')!r}: no prompt template for category {category!r} "
+                         f"(have {sorted(PROMPT_TEMPLATES)})")
+    return category
 
 
 def generate_one(item: dict, base_sizes: dict) -> bool:
@@ -342,7 +353,11 @@ def generate_one(item: dict, base_sizes: dict) -> bool:
         return False
 
     base_url = item.get("base_image_url") or BASE_IMAGE_URL
-    category = (item.get("output_name") or "").split("_", 1)[0] or "slab"
+    try:
+        category = item_category(item)
+    except ValueError as exc:
+        record_failure(item, str(exc))
+        return False
     arguments = build_arguments(prompt, base_url, base_sizes.get(base_url), category)
     endpoint = MODELS[MODEL]["endpoint"]
 
@@ -424,7 +439,7 @@ def main() -> int:
         log(f"     {u.rsplit('/', 1)[-1]} -> {s}")
 
     # --- RESUME SCAN: skip images that already exist in OUTPUT_DIR -----------
-    existing = sorted(p.name for p in OUTPUT_DIR.glob(f"*.{OUTPUT_FORMAT}"))
+    existing = sorted(str(p.relative_to(OUTPUT_DIR)) for p in OUTPUT_DIR.rglob(f"*.{OUTPUT_FORMAT}"))
     todo = [it for it in items
             if not (OUTPUT_DIR / f"{it.get('output_name','stone')}.{OUTPUT_FORMAT}").exists()]
     already = len(items) - len(todo)

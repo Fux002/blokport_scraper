@@ -18,10 +18,11 @@ from stone_pipeline.config.settings import ENV_NAME, SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import populate, writethrough
-from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ready
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
 
-KEY = "slab_marble_carrara_0001"
+KEY = "marble__carrara_0001"
 SKU = "POL-AAA"
 
 
@@ -30,13 +31,15 @@ def ledger_path(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
     path = tmp_path / "dev.ledger"
-    with _open(path) as ledger:                     # a synced, textured variety, so its products are servable
+    with _open(path) as ledger:                     # a synced variety with a slab icon, so its products serve
         now = now_iso()
         ledger.upsert("variation", {
-            "key": KEY, "branch": "slab", "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
-            "image_url": f"https://bucket/variations/{KEY}.png", "volume": "", "medusa_id": "V1",
+            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
+            "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
+        add_icon(ledger, KEY)
+        seed_slab_category(ledger)
     return path
 
 
@@ -51,6 +54,7 @@ def _rule(monkeypatch, on):
 
 def _row(standard_photo, qty="5"):
     return CanonicalRow(src_site="polonine", surrogate_key="AAA", variation_key=KEY, handle="h-aaa", title="Carrara",
+                        category_pcat_id=SLAB_PCAT,
                         inventory_quantity=qty, thumbnail_key="products/AAA/thumb.webp",
                         product_image_keys=["products/AAA/1.webp"], standard_photo=standard_photo)
 
@@ -169,59 +173,9 @@ def test_a_stock_only_refresh_never_changes_the_photo_fact_or_the_reason(ledger_
     assert _state(ledger_path)[1:4] == (True, None, "synced")
 
 
-def _v10_ledger(p):
-    """A ledger as v10 left it: no photo_ready column, the rule's decision kept only as the stock reason."""
-    with Ledger.open(p, env="development") as lg:
-        now = now_iso()
-        for sku, reason in (("SEN-1", "no_photo"), ("SEN-2", None), ("SEN-3", "replaced_by_lot")):
-            lg.upsert("product", {"sku": sku, "source": "sen", "state": "synced", "created_at": now,
-                                  "updated_at": now}, pk=("sku",))
-            lg.upsert("inventory", {"sku": sku, "qty": 0, "reason": reason, "updated_at": now}, pk=("sku",))
-        lg.upsert("product", {"sku": "SEN-4", "source": "sen", "state": "synced", "created_at": now,
-                              "updated_at": now}, pk=("sku",))   # no stock row yet
-    raw = sqlite3.connect(p)
-    raw.execute("ALTER TABLE product DROP COLUMN photo_ready")
-    raw.execute("PRAGMA user_version = 10")
-    raw.execute("UPDATE ledger_meta SET schema_version = 10")
-    raw.commit()
-    raw.close()
-
-
 def _photo_ready_by_sku(lg):
     return {r["sku"]: r["photo_ready"] for r in lg.execute("SELECT sku, photo_ready FROM product")}
 
 
 needs_drop_column = pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 35, 0),
                                        reason="ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v10 shape")
-
-
-@needs_drop_column
-def test_a_v10_ledger_gains_photo_ready_from_the_stock_reason(tmp_path):
-    p = tmp_path / "mig.ledger"
-    _v10_ledger(p)
-    with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert _photo_ready_by_sku(lg) == {"SEN-1": 0, "SEN-2": 1, "SEN-3": 1, "SEN-4": 1}
-
-
-@needs_drop_column
-def test_a_migration_cut_short_after_adding_the_column_fills_it_on_the_next_open(tmp_path, monkeypatch):
-    p = tmp_path / "mig.ledger"
-    _v10_ledger(p)
-    migrate = Ledger._migrate
-
-    def crash_after_migrate(self, *args):
-        migrate(self, *args)
-        self.conn.close()                           # the process dies before the version bump and the commit
-        raise RuntimeError("crashed mid-migration")
-
-    monkeypatch.setattr(Ledger, "_migrate", crash_after_migrate)
-    with pytest.raises(RuntimeError):
-        Ledger.open(p, env="development")
-    monkeypatch.setattr(Ledger, "_migrate", migrate)
-    raw = sqlite3.connect(p)                        # the ALTER committed on its own; the version did not move
-    assert raw.execute("PRAGMA user_version").fetchone()[0] == 10
-    assert "photo_ready" in {r[1] for r in raw.execute("PRAGMA table_info(product)")}
-    raw.close()
-    with Ledger.open(p, env="development") as lg:
-        assert _photo_ready_by_sku(lg) == {"SEN-1": 0, "SEN-2": 1, "SEN-3": 1, "SEN-4": 1}

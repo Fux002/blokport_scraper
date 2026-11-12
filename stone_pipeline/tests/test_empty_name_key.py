@@ -107,8 +107,7 @@ def test_curate_never_pools_names_with_no_usable_key_into_one_card(monkeypatch):
     # silently dropped. Each such name must be listed, none minted or held, and every row keeps its gap.
     from stone_pipeline.core.schema import TreeGap
     from stone_pipeline.stages import curate
-    monkeypatch.setattr(curate, "load_all_existing", lambda: {
-        b: curate.ImportFile(branch=b, path=None) for b in ("slab", "block", "tile")})
+    monkeypatch.setattr(curate, "load_existing", lambda: curate.ImportFile(path=None))
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     rows = []
     names = ["黑金砂", "白麻", "Серый"]
@@ -118,7 +117,7 @@ def test_curate_never_pools_names_with_no_usable_key_into_one_card(monkeypatch):
                             gap_kind=GapKind.missing_variation))
         rows.append(row)
     res = curate.build_curation(rows, loaders.load_all())
-    assert not any(res.new_variants[b] for b in ("slab", "block", "tile"))
+    assert not res.new_variants
     assert not res.pending_confirm
     assert sorted(s["raw_name"] for s in res.suspicious_names) == sorted(names)
     assert all(any(g.gap_kind == GapKind.missing_variation for g in r.tree_gaps) for r in rows)

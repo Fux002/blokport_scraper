@@ -36,7 +36,7 @@ def test_seed_variations_carry_medusa_ids(tmp_path):
         assert n > 20000, f"expected the full variant catalog, got {n}"
         # a variation carries its real Medusa id and is synced after bootstrap
         row = ledger.execute(
-            "SELECT medusa_id, state, branch FROM variation WHERE key LIKE 'block_marble_%' "
+            "SELECT medusa_id, state, branch FROM variation WHERE key LIKE 'marble__marble_%' "
             "AND medusa_id IS NOT NULL LIMIT 1"
         ).fetchone()
         assert row is not None, "no block_marble variation seeded with an id"

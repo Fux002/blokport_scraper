@@ -51,9 +51,9 @@ def _s3_error(code: str) -> Exception:
 def _seed(path: Path, key: str) -> None:
     now = now_iso()
     with Ledger.open(path, env="development") as lg:
-        lg.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "x",
-                                "aliases": "[]", "image_url": "", "image_sha256": None,
-                                "image_model": None, "volume": "", "medusa_id": "MID-1", "in_full": 1,
+        lg.upsert("variation", {"key": key, "type": "Marble", "name": "x",
+                                "aliases": "[]",
+                                "medusa_id": "MID-1", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
 
@@ -63,7 +63,7 @@ def test_snapshot_round_trip_preserves_acked_ids(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
 
     src = tmp_path / "development.db"
-    _seed(src, "slab_marble_test_1")
+    _seed(src, "marble__test_1")
 
     assert snapshot.save(src, env="development") is True
     assert snapshot.snapshot_key("development") in {k for _, k in fake.store}
@@ -72,7 +72,7 @@ def test_snapshot_round_trip_preserves_acked_ids(tmp_path, monkeypatch):
     dest = tmp_path / "restored" / "development.db"
     assert snapshot.restore(dest, env="development") is True
     with Ledger.open(dest, env="development") as lg:
-        row = lg.get("variation", "key", "slab_marble_test_1")
+        row = lg.get("variation", "key", "marble__test_1")
         assert row is not None and row["medusa_id"] == "MID-1"   # the acked id survived the restart
 
 
@@ -80,7 +80,7 @@ def test_restore_never_clobbers_an_existing_ledger(tmp_path, monkeypatch):
     fake = _FakeS3()
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     existing = tmp_path / "development.db"
-    _seed(existing, "slab_local_1")
+    _seed(existing, "marble__local_1")
     snapshot.save(existing, env="development")           # a snapshot exists...
     # ...but a local ledger is already present -> restore must NOT overwrite it
     assert snapshot.restore(existing, env="development") is False
@@ -318,11 +318,11 @@ def test_an_unchanged_db_is_not_uploaded_again(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     snapshot._LAST_UPLOADED.clear()
     src = tmp_path / "development.db"
-    _seed(src, "slab_marble_test_1")
+    _seed(src, "marble__test_1")
     assert snapshot.save(src, env="development") is True
     assert snapshot.save(src, env="development") is True          # unchanged: still "saved" (it is on S3)
     assert uploads["n"] == 1, "an identical snapshot was uploaded again"
-    _seed(src, "slab_marble_test_2")                               # a real write
+    _seed(src, "marble__test_2")                               # a real write
     assert snapshot.save(src, env="development") is True
     assert uploads["n"] == 2
 
@@ -337,13 +337,13 @@ def test_a_restored_db_is_not_uploaded_back_over_a_newer_save(tmp_path, monkeypa
     snapshot._LAST_UPLOADED.clear()
     old = tmp_path / "old" / "development.db"
     old.parent.mkdir()
-    _seed(old, "slab_marble_test_1")
+    _seed(old, "marble__test_1")
     assert snapshot.save(old, env="development") is True
     snapshot._LAST_UPLOADED.clear()                                # the new task is a fresh process
     restored = tmp_path / "new" / "development.db"
     assert snapshot.restore(restored, env="development") is True
     key = (snapshot.S3_BUCKET, snapshot.snapshot_key("development"))
-    _seed(old, "slab_marble_test_2")                               # the old task's last write, then its final save
+    _seed(old, "marble__test_2")                               # the old task's last write, then its final save
     final = tmp_path / "final.db"
     snapshot._consistent_copy(old, final)
     fake.store[key] = final.read_bytes()
@@ -375,11 +375,11 @@ def test_concurrent_saves_leave_s3_and_the_record_on_the_newest_copy(tmp_path, m
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     snapshot._LAST_UPLOADED.clear()
     db = tmp_path / "development.db"
-    _seed(db, "slab_marble_test_1")
+    _seed(db, "marble__test_1")
     older = threading.Thread(target=snapshot.save, args=(db,), kwargs={"env": "development"})
     older.start()
     assert first_in_upload.wait(5)
-    _seed(db, "slab_marble_test_2")                                # a newer write, saved while the older upload runs
+    _seed(db, "marble__test_2")                                # a newer write, saved while the older upload runs
     newer = threading.Thread(target=snapshot.save, args=(db,), kwargs={"env": "development"})
     newer.start()
     newer.join(0.5)                                                # with one save at a time it waits for the older
@@ -400,7 +400,7 @@ def test_a_failed_save_names_the_key_it_was_for(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(snapshot, "_s3", lambda: _Down())
     snapshot._LAST_UPLOADED.clear()
     db = tmp_path / "config.db"
-    _seed(db, "slab_marble_test_1")
+    _seed(db, "marble__test_1")
     with caplog.at_level("ERROR"):
         assert snapshot.save_config(db, env="development") is False
     assert any(snapshot.config_key("development") in r.getMessage() for r in caplog.records)
@@ -416,10 +416,10 @@ def test_the_final_save_is_forced_so_a_cross_process_flip_cannot_survive_a_roll(
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     snapshot._LAST_UPLOADED.clear()
     db = tmp_path / "development.db"
-    _seed(db, "slab_marble_test_1")
+    _seed(db, "marble__test_1")
     older = tmp_path / "older.db"
     snapshot._consistent_copy(db, older)                           # the config server's copy, before the newer write
-    _seed(db, "slab_marble_test_2")
+    _seed(db, "marble__test_2")
     assert snapshot.save(db, env="development") is True            # the sync server: uploads and records the newer
     key = snapshot.snapshot_key("development")
     fake.store[(snapshot.S3_BUCKET, key)] = older.read_bytes()     # the config server's older upload lands last
