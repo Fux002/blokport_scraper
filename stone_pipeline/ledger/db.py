@@ -27,10 +27,16 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 15  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 20  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
-#                      migration (phase1.migrate_stores) writes v15 stores; an older ledger is refused (_apply_schema).
+#                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
+#                      v20 (provisional): variation_deleted -- the varieties Medusa acked deleted (table 575 / G5).
+#                      Merge order (the manager, 11-12; 575 lands before Monday's promotion): SC #677 merges AFTER
+#                      #596, #591 and C4 (SC #651), and BEFORE #634. Ledger numbers are assigned at merge (the queue
+#                      rule): SC #677 takes the next free number when it merges (v19 once those three are in), and
+#                      #634 renumbers after it. Never two PRs on one number.
+PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -171,15 +177,17 @@ class Ledger:
         # Apply the DDL once per database, not on every open (the sync server opens a connection per request).
         # PRAGMA user_version makes a reopen a no-op. A brand-new file (version 0) gets the schema; a ledger from
         # before phase 1 (1 to 14) is REFUSED: its rows carry old Keys, and only the store migration may turn them
-        # into v15 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
+        # into phase 1 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
+        # A phase 1 ledger (v15 on) gains the later tables in place: schema.sql's CREATE IF NOT EXISTS adds them.
         from_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if from_version >= SCHEMA_VERSION:
             return
-        if from_version > 0:
-            raise LedgerError(f"ledger schema {from_version} predates phase 1 (v{SCHEMA_VERSION}): run the store "
+        if 0 < from_version < PHASE1_VERSION:
+            raise LedgerError(f"ledger schema {from_version} predates phase 1 (v{PHASE1_VERSION}): run the store "
                               "migration (RUN_MODE=phase1-migrate), never open it in place")
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.conn.execute("UPDATE ledger_meta SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
         self.conn.commit()
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
