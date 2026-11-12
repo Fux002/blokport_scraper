@@ -168,7 +168,9 @@ def test_origin_card_carries_the_scraped_spelling(tmp_path, monkeypatch):
     from stone_pipeline.config import decisions_store
     from stone_pipeline.core.schema import FlagCode, ReviewFlag
     from stone_pipeline.stages import decisions
+    from stone_pipeline.config import store
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml()                            # the config server boot creates the store; a produce never does
     row = _row("Amazon Green Granite")
     row.variation_name, row.type_name, row.origin_source = "Amazonia", "Granite", "origin_needs_confirmation"
     row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_needs_confirmation, raw_value="BR",

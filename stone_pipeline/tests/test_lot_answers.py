@@ -16,8 +16,7 @@ CARD = {"ref": "sentas|2351", "sources": ["sentas"], "payload": {
 
 
 @pytest.fixture
-def store_with_card(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+def store_with_card(seeded_config_store):
     decisions_store.replace_pending("lot", [CARD])
 
 
@@ -65,10 +64,9 @@ def test_the_review_api_lists_and_answers_lot_cards(store_with_card):
 
 # -- the run writes its cards; the catalog puts the latest run's cards in the queue ----------------------
 
-def test_the_latest_complete_run_s_cards_become_the_review_queue(tmp_path, monkeypatch):
+def test_the_latest_complete_run_s_cards_become_the_review_queue(tmp_path, seeded_config_store):
     from stone_pipeline import catalog
     from stone_pipeline.stages import emit
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     for run, cards in (("sentas_20261001_000000", [CARD, {**CARD, "ref": "sentas|1"}]),
                        ("sentas_20261013_000000", [CARD])):
         (tmp_path / "out" / run / "diagnostics").mkdir(parents=True)
