@@ -242,7 +242,7 @@ def test_the_stores_are_the_base_the_backbone_the_global_renames_and_the_active_
     monkeypatch.setattr(decisions_store, "active_learned_aliases", lambda: [
         {"identity_key": ABS, "value": "Jet Black", "norm": "jet black", "method": "phonetic", "source": "pol",
          "status": "active", "first_seen": "", "decided_by": "migration", "decided_at": ""}], raising=False)
-    monkeypatch.setattr(cleanup, "_vocabulary", lambda: (frozenset({"granite"}), frozenset({"black"})))
+    monkeypatch.setattr(cleanup, "vocabulary", lambda: (frozenset({"granite"}), frozenset({"black"})))
     stores = cleanup.load_stores()
     assert stores.seed == {ABS: frozenset({"nero assoluto", "shanxi black", "black galaxy"}),
                            KASH: frozenset({"bianco kashmir"})}
