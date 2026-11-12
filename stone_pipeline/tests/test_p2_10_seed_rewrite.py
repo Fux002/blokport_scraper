@@ -100,13 +100,16 @@ def test_the_removed_list_is_exactly_the_shared_c1_judgement():
     listed."""
     from stone_pipeline.aliases.cleanup import seed_refusal
     from stone_pipeline.aliases.context import build_contexts
-    base = sorted({(r["Key"], r["Type"], r["Name"]) for _, r in _base_rows()})
+    # the shared seed is judged against the COMMITTED names only, never one env's live mints (manager, 11-12)
+    base = sorted({(r["Key"], r["Type"], r["Name"]) for source, r in _base_rows() if source != LIVE_ADDITIONS.name})
     contexts = build_contexts(base)
+    live = {r["Key"]: (r["Type"], r["Name"]) for source, r in _base_rows() if source == LIVE_ADDITIONS.name}
     posts = _posts()
 
     def refusal(key: str, value: str):
-        if key not in contexts:                      # a post with no base row: its variant among the base's names
-            contexts[key] = build_contexts([*base, (key, posts[key]["stone_type"], posts[key]["variant"])])[key]
+        if key not in contexts:                      # a live-only Key or a post with no base row: its own name
+            type_, name = live.get(key) or (posts[key]["stone_type"], posts[key]["variant"])
+            contexts[key] = build_contexts([*base, (key, type_, name)])[key]
         return seed_refusal(value, contexts[key], IS_CODE)
 
     listed = _differences("removed")
@@ -130,7 +133,17 @@ def test_named_moves():
     assert removed[("marble__white_super_0caae4a1-7d46-5dac-b34c-028b9616bac6", "White Super Es")] == "same_type_name"
 
 
-RENAMED_POSTS = 13                     # the manager's ruling (11-12): coded variants take the base Name
+def test_a_name_only_dev_minted_never_refuses_a_committed_alias():
+    """Kept (manager, 11-12): 'Amazon Green' names a granite only dev's live base holds, so it stays on the posts it
+    sits on; SC #638's gate enforces that collision per env at emit."""
+    posts = _posts()
+    for key in ("granite__verde_ubatuba_972a36ef-6ee7-5c61-8f5d-a784f1f9fe9d",
+                "granite__amazon_blue_a80acbf2-a6e2-5596-b25a-4a1b24f6f75f",
+                "granite__amazonia_34fba239-44f2-53cd-a95f-c94d82c47be4"):
+        assert "Amazon Green" in posts[key]["aliases"], key
+
+
+RENAMED_POSTS = 13                    # the manager's ruling (11-12): coded variants take the base Name
 
 
 def test_a_coded_post_variant_takes_its_base_name_and_keeps_the_coded_form_as_an_alias():
