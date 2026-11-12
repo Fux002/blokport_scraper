@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
 # image also carries its pin tag (prod-<sha12> / prod-gpu-<sha12>), which the ECR lifecycle keeps (DEPLOY.md).
-prod_image_tag     = "11da0088a0524214720aa5bdad7b81602a95cdf1"     # the BW candidate: eea91c5 + SC #637 (Brazilian White split, same-type alias removals, Volakas fold), data only; built by build-candidate (run 43168235103), digest fb62ffb5
+prod_image_tag     = "b9b0831de92b1431bbc7d3a4c32d1cfa7db43900"     # the C2b candidate: 11da0088 + SC #648 (Calcite Blue = Casa Blue, owner 12 Nov), data only; built by build-candidate (run 43206336786), digest 12fcc800; pin tag prod-b9b0831de92b
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
