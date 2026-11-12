@@ -284,7 +284,6 @@ class RunContext:
     run_log: logging.LoggerAdapter
     manifest: Manifest
     state_dir: Path
-    writeback_path: Path
     scrape_path: Optional[Path]
 
 
@@ -361,11 +360,9 @@ def _start(source: str, adapter: AdapterBase, acquired: Acquired, mode: OutputMo
     )
     manifest.totals["backend_fingerprint_ok"] = 1
     source_cfg = load_source(source)   # once: the floor, the vendor origin at Stage 4, the write-through
-    # write-back persists to state (production); tests pass a temp state_dir so a run never pollutes the repo's
-    # learned aliases
     return RunContext(source=source, adapter=adapter, source_cfg=source_cfg, ref=ref, mode=mode, run_id=run_id,
                       layout=layout, run_log=run_log, manifest=manifest, state_dir=state_dir,
-                      writeback_path=state_dir / "alias_writeback.csv", scrape_path=acquired.scrape_path)
+                      scrape_path=acquired.scrape_path)
 
 
 def preflight(ctx: RunContext, frame: pl.DataFrame, known_products_path: Optional[Path]) -> Preflight:
@@ -404,7 +401,7 @@ def preflight(ctx: RunContext, frame: pl.DataFrame, known_products_path: Optiona
     if report.status == health.FAILED:
         run_log.error("health FAILED; aborting before emit")
         raise RunAborted(stamp_failed=False)
-    # the row-count baseline is run state like the alias write-back: it lives in state_dir (the
+    # the row-count baseline is run state: it lives in state_dir (the
     # production default is the same state/ folder; a test's tmp state_dir keeps it private)
     health.update_baseline_if_ok(report, contract, health.now_iso(), path=ctx.state_dir / "scrape_baselines.json")
 
@@ -488,10 +485,10 @@ def resolve(ctx: RunContext, rows: list[CanonicalRow]) -> Resolved:
 
     # Stage 3: normalize
     _record(manifest, run_log, normalize.run(rows, ref))
-    # Stage 4: variation (collects alias write-back for persistence at run end). The source config carries
+    # Stage 4: variation (collects the learned guesses, proposed at run end). The source config carries
     # the vendor's declared origin, the matcher's origin evidence when a listing states none.
     writeback = WriteBack()
-    _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=ctx.writeback_path,
+    _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback,
                                                    generic_descriptor=ctx.adapter.generic_descriptor,
                                                    source_cfg=ctx.source_cfg))
     # Stage 5: reconcile tree
@@ -715,9 +712,9 @@ def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.Valid
             run_log.error("ledger write-through failed; Medusa will not receive this source until a "
                           "successful re-run", extra={"extra_fields": {"source": source_cfg.source_code}})
 
-    written = writeback.flush(ctx.writeback_path)
-    if written:
-        manifest.write_backs.append(f"alias_writeback:{written}")
+    proposed = writeback.flush()
+    if proposed:
+        manifest.write_backs.append(f"learned_alias_proposed:{proposed}")
     _write_diagnostics(manifest, ctx.layout)
     # the per-source product checklist
     write_steps_md(ctx.layout, source=ctx.source, run_id=ctx.run_id, health=ctx.manifest.health_status,

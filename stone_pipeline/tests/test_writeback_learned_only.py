@@ -3,8 +3,9 @@
 A bind the seed already decides (exact, exact narrowed by name / type / colour / origin, projection, override)
 is re-derived on every run, so saving it adds only stickiness: the saved pick outlived a later seed
 correction. Prod: four marenostone 'Volakas Marble' slabs bound to Spider Red by origin (exact_origin) and the
-pick was saved, so moving the seed alias to Volocas alone would have left them colliding. Hermetic: a
-hand-built index and a tmp file, runs in CI.
+pick was saved, so moving the seed alias to Volocas alone would have left them colliding. Since P2-10 C2 a learned
+guess is a proposal, and the one-time migration of the old file drops every non-learned pick. Hermetic: a
+hand-built index, runs in CI.
 """
 from __future__ import annotations
 
@@ -56,7 +57,9 @@ def test_a_fuzzy_bind_is_still_saved():
                        raw_type="Granite", raw_format="Slab")
     stage.resolve_row(row)
     assert row.variation_id == "a" and row.variation_method == "fuzzy"
-    assert stage.writeback.aliases == [("a", "Kashmir Goldx", "fuzzy")]
+    [(key, alias, method, source, score)] = stage.writeback.aliases
+    assert (key, alias, method, source) == ("granite__kashmir_golda_1", "Kashmir Goldx", "fuzzy", "zucchi")
+    assert 80 <= score < 100                                              # the fuzzy tier's own score
 
 
 def _volakas_index():
@@ -68,37 +71,21 @@ def _volakas_index():
     return idx
 
 
-def test_an_old_saved_origin_pick_no_longer_binds(tmp_path):
-    path = tmp_path / "alias_writeback.csv"
-    path.write_text("variation_id,alias,method\r\nspider_red,Volakas Marble,exact_origin\r\n", encoding="utf-8")
-    idx = _volakas_index()
-    match_variation._apply_writeback(idx, wb.load_alias_writeback(path))
-    m = VariationEngine(idx, auto_accept=92, review_floor=84).match("Volakas Marble", block_type="marble",
-                                                                    block_origin="IR")
-    assert m.cid == "volocas"
-    # the saved pick, had it been applied, makes Spider Red a second Iranian owner: a collision, held
+def test_an_old_saved_origin_pick_is_never_migrated_into_a_learned_alias():
+    from stone_pipeline.aliases import migrate_learned
+    from stone_pipeline.aliases.context import build_contexts
+    ledger = [{"key": "marble__spider_red_1", "type": "Marble", "name": "Spider Red", "medusa_id": "spider_red",
+               "in_full": 1, "state": "synced"}]
+    active, dropped = migrate_learned.plan([("spider_red", "Volakas Marble", "exact_origin")], ledger,
+                                           build_contexts([("marble__spider_red_1", "Marble", "Spider Red")]),
+                                           lambda value: False)
+    assert active == [] and [d["reason"] for d in dropped] == ["not_learned"]
+    # why: the saved pick, had it been applied, makes Spider Red a second Iranian owner, a collision, held
     stale = _volakas_index()
-    match_variation._apply_writeback(stale, [("spider_red", "Volakas Marble")])
+    stale.add_surface_alias("spider_red", "Volakas Marble")
     held = VariationEngine(stale, auto_accept=92, review_floor=84).match("Volakas Marble", block_type="marble",
                                                                          block_origin="IR")
     assert held.cid is None and held.method.endswith("_collision")
-
-
-def test_the_file_heals_on_the_next_flush_and_then_stays_untouched(tmp_path):
-    path = tmp_path / "alias_writeback.csv"
-    path.write_text("variation_id,alias,method\r\n"
-                    "spider_red,Volakas Marble,exact_origin\r\n"
-                    "v1,Kashmir Goldx,fuzzy\r\n"
-                    "v2,Some Spelling,clean_variety_exact\r\n", encoding="utf-8")
-    assert wb.WriteBack().flush(path) == 0                     # nothing new learned, but the file is healed
-    assert wb.load_alias_writeback_records(path) == [("v1", "Kashmir Goldx", "fuzzy")]
-    before = path.read_bytes()
-    assert wb.WriteBack().flush(path) == 0
-    assert path.read_bytes() == before                         # healed file: a re-run is a no-op
-
-
-def test_a_non_learned_alias_handed_to_flush_is_not_written(tmp_path):
-    path = tmp_path / "alias_writeback.csv"
-    w = wb.WriteBack()
-    w.add_alias("v1", "Narrowed Pick", method="exact_origin")
-    assert w.flush(path) == 0 and not path.exists()
+    fresh = VariationEngine(_volakas_index(), auto_accept=92, review_floor=84).match(
+        "Volakas Marble", block_type="marble", block_origin="IR")
+    assert fresh.cid == "volocas"
