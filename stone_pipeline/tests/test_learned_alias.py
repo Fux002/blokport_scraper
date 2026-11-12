@@ -156,7 +156,7 @@ def test_the_active_reader_is_sorted_and_creates_no_store(tmp_path, monkeypatch,
 # --- the matcher: active rows only, proposals from its guesses -------------------------------------------------------
 
 def _built_stage(monkeypatch):
-    """VariationStage.build over one hand-built index (candidate 'a' = KEY), so the learned rows it applies are seen."""
+    """VariationStage.build over one hand-built index (candidate 'a' = KEY)."""
     index = CandidateIndex()
     index.add("a", "Kashmir Golda", surfaces=[], block_type="granite")
     monkeypatch.setattr(match_variation, "build_variation_index", lambda table, backbone, origin_map=None: index)
@@ -166,15 +166,26 @@ def _built_stage(monkeypatch):
     return index
 
 
-def test_a_proposed_learned_alias_is_not_a_matcher_input(config_db, monkeypatch):
+def _table_aliases(tmp_path) -> list[str]:
+    """KEY's aliases in the matcher's variety table, its surfaces from the alias stores (P2-10 C3: the learned rows
+    reach the matcher through aliases.stores, the one place every store is read)."""
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.reference.loaders import load_variants
+    from stone_pipeline.reference.loaders.backbone import Backbone
+    path = tmp_path / "variants_export_base.csv"
+    path.write_text(f"Key,Name,Type\n{KEY},Kashmir Golda,Granite\n", encoding="utf-8")
+    return load_variants(path, alias_stores.scraper_stores(Backbone())).by_id[KEY].aliases
+
+
+def test_a_proposed_learned_alias_is_not_a_matcher_input(config_db, tmp_path):
     decisions_store.propose_learned_aliases([_proposal("Totally Other Name")])
-    assert "Totally Other Name" not in _built_stage(monkeypatch).candidates["a"].surfaces
+    assert "Totally Other Name" not in _table_aliases(tmp_path)
 
 
-def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, monkeypatch):
+def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, tmp_path):
     decisions_store.propose_learned_aliases([_proposal("Totally Other Name")])
     decisions_store.decide_learned_alias(KEY, "Totally Other Name", "active", "operator")
-    assert "Totally Other Name" in _built_stage(monkeypatch).candidates["a"].surfaces
+    assert "Totally Other Name" in _table_aliases(tmp_path)
 
 
 def test_the_matcher_no_longer_reads_the_alias_writeback_csv(config_db, monkeypatch, tmp_path):
