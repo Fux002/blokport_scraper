@@ -10,7 +10,7 @@ from typing import Optional
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.reference.loaders.common import env, norm
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import CATEGORY_HANDLES_COLUMN, AttributeValue, read_attributes
 
 # Vocabulary categories carried in attributes.csv (section 6), declared by the active product-domain pack
 # (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
@@ -84,13 +84,27 @@ def attributes_status_required(path: Path) -> bool:
     return ATTRIBUTES_STATUS_REQUIRED and Path(path) == env().SETTINGS.paths.attributes_csv
 
 
+def _foreign_type(value: AttributeValue, pack_handles: frozenset[str]) -> bool:
+    """A type of ANOTHER commodity on the platform (table 569): it has valid combinations, and none of them is in one
+    of the pack's categories (BlokPort's Steel or Wine for the stone pack). A type with no combination yet is the
+    pack's, so a new type still types its listings."""
+    return bool(value.category_handles) and pack_handles.isdisjoint(value.category_handles)
+
+
 def load_attributes(path: Path | None = None) -> Attributes:
-    """The name->id tables of every value that has an id (an id-less value cannot be emitted).
-    read_attributes guards conflicting duplicates."""
+    """The name->id tables of every value that has an id (an id-less value cannot be emitted), the type table
+    holding only the PACK's types. This is the one place the type vocabulary is scoped (table 569), so the type
+    words, the vocabulary words and the type resolution all read the same set. An attributes.csv without the
+    category_handles column is refused: without it a foreign type would read as the pack's. read_attributes
+    guards conflicting duplicates."""
+    path = Path(path or env().SETTINGS.paths.attributes_csv)
+    pack_handles = frozenset(c["plural"] for c in active_pack().categories)   # D11: a category's handle
     attrs = Attributes()
-    for a in read_attributes(Path(path or env().SETTINGS.paths.attributes_csv),
-                             require_status=ATTRIBUTES_STATUS_REQUIRED):
-        if not a.sourceid:
+    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if a.category == "type" and a.category_handles is None:
+            raise ValueError(f"{path}: missing required column {CATEGORY_HANDLES_COLUMN} (table 569): the type "
+                             "vocabulary cannot be scoped to the pack without it")
+        if not a.sourceid or (a.category == "type" and _foreign_type(a, pack_handles)):
             continue
         if a.category == "category":
             attrs.category_pcat[a.value] = a.sourceid

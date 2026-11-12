@@ -20,6 +20,9 @@ from stone_pipeline.core.text import match_key
 
 ATTRIBUTE_COLUMNS = ("category", "value", "sourceid")
 _STATUS_COLUMNS = ("status", "internal")
+# Table 569: on a `type` row, the product_category handles (D11) the type has a valid combination in, '|'-joined
+# ('' when it has none); empty on every other row. load_attributes scopes the type vocabulary to the pack with it.
+CATEGORY_HANDLES_COLUMN = "category_handles"
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
 # Key, Name and Type are the variation's identity (phase 1: a Key names one stone of one type, and Type is its
@@ -41,6 +44,8 @@ class AttributeValue:
     sourceid: str
     status: str        # "active" | "archived"
     internal: bool
+    # the type's product_category handles (table 569), sorted; None when the file has no category_handles column
+    category_handles: tuple[str, ...] | None = None
 
     @property
     def assignable(self) -> bool:
@@ -65,7 +70,8 @@ def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeV
         if not category or not value:
             continue
         item = AttributeValue(category, value, (row.get("sourceid") or "").strip(),
-                              _status(row, fields, label, line), _internal(row, fields, label, line))
+                              _status(row, fields, label, line), _internal(row, fields, label, line),
+                              _category_handles(row, fields))
         _guard_duplicate(ids, item, label)
         out.append(item)
     return out
@@ -143,6 +149,12 @@ def _parse(handle, label: str, required: tuple[str, ...]) -> Iterator[tuple[int,
         raise ValueError(f"{label}: missing required column(s) {', '.join(missing)}")
     for row in reader:
         yield reader.line_num, row, fields
+
+
+def _category_handles(row: dict, fields: set[str]) -> tuple[str, ...] | None:
+    if CATEGORY_HANDLES_COLUMN not in fields:
+        return None
+    return tuple(sorted({h.strip() for h in (row.get(CATEGORY_HANDLES_COLUMN) or "").split("|") if h.strip()}))
 
 
 def _status(row: dict, fields: set[str], label: str, line: int) -> str:
