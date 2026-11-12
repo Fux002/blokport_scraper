@@ -78,11 +78,11 @@ dev_standardise_clean_budget_usd  = "10"
 prod_standardise_clean_budget_usd = "35" # 3D run: Nov clean spend to date 0 (no clean-spend file, the same read) + 35
 dev_standardise_gpu_vcpus         = 32
 prod_standardise_gpu_vcpus        = 128
-# The prod 3D run (PROD_3D_RUN_PLAN_v2): one scoped photos run over the scope file below, capped at the owner's 235 USD
-# in all (select.RunCap binds both budgets above). Set for that run only, then both back to "" (while the scope is
-# set, every photos run is scoped and a close-only or clicks-only run is refused).
-prod_standardise_scope_key   = "prod/standardise-test/scope/prod-3d-run-2026-11.json"
-prod_standardise_run_cap_usd = "235"
+# A scoped photos run (a scope file plus its own cap, select.RunCap): unset, every photos run works all new and changed
+# photos within the monthly budgets above. The prod 3D run (PROD_3D_RUN_PLAN_v2, scope 52fd255b, cap 235) ran on
+# 2026-11-11 and was unscoped afterwards (owner: "back to normal").
+prod_standardise_scope_key   = ""
+prod_standardise_run_cap_usd = ""
 # The overnight photos run (deploy.start_photos_run, infra/modules/sync_service/photos_nightly.tf): the schedule exists
 # in both environments and is off until the owner switches it on; on or off is one apply that never rolls the service.
 dev_photos_nightly  = false
