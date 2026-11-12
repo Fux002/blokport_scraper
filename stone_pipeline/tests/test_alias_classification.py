@@ -406,3 +406,70 @@ def test_c5_judges_with_c2_s_builder_over_the_live_varieties(ledger):
     expected = {(ABS, v): why for v in ("Black", "Kashmir White", "Nero Assoluto", "G654")
                 if (why := cleanup.seed_refusal(v, context, stores.is_code))}
     assert removed == expected == {(ABS, "Black"): "bare_vocabulary_word", (ABS, "Kashmir White"): "same_type_name"}
+
+
+# --- the open review items (alias_cleanup_open.csv; agreed with Scraper C6, 11-12) ---------------------------------------
+def test_the_open_items_file_is_header_only_when_empty_and_sorted():
+    from stone_pipeline.aliases import open_items
+    assert open_items.open_items_bytes([]) == b"kind,Key,Value,reason\n"
+    body = open_items.open_items_bytes([("digit_non_code", KASH, "Bianco 2000", "digit_not_code"),
+                                        ("admin_refused", ABS, "Black", "bare_vocabulary_word"),
+                                        ("digit_non_code", ABS, "Nero 3", "digit_not_code")])
+    assert body.decode("utf-8") == ("kind,Key,Value,reason\n"
+                                    f"admin_refused,{ABS},Black,bare_vocabulary_word\n"
+                                    f"digit_non_code,{ABS},Nero 3,digit_not_code\n"
+                                    f"digit_non_code,{KASH},Bianco 2000,digit_not_code\n")
+    with pytest.raises(ValueError, match="kind"):
+        open_items.open_items_bytes([("other", ABS, "x", "y")])
+
+
+def test_the_open_items_read_back_and_a_bad_header_is_named(tmp_path):
+    from stone_pipeline.aliases import open_items
+    path = tmp_path / open_items.OPEN_FILE
+    assert open_items.read_open_items(path) is None                          # absent
+    path.write_bytes(open_items.open_items_bytes([("digit_non_code", ABS, "Nero 3", "digit_not_code")]))
+    assert open_items.read_open_items(path) == [
+        {"kind": "digit_non_code", "key": ABS, "value": "Nero 3", "reason": "digit_not_code"}]
+    path.write_text("kind,Key,Value\n", encoding="utf-8")
+    with pytest.raises(open_items.OpenItemsUnreadable, match=open_items.OPEN_FILE):
+        open_items.read_open_items(path)
+
+
+def test_a_digit_bearing_alias_that_is_not_a_code_is_an_open_item(ledger):
+    _variation(ledger, ABS, "Absolute Black", "Granite", aliases=["Nero 3", "G654", "Shanxi Black", "Black"])
+    _variation(ledger, KASH, "Kashmir White", "Granite", aliases=["Bianco 2000"])
+    stores = _stores(seed={ABS: ["Shanxi Black", "Black"], KASH: ["Bianco 2000"]},
+                     operator={("Absolute Black", "Granite"): ["Nero 3"]})
+    assert cleanup.digit_items(cleanup.classify(ledger, stores)) == [
+        ("digit_non_code", ABS, "Nero 3", "digit_not_code"), ("digit_non_code", KASH, "Bianco 2000", "digit_not_code")]
+
+
+def test_an_admin_alias_failing_the_boundary_is_an_open_item(tmp_path):
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id,Key,Name,Type,Aliases,AdminAliases,AdminCodes\n"
+                      f"v1,{ABS},Absolute Black,Granite,,Black|Nero Assoluto|G602,\n"
+                      f"v2,{KASH},Kashmir White,Granite,,Kashmir White Granite,\n", encoding="utf-8")
+    items = cleanup.admin_items(export, code_matcher(r"[Gg]\d+[A-Za-z]?"))
+    assert items == [("admin_refused", ABS, "Black", "bare_vocabulary_word"), ("admin_refused", ABS, "G602", "is_code"),
+                     ("admin_refused", KASH, "Kashmir White Granite", "own_name_type_word")]
+
+
+def test_an_export_without_admin_aliases_gives_no_admin_items_and_says_so(tmp_path, caplog):
+    export = tmp_path / "variants_export.csv"
+    export.write_text(f"Id,Key,Name,Type,Aliases\nv1,{ABS},Absolute Black,Granite,Black\n", encoding="utf-8")
+    assert cleanup.admin_items(export, code_matcher(None)) is None
+    assert "AdminAliases" in caplog.text
+
+
+def test_the_route_writes_the_open_items_and_reports_the_admin_rows(service, monkeypatch, tmp_path):
+    from stone_pipeline import lifecycle
+    from stone_pipeline.aliases import open_items
+    monkeypatch.setattr(cleanup, "_bucket_prefix", lambda: ("bucket", service["prefix"]))
+    monkeypatch.setattr(cleanup, "_export_file", lambda: tmp_path / "absent_export.csv")
+    with Ledger.open(service["path"], env="development") as lg:
+        _variation(lg, KASH, "Kashmir White", "Granite", aliases=["Bianco 2000"])
+    monkeypatch.setattr(cleanup, "load_stores", lambda: _stores(seed={ABS: ["Nero Assoluto"], KASH: ["Bianco 2000"]}))
+    body, code = lifecycle.alias_classification()
+    assert code == 200 and (body["open_items"], body["admin_rows"]) == (1, "absent")
+    assert open_items.read_open_items(tmp_path / "review" / open_items.OPEN_FILE) == [
+        {"kind": "digit_non_code", "key": KASH, "value": "Bianco 2000", "reason": "digit_not_code"}]
