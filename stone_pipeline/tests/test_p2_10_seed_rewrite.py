@@ -151,8 +151,9 @@ def test_a_coded_post_variant_takes_its_base_name_and_keeps_the_coded_form_as_an
     names = {r["Key"]: r["Name"] for _, r in _base_rows()}
     renamed = _differences("renamed")
     assert len(renamed) == RENAMED_POSTS
+    # the coded form stays through the base's alias, in the base's spelling ('Red Wendeng-z' for 'Red Wendeng-Z')
     assert [(r["Key"], r["Value"]) for r in renamed if posts[r["Key"]]["variant"] != names[r["Key"]]
-            or r["Value"] not in posts[r["Key"]]["aliases"]] == []
+            or match_key(r["Value"]) not in {match_key(a) for a in posts[r["Key"]]["aliases"]}] == []
     rosal = posts["limestone__rosal_10cbf934-0687-5e6b-a23b-50afe310f65f"]
     assert rosal["variant"] == "Rosal" and "Rosal B" in rosal["aliases"]
 
