@@ -352,3 +352,30 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     produce.run(None, "inventory")
     assert calls == ["fetch", "migrate", "build"]
+
+
+# --- a proposal never leaves a store that hides sources.yaml (CI's `certify all`, 12 Nov) ------------------------------
+
+def test_a_proposal_on_a_host_without_config_db_seeds_the_store_like_the_config_server(tmp_path, monkeypatch):
+    # the config server seeds a new config.db from sources.yaml at boot; a store first created by a proposal must hold
+    # the same sources, or load_sources reads it (store.config_db_path().exists()) and finds none
+    from stone_pipeline.config.sources import load_sources, load_yaml_sources
+    path = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    assert not path.exists()
+    decisions_store.propose_learned_aliases([_proposal("Kashmir Goldx")])
+    assert path.exists() and set(load_sources()) == set(load_yaml_sources()) != set()
+
+
+@pytest.fixture(scope="module")
+def module_config_db():
+    import os
+    return os.environ.get("BLOKPORT_CONFIG_DB")
+
+
+def test_a_module_scoped_fixture_sees_an_isolated_config_store(module_config_db):
+    # a module-scoped fixture runs before the function-scoped isolation; it must not reach the checkout's config.db
+    from pathlib import Path
+    from stone_pipeline.config.settings import SETTINGS
+    assert module_config_db and Path(module_config_db) != SETTINGS.paths.workspace_root / "config.db"
+    assert not Path(module_config_db).exists()
