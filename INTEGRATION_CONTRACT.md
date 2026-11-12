@@ -243,7 +243,7 @@ GET `/sync/v1/inventory` item payloads:
   unpublishes every product as `delisted` instead of tombstoning, and a hard or factory reset and a seed variety drop
   spare it. A reset re-serves a spared gone listing once from zero (Medusa is wiped too on a factory reset). A
   delisted (vendor-removed or taken offline) listing is spared the same way. A variety
-  a gone listing shows cannot be retired or unminted (409, naming the gone SKUs).
+  a gone or delisted listing shows cannot be retired or unminted (409, naming those SKUs).
 - Condition of done (505): the backend lanes never unpublish or hard-delete a `sold_out` listing. The inventory lane
   stops rejecting it when it is not on sale, and `held` joins the hide set. The scraper half reaches a pull only with or
   after that change.

@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, GONE_SKUS_SQL, KEPT_SKUS_SQL,
+from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, KEPT_SKUS_SQL,
                                       RECORD_SYNCED_STOCK_SQL,
                                       RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql,
                                       now_iso, on_sale_sql, variation_icons)
@@ -1036,15 +1036,16 @@ def variation_live_products(ledger: Ledger, key: str) -> int:
     return int(row["n"]) if row else 0
 
 
-class GoneListingsShowVariety(RuntimeError):
-    """A variety some gone listing shows cannot be retired: retiring cascades its products, and a gone listing's record
-    is never deleted (table 505). Raised whatever `force` says: the operator moves or decides those listings first."""
+class KeptListingsShowVariety(RuntimeError):
+    """A variety some kept record shows (a gone or delisted listing, db.KEPT_SKUS_SQL) cannot be retired: retiring
+    cascades its products, and a kept record is never deleted (table 505), the one rule a reset follows too. Raised
+    whatever `force` says: the operator moves or decides those listings first."""
 
 
-def variation_gone_listings(ledger: Ledger, key: str) -> list[str]:
-    """The SKUs of the gone listings (gone_at set) that show this variety, sorted."""
+def variation_kept_listings(ledger: Ledger, key: str) -> list[str]:
+    """The SKUs of the kept records (db.KEPT_SKUS_SQL) that show this variety, sorted."""
     return [r["sku"] for r in ledger.execute(
-        f"SELECT sku FROM product WHERE variation_key = ? AND sku IN ({GONE_SKUS_SQL}) ORDER BY sku", (key,))]
+        f"SELECT sku FROM product WHERE variation_key = ? AND sku IN ({KEPT_SKUS_SQL}) ORDER BY sku", (key,))]
 
 
 def retire_variation(ledger: Ledger, key: str, force: bool = False,
@@ -1055,9 +1056,10 @@ def retire_variation(ledger: Ledger, key: str, force: bool = False,
     never-synced variety: Medusa never received it, so there is nothing to tell it to delete). The caller
     (lifecycle) has already guarded existence + the live-product precondition. Serve-in-flight guarded."""
     _lock_and_check_in_flight(ledger)
-    if gone := variation_gone_listings(ledger, key):
-        raise GoneListingsShowVariety(f"variety {key!r} is shown by {len(gone)} gone listing(s) {', '.join(gone)}: "
-                                      "their records stay (table 505); move them to another variety first")
+    if kept := variation_kept_listings(ledger, key):
+        raise KeptListingsShowVariety(f"variety {key!r} is shown by {len(kept)} gone or delisted listing(s) "
+                                      f"{', '.join(kept)}: their records stay (table 505); move them to another "
+                                      "variety first")
     var = ledger.get("variation", "key", key)
     prods = ledger.execute("SELECT sku, source FROM product WHERE variation_key = ?", (key,)).fetchall()
     if prods:                                  # E1: product tombstones (serve before the variation one)
