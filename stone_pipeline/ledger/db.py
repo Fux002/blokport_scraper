@@ -46,6 +46,9 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 HIDDEN_REASONS = ("no_photo", "delisted", "held")
 # The products a gone listing is (populate_discontinued stamped it): their records are never deleted or tombstoned.
 GONE_SKUS_SQL = "SELECT sku FROM inventory WHERE gone_at IS NOT NULL"
+# The records a reset or a seed drop keeps (Mas, table 505): the gone listings and the delisted (vendor-removed or
+# taken offline) ones. No re-scrape brings either back, and their records, photos and textures are permanent.
+KEPT_SKUS_SQL = "SELECT sku FROM inventory WHERE gone_at IS NOT NULL OR reason = 'delisted'"
 
 
 def on_sale_sql(alias: str) -> str:

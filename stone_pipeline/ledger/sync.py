@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, GONE_SKUS_SQL,
+from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, GONE_SKUS_SQL, KEPT_SKUS_SQL,
                                       RECORD_SYNCED_STOCK_SQL,
                                       RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql,
                                       now_iso, on_sale_sql, variation_icons)
@@ -783,12 +783,13 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
             continue
         survivor = survivor_of(keys, seed_keys)
         dedup += [k for k in keys if k != survivor and k not in protected]
-    # a variety a gone listing shows stays: the listing's record is never deleted (table 505), and it is reported
-    gone_keys = {r["variation_key"] for r in ledger.execute(
-        f"SELECT DISTINCT variation_key FROM product WHERE sku IN ({GONE_SKUS_SQL})")}
-    kept_for_gone = sorted(k for k in dedup + stale if k in gone_keys)
-    dedup = [k for k in dedup if k not in gone_keys]
-    stale = [k for k in stale if k not in gone_keys]
+    # a variety a kept record shows (a gone or delisted listing, db.KEPT_SKUS_SQL) stays: that record is never deleted
+    # (table 505), and the variety is reported
+    kept_keys = {r["variation_key"] for r in ledger.execute(
+        f"SELECT DISTINCT variation_key FROM product WHERE sku IN ({KEPT_SKUS_SQL})")}
+    varieties_kept = sorted(k for k in dedup + stale if k in kept_keys)
+    dedup = [k for k in dedup if k not in kept_keys]
+    stale = [k for k in stale if k not in kept_keys]
     dropped = dedup + stale
     if dropped:
         for keys, reason in ((dedup, "reseed_dedup"), (stale, "not_in_seed")):
@@ -810,9 +811,9 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
         ledger.execute(f"DELETE FROM variation WHERE key IN ({q})", tuple(dropped))
     log.warning("variation table reconciled to seed (dedup old sides + drop non-seed leftovers)",
                 extra={"extra_fields": {"tombstoned_dropped": len(dropped), "dedup": len(dedup),
-                                        "not_in_seed": len(stale), "kept_for_gone": kept_for_gone}})
+                                        "not_in_seed": len(stale), "varieties_kept": varieties_kept}})
     return {"tombstoned_dropped": len(dropped), "dedup": len(dedup),
-            "not_in_seed": len(stale), "dropped_keys": dropped, "kept_for_gone": kept_for_gone}
+            "not_in_seed": len(stale), "dropped_keys": dropped, "varieties_kept": varieties_kept}
 
 
 def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
@@ -869,27 +870,28 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
         # pull leaves them as orphans forever. A product Medusa never received is dropped silently. Mirrors
         # retire_variation's E2 synced-only rule.
         # the SELECT already has a WHERE, so fold a scoped source filter in as AND (not a second WHERE)
-        # A gone listing is spared: its record is never deleted (table 505), and it is never scraped again to come back.
+        # A kept record (a gone or delisted listing, db.KEPT_SKUS_SQL) is spared: it is never deleted (table 505), and
+        # no re-scrape brings it back.
         src_and = where.replace(" WHERE ", " AND ", 1) if scoped else ""
-        not_gone = f"sku NOT IN ({GONE_SKUS_SQL})"
-        out["gone_kept"] = ledger.execute(
-            f"SELECT COUNT(*) FROM product WHERE sku IN ({GONE_SKUS_SQL}){src_and}", params).fetchone()[0]
+        not_kept = f"sku NOT IN ({KEPT_SKUS_SQL})"
+        out["records_kept"] = ledger.execute(
+            f"SELECT COUNT(*) FROM product WHERE sku IN ({KEPT_SKUS_SQL}){src_and}", params).fetchone()[0]
         synced = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE {in_medusa_sql('p')}{src_and} "
-                                f"AND p.{not_gone}", params).fetchall()
+                                f"AND p.{not_kept}", params).fetchall()
         if synced:
             record_tombstones(ledger, [(r["sku"], r["source"]) for r in synced],
                               reason="reset_dropped", kind="product")
         out["product_tombstoned"] = len(synced)
         out["inventory"] = ledger.execute(
-            f"DELETE FROM inventory WHERE gone_at IS NULL AND sku IN (SELECT sku FROM product{where})",
-            params).rowcount if scoped else ledger.execute("DELETE FROM inventory WHERE gone_at IS NULL").rowcount
+            f"DELETE FROM inventory WHERE {not_kept} AND sku IN (SELECT sku FROM product{where})",
+            params).rowcount if scoped else ledger.execute(f"DELETE FROM inventory WHERE {not_kept}").rowcount
         out["product"] = ledger.execute(
-            f"DELETE FROM product{where}{' AND ' if where else ' WHERE '}{not_gone}", params).rowcount
-        # the spared gone listings re-serve once from zero, as a soft reset does: a coordinated factory reset wipes
-        # Medusa too, so a record kept with its old sync overlay would never be sent again
-        gone_scope = f"{where}{' AND ' if where else ' WHERE '}sku IN ({GONE_SKUS_SQL})"
-        _reset_overlay(ledger, "product", now, gone_scope, params)
-        ledger.execute(f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL}, updated_at = ? WHERE gone_at IS NOT NULL"
+            f"DELETE FROM product{where}{' AND ' if where else ' WHERE '}{not_kept}", params).rowcount
+        # the spared records re-serve once from zero, as a soft reset does: a coordinated factory reset wipes Medusa
+        # too, so a record kept with its old sync overlay would never be sent again
+        kept_scope = f"{where}{' AND ' if where else ' WHERE '}sku IN ({KEPT_SKUS_SQL})"
+        _reset_overlay(ledger, "product", now, kept_scope, params)
+        ledger.execute(f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL}, updated_at = ? WHERE sku IN ({KEPT_SKUS_SQL})"
                        + (f" AND sku IN (SELECT sku FROM product{where})" if scoped else ""), (now, *params))
     else:                                      # keep the rows, just re-serve them from zero
         out["product"] = _reset_overlay(ledger, "product", now, where, params)
