@@ -177,3 +177,29 @@ def test_emit_derives_aliases_and_the_sidecar_from_the_scraper_stores(tmp_path, 
     sidecar = json.loads((out.parent / alias_payload.ALIAS_SIDECAR).read_text(encoding="utf-8"))
     assert sidecar == {CASA: {"alias_rows": [{"value": "Azul Casa", "method": "seed"},
                                              {"value": "Casablue", "method": "learned"}], "codes": ["G603"]}}
+
+
+# --- curate reads every surface from the stores, never the export's Aliases (P2-7 dropped the column) ----------------
+def test_curate_s_existing_index_carries_each_variety_s_surfaces_from_the_stores(tmp_path, monkeypatch):
+    # curate's alias-aware existence check (a known spelling never mints a duplicate) sees exactly the matcher's
+    # surfaces: the scraper's stores, the hand rows, and the codes
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.aliases.surfaces import Stores
+    from stone_pipeline.stages.curate import existing
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id,Key,Name,Image,AdminAliases,AdminCodes,status,Type,owner\n"
+                      f"var_g,{GALAXY},Black Galaxy,,Star Galaxy,G654,active,Granite,\n", encoding="utf-8")
+    monkeypatch.setattr(existing, "existing_varieties_file", lambda: export)
+    monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores(
+        seed={GALAXY: (["Galaxy Nero"], ["G603"])}, learned=[(GALAXY, "Blak Galaxy")]))
+    imp = existing.load_existing()
+    surfaces = imp.by_name_type[("black galaxy", "granite")]["Aliases"].split("|")
+    assert sorted(surfaces) == sorted(["Galaxy Nero", "Blak Galaxy", "Star Galaxy", "G603", "G654"])
+
+
+def test_a_delta_row_the_export_already_holds_is_not_republished():
+    # curate proposes aliases to learned_alias (C2), so a delta row is real only for a variety the export lacks
+    from stone_pipeline.stages.curate import output
+    rows = [{"Key": CASA, "Name": "Casa Blue", "Type": "Marble", "Aliases": "New Spelling"},
+            {"Key": GALAXY, "Name": "Black Galaxy", "Type": "Granite", "Aliases": ""}]
+    assert output.new_variety_rows(rows, export_keys={CASA}) == [rows[1]]
