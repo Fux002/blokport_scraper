@@ -60,6 +60,18 @@ def _isolate_config_store(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
 
 
+@pytest.fixture
+def seeded_config_store(monkeypatch, tmp_path_factory):
+    """A private config.db seeded from the committed sources.yaml, as the config server seeds it at boot. For a test
+    that runs several sources in one process: a run proposes its learned guesses into config.db (P2-10 C2), and a
+    store first created by that write would hold no sources, so the next source's load_source would find none."""
+    from stone_pipeline.config import store
+    path = tmp_path_factory.mktemp("config") / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _clear_vocab_caches():
     """The colour/type recognition vocab is lazily loaded and lru-cached from attributes.csv + the synonym

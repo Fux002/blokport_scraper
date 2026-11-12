@@ -97,7 +97,7 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
 
     res2 = curate.build_curation(rows2, ref2)
     assert res2.new_variants == []                     # no re-mint: the decision is spent
-    assert all(a.get("_status") != "pending" for a in res2.alias_additions)
+    assert res2.learned_proposals == []                 # the bind is the operator's: nothing is guessed
 
 
 def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monkeypatch):

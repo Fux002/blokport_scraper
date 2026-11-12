@@ -50,13 +50,20 @@ def _stores(seed=None, operator=None, learned=None, pattern=r"[Gg]\d+[A-Za-z]?")
                           operator={(match_key(n), match_key(t)): frozenset(match_key(v) for v in vs)
                                     for (n, t), vs in (operator or {}).items()},
                           learned={k: frozenset(match_key(v) for v in vs) for k, vs in (learned or {}).items()},
-                          type_words=frozenset({"granite", "marble"}),
-                          vocabulary_keys=frozenset({"black", "white", "polished", "granite", "marble"}),
                           is_code=code_matcher(pattern))
 
 
 def _rows(classification):
     return [tuple(r) for r in classification.rows]
+
+
+@pytest.fixture(autouse=True)
+def _vocabulary(monkeypatch):
+    """C2's one context builder (aliases.context), on a fixed vocabulary instead of this env's attributes export."""
+    from stone_pipeline.aliases import context
+    monkeypatch.setattr(context, "_clear_type_words", lambda: frozenset({"granite", "marble"}))
+    monkeypatch.setattr(context, "vocabulary_keys", lambda: frozenset({"black", "white", "polished", "granite",
+                                                                       "marble"}))
 
 
 @pytest.fixture
@@ -242,7 +249,6 @@ def test_the_stores_are_the_base_the_backbone_the_global_renames_and_the_active_
     monkeypatch.setattr(decisions_store, "active_learned_aliases", lambda: [
         {"identity_key": ABS, "value": "Jet Black", "norm": "jet black", "method": "phonetic", "source": "pol",
          "status": "active", "first_seen": "", "decided_by": "migration", "decided_at": ""}], raising=False)
-    monkeypatch.setattr(cleanup, "vocabulary", lambda: (frozenset({"granite"}), frozenset({"black"})))
     stores = cleanup.load_stores()
     assert stores.seed == {ABS: frozenset({"nero assoluto", "shanxi black", "black galaxy"}),
                            KASH: frozenset({"bianco kashmir"})}
@@ -378,38 +384,25 @@ def test_csv_reads_back_as_written(ledger):
 
 
 # --- the one `removed` judgement, shared with the seed rewrite (Scraper seed, 11-12) --------------------------------------
-def test_the_context_drops_the_variety_s_own_name_from_its_type_s_names():
-    names = {"granite": {"absolute black", "kashmir white"}, "marble": {"carrara"}}
-    context = cleanup.alias_context("Absolute Black", "Granite", names, frozenset({"granite"}), frozenset({"black"}))
-    assert context.same_type_name_keys == frozenset({"kashmir white"}) and context.own_name == "Absolute Black"
-    assert (context.type_words, context.vocabulary_keys) == (frozenset({"granite"}), frozenset({"black"}))
-    assert names["granite"] == {"absolute black", "kashmir white"}           # the caller's map is not changed
-
-
 def test_seed_refusal_is_the_c1_reason_and_a_code_is_never_a_refusal():
+    from stone_pipeline.aliases.context import build_contexts
     is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
-    context = cleanup.alias_context("Absolute Black", "Granite", {"granite": {"kashmir white"}},
-                                    frozenset({"granite"}), frozenset({"black"}))
+    context = build_contexts([(ABS, "Granite", "Absolute Black"), (KASH, "Granite", "Kashmir White")])[ABS]
     assert cleanup.seed_refusal("G654", context, is_code) is None              # a code moves to `codes`, never removed
     assert cleanup.seed_refusal("Black", context, is_code) == "bare_vocabulary_word"
     assert cleanup.seed_refusal("Kashmir White", context, is_code) == "same_type_name"
     assert cleanup.seed_refusal("Nero Assoluto", context, is_code) is None
 
 
-def test_the_vocabulary_is_public(monkeypatch):
-    from stone_pipeline.adapters import tokens
-    monkeypatch.setattr(tokens, "_clear_type_words", lambda: frozenset({"granite"}))
-    monkeypatch.setattr(tokens, "known_values", lambda kind: {"color": ("Black",)}.get(kind, ()))
-    assert cleanup.vocabulary() == (frozenset({"granite"}), frozenset({"black"}))
-
-
-def test_c5_s_removed_set_is_seed_refusal_over_the_same_names(ledger):
+def test_c5_judges_with_c2_s_builder_over_the_live_varieties(ledger):
+    from stone_pipeline.aliases.context import build_contexts
     _variation(ledger, ABS, "Absolute Black", "Granite", aliases=["Black", "Kashmir White", "Nero Assoluto", "G654"])
     _variation(ledger, KASH, "Kashmir White", "Granite")
+    _variation(ledger, CARR, "Carrara", "Marble", state="retiring")
+    _tombstone(ledger, CARR)
     stores = _stores(seed={ABS: ["Black", "Kashmir White", "Nero Assoluto", "G654"]})
     removed = {(k, v): why for k, v, cls, why in cleanup.classify(ledger, stores).differences if cls == "removed"}
-    names = {"granite": {"absolute black", "kashmir white"}}
-    context = cleanup.alias_context("Absolute Black", "Granite", names, stores.type_words, stores.vocabulary_keys)
+    context = build_contexts([(ABS, "Granite", "Absolute Black"), (KASH, "Granite", "Kashmir White")])[ABS]
     expected = {(ABS, v): why for v in ("Black", "Kashmir White", "Nero Assoluto", "G654")
                 if (why := cleanup.seed_refusal(v, context, stores.is_code))}
     assert removed == expected == {(ABS, "Black"): "bare_vocabulary_word", (ABS, "Kashmir White"): "same_type_name"}
