@@ -13,7 +13,7 @@ finish,Sanded,wood_finish_sanded,
 finish,Waxed,wood_finish_waxed,
 quality,A,wood_quality_a,
 quality,B,wood_quality_b,
-type,Ash,wood_type_ash,
-type,Larch,wood_type_larch,
-type,Oak,wood_type_oak,
-type,Walnut,wood_type_walnut,
+type,Ash,wood_type_ash,beams|panels|planks
+type,Larch,wood_type_larch,beams|panels|planks
+type,Oak,wood_type_oak,beams|panels|planks
+type,Walnut,wood_type_walnut,beams|panels|planks
