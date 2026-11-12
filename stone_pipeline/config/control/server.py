@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from stone_pipeline.config import store
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.medusa_inputs import AttributesUnavailable
 
 log = logfmt.get_logger("config.server")
 
@@ -32,21 +33,29 @@ log = logfmt.get_logger("config.server")
 _MAX_BODY_BYTES = 1 << 20
 
 
+def _attribute_reader():
+    """The attributes.csv readers (reference.loaders), once the last attributes fetch is known good: EVERY read of the
+    file on this server goes through here, so none can serve a vocabulary or a restriction whose fetch was refused.
+    AttributesUnavailable (a 503, dispatch) while it stands refused: the file on disk is not Medusa's current one."""
+    from stone_pipeline.io.medusa_inputs import require_attributes
+    from stone_pipeline.reference import loaders
+    require_attributes()
+    return loaders
+
+
 def _color_vocab() -> dict[str, str]:
     """norm(colour) -> canonical colour name, from the Medusa attribute vocab. Backs the mint colour
     picker (GET /config/v1/colors) and validates an operator's seed colour (never seed one Medusa lacks).
-    Loaded per call (admin low-QPS), mirroring config/varieties.py; empty if attributes.csv is absent."""
+    Loaded per call (admin low-QPS), mirroring config/varieties.py."""
     from stone_pipeline.matching import projections as proj
-    from stone_pipeline.reference.loaders import load_attributes
-    return {proj.norm(c): c for c in load_attributes().canonical_names("color")}
+    return {proj.norm(c): c for c in _attribute_reader().load_attributes().canonical_names("color")}
 
 
 def _type_vocab() -> dict[str, str]:
     """norm(type) -> canonical stone-type name, from the Medusa attribute vocab. Backs the mint type
     picker (GET /config/v1/types) and validates an operator's seed type (never seed one Medusa lacks)."""
     from stone_pipeline.matching import projections as proj
-    from stone_pipeline.reference.loaders import load_attributes
-    return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
+    return {proj.norm(t): t for t in _attribute_reader().load_attributes().canonical_names("type")}
 
 
 def _assignable_values(category: str, vocab: dict[str, str]) -> list[str]:
@@ -55,8 +64,7 @@ def _assignable_values(category: str, vocab: dict[str, str]) -> list[str]:
     vocab the decide validator checks against (it is still a known attribute), but never offers it as a
     choice. Dormant until Blokport publishes the status columns: restricted_values is then empty and the
     picker lists the whole vocab, byte-identical to before."""
-    from stone_pipeline.reference.loaders import restricted_values
-    restricted = restricted_values().get(category, set())
+    restricted = _attribute_reader().restricted_values().get(category, set())
     return sorted(canon for nv, canon in vocab.items() if nv not in restricted)
 
 
@@ -486,8 +494,7 @@ def _put_review_attribute(params, body, query):
         return err
     # VE2: a restricted (archived or internal) Medusa id must never be pasted onto a pending value -- it would
     # make products unassignable. Dormant until the status columns exist (restricted_ids is then empty).
-    from stone_pipeline.reference.loaders import restricted_ids
-    if medusa_id and medusa_id in restricted_ids():
+    if medusa_id and medusa_id in _attribute_reader().restricted_ids():
         return 400, {"error": f"attribute id {medusa_id!r} is archived or internal in Medusa; "
                               "assign an active value", "restricted": True}
     try:
@@ -625,8 +632,7 @@ def _ve2_decide_gate(listings, name: str, stone_type: str, color: str, origin: s
     columns: restricted_values is empty and is_archived is False for every variety, so this returns None."""
     from stone_pipeline.config import varieties
     from stone_pipeline.matching import projections as proj
-    from stone_pipeline.reference.loaders import restricted_values
-    restricted = restricted_values()
+    restricted = _attribute_reader().restricted_values()
     rtypes, rcolors = restricted.get("type", set()), restricted.get("color", set())
     canonical = name if varieties.exists_as(name, stone_type) else varieties.alias_target(name, stone_type)
     if not canonical:                                            # MINT: a brand-new variety
@@ -1099,6 +1105,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 return handler(params, body, query)
             except _BadRequest as exc:
                 return 400, {"error": str(exc)}
+            except AttributesUnavailable as exc:      # a route that reads the vocabulary, while its fetch is refused
+                return 503, {"error": str(exc)}
         allowed.append(route_method)
     if allowed:
         return 405, {"error": f"{method} is not allowed on /config/v1/{'/'.join(segments)}; "
@@ -1330,12 +1338,17 @@ def boot(config_db, ledger_path) -> None:
     # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
-    # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
-    # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
-    # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
+    # just-added colour is rejected at mint until the next full produce, and a REPUBLISH does not fetch inputs. A
+    # refused fetch (S3 error, thin or malformed copy, table 569's category_handles missing) is RECORDED, not fatal
+    # (the manager's ruling on SC #663): a crash-looping boot would take /reset, /run and every other route down with
+    # it. The vocabulary routes answer 503 naming the reason, so the server never serves a stale local vocab as
+    # Medusa's (34's rev 2, F vs G10), and a later successful fetch (a photos page, the produce, the next boot) clears it.
     from stone_pipeline.io import medusa_inputs
-    if medusa_inputs.fetch_attributes():
+    try:
+        medusa_inputs.fetch_attributes()
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    except AttributesUnavailable as exc:
+        log.warning("boot: %s; the vocabulary routes answer 503 until a fetch succeeds", exc)
     # The name-field kinds: a boot failure is logged, not fatal. The routes that clean a name read the map per
     # request and answer 503 until a later boot or produce fetch has written a valid one.
     try:
