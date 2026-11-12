@@ -263,8 +263,6 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     rows = [by_key[k] for k in order]
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
-    from stone_pipeline.stages import decisions
-    retired = set() if seed_only else decisions.load_retired()   # seed_only: no config.db retired filter
     # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
     # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
     # (a stale 'Z Astoria'). NOTE: a variety's stone TYPE is authoritative -- it is assigned from the Key
