@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
@@ -79,12 +80,21 @@ def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
 
 _COLS = VARIETY_FILE_COLUMNS
 ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of aliases dropped at emit (Mas, 11-12)
+# Each run's list under its own UTC stamp: the base keeps only the emitted aliases (base := 1_variants_full), so a
+# dropped alias is gone for good and the current list is overwritten by the next run (Scraper L2). The review upload
+# mirrors this folder to S3 and never deletes, so every run's list stays there.
+ALIAS_COLLISIONS_RUNS = "alias_collisions_dropped_runs"
+_ALIAS_COLLISION_FIELDS = ["Key", "variety", "alias", "collides_with", "collides_with_key"]
 
 
-def _drop_alias_collisions(rows: list[dict]) -> None:
+def _run_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _drop_alias_collisions(rows: list[dict]) -> list[dict]:
     """An alias equal to another live variety's name of the same type (an operator mint equal to a seed alias) would
-    bind one stone's listing to another (Mas, 11-11): it is DROPPED from its row and LISTED for the operator, in the
-    review file and the run log. The produce never stops on it; CI holds the committed vocabulary at 0."""
+    bind one stone's listing to another (Mas, 11-11): it is DROPPED from its row, logged, and returned for the review
+    list. The produce never stops on it; CI holds the committed vocabulary at 0."""
     collisions = alias_collisions.find(
         alias_collisions.Variety(r["Key"], r["Type"], r["Name"], tuple(a for a in r["Aliases"].split("|") if a))
         for r in rows)
@@ -97,16 +107,25 @@ def _drop_alias_collisions(rows: list[dict]) -> None:
     listed = [{"Key": c.key, "variety": f"{c.variety[0]} {c.variety[1]}", "alias": c.alias,
                "collides_with": f"{c.collides_with[0]} {c.collides_with[1]}", "collides_with_key": c.other_key}
               for c in collisions]
-    csvio.write_dicts(SETTINGS.paths.review_dir / ALIAS_COLLISIONS_REVIEW,
-                      ["Key", "variety", "alias", "collides_with", "collides_with_key"], listed, sanitize=True)
     if listed:
         log.warning("aliases dropped: each names another variety of the same type", extra={"extra_fields": {
             "count": len(listed), "report": ALIAS_COLLISIONS_REVIEW, "aliases": listed[:20]}})
+    return listed
+
+
+def _list_alias_collisions(listed: list[dict]) -> None:
+    """The review list of this run's dropped aliases (the run summary counts it), and, when any dropped, its
+    per-run copy."""
+    review = SETTINGS.paths.review_dir
+    csvio.write_dicts(review / ALIAS_COLLISIONS_REVIEW, _ALIAS_COLLISION_FIELDS, listed, sanitize=True)
+    if listed:
+        csvio.write_dicts(review / ALIAS_COLLISIONS_RUNS / f"{_run_stamp()}.csv", _ALIAS_COLLISION_FIELDS, listed,
+                          sanitize=True)
 
 
 def alias_collisions_dropped() -> int:
-    """How many aliases the last build dropped as collisions, read from the review list it always writes, so the run
-    summary states the count of the very list the operator opens."""
+    """How many aliases the last produce build dropped as collisions, read from the review list every such build
+    writes, so the run summary states the count of the very list the operator opens."""
     with (SETTINGS.paths.review_dir / ALIAS_COLLISIONS_REVIEW).open(encoding="utf-8-sig", newline="") as h:
         return sum(1 for _ in csv.DictReader(h))
 
@@ -268,7 +287,9 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     # uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship no matter how it
     # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
-    _drop_alias_collisions(rows)
+    dropped_aliases = _drop_alias_collisions(rows)
+    if not seed_only:                     # seed.verify's projection never rewrites the produce's list (Scraper L1)
+        _list_alias_collisions(dropped_aliases)
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
