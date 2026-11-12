@@ -27,14 +27,15 @@ def export_file() -> Path:
     return SETTINGS.paths.export_file
 
 
-def export_version() -> tuple[int, int] | None:
-    """The export's (size, mtime), or None when it is absent: what a cache keyed on the export compares, never a
-    parse (reference.medusa_files.read_variants_export is the one reader)."""
+def export_version() -> tuple[str, int, int] | None:
+    """The export's (path, size, mtime), or None when it is absent: what a cache keyed on the export compares, never
+    a parse (reference.medusa_files.read_variants_export is the one reader)."""
+    path = export_file()
     try:
-        stat = export_file().stat()
+        stat = path.stat()
     except FileNotFoundError:
         return None
-    return (stat.st_size, stat.st_mtime_ns)
+    return (str(path), stat.st_size, stat.st_mtime_ns)
 
 
 def seed_of(backbone) -> dict[str, tuple[Sequence[str], Sequence[str]]]:
@@ -55,14 +56,57 @@ def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
     return out
 
 
+# The seed and the export's hand rows, each kept for the one file version it was read from: alias_target rebuilds on
+# every config.db write (a decision), and re-parsing the 12,156-post backbone and the export each time would put that
+# parse on every decision. One entry each, replaced when the file changes.
+_SEED: dict = {}
+_ADMIN: dict = {}
+
+
+def _backbone_version() -> tuple | None:
+    from stone_pipeline.config.settings import SETTINGS
+    path = SETTINGS.paths.backbone_json
+    if not path.exists():
+        return None                      # load_backbone raises the named error
+    stat = path.stat()
+    return (str(path), stat.st_size, stat.st_mtime_ns)
+
+
+def _seed(backbone) -> Mapping[str, tuple[Sequence[str], Sequence[str]]]:
+    """The seed of `backbone`, or, with none, of the backbone file: parsed once per file version, and a backbone the
+    caller parsed from that very file (load_all's) is reused, never parsed twice."""
+    from stone_pipeline.reference.loaders.backbone import load_backbone
+    version = _backbone_version()
+    if backbone is None and version is not None and version in _SEED:
+        return _SEED[version]
+    if backbone is None:
+        backbone = load_backbone()
+    seed = seed_of(backbone)
+    if version is not None and backbone.version == version:
+        _SEED.clear()
+        _SEED[version] = seed
+    return seed
+
+
+def export_admin_rows() -> dict[str, tuple[Sequence[str], Sequence[str]]]:
+    """Key -> (AdminAliases, AdminCodes) of the backend's export, read once per export version; {} with no export."""
+    version = export_version()
+    if version is None:
+        return {}
+    if version not in _ADMIN:
+        from stone_pipeline.reference.medusa_files import read_variants_export
+        _ADMIN.clear()
+        _ADMIN[version] = admin_of(read_variants_export(export_file(), require_status=False))
+    return _ADMIN[version]
+
+
 def scraper_stores(backbone=None) -> Stores:
     """The scraper's own stores (seed, operator, active learned); the hand rows come with the export a caller reads.
     The statements are read only when config.db exists, and the learned reader creates no store either (a read never
     creates it). A proposed or rejected learned alias is no surface."""
     from stone_pipeline.config import decisions_store, store
-    from stone_pipeline.reference.loaders.backbone import load_backbone
     rows = decisions_store.statement_rows() if store.config_db_path().exists() else []
-    return Stores(seed=seed_of(backbone if backbone is not None else load_backbone()),
+    return Stores(seed=_seed(backbone),
                   operator=operator_aliases(rows),
                   learned=[(r["identity_key"], r["value"]) for r in decisions_store.active_learned_aliases()])
 
