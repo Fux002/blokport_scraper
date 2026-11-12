@@ -2,7 +2,11 @@
 
 The catalog is a pure function of two inputs that NEVER alias:
   - the immutable Medusa export (existing variants, download-only), and
-  - this run's scraped additions (new variants + confirmed alias updates).
+  - this run's scraped additions (new variants).
+A variety's aliases are NOT read from any of these files: emit computes them ONCE from the alias stores
+(aliases.surfaces: the backbone's seed, the operator's renames, the active learned rows; P2-10 C4, decision D1),
+writes their values as the Aliases column (so the base's Aliases equal the payload), and writes the full alias_rows
+and codes to a sidecar (aliases.payload.ALIAS_SIDECAR) the ledger populate reads.
 
 This stage assembles the full file the user uploads, so nothing is hand-merged or
 stamped in place and re-running yields an identical file:
@@ -12,7 +16,7 @@ stamped in place and re-running yields an identical file:
                                     └─►  1_variants_update.csv  (the full rows the delta names)
 
 Beside them it writes the icon side file (variant_image_shas.json): each produced variety's icon pairs listed on S3,
-which the ledger serves as the variety's category_images (PHASE-1-SPEC section 4).
+which the ledger serves as the variety's category_images (PHASE-1-SPEC section 4), and the alias sidecar.
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from stone_pipeline.aliases import payload as alias_payload
+from stone_pipeline.aliases import stores as alias_stores
+from stone_pipeline.aliases.surfaces import Stores, Surfaces, Variety, surfaces_by_key
 from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
@@ -29,6 +36,7 @@ from stone_pipeline.core.text import (
     clean_alias_list,
     clean_variety_name,
     looks_like_artifact,
+    match_key,
     split_bracket_alias,
 )
 from stone_pipeline.io import storage
@@ -45,21 +53,47 @@ def _alias_display(text: str) -> str:
     return field_kinds.display(field_kinds.VARIATION_ALIAS_VALUE, text)
 
 
-def _write_names(row: dict) -> list[str]:
-    """Write a row's Name and Aliases by their fields' rule (field-kinds.json); returns the aliases dropped for
-    having no ASCII form. A '(alternative)' moves out of the Name into the alias list ('Black Galaxy (Star
-    Galaxy)' -> Name 'Black Galaxy' + alias 'Star Galaxy'). The Key is unchanged (a Name/alias correction, not a
-    re-key), and matching improves because both the clean name and each alternative spelling resolve."""
-    bare_name, name_bracket_aliases = split_bracket_alias(row["Name"])
-    raw_aliases = [a for a in row["Aliases"].split("|") if a.strip()] + name_bracket_aliases
+def _write_name(row: dict) -> None:
+    """Write a row's Name by its field's rule (field-kinds.json); a '(alternative)' is not part of the Name ('Black
+    Galaxy (Star Galaxy)' -> 'Black Galaxy'), the alternative spelling being the seed's alias. The Key is unchanged
+    (a Name correction, not a re-key)."""
+    bare_name, _ = split_bracket_alias(row["Name"])
     try:
         row["Name"] = field_kinds.display(field_kinds.VARIATION_NAME, bare_name)
     except UnfoldableName as exc:
         # dropping the row would delete the variety (base := full), so a name with no ASCII form stops emit
         raise UnfoldableName(f"{row['Key']}: variety name {bare_name!r} has no ASCII form") from exc
-    kept, dropped = clean_alias_list(bare_name, raw_aliases, _alias_display)
-    row["Aliases"] = "|".join(kept)
-    return dropped
+
+
+def _alias_rows(rows: list[dict], seed_only: bool) -> tuple[dict[str, list[tuple[str, str]]],
+                                                             dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
+    """Each row's aliases (value, method) and codes from the alias stores (aliases.surfaces), the scraper's own
+    methods only, each alias written by its field's rule (clean_alias_list with the alias display rule: one value can
+    split into pieces, each keeping its method; the Name and repeats dropped). Returns (aliases by Key, codes by Key,
+    each (value, method), and the (Key, alias) pairs dropped for having no ASCII form). seed_only reads the committed
+    seed alone (the backbone), so the seed projection stays hermetic: no config.db."""
+    from stone_pipeline.reference.loaders.backbone import load_backbone
+    stores = (Stores(seed=alias_stores.seed_of(load_backbone())) if seed_only else alias_stores.scraper_stores())
+    surfaces, unbound = surfaces_by_key([Variety(r["Key"], r["Name"], r["Type"]) for r in rows], stores,
+                                        alias_stores.is_code())
+    alias_stores.log_unbound(unbound)
+    aliases: dict[str, list[tuple[str, str]]] = {}
+    codes: dict[str, list[tuple[str, str]]] = {}
+    dropped: list[tuple[str, str]] = []
+    for r in rows:
+        found, kept, seen = surfaces[r["Key"]], [], set()
+        for value, method in found.aliases:
+            if method not in alias_payload.SENT_METHODS:
+                continue
+            pieces, lost = clean_alias_list(r["Name"], [value], _alias_display)
+            dropped.extend((r["Key"], a) for a in lost)
+            for piece in pieces:
+                if (key := match_key(piece)) not in seen:
+                    seen.add(key)
+                    kept.append((piece, method))
+        aliases[r["Key"]] = kept
+        codes[r["Key"]] = [(v, m) for v, m in found.codes if m in alias_payload.SENT_METHODS]
+    return aliases, codes, dropped
 
 
 def update_rows(full_rows: list[dict], delta: list[dict]) -> list[dict]:
@@ -184,12 +218,12 @@ def _s3_icon_pairs() -> dict[str, dict[str, str]] | None:
 
 def _consolidate(rows: list[dict]) -> list[dict]:
     """Fold ONLY variants whose name carries a trailing grade code into their base variety, so a
-    graded family becomes ONE searchable variety with the originals as aliases ('Rosal C'/'Rosal
-    T'/'Rosal B' -> 'Rosal'). Every other variant passes through UNTOUCHED -- distinct same-name
+    graded family becomes ONE variety ('Rosal C'/'Rosal T'/'Rosal B' -> 'Rosal'; the coded spellings are
+    the seed's aliases). Every other variant passes through UNTOUCHED -- distinct same-name
     variants are NOT deduped and real names ('Rosal Codacal Favor', 'Agata Black') never merge,
     because only a row whose clean_variety_name DIFFERS from its name (a code was stripped) is
-    folded. If a base of the same type with the clean name already exists it absorbs the code as an
-    alias; otherwise the first coded row is renamed to the base (its Key survives the in-place Medusa
+    folded. If a base of the same type with the clean name already exists it absorbs the coded row;
+    otherwise the first coded row is renamed to the base (its Key survives the in-place Medusa
     rename). A fold never crosses types: a variety's identity is (type, name)."""
     coded, passthrough = [], []
     for r in rows:
@@ -201,27 +235,20 @@ def _consolidate(rows: list[dict]) -> list[dict]:
         base_by.setdefault((variety_key_type(r["Key"]), r["Name"].casefold()), r)
     for clean, r in coded:
         gkey = (variety_key_type(r["Key"]), clean.casefold())
-        target = base_by.get(gkey)
-        new_aliases = {r["Name"].strip()} | {a.strip() for a in (r.get("Aliases") or "").split("|") if a.strip()}
-        if target is None:                                            # no base yet -> this row becomes it
+        if gkey not in base_by:                                       # no base yet -> this row becomes it
             nr = dict(r); nr["Name"] = clean
-            nr["Aliases"] = "|".join(sorted(a for a in new_aliases if a.casefold() != clean.casefold()))
             base_by[gkey] = nr
             out.append(nr)
-        else:                                                         # fold the code into the base
-            cur = {a.strip() for a in (target.get("Aliases") or "").split("|") if a.strip()}
-            target["Aliases"] = "|".join(sorted((cur | new_aliases) - {""}
-                                                - {a for a in (cur | new_aliases) if a.casefold() == clean.casefold()}))
     return out
 
 
 def _rows(path: Path) -> list[dict]:
     """The _COLS rows with a Key of a variants file: the base, Medusa's live export or this produce's update
-    delta, which share the shape."""
+    delta, which share the shape. A file's Aliases are never read: emit derives them from the alias stores."""
     path = Path(path)
     if not path.exists():
         return []
-    return [dict(zip(_COLS, (v.key, v.name, v.type, "|".join(v.aliases))))
+    return [dict(zip(_COLS, (v.key, v.name, v.type, "")))
             for v in read_variants_export(path, require_status=variants_status_required(path)) if v.key]
 
 
@@ -253,11 +280,9 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
                 by_key[r["Key"]] = r
                 order.append(r["Key"])
     n_existing = len(order)
-    delta = [] if seed_only else _rows(SETTINGS.paths.curate_delta_csv)              # curate's new + alias delta
+    delta = [] if seed_only else _rows(SETTINGS.paths.curate_delta_csv)              # curate's new varieties
     for r in delta:
-        if r["Key"] in by_key:
-            by_key[r["Key"]].update(r)                        # alias update onto existing row
-        else:
+        if r["Key"] not in by_key:
             by_key[r["Key"]] = r
             order.append(r["Key"])                            # genuinely new variant
     rows = [by_key[k] for k in order]
@@ -276,20 +301,30 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     # entry is surfaced for review by seed.verify / the consistency report instead, never deleted here.
     from stone_pipeline.reference import loaders
     rows = [r for r in rows if not looks_like_artifact(r["Name"])]
-    rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
-    alias_drops: list[tuple[str, str]] = []
+    rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal'
     for r in rows:
-        alias_drops.extend((r["Key"], alias) for alias in _write_names(r))
-    _report_alias_drops(alias_drops)
+        _write_name(r)
 
     # THE dedup gate: collapse every (type, name) that resolves to more than one Key to a single survivor
     # before write. 1_variants_full feeds BOTH the committed base (base := full) AND the ledger, so gating
     # uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship no matter how it
     # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
+    aliases, codes, alias_drops = _alias_rows(rows, seed_only)
+    _report_alias_drops(alias_drops)
+    for r in rows:
+        r["Aliases"] = "|".join(v for v, _ in aliases[r["Key"]])
     dropped_aliases = _drop_alias_collisions(rows)
     if not seed_only:                     # seed.verify's projection never rewrites the produce's list (Scraper L1)
         _list_alias_collisions(dropped_aliases)
+    # the payload's set is exactly what the Aliases column keeps after the gates, in the payload's order, so the base's
+    # Aliases equal the alias_rows values
+    sent: dict[str, tuple[list[dict], list[str]]] = {}
+    for r in rows:
+        left = set(r["Aliases"].split("|")) - {""}
+        sent[r["Key"]] = alias_payload.rows_of(Surfaces(
+            aliases=tuple((v, m) for v, m in aliases[r["Key"]] if v in left), codes=tuple(codes[r["Key"]])))
+        r["Aliases"] = "|".join(a["value"] for a in sent[r["Key"]][0])
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
@@ -300,6 +335,7 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
         # the incremental upload: the full file's rows this run's delta names, the SAME cleaned row objects in
         # full-file order, so the two upload files can never disagree on a Name or alias
         csvio.write_dicts(path.parent / "1_variants_update.csv", _COLS, update_rows(rows, delta), sanitize=False)
+        alias_payload.write_sidecar(path.parent, sent)     # the ledger populate's alias_rows and codes
         listed = icons if icons is not None else _s3_icon_pairs()
         if listed is not None:
             # every produced variety's pairs, sorted, so the same listing writes the same bytes; a variety with no

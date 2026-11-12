@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS ledger_meta (
 -- (Medusa external_id). A type or canonical-name correction is a NEW Key (a
 -- re-key, design section 5C), not an update of this row.
 --
--- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: type, name, aliases and the
+-- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: type, name, alias_rows, codes and the
 --   variety's category images, each pair's S3 key and ETag). fill_variation_types re-hashes the row when it fills
 --   the type.
 -- ---------------------------------------------------------------------------
@@ -58,7 +58,11 @@ CREATE TABLE IF NOT EXISTS variation (
     key           TEXT PRIMARY KEY,                    -- {slug(type)}__{slug(name)}_{uuid5} (phase1.variety_key)
     type          TEXT NOT NULL,                       -- canonical type name
     name          TEXT NOT NULL,                       -- canonical variety name
-    aliases       TEXT,                                -- JSON array of strings
+    -- the scraper's WHOLE alias set, JSON [{value, method}] (method seed | operator | learned, by match_key), and its
+    -- codes, JSON [string] (P2-10 C4). NULL = not computed yet, never "empty" ('[]' is the empty channel): a row
+    -- with either NULL is held from the serve until a produce computes both (ledger v19).
+    alias_rows    TEXT,
+    codes         TEXT,
     medusa_id     TEXT,                                -- null until synced
     -- 1 when this variation is in the produced 1_variants_full set (the catalog
     -- output), 0 for export-only rows kept for ids/FK (junk, consolidated-away).
