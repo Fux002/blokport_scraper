@@ -269,3 +269,71 @@ def test_a_mint_row_and_the_operator_store_state_one_value_when_the_stated_type_
                                   "stone_type": "Quartzite"}])
     assert (minted["Name"], minted["Type"]) == ("Super Blanco", "Quartzite")
     assert minted["Aliases"].split("|") == [stated.spelling]
+
+
+# --- review 2 on C4 (11-12) ------------------------------------------------------------------------------------------
+def _emit_seed(tmp_path, monkeypatch, seed):
+    """One emit of the base row Black Galaxy with `seed` as its seed store; returns its sidecar entry."""
+    import dataclasses
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.aliases.surfaces import Stores
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.stages import emit_catalog
+    paths = dataclasses.replace(SETTINGS.paths, review_dir=tmp_path / "review",
+                                variants_export_csv=tmp_path / "no_export.csv", curate_delta_csv=tmp_path / "no.csv")
+    monkeypatch.setattr(emit_catalog, "SETTINGS", dataclasses.replace(SETTINGS, paths=paths))
+    monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores(seed={GALAXY: (seed, [])}))
+    base = tmp_path / "variants_export_base.csv"
+    base.write_text(f"Key,Name,Type,Aliases\n{GALAXY},Black Galaxy,Granite,\n", encoding="utf-8")
+    out = tmp_path / "out" / "1_variants_full.csv"
+    out.parent.mkdir()
+    emit_catalog.build(base, icons={}, out_path=out)
+    return json.loads((out.parent / alias_payload.ALIAS_SIDECAR).read_text(encoding="utf-8"))[GALAXY]
+
+
+def test_a_bracketed_code_piece_goes_to_codes_never_to_alias_rows(tmp_path, monkeypatch):
+    # B1: ONE order: a value is cleaned into pieces first, then every piece is split by the code pattern; a code
+    # sent as an alias_row makes the backend hold the variety
+    entry = _emit_seed(tmp_path, monkeypatch, ["Star Galaxy (G603)"])
+    assert entry == {"alias_rows": [{"value": "Star Galaxy", "method": "seed"}], "codes": ["G603"]}
+
+
+def test_a_comma_separated_code_piece_goes_to_codes_never_to_alias_rows(tmp_path, monkeypatch):
+    entry = _emit_seed(tmp_path, monkeypatch, ["Galaxy Nero, G654"])
+    assert entry == {"alias_rows": [{"value": "Galaxy Nero", "method": "seed"}], "codes": ["G654"]}
+
+
+def test_a_reserve_of_an_uncomputed_variation_answers_frozen_uncomputed_until_a_produce(tmp_path):
+    # B2 (Mas, 11-12): a NULL alias_rows or codes is frozen 'uncomputed' (remedy: run a produce), the LAST reason of
+    # the closed order, never marked and never 'reserved'; after one produce the same Key is reserved
+    from stone_pipeline.ledger.server import dispatch
+
+    def reserve(lg, keys):
+        return dispatch(lg, "POST", "reserve", {}, {"type": "variations", "external_ids": keys})[1]
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation(lg, CASA, "Casa Blue", "Marble", state="synced")
+        _variation(lg, GALAXY, "Black Galaxy", "Granite", state="synced")
+        lg.execute("UPDATE variation SET archived = 1 WHERE key = ?", (GALAXY,))   # an earlier reason wins
+        assert reserve(lg, [CASA, GALAXY]) == {"reserved": [], "unknown": [], "frozen": [
+            {"external_id": GALAXY, "reason": "archived"}, {"external_id": CASA, "reason": "uncomputed"}]}
+        assert lg.get("variation", "key", CASA)["reserved_at"] is None
+        populate_variations_full(lg, _full(tmp_path, _ROWS))
+        assert reserve(lg, [CASA])["reserved"] == [CASA]
+
+
+def test_curate_finds_a_spaced_or_hyphenated_code_by_its_compact_key(tmp_path, monkeypatch):
+    # L3: curate's existence check looks codes up by the matcher's compact key (CandidateIndex.by_code), so a
+    # 'G-603' listing is the existing Black Galaxy, never a new variety
+    from types import SimpleNamespace
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.aliases.surfaces import Stores
+    from stone_pipeline.stages.curate import context, existing
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id,Key,Name,Image,AdminAliases,AdminCodes,status,Type,owner\n"
+                      f"var_g,{GALAXY},Black Galaxy,,,G603,active,Granite,\n", encoding="utf-8")
+    monkeypatch.setattr(existing, "existing_varieties_file", lambda: export)
+    monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores())
+    surface, codes = context.existing_surfaces(existing.load_existing(), retired=set())
+    c = SimpleNamespace(existing_surface=surface, existing_codes=codes)
+    for spelling in ("G603", "G-603", "G 603"):
+        assert context.surface_owners(c, spelling) == {("black galaxy", "granite")}, spelling
