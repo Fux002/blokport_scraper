@@ -32,6 +32,7 @@ from stone_pipeline.core.text import (
     split_bracket_alias,
 )
 from stone_pipeline.io import storage
+from stone_pipeline.reference import alias_collisions
 from stone_pipeline.reference.loaders import field_kinds, variants_status_required
 from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -277,6 +278,19 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
     return list(out.values())
 
 
+def _check_alias_collisions(rows: list[dict]) -> None:
+    """An alias never names another variety of the same type (Mas, 11-11): such an alias would bind one stone's
+    listing to another, and nothing merges by name without the owner's word. Fails loud, every collision named,
+    before anything is written. A row's type is its Key's type slug, named through the attributes' type values."""
+    from stone_pipeline.core.text import slugify
+    from stone_pipeline.reference import loaders
+    type_of = {slugify(t, "_"): t for t in loaders.load_attributes().canonical_names("type")}
+    alias_collisions.check(
+        alias_collisions.Variety(r["Key"], type_of.get(slug, slug), r["Name"],
+                                 tuple(a for a in (r["Aliases"] or "").split("|") if a))
+        for r in rows if (slug := loaders.type_slug_from_key(r["Key"])))
+
+
 def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
           *, seed_only: bool = False, out_path: Path | None = None) -> Path:
     """Assemble to_upload/1_variants_full.csv from the committed base (the complete
@@ -376,6 +390,7 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
     # preserved. This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
     _snap("collapse")
+    _check_alias_collisions(rows)
     # Report any variety left in some-but-not-all fan-out categories, naming the filter stage that dropped
     # each missing category (the first snapshot where it went absent after having been present).
     _fanout = {c.name for c in active_categories() if c.fan_out}
