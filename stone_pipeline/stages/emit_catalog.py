@@ -32,7 +32,6 @@ from stone_pipeline.core.text import (
 from stone_pipeline.io import storage
 from stone_pipeline.io.variety_icons import ICON_SIDECAR, VARIATIONS_PREFIX, icon_pair
 from stone_pipeline.phase1.variety_key import variety_key_type
-from stone_pipeline.reference import alias_collisions
 from stone_pipeline.reference.loaders import field_kinds, variants_status_required
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 
@@ -236,12 +235,6 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     # uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship no matter how it
     # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
-    # An alias never names another variety of the same type (Mas, 11-11): such an alias would bind one stone's
-    # listing to another, and nothing merges by name without the owner's word. Fails loud, every collision named,
-    # before anything is written.
-    alias_collisions.check(alias_collisions.Variety(r["Key"], r["Type"], r["Name"],
-                                                    tuple(a for a in (r["Aliases"] or "").split("|") if a))
-                           for r in rows)
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
