@@ -435,8 +435,21 @@ def migration_applied(name: str, path: str | Path | None = None) -> bool:
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
-    """A connection for WRITING (creates the store when absent)."""
+    """A connection for WRITING (creates the store when absent): the config server's boot (restore, then seed) and
+    its admin writes. A produce-path writer uses open_existing_store instead."""
     return _connect(Path(path or config_db_path()))
+
+
+def open_existing_store(path: str | Path | None = None) -> sqlite3.Connection:
+    """THE produce-side opener: a connection for WRITING to a config.db that must already exist. The store is created
+    only by the config server's boot (restore from S3, then seed from sources.yaml), never by a produce write: a store
+    a write created would be EMPTY of sources, hiding sources.yaml from load_sources, and on the service a present
+    local file makes the boot skip its restore (a stale store). Absent raises ConfigStoreError and creates nothing."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        raise ConfigStoreError(f"config.db absent at {p}: a produce writes only into an existing store (the config "
+                               "server creates it: restore, then seed)")
+    return _connect(p)
 
 
 def read_store(path: str | Path | None = None) -> sqlite3.Connection:
