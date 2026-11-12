@@ -310,7 +310,8 @@ def test_no_reset_touches_a_learned_row(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(lifecycle, "_ledger_op", reset_tests._fake_ledger_op)
     monkeypatch.setattr(image_wipe, "wipe_all_product_images", lambda **k: {})
     monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
-    for sources in (None, ["polonine"]):                          # the global and the scoped reset
+    scopes = (None,) if mode.get("pristine") else (None, ["polonine"])   # a factory reset is global-only
+    for sources in scopes:                                                # the global and the scoped reset
         out, code = lifecycle.reset(sources=sources, **mode)
         assert code == 200
         assert "learned_alias" not in (out.get("config") or {})

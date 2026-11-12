@@ -82,6 +82,11 @@ starts with `image_pipeline` on (config.db migration, schema 9); turning it off 
 | `GET` | `/config/v1/review/backbone/decided` | already-decided leaves (to revise) |
 | `POST` | `/config/v1/review/backbone/approve_all` | `{ "verdict"?: "likely_real" }` bulk-approve |
 | `PUT` | `/config/v1/review/backbone/<ref>` | `{ "action":"approve"\|"reject"\|"clear" }` |
+| `GET` | `/config/v1/review/aliases[?status=proposed\|active\|rejected]` | learned aliases (P2-10 C6): `{aliases, counts, open, open_read}`; a card is `{id, identity_key, variety, stone_type, value, norm, method, source, score, status, first_seen, decided_by, decided_at}` (`variety`/`stone_type` null when the ledger no longer holds the Key, `score` null when unknown); `open` is the cleanup's read-only items `{kind, key, value, reason}`, `open_read` `current`\|`absent`; 503 names an absent ledger or an unreadable open file |
+| `PUT` | `/config/v1/review/aliases/<id>` | `{ "action":"approve"\|"reject" }`; `<id>` = url-encoded `identity_key\|norm`; reject also withdraws an approved alias, and a rejected norm is never proposed again |
+| `DELETE` | `/config/v1/review/aliases/<id>` | the only removal of a learned value (it may be proposed again); no reset clears learned aliases, an unmint or retire drops the variety's |
+
+Every `GET /config/v1/review/variants` card carries `resolution: {action: "bind"|"mint", name, stone_type}` (null with no name or type): the server's bind-or-mint answer for the card's prefilled name and type (the standing decision's, else the scraper's guess), from the same rule a statement binds by. It replaces the client-side "Will mint" guess.
 
 > **Reset option "Keep hosted images" (`keep_images`, factory reset only).** On: the hosted product images stay
 > (everything under `<env>/products/`: the scraped originals, the re-hosted photos, the published standardised views

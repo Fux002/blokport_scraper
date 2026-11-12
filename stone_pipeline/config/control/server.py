@@ -419,6 +419,12 @@ def _get_review_variants(params, body, query):
     # the front of one list and never loses their place. A decided card is NOT removed: it stays pending
     # until the next produce binds it, and re-stating over it revises the decision. Stable sort.
     cards.sort(key=lambda c: bool(c.get("decided")))
+    for c in cards:
+        # "Will bind" / "Will mint" from the server (PHASE-2-SPEC:178), for the name and type the card starts from:
+        # the standing decision's, else the scraper's guess (the admin card's own prefill order)
+        c["resolution"] = decisions_store.resolution(
+            c.get("current_alias_of") or c.get("current_seed_name") or c.get("variant") or "",
+            c.get("current_seed_type") or c.get("stone_type") or "")
     decided = sum(1 for c in cards if c.get("decided"))
     return 200, {"variants": cards,
                  # progress signal: the list length cannot move while reviewing, so without a count
@@ -758,6 +764,55 @@ def _put_review_backbone_leaf(params, body, query):
     return 200, {"ref": ref, "action": action}
 
 
+# -- learned aliases (P2-10 C6): the AliasesPanel's read, approve/reject and the one delete -------------------------
+_ALIAS_ACTIONS = {"approve": "active", "reject": "rejected"}
+
+
+def _alias_id(params) -> tuple[str, str]:
+    from stone_pipeline.aliases import review
+    try:
+        return review.parse_id(unquote(params["id"]))
+    except ValueError as exc:
+        raise _BadRequest(str(exc)) from exc
+
+
+def _get_review_aliases(params, body, query):
+    # ?status=proposed|active|rejected narrows the cards; the counts and the cleanup's open items are always whole
+    from stone_pipeline.aliases import open_items, review
+    from stone_pipeline.config import decisions_store
+    status = _query(query, ("status",))["status"]
+    if status is not None and status not in decisions_store.LEARNED_STATUSES:
+        raise _BadRequest(f"status must be one of {list(decisions_store.LEARNED_STATUSES)}, got {status!r}")
+    try:
+        return 200, review.review(status)
+    except (open_items.OpenItemsUnreadable, review.LedgerUnavailable) as exc:
+        return 503, {"error": str(exc)}
+
+
+def _put_review_alias(params, body, query):
+    # {"action":"approve"|"reject"}: approve makes the learned alias a matcher input, reject withdraws it for good
+    # (on a proposal or on an approved alias); its norm is never proposed again for that variety
+    from stone_pipeline.aliases import review
+    from stone_pipeline.config import decisions_store
+    key, norm = _alias_id(params)
+    if not isinstance(body, dict) or _str(body, "action") not in _ALIAS_ACTIONS:
+        return 400, {"error": f"body must be a JSON object {{action}}, action one of {sorted(_ALIAS_ACTIONS)}"}
+    status = _ALIAS_ACTIONS[_str(body, "action")]
+    if not decisions_store.decide_learned_alias(key, norm, status, decided_by="operator"):
+        return 404, {"error": f"no learned alias {review.card_id(key, norm)!r}"}
+    return 200, {"id": review.card_id(key, norm), "status": status}
+
+
+def _delete_review_alias(params, body, query):
+    # the ONLY removal of a learned value; forgotten, not rejected, so the matcher may propose it again
+    from stone_pipeline.aliases import review
+    from stone_pipeline.config import decisions_store
+    key, norm = _alias_id(params)
+    if not decisions_store.delete_learned_alias(key, norm):
+        return 404, {"error": f"no learned alias {review.card_id(key, norm)!r}"}
+    return 200, {"id": review.card_id(key, norm), "deleted": True}
+
+
 # -- lots: "which slabs are sold?" ---------------------------------------------------------------------------
 def _get_review_lots(params, body, query):
     # the lots whose sold slabs the vendor's data does not identify, each with every scanned slab to choose from
@@ -1047,6 +1102,9 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("GET", ("review", "backbone", "decided"), _get_review_backbone_decided),
     ("POST", ("review", "backbone", "approve_all"), _durable(_post_review_backbone_approve_all)),
     ("PUT", ("review", "backbone", "{ref}"), _durable(_put_review_backbone_leaf)),
+    ("GET", ("review", "aliases"), _get_review_aliases),
+    ("PUT", ("review", "aliases", "{id}"), _durable(_put_review_alias)),
+    ("DELETE", ("review", "aliases", "{id}"), _durable(_delete_review_alias)),
     ("GET", ("review", "lots"), _get_review_lots),
     ("PUT", ("review", "lots", "{ref}"), _durable(_put_review_lot)),
     ("GET", ("origins",), _get_origins),

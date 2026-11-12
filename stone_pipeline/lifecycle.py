@@ -625,8 +625,11 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
         out = sync.retire_variation(lg, key, force=force)
         # exclusion memory (never re-mint a retired variety, E8/E10), written INSIDE the slot: a produce
         # starting between the ledger op and this write would read the old memory and re-mint the Key.
+        from stone_pipeline.config import decisions_store
         from stone_pipeline.stages import decisions
         decisions.add_retired(key)
+        # the Key's learned aliases go with it (P2-10 C6); un_retire does not restore them, the matcher re-proposes
+        out["learned_aliases_cleared"] = decisions_store.clear_learned_for_keys([key])
         return out
 
     return _ledger_op("retire_variation", work)
@@ -685,6 +688,9 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
         # by (type, name): the type-slug from the variety's Key keeps a same-name variety of another type intact
         out["mint_decisions_cleared"] = sum(decisions_store.clear_for_variety(sibs[0][1], ident_of[sibs[0][0]][0])
                                             for sibs in targets)
+        # every Key's learned aliases go with the variety (P2-10 C6), in the same config.db-first step
+        out["learned_aliases_cleared"] = decisions_store.clear_learned_for_keys(
+            sk for sibs in targets for sk, _ in sibs)
         for sibs in targets:
             for sk, _ in sibs:
                 sync.retire_variation(lg, sk, force=force, reason="variation_unminted")
