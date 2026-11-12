@@ -28,14 +28,14 @@ log = logfmt.get_logger("deploy.fetch_inputs")
 
 # A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
 # local file, or the run silently starts from the wrong base:
-#   - attributes.csv is the committed vocab seed; a thin copy wipes it and NOTHING resolves.
 #   - variants_export.csv is the live matching reference; a thin copy makes the matcher treat the whole
 #     ~24.7k catalog as new -- mass re-mint / mass gap (the ledger-gap failure mode).
 #   - variants_export_base.csv is the committed full seed of truth (base == full).
 #   - ports.csv carries the env's Medusa port ids; a thin copy loses port-of-origin resolution for the
 #     whole run (every product ships no port), and in prod there is no dev fallback to catch it.
-# These keep the local copy unless the S3 copy is at least THIN_COPY_MIN_FRACTION as complete.
-_PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
+# These keep the local copy unless the S3 copy is at least THIN_COPY_MIN_FRACTION as complete. attributes.csv is not
+# kept: a thin copy of the vocabulary is REFUSED by every fetch (_take_attributes), never run on as if fresh.
+_PROTECTED_BASE = {"variants_export.csv", "variants_export_base.csv", "ports.csv"}
 # A protected file with no local copy is measured against the committed file that lists the same rows: the live
 # export is gitignored, so after every roll it is absent while the committed base (the same scraper-owned variants,
 # Id-free) is in the image. Without this the guard never ran on a fresh task.
@@ -198,17 +198,24 @@ def fetch_attributes(client=None, target=None) -> None:
             client.download_file(S3_BUCKET, key, str(tmp))
         except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
             raise _refuse_attributes(target, f"could not fetch s3://{S3_BUCKET}/{key}: {exc}") from exc
-        # protected base: a thin S3 copy (Medusa mid-reset) is refused, never written over the fuller local file
-        if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
-            raise _refuse_attributes(target, f"the S3 copy looks thin ({incoming} lines against {current} in the "
-                                             "local copy); Medusa's export looks partial (mid-reset?). Re-export it.")
-        try:
-            check_readable("attributes.csv", tmp)  # malformed (a missing category_handles column included): raises
-        except ValueError as exc:
-            raise _refuse_attributes(target, f"the S3 copy is malformed: {exc}") from exc
-        _replace_attributes(tmp, target)
+        _take_attributes(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _take_attributes(tmp: Path, target: Path) -> None:
+    """Swap the downloaded attributes.csv `tmp` in over `target`, by the ONE rule both fetches (fetch_attributes and the
+    produce's fetch_all) follow: a thin copy (Medusa mid-reset) and a malformed one (a missing category_handles column
+    included) each raise AttributesUnavailable with the local file left as it was, never kept quietly as if it were the
+    fresh vocab (G10's attributes half)."""
+    if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
+        raise _refuse_attributes(target, f"the S3 copy looks thin ({incoming} lines against {current} in the local "
+                                         "copy); Medusa's export looks partial (mid-reset?). Re-export it.")
+    try:
+        check_readable("attributes.csv", tmp)
+    except ValueError as exc:
+        raise _refuse_attributes(target, f"the S3 copy is malformed: {exc}") from exc
+    _replace_attributes(tmp, target)
 
 
 # fetched and validated only by fetch_field_kinds, so the map has one fetch path (skipped by the bulk fetch_all)
@@ -292,17 +299,18 @@ def fetch_all() -> int:
             tmp = _incoming(target)
             try:
                 client.download_file(S3_BUCKET, key, str(tmp))
-                # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
-                dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
-                if name in _PROTECTED_BASE:
-                    incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
-                    if _would_clobber(incoming, current):
-                        _refuse_thin(name, incoming, current, basis)
-                        continue
-                check_readable(name, tmp)       # malformed: raise, the produce stops loud with the local file kept
                 if name == "attributes.csv":
-                    _replace_attributes(tmp, target)    # a fresh vocab clears the config server's recorded refusal
+                    _take_attributes(tmp, target)       # the vocabulary's one rule: thin or malformed raises
+                    dropped = 0
                 else:
+                    # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
+                    dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
+                    if name in _PROTECTED_BASE:
+                        incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
+                        if _would_clobber(incoming, current):
+                            _refuse_thin(name, incoming, current, basis)
+                            continue
+                    check_readable(name, tmp)   # malformed: raise, the produce stops loud with the local file kept
                     os.replace(tmp, target)
             finally:
                 tmp.unlink(missing_ok=True)

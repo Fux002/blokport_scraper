@@ -13,8 +13,10 @@ from stone_pipeline.config import settings
 from stone_pipeline.reference import sync_variants_base
 
 
-def test_attributes_is_a_protected_base():
-    assert "attributes.csv" in fetch_inputs._PROTECTED_BASE
+def test_attributes_is_refused_thin_never_kept_as_a_protected_base():
+    # the vocabulary's thin copy is refused by every fetch (_take_attributes; test_attributes_unavailable), so it is
+    # not among the files whose local copy is kept
+    assert "attributes.csv" not in fetch_inputs._PROTECTED_BASE
 
 
 def test_variant_exports_are_protected_bases():
