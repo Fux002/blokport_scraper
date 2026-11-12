@@ -28,16 +28,18 @@ def active_learned_aliases() -> list[dict]:
             f"SELECT {', '.join(_COLUMNS)} FROM learned_alias WHERE status = 'active' ORDER BY identity_key, norm")]
 
 
-def _row(proposal: dict) -> tuple[str, str, str, str, str]:
+def _row(proposal: dict) -> tuple:
     key, value = (proposal.get("identity_key") or "").strip(), (proposal.get("value") or "").strip()
     norm = match_key(value)
     if not key or not norm:
         raise InvalidDecision(f"a learned alias needs an identity Key and a value with a key: {proposal!r}")
-    return key, value, norm, (proposal.get("method") or "").strip(), (proposal.get("source") or "").strip()
+    return (key, value, norm, (proposal.get("method") or "").strip(), (proposal.get("source") or "").strip(),
+            proposal.get("score"))
 
 
 def propose_learned_aliases(proposals: Iterable[dict]) -> int:
-    """Record each {identity_key, value, method, source} as a PROPOSED learned alias. A (Key, norm) that already holds
+    """Record each {identity_key, value, method, source, score} as a PROPOSED learned alias (score: the proposing
+    arm's own score on 0..100, or None). A (Key, norm) that already holds
     a row (proposed, active or rejected) is left as it is, so a decision is never undone and a rejected norm is never
     proposed again. Returns the number of new proposals."""
     rows = [_row(p) for p in proposals]
@@ -46,8 +48,8 @@ def propose_learned_aliases(proposals: Iterable[dict]) -> int:
     now = _now()
     with closing(store.open_store()) as conn, conn:
         return sum(conn.execute(
-            "INSERT OR IGNORE INTO learned_alias (identity_key, value, norm, method, source, status, first_seen) "
-            "VALUES (?, ?, ?, ?, ?, 'proposed', ?)", (*row, now)).rowcount for row in rows)
+            "INSERT OR IGNORE INTO learned_alias (identity_key, value, norm, method, source, score, status, "
+            "first_seen) VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?)", (*row, now)).rowcount for row in rows)
 
 
 def decide_learned_alias(identity_key: str, value: str, status: str, decided_by: str) -> bool:
@@ -69,15 +71,16 @@ def learned_migration_done(name: str) -> bool:
 
 def record_learned_migration(name: str, rows: Iterable[dict]) -> int:
     """The one-time migration's write, in ONE transaction: each {identity_key, value, method, source} becomes ACTIVE,
-    decided_by 'migration', and the marker `name` is recorded, so a failure leaves neither. A (Key, norm) already
-    proposed is activated; one already decided keeps its decision. Returns the rows written."""
+    decided_by 'migration' and with no score (the old file kept none), and the marker `name` is recorded, so a failure
+    leaves neither. A (Key, norm) already proposed is activated; one already decided keeps its decision. Returns the
+    rows written."""
     now = _now()
     written = 0
     with closing(store.open_store()) as conn, conn:
         for row in map(_row, rows):
             written += conn.execute(
-                "INSERT INTO learned_alias (identity_key, value, norm, method, source, status, first_seen, "
-                "decided_by, decided_at) VALUES (?, ?, ?, ?, ?, 'active', ?, 'migration', ?) "
+                "INSERT INTO learned_alias (identity_key, value, norm, method, source, score, status, first_seen, "
+                "decided_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 'migration', ?) "
                 "ON CONFLICT (identity_key, norm) DO UPDATE SET status = 'active', decided_by = 'migration', "
                 "decided_at = excluded.decided_at WHERE learned_alias.status = 'proposed'", (*row, now, now)).rowcount
         conn.execute("INSERT INTO migration (name, applied_at) VALUES (?, ?)", (name, now))

@@ -15,7 +15,7 @@ from stone_pipeline.state import writeback as wb
 
 def _rows(path):
     with closing(sqlite3.connect(str(path))) as conn:
-        return conn.execute("SELECT identity_key, value, method, source, status FROM learned_alias "
+        return conn.execute("SELECT identity_key, value, method, source, status, score FROM learned_alias "
                             "ORDER BY identity_key, norm").fetchall()
 
 
@@ -23,13 +23,13 @@ def test_a_run_s_guesses_are_proposed_once_with_their_provenance(tmp_path, monke
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
     w = wb.WriteBack()
-    w.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi")
+    w.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi", score=88.0)
     w.add_alias("granite__a_1", "some scraped spelling", method="phonetic", source="sentas")   # the run's dup
     assert w.flush() == 1
     again = wb.WriteBack()
     again.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi")
     assert again.flush() == 0                                       # a later run's repeat adds nothing
-    assert _rows(path) == [("granite__a_1", "Some Scraped Spelling", "fuzzy", "zucchi", "proposed")]
+    assert _rows(path) == [("granite__a_1", "Some Scraped Spelling", "fuzzy", "zucchi", "proposed", 88.0)]
 
 
 def test_an_empty_run_proposes_nothing_and_creates_no_store(tmp_path, monkeypatch):

@@ -30,9 +30,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from stone_pipeline.aliases import open_items
 from stone_pipeline.aliases.context import build_contexts
+from stone_pipeline.core import logfmt
 from stone_pipeline.core.alias_problem import AliasContext, alias_refusal, code_matcher
 from stone_pipeline.core.text import match_key
+
+log = logfmt.get_logger("alias_cleanup")
 
 # --- config ----------------------------------------------------------------------------------------------------------
 FILE_NAME = "alias_classification.csv"
@@ -50,6 +54,9 @@ KEYS_SHOWN = 20                            # how many Keys a refusal's message n
 NO_OWNER = "no owner store"
 EMPTY_KEY = "empty key"
 ORPHAN_TOMBSTONE = "pending tombstone with no ledger row (no last set to name)"
+# The classes whose values are aliases served as such (not a code, not removed): a digit in one is an open item.
+ALIAS_CLASSES = ("seed", "operator", "learned")
+ADMIN_ALIASES_COLUMN = "AdminAliases"      # the live export's admin rows (P2-7's E1), read by header
 
 
 class NotAllSynced(RuntimeError):
@@ -251,6 +258,11 @@ def _to_upload_dir() -> Path:
     return SETTINGS.paths.to_upload_dir
 
 
+def _export_file() -> Path:
+    from stone_pipeline.config.settings import SETTINGS
+    return SETTINGS.paths.variants_export_csv
+
+
 def _review_dir() -> Path:
     from stone_pipeline.config.settings import SETTINGS
     return SETTINGS.paths.review_dir
@@ -270,17 +282,56 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def build(ledger) -> tuple[Classification, str]:
-    """Classify the ledger against this env's stores, write the difference list (always, for the owner), then refuse
-    unless the file is whole. Returns (the classification, generated_at: the moment the synced check passed)."""
+def digit_items(classification: Classification) -> list[tuple[str, str, str, str]]:
+    """The open items of the served aliases (seed, operator, learned) holding a digit: the code pattern did not accept
+    them (a code is classed `code`), so staff decide whether each is a code."""
+    return [("digit_non_code", key, value, open_items.DIGIT_REASON) for key, value, cls in classification.rows
+            if cls in ALIAS_CLASSES and any(ch.isdigit() for ch in value)]
+
+
+def admin_items(export: Path, is_code: Callable[[str], bool]) -> Optional[list[tuple[str, str, str, str]]]:
+    """The open items of the admin aliases (the live export's AdminAliases) failing the boundary, judged with C2's
+    context over the export's own rows; never changed by the cleanup (design 3j), only listed for staff. None when
+    the export has no AdminAliases column (before P2-7's export split), said in the log."""
+    with Path(export).open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        columns = rows[0].keys() if rows else []
+    if ADMIN_ALIASES_COLUMN not in columns:
+        log.warning("the live export has no AdminAliases column: no admin alias is judged (P2-7 not live yet)",
+                    extra={"extra_fields": {"export": str(export)}})
+        return None
+    contexts = build_contexts((r["Key"], r["Type"], r["Name"]) for r in rows if r.get("Key"))
+    items = []
+    for r in rows:
+        for value in (v.strip() for v in (r[ADMIN_ALIASES_COLUMN] or "").split("|")):
+            if value and (why := alias_refusal(value, contexts[r["Key"]], is_code)):
+                items.append(("admin_refused", r["Key"], value, why))
+    return sorted(items, key=lambda i: (i[0], i[1], match_key(i[2]), i[2]))
+
+
+@dataclass(frozen=True)
+class Built:
+    classification: Classification
+    generated_at: str                          # the moment the synced check passed
+    open_items: int
+    admin_rows: str                            # "read", or "absent" (the export has no AdminAliases column yet)
+
+
+def build(ledger) -> Built:
+    """Classify the ledger against this env's stores, write the difference list and the open review items (always,
+    for the owner and staff), then refuse unless the file is whole."""
     stores = load_stores()
     classification = classify(ledger, stores)
     generated_at = _now()
+    export = _export_file()
+    admin = admin_items(export, stores.is_code) if export.exists() else None
+    items = digit_items(classification) + (admin or [])
     review = _review_dir()
     review.mkdir(parents=True, exist_ok=True)
     (review / DIFFERENCES_FILE).write_bytes(differences_bytes(classification))
+    (review / open_items.OPEN_FILE).write_bytes(open_items.open_items_bytes(items))
     require_whole(classification)
-    return classification, generated_at
+    return Built(classification, generated_at, len(items), "read" if admin is not None else "absent")
 
 
 def publish(ledger) -> dict:
@@ -288,7 +339,8 @@ def publish(ledger) -> dict:
     with the file's manifest entry and the `alias_classification` field, keeping the produce's run id and every other
     entry. Read-only on the ledger and config.db."""
     from stone_pipeline.io.deliverables import MANIFEST_NAME, publish_deliverables, published_manifest
-    classification, generated_at = build(ledger)
+    built = build(ledger)
+    classification, generated_at = built.classification, built.generated_at
     up = _to_upload_dir()
     (up / FILE_NAME).write_bytes(csv_bytes(classification))
     bucket, prefix = _bucket_prefix()
@@ -299,7 +351,8 @@ def publish(ledger) -> dict:
     entry = published["manifest"]["files"][FILE_NAME]
     return {"file": FILE_NAME, "rows": entry["rows"], "sha256": entry["sha256"],
             "variations": classification.variations, "tombstoned": classification.tombstoned,
-            "removed": sum(d[2] == "removed" for d in classification.differences), "generated_at": generated_at}
+            "removed": sum(d[2] == "removed" for d in classification.differences), "generated_at": generated_at,
+            "open_items": built.open_items, "admin_rows": built.admin_rows}
 
 
 def main() -> int:
@@ -308,13 +361,16 @@ def main() -> int:
     from stone_pipeline.ledger import writethrough
     with writethrough.connect(bind=False) as ledger:
         try:
-            classification, generated_at = build(ledger)
+            built = build(ledger)
         except (NotAllSynced, Unclassifiable) as exc:
             print(f"REFUSED: {exc}", file=sys.stderr)
             return 3
+    classification = built.classification
     (_to_upload_dir() / FILE_NAME).write_bytes(csv_bytes(classification))
     print(f"{FILE_NAME}: {len(classification.rows)} rows, {classification.variations} variations, "
-          f"{classification.tombstoned} tombstoned, generated_at {generated_at}; differences in {DIFFERENCES_FILE}")
+          f"{classification.tombstoned} tombstoned, generated_at {built.generated_at}; differences in "
+          f"{DIFFERENCES_FILE}; {built.open_items} open item(s) in {open_items.OPEN_FILE} "
+          f"(admin rows {built.admin_rows})")
     return 0
 
 
