@@ -8,6 +8,7 @@ derive.py. Each is a pack field now, and the three packs declare them; a pack th
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 import sys
 
@@ -82,6 +83,11 @@ def test_every_pack_loads_and_drives_the_shared_code_in_a_fresh_process(pack):
         "proj.deprefixed('Sample Name 3cm'); engine._colour_conflict('a b', 'a c'); clean_variety('Sample Name', '')\n"
         "print('ok', p.name, sorted(p.inventory_prefixes), p.color_attribute)\n" % pack)
     env = {"SCRAPER_DOMAIN_PACK": pack, "PATH": "", "HOME": "/nonexistent", "PYTHONPATH": "."}
+    # The interpreter's own runtime linkage is not part of the environment under test. setup-python's build is a shared
+    # one that finds its libpython through LD_LIBRARY_PATH; without it, on a host that also carries a system
+    # libpython3.12 (the CI boxes), the child binds that one and loses the installed packages (yaml).
+    if os.environ.get("LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr[-1500:]
     assert out.stdout.startswith(f"ok {pack}")

@@ -13,8 +13,10 @@ from stone_pipeline.config import settings
 from stone_pipeline.reference import sync_variants_base
 
 
-def test_attributes_is_a_protected_base():
-    assert "attributes.csv" in fetch_inputs._PROTECTED_BASE
+def test_attributes_is_refused_thin_never_kept_as_a_protected_base():
+    # the vocabulary's thin copy is refused by every fetch (_take_attributes; test_attributes_unavailable), so it is
+    # not among the files whose local copy is kept
+    assert "attributes.csv" not in fetch_inputs._PROTECTED_BASE
 
 
 def test_variant_exports_are_protected_bases():
@@ -51,8 +53,8 @@ _NO_SUCH_KEY = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "
 def _committed(tmp_path, lines: int):
     """A tmp attributes.csv seeded with `lines` colour rows (the committed baseline stand-in)."""
     target = tmp_path / "attributes.csv"
-    target.write_text("category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(lines)), encoding="utf-8")
+    target.write_text("category,value,sourceid,category_handles\n" + "".join(
+        f"color,c{i},id{i},\n" for i in range(lines)), encoding="utf-8")
     return target
 
 
@@ -65,7 +67,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
     # replace found the first one's file gone (FileNotFoundError, a 500)
     import threading
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
     both = threading.Barrier(2)
 
     class _Together(_FakeS3):
@@ -77,7 +79,8 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
 
     def fetch():
         try:
-            out.append(fetch_inputs.fetch_attributes(client=_Together(live), target=target))
+            fetch_inputs.fetch_attributes(client=_Together(live), target=target)
+            out.append("written")
         except Exception as exc:                                 # what the request saw
             errors.append(exc)
     threads = [threading.Thread(target=fetch) for _ in range(2)]
@@ -85,41 +88,42 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
         t.start()
     for t in threads:
         t.join()
-    assert errors == [] and out == [True, True] and target.read_text().count("color,") == 38
+    assert errors == [] and out == ["written", "written"] and target.read_text().count("color,") == 38
     assert _leftovers(tmp_path) == []
 
 
 def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
-    assert fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target) is True
+    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
+    fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target)
     assert target.read_text().count("color,") == 38          # replaced with the live vocab
     assert _leftovers(tmp_path) == []                         # temp cleaned up
 
 
-def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
+def test_fetch_attributes_refuses_a_thin_copy_and_leaves_the_local_file(tmp_path):
+    # one path with the produce fetch: a thin copy is refused LOUD, never kept quietly as if the local file were fresh
     target = _committed(tmp_path, 100)
-    thin = "category,value,sourceid\ncolor,c0,id0\n"          # 2 lines << 50% of 101 -> floor keeps committed
-    assert fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target) is False
-    assert target.read_text().count("color,") == 100          # committed seed preserved
+    before = target.read_text()
+    thin = "category,value,sourceid,category_handles\ncolor,c0,id0,\n"          # 2 lines << 50% of 101
+    with pytest.raises(RuntimeError, match="attributes.csv.*thin"):
+        fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target)
+    assert target.read_text() == before
     assert _leftovers(tmp_path) == []
 
 
 @pytest.mark.parametrize("error", [_NO_SUCH_KEY, NoCredentialsError(), EndpointConnectionError(endpoint_url="x"),
                                    RetriesExceededError(last_exception=ConnectionError("body read"))])
-def test_fetch_attributes_keeps_the_committed_vocab_on_an_s3_error_and_says_so(tmp_path, monkeypatch, error):
-    errors: list[str] = []
-    monkeypatch.setattr(fetch_inputs.log, "error", lambda msg, *a, **k: errors.append(msg))
+def test_fetch_attributes_refuses_on_an_s3_error_and_leaves_the_local_file(tmp_path, error):
     target = _committed(tmp_path, 26)
     before = target.read_text()
-    assert fetch_inputs.fetch_attributes(client=_FakeS3(error=error), target=target) is False   # kept
+    with pytest.raises(RuntimeError, match="attributes.csv"):
+        fetch_inputs.fetch_attributes(client=_FakeS3(error=error), target=target)
     assert target.read_text() == before
     assert _leftovers(tmp_path) == []
-    assert len(errors) == 1 and "attributes.csv" in errors[0]                  # loud, not silent
 
 
 def test_fetch_attributes_raises_an_unexpected_error(tmp_path):
-    # only an S3 failure keeps the committed vocab; a bug (or a full disk) is not hidden as "kept"
+    # a bug (or a full disk) raises as itself, not as an S3 refusal
     target = _committed(tmp_path, 26)
     with pytest.raises(RuntimeError, match="boom"):
         fetch_inputs.fetch_attributes(client=_FakeS3(error=RuntimeError("boom")), target=target)
@@ -222,43 +226,42 @@ def test_the_thin_copy_floor_is_one_setting():
 # settings parses attributes.csv at import, so a malformed S3 copy written over the good local file would stop every
 # later produce at `import settings`, before its own fetch could heal it. The fetch validates before it replaces.
 _MALFORMED_ATTRIBUTES = {
-    "empty status cell": "category,value,sourceid,status,internal\n" + "".join(
-        f"color,c{i},id{i},active,false\n" for i in range(30)) + "color,cx,idx,,false\n",
-    "conflicting duplicate": "category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(30)) + "color,C0,other\n",
+    "empty status cell": "category,value,sourceid,status,internal,category_handles\n" + "".join(
+        f"color,c{i},id{i},active,false,\n" for i in range(30)) + "color,cx,idx,,false,\n",
+    "conflicting duplicate": "category,value,sourceid,category_handles\n" + "".join(
+        f"color,c{i},id{i},\n" for i in range(30)) + "color,C0,other,\n",
+    "no category_handles column": "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(30)),
 }
 
 
-def test_fetch_attributes_keeps_the_local_file_when_s3_is_malformed(tmp_path, caplog):
+def test_fetch_attributes_refuses_a_malformed_copy_and_leaves_the_local_file(tmp_path):
     for problem, body in _MALFORMED_ATTRIBUTES.items():
         target = _committed(tmp_path, 26)
         before = target.read_text()
-        caplog.clear()
-        assert fetch_inputs.fetch_attributes(client=_FakeS3(body), target=target) is False, problem
+        with pytest.raises(fetch_inputs.AttributesUnavailable, match="attributes.csv"):
+            fetch_inputs.fetch_attributes(client=_FakeS3(body), target=target)
         assert target.read_text() == before, problem
         assert _leftovers(tmp_path) == []
-        errors = [r for r in caplog.records if r.levelname == "ERROR"]
-        assert errors and "attributes.csv" in errors[0].getMessage(), problem
 
 
 def test_the_produce_fetch_stops_loud_on_a_malformed_attributes_file(tmp_path, monkeypatch):
     for problem, body in _MALFORMED_ATTRIBUTES.items():
         local = _committed(tmp_path, 26)
         before = local.read_text()
-        with pytest.raises(ValueError, match="attributes.csv"):
+        with pytest.raises(fetch_inputs.AttributesUnavailable, match="attributes.csv"):
             _main_with(tmp_path, monkeypatch, "attributes.csv", body)
         assert local.read_text() == before, problem                 # the good local file stays
         assert not local.with_suffix(".csv.incoming").exists()
 
 
 def test_the_produce_fetch_never_writes_a_malformed_attributes_file_where_none_was(tmp_path, monkeypatch):
-    with pytest.raises(ValueError):
+    with pytest.raises(fetch_inputs.AttributesUnavailable):
         _main_with(tmp_path, monkeypatch, "attributes.csv", _MALFORMED_ATTRIBUTES["empty status cell"])
-    assert list(tmp_path.iterdir()) == []
+    assert [p.name for p in tmp_path.iterdir()] == ["attributes.csv.unavailable"]     # only the recorded reason
 
 
 def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeypatch):
-    body = "category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n"
+    body = "category,value,sourceid,status,internal,category_handles\ncolor,Black,col_1,archived,false,\n"
     _main_with(tmp_path, monkeypatch, "attributes.csv", body)
     assert (tmp_path / "attributes.csv").read_text(encoding="utf-8") == body
 
