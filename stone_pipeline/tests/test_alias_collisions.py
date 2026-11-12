@@ -35,6 +35,19 @@ def test_its_own_name_and_its_own_copies_are_not_collisions():
                     _v("block_q", "Quartzite", "Super White", "Super White Quartzite")]) == []
 
 
+def test_a_post_under_the_same_key_is_the_same_variety_not_another():
+    # Scraper M2: the base row 'G562 Maple Red' and its backbone post spelt 'G562' share one Key; the post's spelling
+    # is that variety's own name, so the base row's alias 'G562' is not a collision
+    key = "granite__g562_maple_red_8a0f2c3e-1b2c-5d6e-8f90-a1b2c3d4e5f6"
+    assert ac.find([_v(key, "Granite", "G562 Maple Red", "G562", "G562 Granite"), _v(key, "Granite", "G562")]) == []
+
+
+def test_copies_sharing_an_identity_core_are_the_same_variety():
+    # old per-category Keys: slab and block copies of one variety share the core (type + name slug) across uuids
+    assert ac.find([_v("slab_marble_karina_00000000-0000-5000-8000-000000000001", "Marble", "Karina", "Karina V"),
+                    _v("block_marble_karina_00000000-0000-5000-8000-000000000002", "Marble", "Karina V")]) == []
+
+
 def test_the_same_name_under_another_type_is_not_a_collision():
     # a granite 'Silver Grey' alias and a slate 'Silver Grey' variety are two stones matching keeps apart (Mas, 11-11)
     assert ac.find([_v("g1", "Granite", "Bianco Sardo", "Silver Grey"), _v("s1", "Slate", "Silver Grey")]) == []
