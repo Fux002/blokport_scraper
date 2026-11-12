@@ -5,6 +5,7 @@ alias_target (config.varieties) both read through here, so they can never see tw
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
@@ -61,6 +62,9 @@ def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
 # parse on every decision. One entry each, replaced when the file changes.
 _SEED: dict = {}
 _ADMIN: dict = {}
+# held around every read and refill of the two caches, so a server-side caller on another thread never sees one
+# half-replaced (config.varieties already serialises its rebuild under its own lock; this one holds for any caller)
+_CACHE_LOCK = threading.Lock()
 
 
 def _backbone_version() -> tuple | None:
@@ -76,28 +80,30 @@ def _seed(backbone) -> Mapping[str, tuple[Sequence[str], Sequence[str]]]:
     """The seed of `backbone`, or, with none, of the backbone file: parsed once per file version, and a backbone the
     caller parsed from that very file (load_all's) is reused, never parsed twice."""
     from stone_pipeline.reference.loaders.backbone import load_backbone
-    version = _backbone_version()
-    if backbone is None and version is not None and version in _SEED:
-        return _SEED[version]
-    if backbone is None:
-        backbone = load_backbone()
-    seed = seed_of(backbone)
-    if version is not None and backbone.version == version:
-        _SEED.clear()
-        _SEED[version] = seed
-    return seed
+    with _CACHE_LOCK:
+        version = _backbone_version()
+        if backbone is None and version is not None and version in _SEED:
+            return _SEED[version]
+        if backbone is None:
+            backbone = load_backbone()
+        seed = seed_of(backbone)
+        if version is not None and backbone.version == version:
+            _SEED.clear()
+            _SEED[version] = seed
+        return seed
 
 
 def export_admin_rows() -> dict[str, tuple[Sequence[str], Sequence[str]]]:
     """Key -> (AdminAliases, AdminCodes) of the backend's export, read once per export version; {} with no export."""
-    version = export_version()
-    if version is None:
-        return {}
-    if version not in _ADMIN:
-        from stone_pipeline.reference.medusa_files import read_variants_export
-        _ADMIN.clear()
-        _ADMIN[version] = admin_of(read_variants_export(export_file(), require_status=False))
-    return _ADMIN[version]
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    with _CACHE_LOCK:
+        version = export_version()
+        if version is None:
+            return {}
+        if version not in _ADMIN:
+            _ADMIN.clear()
+            _ADMIN[version] = admin_of(read_variants_export(export_file(), require_status=False))
+        return _ADMIN[version]
 
 
 def scraper_stores(backbone=None) -> Stores:
