@@ -23357,6 +23357,7 @@
         "Amazonita Green Granite",
         "Verde Amazonita",
         "Green Amazonita",
+        "Amazon Green",
         "Verde Amazonas",
         "Amazonite",
         "Amazonita Green",
@@ -23539,6 +23540,7 @@
         "Amazon Green Granite",
         "Amazonia Green Granite",
         "Verde Amazonia",
+        "Amazon Green",
         "Amazonia Green"
       ],
       "codes": [],
@@ -27318,7 +27320,8 @@
       "aliases": [
         "Polar Cream Granite",
         "Arctic White Granite",
-        "Polar Cream"
+        "Polar Cream",
+        "Arctic White"
       ],
       "codes": [],
       "merged_from": []
@@ -36272,6 +36275,7 @@
       "aliases": [
         "Antarctica White Granite",
         "Antarctica White",
+        "Arctic White",
         "Kajaani Granite",
         "Granit Risti Grau",
         "Risti Grey Granite",
@@ -38088,6 +38092,7 @@
         "Black Cosmos Granite",
         "China Via Lactea",
         "China Via Lactea Granite",
+        "Cosmic Black",
         "Cosmic Black Granite",
         "Cosmic Black Titanium",
         "Cosmic Black Titanium Granite",
@@ -38098,6 +38103,7 @@
         "Cosmos Black",
         "Cosmos Black Granite",
         "Mist Black Via Lactea",
+        "Via Lactea",
         "Via Lactea Granite",
         "Yuzhou Xingyun",
         "Titanium"
@@ -38322,6 +38328,7 @@
         "Black Forest Granite",
         "Forest Black Granite",
         "Lava Vechia Granite",
+        "Black Forest",
         "Forest Black",
         "Lava Vechia"
       ],
@@ -46275,7 +46282,8 @@
       "aliases": [
         "Blue Night Brazil Granite",
         "Cosmic Black Granite",
-        "Blue Night Brazil"
+        "Blue Night Brazil",
+        "Cosmic Black"
       ],
       "codes": [],
       "merged_from": []
@@ -59198,7 +59206,8 @@
       "aliases": [
         "Cosmic Blue Black Granite",
         "Cosmic Black Granite",
-        "Cosmic Blue Black"
+        "Cosmic Blue Black",
+        "Cosmic Black"
       ],
       "codes": [],
       "merged_from": []
@@ -95681,6 +95690,7 @@
       "aliases": [
         "Dark Forest Granite",
         "Black Forest Granite",
+        "Black Forest",
         "Z Black Forest",
         "Dark Forest"
       ],
@@ -114092,6 +114102,7 @@
         "Sedna Gold",
         "Titanium",
         "Titanium Black",
+        "Cosmic Black",
         "Gold Silk",
         "Magnific Gold",
         "Sedna Granite",
@@ -137396,6 +137407,7 @@
         "Granito Porto Branco",
         "Black Cosmos Granite",
         "Milky White",
+        "Via Lactea",
         "Black Cosmos",
         "Porto Branco Scuro",
         "Negro Via Lattea",
@@ -174225,6 +174237,7 @@
         "Verde Dorado",
         "Verde Dorato",
         "Verde Ubatuba Ubatuba",
+        "Amazon Green",
         "Amazon Green Dark",
         "Amazon Green Dark Granite",
         "Amazon Green Granite",
@@ -251537,6 +251550,7 @@
       "aliases": [
         "Crystal Grey Marble",
         "Apenino Grey Marble",
+        "Crystal Grey",
         "Apenino Grey"
       ],
       "codes": [],
@@ -258761,6 +258775,7 @@
         "Mahallat Pearl Grey",
         "Mahallat Grey",
         "Crystal Gray",
+        "Crystal Grey",
         "Azure Crystal"
       ],
       "codes": [],
@@ -278403,6 +278418,7 @@
         "White Marble Cachoeiro",
         "Marmore Branco Cachoeira",
         "Branco Cachoeira",
+        "Cachoeiro White",
         "Branco Cachoeiro",
         "Blanco Cachoeiro",
         "White Cachoeiro"
@@ -343035,7 +343051,8 @@
         "Lilac Branco",
         "Lilac Branco Marble",
         "White Lilac",
-        "White Lilac Marble"
+        "White Lilac Marble",
+        "Cachoeiro White"
       ],
       "codes": [],
       "merged_from": []
@@ -399796,7 +399813,8 @@
       "aliases": [
         "Silver Moon Grey Marble",
         "Crystal Grey Marble",
-        "Silver Moon Grey"
+        "Silver Moon Grey",
+        "Crystal Grey"
       ],
       "codes": [],
       "merged_from": []
@@ -431843,6 +431861,7 @@
         "Colorful Jade",
         "Amber",
         "Brown Colorful",
+        "Multicolor Onyx",
         "Pakistan Colorful Onyx",
         "Pakistan Colorful",
         "Qicai Yu"
@@ -437742,6 +437761,7 @@
         "Multicolor Onyx Pakistan",
         "Balochistan Green",
         "Dark Green Onyx",
+        "Multicolor Onyx",
         "Green Onyx Pakistan",
         "Onice Verde Scuro",
         "Onyx Verde Pakistano",

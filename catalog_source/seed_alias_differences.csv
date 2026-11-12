@@ -270,12 +270,10 @@ granite__amarillo_jara_832b5cc9-5e17-5b4a-95f8-23609c169662,Amarillo Jara Granit
 granite__amarillo_platino_2dc4597c-8735-50d6-a320-a9af6275cd2c,Amarillo Platino Granite,removed,own_name_type_word
 granite__amazon_9a814527-f58c-5732-b220-cf0e1e410a00,Amazon Granite,removed,own_name_type_word
 granite__amazon_blue_a80acbf2-a6e2-5596-b25a-4a1b24f6f75f,Amazon Blue Granite,removed,own_name_type_word
-granite__amazon_blue_a80acbf2-a6e2-5596-b25a-4a1b24f6f75f,Amazon Green,removed,same_type_name
 granite__amazon_brown_3f4dda5a-0721-52d6-9bad-d5d3ff3228b6,Amazon Brown Granite,removed,own_name_type_word
 granite__amazon_green_12067995-9153-5091-bdf2-0fd2f69fc1e0,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 granite__amazon_green_12067995-9153-5091-bdf2-0fd2f69fc1e0,Amazon Green Granite,removed,own_name_type_word
 granite__amazon_lilas_7836912b-39d7-5e56-959c-5ebe5d92abf9,Amazon Lilas Granite,removed,own_name_type_word
-granite__amazonia_34fba239-44f2-53cd-a95f-c94d82c47be4,Amazon Green,removed,same_type_name
 granite__amba_white_41b091c5-b7a7-598d-a12c-21489994f5a7,Amba White Granite,removed,own_name_type_word
 granite__ambatomanga_5b2a8d7f-b551-5785-8b37-785aab8b1701,Ambatomanga Granite,removed,own_name_type_word
 granite__amber_persa_ae501c82-1a3f-5ad8-9f66-44bffb03051b,Amber Persa Granite,removed,own_name_type_word
@@ -314,7 +312,6 @@ granite__arandis_41a072c5-7832-5882-a843-9d3ce4287cdb,Arandis Granite,removed,ow
 granite__arany_a6a30603-3329-5e90-a859-cc1861539536,Arany Granite,removed,own_name_type_word
 granite__archipelago_red_5b8a7a28-dc46-5c2d-9401-0816c29b4347,Archipelago Red Granite,removed,own_name_type_word
 granite__arctic_black_star_d095aa86-88f7-5b53-88d0-6a7a90e1dea5,Arctic Black Star Granite,removed,own_name_type_word
-granite__arctic_cream_71883a84-647b-5f30-a9b5-f44d80f5aa36,Arctic White,removed,same_type_name
 granite__arctic_pink_0101cd82-d0ad-5bf2-a759-7eb7a79dbd9d,Arctic Pink Granite,removed,own_name_type_word
 granite__arctic_polar_white_dfc1af8d-e83d-5364-a62d-41e2fc632ad5,Arctic Polar White Granite,removed,own_name_type_word
 granite__arctic_white_8c7d687f-0d8d-5a02-81fd-b603121744a5,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
@@ -405,7 +402,6 @@ granite__bengal_black_e098d774-44ed-5d0f-89df-32dea4daf8b6,Bengal Black Granite,
 granite__bergan_2465aeb2-6e09-5a96-9821-50daa0353079,Bergan Granite,removed,own_name_type_word
 granite__berry_brown_a9a6e2dc-ef79-5ac9-9728-372bd3b1bae0,Berry Brown Granite,removed,own_name_type_word
 granite__bethanie_065a642f-c829-5173-b99e-e87a89f297e7,Bethanie Granite,removed,own_name_type_word
-granite__bianco_antarctica_cf9bde94-c41e-5697-b547-b67a7f41f9e2,Arctic White,removed,same_type_name
 granite__bianco_antico_7673d570-698e-5c7f-96c6-291ee655b96d,Bianco Antico Granite,removed,own_name_type_word
 granite__bianco_aurina_4949bdbb-2990-5e20-9dc9-b240ff2462be,Bianco Aurina Granite,removed,own_name_type_word
 granite__bianco_cardigan_8b704506-5763-5309-9457-5feacb4ce146,Bianco Cardigan Granite,removed,own_name_type_word
@@ -425,13 +421,10 @@ granite__birkenkopf_f312b4ae-bf12-59ba-8228-dcecb4a445bf,Birkenkopf Granite,remo
 granite__biscotti_gold_8903f7ae-d7a3-5c0a-b372-da6f800883fb,Biscotti Gold Granite,removed,own_name_type_word
 granite__black_bingzhou_307413b1-b732-5c4c-8515-76c421b40d9b,Black Bingzhou Granite,removed,own_name_type_word
 granite__black_cosmic_c1460a9e-71c1-59f3-8be4-622a09f69d53,Black Cosmic Granite,removed,own_name_type_word
-granite__black_cosmic_c1460a9e-71c1-59f3-8be4-622a09f69d53,Cosmic Black,removed,same_type_name
-granite__black_cosmic_c1460a9e-71c1-59f3-8be4-622a09f69d53,Via Lactea,removed,same_type_name
 granite__black_diamond_sichuan_96b47ad2-6c8a-53d4-b8ea-699294f93a3c,Black Diamond Sichuan Granite,removed,own_name_type_word
 granite__black_eyes_e3697b12-6779-54c1-8687-5f5ff294862b,Black Eyes Granite,removed,own_name_type_word
 granite__black_falcon_e4886789-ce47-5fe5-b403-a1d5d45da15a,Black Falcon Granite,removed,own_name_type_word
 granite__black_forest_a99b676f-968b-5b59-9419-a2d55f9a2cc7,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
-granite__black_forest_gold_ed7ca128-51d0-5a60-aa03-89e8cbf89ff3,Black Forest,removed,same_type_name
 granite__black_fuping_0d743363-15dd-52ae-be3d-0331c5659c2d,Black Fuping Granite,removed,own_name_type_word
 granite__black_grain_4bbac93a-e1f0-50f1-8c26-ff9c15c61329,Black Grain Granite,removed,own_name_type_word
 granite__black_granite_5f3f2fdf-f721-59a6-b146-899961ee632c,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
@@ -508,7 +501,6 @@ granite__branco_piracema_e2b8e93d-0e32-5766-980e-c8b7e8bd1d0f,Branco Piracema Gr
 granite__branco_portinari_76460ed5-5b78-59b1-9b25-5db61027bbf7,Branco Portinari Granite,removed,own_name_type_word
 granite__branco_verona_a0585434-f1a6-50c3-ba96-fd9833ec60db,Branco Verona Granite,removed,own_name_type_word
 granite__brass_blue_b715ee3c-a6c4-5ba1-9ed8-7bb7e366eba5,Brass Blue Granite,removed,own_name_type_word
-granite__brazil_blue_night_9cfb727b-3bb6-5146-ab8f-819eb06e4601,Cosmic Black,removed,same_type_name
 granite__brazil_brown_bc7063b1-bb5c-539b-9b4e-8065aed1ce4c,Brazil Brown Granite,removed,own_name_type_word
 granite__brazil_ivory_12ac489c-97e1-5945-a682-9720fbc45a85,Brazil Ivory Granite,removed,own_name_type_word
 granite__brazil_multicolor_eb18d9f2-35c2-5680-b3ad-7ecd811ba9f2,Brazil Multicolor Granite,removed,own_name_type_word
@@ -652,7 +644,6 @@ granite__coromandel_1ee7581b-1ffe-5b25-b81a-a4dddc77dd9c,Coromandel Granite,remo
 granite__corona_pink_1b902048-e1fd-581a-b0d8-c5e0116b6621,Corona Pink Granite,removed,own_name_type_word
 granite__cortina_white_7c8946bb-5156-5368-ac79-8847a50eb66b,Cortina White Granite,removed,own_name_type_word
 granite__cosmic_black_d443c002-dbf9-5830-8b5c-6c413c0c1772,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
-granite__cosmic_blue_e75dcf11-66f7-5f07-bd84-d21de0389ed7,Cosmic Black,removed,same_type_name
 granite__cosmos_green_edd887da-e179-5a39-a1f0-ca2bf660c1cc,Cosmos Green Granite,removed,own_name_type_word
 granite__costa_esmeralda_c2f2673c-55b0-518f-86b4-f4d68f005685,Costa Esmeralda Granite,removed,own_name_type_word
 granite__cotton_motion_33950fd9-0796-5fae-b799-d2b29e8d1e85,Cotton Motion Granite,removed,own_name_type_word
@@ -1053,7 +1044,6 @@ granite__imperial_green_4e7c2862-6581-53d4-99dd-ef856bf94f95,Imperial Green Gran
 granite__imperial_pearl_09c64f16-74ed-5445-a93f-11904ef535ce,Imperial Pearl Granite,removed,own_name_type_word
 granite__imperial_pink_92d22730-b4dd-5c4c-ac49-43d496767cc7,Imperial Pink Granite,removed,own_name_type_word
 granite__imperial_red_9dd89eda-1adc-5e4f-8849-d9410fd28ea8,Imperial Red Granite,removed,own_name_type_word
-granite__india_black_forest_2a98aca8-c221-5d34-96c3-f16faf33f475,Black Forest,removed,same_type_name
 granite__india_mahogany_be7c2316-481d-5e2c-b7f8-fd104e285099,India Mahogany Granite,removed,own_name_type_word
 granite__indian_kinawa_1169b777-df6d-5d9c-8094-6e47afb709a4,Indian Kinawa Granite,removed,own_name_type_word
 granite__indian_sunset_0c46f0e1-b95c-52ae-a617-d8bbaff907f1,Indian Sunset Granite,removed,own_name_type_word
@@ -1254,7 +1244,6 @@ granite__madam_red_lingqiu_0b9821b9-eb1b-587d-acf8-ce7800fcdb70,Madam Red Lingqi
 granite__madame_pink_5ba2d2b7-801e-534b-a188-67a741de689a,Madame Pink Granite,removed,own_name_type_word
 granite__madera_39584b25-1714-52a1-8f6f-b1f010f59652,Madera Granite,removed,own_name_type_word
 granite__magma_bordeaux_d241e62f-0898-5572-a73f-d6de258e99e4,Magma Bordeaux Granite,removed,own_name_type_word
-granite__magma_gold_30530132-0f60-5d12-967c-55d84b0d8b4a,Cosmic Black,removed,same_type_name
 granite__magma_gold_30530132-0f60-5d12-967c-55d84b0d8b4a,Magma Gold Granite,removed,own_name_type_word
 granite__magnific_dark_c0274eda-25a1-5b5c-a15b-4980d4b637be,Magnific Dark Granite,removed,own_name_type_word
 granite__magnum_gold_c4c20f7d-c824-5b16-bdbd-75fbcddab504,Magnum Gold Granite,removed,own_name_type_word
@@ -1507,7 +1496,6 @@ granite__porfidico_ca105ffc-351f-5a65-b296-5e2de7b1405c,Porfidico Granite,remove
 granite__porkkala_63922831-ab7c-5a1f-9deb-48dd05406122,Porkkala Granite,removed,own_name_type_word
 granite__portillo_25973a6e-4cdc-57a5-9a23-4ceef3010228,Portillo Quartzite,removed,own_name_type_word
 granite__porto_branco_9011f5aa-090a-56c7-b8d6-395c4aecea4d,Porto Branco Granite,removed,own_name_type_word
-granite__porto_branco_9011f5aa-090a-56c7-b8d6-395c4aecea4d,Via Lactea,removed,same_type_name
 granite__porto_cervo_f7cd181f-1bf6-5cc3-87c2-0c8c0f690d57,Porto Cervo Granite,removed,own_name_type_word
 granite__porto_rosa_2dee0c1d-a3d4-59f4-a5c2-3c854aa1a32b,Porto Rosa Quartzite,removed,own_name_type_word
 granite__pr_red_china_93c1f1ba-d3df-5662-a4cd-b2cec7f99eb3,Pr Red China Granite,removed,own_name_type_word
@@ -1913,7 +1901,6 @@ granite__verde_real_b64f9d83-4d05-5a52-9d1e-dece49c773fa,Verde Real Granite,remo
 granite__verde_salvia_0eb66884-6ee5-5531-85ed-934357028fd2,Verde Salvia Granite,removed,own_name_type_word
 granite__verde_savoia_89941680-6eff-5df2-806d-3e6e91a7d244,Verde Savoia Granite,removed,own_name_type_word
 granite__verde_tuareg_fa99d3ad-157b-5379-a180-fbd57684ed41,Verde Tuareg Quartzite,removed,own_name_type_word
-granite__verde_ubatuba_972a36ef-6ee7-5c61-8f5d-a784f1f9fe9d,Amazon Green,removed,same_type_name
 granite__verde_ubatuba_972a36ef-6ee7-5c61-8f5d-a784f1f9fe9d,Verde Ubatuba Granite,removed,own_name_type_word
 granite__verde_velasquez_3548b529-a021-5be1-becc-a109205fa9b3,Verde Velasquez Granite,removed,own_name_type_word
 granite__verde_veneziano_990b28f6-4013-5e87-a862-147e57e01202,Verde Veneziano Granite,removed,own_name_type_word
@@ -2807,7 +2794,6 @@ marble__antique_beige_e241f462-fdbb-5fd6-a615-2f9f22c5d00e,Antique Beige Marble,
 marble__antique_fonce_ab8fe28c-69f4-5ad6-8290-c79d3ea95014,Antique Fonce Marble,removed,own_name_type_word
 marble__antique_green_e1748995-0b4a-5788-8064-b15fd696c609,Antique Green Marble,removed,own_name_type_word
 marble__aomari_brown_2ba54c2b-2d16-5b29-92ef-14d1d76ae026,Aomari Brown Marble,removed,own_name_type_word
-marble__apenino_e7d75de8-cc02-575c-882e-4cbe5ea1383b,Crystal Grey,removed,same_type_name
 marble__aphrodisias_cloudy_e6c10a48-dc97-50dc-a0c4-25396afb4c7d,Aphrodisias Cloudy Marble,removed,own_name_type_word
 marble__apollion_black_e57a82e7-e93e-5172-b1f1-218a23dc4dca,Apollion Black Marble,removed,own_name_type_word
 marble__apricena_bronzetto_5256b876-5cba-5a07-9edd-9c29245406e4,Apricena Bronzetto Limestone,removed,own_name_type_word
@@ -2880,7 +2866,6 @@ marble__ayhan_beige_aeaf9734-1050-5c5e-8702-c9a008354f9e,Ayhan Beige Marble,remo
 marble__azalea_beige_bae879a9-da4b-5f24-a95c-e9fdf454bc9d,Azalea Beige Marble,removed,own_name_type_word
 marble__azalea_red_8df6e511-1590-5b05-ad81-ba280012d449,Azalea Red Marble,removed,own_name_type_word
 marble__azul_lagoa_2575c979-4cf5-5d95-9667-4d999400d3a8,Azul Lagoa Marble,removed,own_name_type_word
-marble__azure_db0c4ff2-51da-5b5d-a327-93901c03f01a,Crystal Grey,removed,same_type_name
 marble__bahia_grey_992a0e7b-4872-5e06-b756-3a0b679da6ef,Bahia Grey Marble,removed,own_name_type_word
 marble__bai_yulan_beige_d565683d-5cb1-5464-b8bc-a5fe683a7ffc,Bai Yulan Beige Marble,removed,own_name_type_word
 marble__bai_zhenzhu_beige_729622a1-5c14-5e91-b301-e9d997aeeb44,Bai Zhenzhu Beige Marble,removed,own_name_type_word
@@ -3069,7 +3054,6 @@ marble__bursa_light_emperador_fc3e8d1d-1480-5dc0-83ed-2b46520cf09d,Bursa Light E
 marble__buteasa_furnir_550606d6-9e82-5d37-a398-a27b110ccdb2,Buteasa Furnir Marble,removed,own_name_type_word
 marble__butterfly_red_90fd5344-97f4-5407-9b11-3e377dd2269b,Butterfly Red Marble,removed,own_name_type_word
 marble__bvlgari_blue_3c17df1c-870f-5564-96b4-d3f270a4072e,Bvlgari Blue Marble,removed,own_name_type_word
-marble__cachoeiro_cde90eb2-e274-591e-bbe2-8afae386c643,Cachoeiro White,removed,same_type_name
 marble__cachoeiro_white_66bbb1be-d120-5afe-8910-1f97c41019ba,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 marble__cadirkaya_silver_grey_e17feb3b-2d49-50ec-9b57-b1d0d7d31c16,Cadirkaya Silver Grey Marble,removed,own_name_type_word
 marble__cafe_cream_bd5af72c-75ef-5fd5-845f-b6da5191dd29,Cafe Cream Marble,removed,own_name_type_word
@@ -3698,7 +3682,6 @@ marble__likya_beige_2f836ad7-2712-5137-97ac-910f716de6ca,Likya Beige Marble,remo
 marble__likya_rose_3cd80955-abc7-5cc4-a08e-788fdd4b6507,Likya Rose Marble,removed,own_name_type_word
 marble__likya_royal_3355bacf-1471-56a2-8e9b-686d44246df8,Likya Royal Marble,removed,own_name_type_word
 marble__lilac_marble_9b823ab6-ffd1-5992-a5f0-3f95efe49502,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
-marble__lilac_white_2dea3cca-10ad-5b92-9d8c-c8c7508f42db,Cachoeiro White,removed,same_type_name
 marble__lilac_white_2dea3cca-10ad-5b92-9d8c-c8c7508f42db,Lilac White Marble,removed,own_name_type_word
 marble__lilleberg_aad1873d-c46e-5817-affe-0ebb068aa598,Lilleberg Marble,removed,own_name_type_word
 marble__lillium_beige_f6deb040-a25d-5694-b731-3ce2474ce10a,Lillium Beige Marble,removed,own_name_type_word
@@ -4283,7 +4266,6 @@ marble__silver_fantasy_c5c41a7b-b2f2-57c4-8b0d-47c5b6cec7dc,Silver Fantasy Marbl
 marble__silver_fox_16261bbf-77df-579e-9d44-4cb089394018,Silver Fox Limestone,removed,own_name_type_word
 marble__silver_galaxy_616e1e28-caf8-5ff5-a6c0-fdebb98a138b,Silver Galaxy Marble,removed,own_name_type_word
 marble__silver_mist_d3a467bb-f1f2-5e37-a461-d36f7510ed82,Silver Mist Marble,removed,own_name_type_word
-marble__silver_moon_63595698-8b93-5c4a-9548-69a02cbc15f6,Crystal Grey,removed,same_type_name
 marble__silver_pearl_grey_4e2a395e-66f0-51d3-8b3d-1f201857d03d,Silver Pearl Grey Marble,removed,own_name_type_word
 marble__silver_spider_ca9ad7e4-a4ea-5d6a-8b51-f3d7b191990d,Silver Spider Marble,removed,own_name_type_word
 marble__silver_star_26df4484-0aab-512a-81e7-320e0e3cf8af,Silver Star Marble,removed,own_name_type_word
@@ -4621,7 +4603,6 @@ onyx__cola_1b4ea349-d8b6-58f0-a3b4-ef3c4baadcdf,Cola Marble,removed,own_name_typ
 onyx__colored_green_5745fee2-a302-54c7-978b-c441c1d77b98,Colored Green Onyx,removed,own_name_type_word
 onyx__colored_pink_e558ae10-55f3-5ca8-81f6-08088fd9a919,Colored Pink Onyx,removed,own_name_type_word
 onyx__colorful_429e5fc0-bb99-5cbc-a460-f760d0255219,Multicolor,removed,bare_vocabulary_word
-onyx__colorful_429e5fc0-bb99-5cbc-a460-f760d0255219,Multicolor Onyx,removed,same_type_name
 onyx__cream_traonyx_c0fe29a4-cb67-5ccc-a767-c8dd8a43c884,Cream,removed,bare_vocabulary_word
 onyx__crocodile_green_58bbc593-d5d6-5f9b-b00f-1eb1870bea2a,Crocodile Green Onyx,removed,own_name_type_word
 onyx__da_siberia_8a6472b5-1779-521d-a118-089c3c2fa9ce,Da Siberia Onyx,removed,own_name_type_word
@@ -4689,7 +4670,6 @@ onyx__orange_tiger_5ed19917-2b4a-5831-b41f-8a827e87d672,Orange,removed,bare_voca
 onyx__organic_fa8e8f95-582e-5565-a6d8-d9291e2455d9,Organic Onyx,removed,own_name_type_word
 onyx__pakistan_gold_06084de1-2af6-5b22-8d55-1e6bdd7ddc98,Pakistan Gold Onyx,removed,own_name_type_word
 onyx__pakistan_green_3b8d9a4b-e292-5eb3-8e23-562e3e3ec0c2,Multicolor,removed,bare_vocabulary_word
-onyx__pakistan_green_3b8d9a4b-e292-5eb3-8e23-562e3e3ec0c2,Multicolor Onyx,removed,same_type_name
 onyx__paradise_red_07f8b3ce-90da-51bc-978a-aed923ccb883,Paradise Red Onyx,removed,own_name_type_word
 onyx__persian_green_93cf29b2-651e-5770-a9d4-60cc30ef6252,Persian Green Onyx,removed,own_name_type_word
 onyx__persian_pink_dc01938b-b538-59ed-a995-8d9c6ee2a831,Persian Pink Onyx,removed,own_name_type_word

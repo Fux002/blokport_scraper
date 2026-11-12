@@ -19,9 +19,10 @@ other is listed `no_post` (it leaves the seed when C4 derives the base), and a K
 `no_post` row with an empty Value, so every one is named (the manager's ruling, 11-12).
 
 The judgement's basis (the manager, 11-12), built by C2's one context builder (aliases.context.build_contexts): the
-variety's own name is its committed base Name (the post's variant only for a post with no base row); the same-type
-names are the committed base's (what the ledger mirrors), so the two bases must agree on every Key's Name and Type;
-the vocabulary is the live names of development's committed attributes.csv.
+variety's own name is its base Name (the post's variant only for a post with no base row); the same-type names are the
+COMMITTED bases' only, since the seed is shared by both envs (a dev-only mint never refuses a seed value; SC #638's
+gate enforces that collision per env at emit); every base must agree on every Key's Name and Type; the vocabulary is
+the live names of development's committed attributes.csv.
 
 The difference list (`seed_alias_differences.csv`) is the owner's list and an INPUT as well as the output: a value
 removed from a post exists nowhere else afterwards, so its row is kept from the previous list and only new
@@ -86,11 +87,13 @@ def render(root: Path = REPO_ROOT) -> dict[Path, bytes]:
     """The bytes of every file in WRITES, from the committed files under `root`. Reads only."""
     _require_vocabulary_basis()
     from stone_pipeline.config.domain import active_pack
-    identities = _identities(root)
+    identities = _identities(root, BASES)
+    committed = _identities(root, COMMITTED_BASES)
     doc = json.loads((root / BACKBONE).read_text(encoding="utf-8"))
-    post_only = {post["key"]: (post.get("variant") or "", post.get("stone_type") or "")
-                 for post in doc["posts"] if post.get("key") and post["key"] not in identities}
-    judge = _Judge(identities, _contexts(identities, post_only), code_matcher(active_pack().name_code_pattern))
+    others = {key: name_type for key, name_type in identities.items() if key not in committed}
+    others.update({post["key"]: (post.get("variant") or "", post.get("stone_type") or "")
+                   for post in doc["posts"] if post.get("key") and post["key"] not in identities})
+    judge = _Judge(identities, _contexts(committed, others), code_matcher(active_pack().name_code_pattern))
     differences = _read_differences(root / DIFFERENCES)
     base_values = _base_values(root)
     posted = {post["key"] for post in doc["posts"] if post.get("key")}
@@ -102,15 +105,16 @@ def render(root: Path = REPO_ROOT) -> dict[Path, bytes]:
             DIFFERENCES: _differences_bytes(differences)}
 
 
-def _contexts(identities: dict[str, tuple[str, str]],
-              post_only: dict[str, tuple[str, str]]) -> dict[str, AliasContext]:
+def _contexts(committed: dict[str, tuple[str, str]],
+              others: dict[str, tuple[str, str]]) -> dict[str, AliasContext]:
     """Every Key's alias-check context, from C2's one builder (aliases.context.build_contexts, the builder C5 judges
-    with). A base Key is judged among the base's varieties (what the ledger mirrors). A post with no base row is judged
-    under its own variant among the same varieties: each is built with only itself added, so no post-only name widens
-    another Key's same-type set."""
-    base = [(key, type_, name) for key, (name, type_) in sorted(identities.items())]
+    with). The seed is shared by both envs, so the same-type names are the COMMITTED bases' only, never one env's live
+    mints (the manager, 11-12; a collision with a dev-only variety is enforced per env at emit, SC #638). A Key the
+    committed bases lack (a live-only Key, or a post with no base row) is judged under its own name among those names:
+    each is built with only itself added, so it never widens another Key's same-type set."""
+    base = [(key, type_, name) for key, (name, type_) in sorted(committed.items())]
     contexts = build_contexts(base)
-    for key, (name, type_) in sorted(post_only.items()):
+    for key, (name, type_) in sorted(others.items()):
         contexts[key] = build_contexts([*base, (key, type_, name)])[key]
     return contexts
 
@@ -181,10 +185,10 @@ def _note(differences: dict, key: str, value: str, cls: str, reason: str) -> Non
 
 
 # --- the committed files ---------------------------------------------------------------------------------------------
-def _identities(root: Path) -> dict[str, tuple[str, str]]:
-    """Key -> (Name, Type) from the committed bases, which must agree on every Key they share."""
+def _identities(root: Path, bases: tuple[Path, ...]) -> dict[str, tuple[str, str]]:
+    """Key -> (Name, Type) from `bases`, which must agree on every Key they share."""
     identities: dict[str, tuple[str, str]] = {}
-    for base in BASES:
+    for base in bases:
         for row in read_variants_export(root / base, require_status=False):
             have = identities.setdefault(row.key, (row.name, row.type))
             if have != (row.name, row.type):
