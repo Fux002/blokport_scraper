@@ -19,6 +19,7 @@ Hermetic: tmp stores, a hand-built index, the committed vocabulary. No em dashes
 from __future__ import annotations
 
 import csv
+import io
 import sqlite3
 from contextlib import closing
 from types import SimpleNamespace
@@ -187,7 +188,9 @@ def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, monkeypat
 def test_the_matcher_no_longer_reads_the_alias_writeback_csv(config_db, monkeypatch, tmp_path):
     def refuse(*a, **k):
         raise AssertionError("the matcher read alias_writeback.csv")
-    monkeypatch.setattr(wb, "load_alias_writeback_records", refuse)
+    from stone_pipeline.aliases import migrate_learned
+    monkeypatch.setattr(migrate_learned, "load_alias_writeback_records", refuse)
+    monkeypatch.setattr(migrate_learned, "stored_records", refuse)
     _built_stage(monkeypatch)
 
 
@@ -265,99 +268,6 @@ def _ledger(path):
     return path
 
 
-def _writeback(path, rows):
-    with path.open("w", encoding="utf-8", newline="") as h:
-        w = csv.writer(h)
-        w.writerow(["variation_id", "alias", "method"])
-        w.writerows(rows)
-    return path
-
-
-def _migrate(tmp_path, records):
-    from stone_pipeline.aliases import migrate_learned
-    return migrate_learned.run_once(writeback_path=_writeback(tmp_path / "alias_writeback.csv", records),
-                                    ledger_path=_ledger(tmp_path / "ledger.db"), review_dir=tmp_path / "review")
-
-
-def _dropped(tmp_path) -> list[dict]:
-    from stone_pipeline.aliases import migrate_learned
-    with (tmp_path / "review" / migrate_learned.DROPPED_REVIEW).open(encoding="utf-8-sig", newline="") as h:
-        return list(csv.DictReader(h))
-
-
-def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary(config_db, tmp_path):
-    report = _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic"),        # by the ledger's medusa_id
-                                 (OTHER, "China White", "fuzzy")])                 # already a new Key
-    assert report == {"active": 2, "dropped": 0}
-    assert [r["score"] for r in _rows(config_db)] == [None, None]          # a migrated row carries no score
-    assert [(r["identity_key"], r["value"], r["method"], r["status"], r["decided_by"], r["source"])
-            for r in decisions_store.active_learned_aliases()] == [
-        (LIVE, "PATAGONIA", "phonetic", "active", "migration", ""),
-        (OTHER, "China White", "fuzzy", "active", "migration", "")]
-
-
-def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db, tmp_path):
-    report = _migrate(tmp_path, [
-        ("01NOWHERE", "Some Name", "fuzzy"),            # resolves to no Key
-        ("01GONE", "Old Spelling", "fuzzy"),            # a retiring Key is not live
-        ("01PATAGONIA", "Patagonia White", "fuzzy"),    # its own name (C1 boundary)
-        ("01PATAGONIA", "White Linen", "fuzzy"),        # another same-type variety's name (C1 boundary)
-        ("01PATAGONIA", "G603", "fuzzy"),               # a code, never an alias
-        ("01PATAGONIA", "Legacy Pick", "exact"),        # not a learned guess
-        ("01PATAGONIA", "PATAGONIA", "phonetic"),
-        ("01PATAGONIA", "patagonia", "fuzzy"),          # the same norm again
-    ])
-    assert report == {"active": 1, "dropped": 7}
-    assert [(r["variation_id"], r["alias"], r["reason"]) for r in _dropped(tmp_path)] == [
-        ("01GONE", "Old Spelling", "no_live_key"),
-        ("01NOWHERE", "Some Name", "no_live_key"),
-        ("01PATAGONIA", "G603", "is_code"),
-        ("01PATAGONIA", "Legacy Pick", "not_learned"),
-        ("01PATAGONIA", "Patagonia White", "own_name"),
-        ("01PATAGONIA", "White Linen", "same_type_name"),
-        ("01PATAGONIA", "patagonia", "duplicate"),
-    ]
-
-
-def test_a_second_produce_s_migration_is_a_no_op(config_db, tmp_path):
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) == {"active": 1, "dropped": 0}
-    before = _rows(config_db)
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic"), (OTHER, "China White", "fuzzy")]) is None
-    assert _rows(config_db) == before
-
-
-def test_a_store_holding_the_migration_marker_never_reads_the_csv(config_db, tmp_path, monkeypatch):
-    from stone_pipeline.aliases import migrate_learned
-    _migrate(tmp_path, [])
-    monkeypatch.setattr(migrate_learned, "load_alias_writeback_records",
-                        lambda path: (_ for _ in ()).throw(AssertionError("the csv was read again")))
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) is None
-
-
-def test_an_absent_csv_migrates_nothing_and_still_marks_the_store(config_db, tmp_path):
-    from stone_pipeline.aliases import migrate_learned
-    assert migrate_learned.run_once(writeback_path=tmp_path / "absent.csv", ledger_path=_ledger(tmp_path / "l.db"),
-                                    review_dir=tmp_path / "review") == {"active": 0, "dropped": 0}
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) is None
-
-
-def test_a_brand_new_environment_records_an_empty_migration(config_db, tmp_path):
-    # Scraper's L2 on SC #650: no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
-    # the ledger is read only to resolve records, and there are none
-    from stone_pipeline.aliases import migrate_learned
-    assert migrate_learned.run_once(writeback_path=tmp_path / "absent.csv", ledger_path=tmp_path / "no-ledger.db",
-                                    review_dir=tmp_path / "review") == {"active": 0, "dropped": 0}
-    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
-
-
-def test_records_with_no_ledger_to_resolve_them_fail_loud(config_db, tmp_path):
-    from stone_pipeline.aliases import migrate_learned
-    with pytest.raises(FileNotFoundError, match="no ledger"):
-        migrate_learned.run_once(writeback_path=_writeback(tmp_path / "w.csv", [("01PATAGONIA", "PATAGONIA", "phonetic")]),
-                                 ledger_path=tmp_path / "no-ledger.db", review_dir=tmp_path / "review")
-    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
-
-
 # --- the migration owns its input (manager ruling 11-12): the csv is read from its .v2 key on S3, only while the marker
 # is absent; absence is the only error that reads as "nothing to migrate" ---------------------------------------------
 
@@ -387,12 +297,90 @@ class _S3:
         return {}
 
 
-def _migrate_from(tmp_path, monkeypatch, s3):
+def _migrate_from(tmp_path, monkeypatch, s3, ledger_path=None):
     from stone_pipeline.aliases import migrate_learned
     from stone_pipeline.ledger import snapshot
-    monkeypatch.setattr(migrate_learned, "_s3", lambda: s3, raising=False)
+    monkeypatch.setattr(migrate_learned, "_s3", lambda: s3)
     monkeypatch.setattr(snapshot, "_s3", lambda: s3)
-    return migrate_learned.run_once(ledger_path=_ledger(tmp_path / "ledger.db"), review_dir=tmp_path / "review")
+    return migrate_learned.run_once(ledger_path=ledger_path or _ledger(tmp_path / "ledger.db"),
+                                    review_dir=tmp_path / "review")
+
+
+def _csv(records) -> bytes:
+    out = io.StringIO(newline="")
+    w = csv.writer(out)
+    w.writerow(["variation_id", "alias", "method"])
+    w.writerows(records)
+    return out.getvalue().encode("utf-8")
+
+
+def _migrate(tmp_path, monkeypatch, records):
+    """The migration of these records, stored at the .v2 key."""
+    return _migrate_from(tmp_path, monkeypatch, _S3({WB_NEW: _csv(records)}))
+
+
+def _dropped(tmp_path) -> list[dict]:
+    from stone_pipeline.aliases import migrate_learned
+    with (tmp_path / "review" / migrate_learned.DROPPED_REVIEW).open(encoding="utf-8-sig", newline="") as h:
+        return list(csv.DictReader(h))
+
+
+def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary(config_db, tmp_path, monkeypatch):
+    report = _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic"),        # by the ledger's medusa_id
+                                 (OTHER, "China White", "fuzzy")])                 # already a new Key
+    assert report == {"active": 2, "dropped": 0}
+    assert [r["score"] for r in _rows(config_db)] == [None, None]          # a migrated row carries no score
+    assert [(r["identity_key"], r["value"], r["method"], r["status"], r["decided_by"], r["source"])
+            for r in decisions_store.active_learned_aliases()] == [
+        (LIVE, "PATAGONIA", "phonetic", "active", "migration", ""),
+        (OTHER, "China White", "fuzzy", "active", "migration", "")]
+
+
+def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db, tmp_path, monkeypatch):
+    report = _migrate(tmp_path, monkeypatch, [
+        ("01NOWHERE", "Some Name", "fuzzy"),            # resolves to no Key
+        ("01GONE", "Old Spelling", "fuzzy"),            # a retiring Key is not live
+        ("01PATAGONIA", "Patagonia White", "fuzzy"),    # its own name (C1 boundary)
+        ("01PATAGONIA", "White Linen", "fuzzy"),        # another same-type variety's name (C1 boundary)
+        ("01PATAGONIA", "G603", "fuzzy"),               # a code, never an alias
+        ("01PATAGONIA", "Legacy Pick", "exact"),        # not a learned guess
+        ("01PATAGONIA", "PATAGONIA", "phonetic"),
+        ("01PATAGONIA", "patagonia", "fuzzy"),          # the same norm again
+    ])
+    assert report == {"active": 1, "dropped": 7}
+    assert [(r["variation_id"], r["alias"], r["reason"]) for r in _dropped(tmp_path)] == [
+        ("01GONE", "Old Spelling", "no_live_key"),
+        ("01NOWHERE", "Some Name", "no_live_key"),
+        ("01PATAGONIA", "G603", "is_code"),
+        ("01PATAGONIA", "Legacy Pick", "not_learned"),
+        ("01PATAGONIA", "Patagonia White", "own_name"),
+        ("01PATAGONIA", "White Linen", "same_type_name"),
+        ("01PATAGONIA", "patagonia", "duplicate"),
+    ]
+
+
+def test_a_second_produce_s_migration_is_a_no_op(config_db, tmp_path, monkeypatch):
+    assert _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic")]) == {"active": 1, "dropped": 0}
+    before = _rows(config_db)
+    assert _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic"), (OTHER, "China White", "fuzzy")]) is None
+    assert _rows(config_db) == before
+
+
+def test_a_brand_new_environment_records_an_empty_migration(config_db, tmp_path, monkeypatch):
+    # Scraper's L2 on SC #650: no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
+    # the ledger is read only to resolve records, and there are none
+    from stone_pipeline.aliases import migrate_learned
+    assert _migrate_from(tmp_path, monkeypatch, _S3(), ledger_path=tmp_path / "no-ledger.db") == {"active": 0,
+                                                                                                  "dropped": 0}
+    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_records_with_no_ledger_to_resolve_them_fail_loud(config_db, tmp_path, monkeypatch):
+    from stone_pipeline.aliases import migrate_learned
+    with pytest.raises(FileNotFoundError, match="no ledger"):
+        _migrate_from(tmp_path, monkeypatch, _S3({WB_NEW: _csv([("01PATAGONIA", "PATAGONIA", "phonetic")])}),
+                      ledger_path=tmp_path / "no-ledger.db")
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
 
 
 def test_the_migration_reads_its_records_from_the_v2_key(config_db, tmp_path, monkeypatch):
