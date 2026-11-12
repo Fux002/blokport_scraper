@@ -153,10 +153,10 @@ def test_a_fresh_ledger_with_no_category_rows_still_gives_every_product_its_hand
     registry(_text(PACK_ROWS))
     with Ledger.open(tmp_path / "dev.db", env="development") as lg:
         assert lg.execute("SELECT COUNT(*) FROM attribute").fetchone()[0] == 0
-        assert [_category_handle_for(lg, p) for p in ("pcat_slab", "pcat_block", "pcat_tile", None)] == [
+        assert [_category_handle_for(p) for p in ("pcat_slab", "pcat_block", "pcat_tile", None)] == [
             "slabs", "blocks", "tiles", None]
         with pytest.raises(ValueError, match="pcat_unknown"):
-            _category_handle_for(lg, "pcat_unknown")
+            _category_handle_for("pcat_unknown")
 
 
 def test_the_ledger_seed_and_restore_hold_no_category_rows(tmp_path):

@@ -60,6 +60,21 @@ def _isolate_config_store(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
 
 
+@pytest.fixture
+def tree_category_pcats(monkeypatch):
+    """The tree-build tests' category pcats on the registry (table 577: a category's pcat is the registry's)."""
+    from stone_pipeline.tests._category_registry import TREE_PCATS, set_category_pcats
+    set_category_pcats(monkeypatch, TREE_PCATS)
+
+
+@pytest.fixture
+def slab_category_pcat(monkeypatch):
+    """The Slabs category on SLAB_PCAT, so a canonical row on that pcat is stored under `slabs` (table 577)."""
+    from stone_pipeline.tests._category_registry import set_category_pcats
+    from stone_pipeline.tests._ledger_icons import SLAB_PCAT
+    set_category_pcats(monkeypatch, {"slab": SLAB_PCAT})
+
+
 @pytest.fixture(autouse=True)
 def _clear_vocab_caches():
     """The colour/type recognition vocab is lazily loaded and lru-cached from attributes.csv + the synonym

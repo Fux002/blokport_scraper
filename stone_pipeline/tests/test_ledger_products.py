@@ -9,12 +9,21 @@ id seed), so no pipeline run or live data is needed.
 
 from __future__ import annotations
 
+import pytest
+
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
+from stone_pipeline.tests._category_registry import set_category_pcats
+
+
+@pytest.fixture(autouse=True)
+def _category_pcats(monkeypatch):
+    # the synthetic category pcats, on the registry: a category is never the ledger's (table 577)
+    set_category_pcats(monkeypatch, {"slab": "PC1", "block": "PC2"})
 
 
 def _seed_ids(ledger: Ledger) -> None:
@@ -22,7 +31,6 @@ def _seed_ids(ledger: Ledger) -> None:
     for cat, val, mid in [
         ("color", "Black", "C1"), ("finish", "Polished", "F1"), ("finish", "Honed", "F2"),
         ("quality", "First", "Q1"), ("type", "Marble", "T1"),
-        ("category", "Slabs", "PC1"), ("category", "Blocks", "PC2"),
     ]:
         ledger.upsert("attribute", {
             "category": cat, "value": val, "medusa_id": mid, "state": "synced",

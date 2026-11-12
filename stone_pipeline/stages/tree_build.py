@@ -25,20 +25,19 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.categories import CATEGORIES, default_form_name
+from stone_pipeline.config.categories import CATEGORIES, category_by_handle, category_by_pcat, default_form_name
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
 from stone_pipeline.reference.loaders import attributes_status_required, type_slug_from_key, variants_status_required
 from stone_pipeline.reference.loaders.backbone import read_posts
-from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
+from stone_pipeline.reference.medusa_files import CATEGORY_KIND, read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
 
 # The categories a variety is priced in: every one a new variety fans out to (phase 1: a variety is ONE record per
-# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle (plural), the
-# value attributes.csv lists its pcat under.
-_FAN_OUT_CATEGORIES = {c.name: c.plural for c in CATEGORIES if c.fan_out}
+# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle (D11).
+_FAN_OUT_CATEGORIES = {c.name: c.handle for c in CATEGORIES if c.fan_out}
 COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
                        "finish_id", "color_id", "quality_id")
 
@@ -47,12 +46,19 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
     """attributes.csv (category,value,sourceid) -> {kind: {match_key(value): sourceId}}, for every value that
     has an id. Keyed by match_key so a lookup matches regardless of separator/case/accent (a hyphenated
     'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way. The
-    read_attributes guards conflicting duplicates."""
+    read_attributes guards conflicting duplicates. Category rows are skipped: a category's pcat is the registry's,
+    by its exact handle (table 577, _category_pcat)."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
     for a in read_attributes(Path(path), require_status=attributes_status_required(Path(path))):
-        if a.sourceid:
+        if a.sourceid and a.category != CATEGORY_KIND:
             attr[match_key(a.category)][match_key(a.value)] = a.sourceid
     return attr
+
+
+def _category_pcat(handle: str) -> str | None:
+    """A category's pcat on this env, by its exact handle (the registry, table 577); None when it has none."""
+    cat = category_by_handle(handle)
+    return (cat.pcat_id or None) if cat is not None else None
 
 
 def _read_backbone(paths: list[Path]):
@@ -91,10 +97,9 @@ def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[st
         if unresolved:
             raise ValueError(f"category {c.name!r} declares finishes the finish vocabulary does not hold: {unresolved}")
         out[c.name] |= {attr["finish"][match_key(f)] for f in c.finishes}
-    pcat_to_name = {attr["category"].get(match_key(c.plural)): c.name for c in CATEGORIES}
     for p in products.values():
-        if name := pcat_to_name.get(p["category"]):
-            out[name] |= p["finishes"]
+        if (cat := category_by_pcat(p["category"])) is not None:
+            out[cat.name] |= p["finishes"]
     for c in CATEGORIES:
         if c.finishes_from:
             out[c.name] |= out[c.finishes_from]
@@ -169,7 +174,7 @@ def _acked_combination_tuples(attr: dict, nkey_to_vid: dict[str, str], ledger=No
     unrebuilt = 0
     for carried in acked.values():
         d = dict(carried)   # {dimension: norm(value)}, one value per dimension
-        t = (attr["category"].get(d.get("category", "")), attr["type"].get(d.get("type", "")),
+        t = (_category_pcat(d.get("category", "")), attr["type"].get(d.get("type", "")),
              nkey_to_vid.get(d.get("variation_key", "")), attr["finish"].get(d.get("finish", "")),
              attr["color"].get(d.get("color", "")), attr["quality"].get(d.get("quality", "")))
         if all(t):
@@ -286,7 +291,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if cids or qids:
             overlay_ids[(vnorm, tnorm)] = (cids, qids)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
-    cat_pcat = {name: attr["category"].get(match_key(handle)) for name, handle in _FAN_OUT_CATEGORIES.items()}
+    cat_pcat = {name: _category_pcat(handle) for name, handle in _FAN_OUT_CATEGORIES.items()}
     if unpriced := sorted(name for name, pcat in cat_pcat.items() if not pcat):
         log.warning("fan-out categories with no category id in attributes.csv get no combinations",
                     extra={"extra_fields": {"categories": unpriced}})

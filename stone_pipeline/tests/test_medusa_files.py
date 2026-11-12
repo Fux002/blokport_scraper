@@ -25,14 +25,14 @@ def _file(tmp_path, text: str, encoding: str = "utf-8") -> Path:
 
 
 def test_old_shape_reads_every_value_active_and_not_internal(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid\ncolor,Black,col_1\ncategory,Slabs,pcat_s\n")
+    p = _file(tmp_path, "category,value,sourceid,handle\ncolor,Black,col_1\ncategory,Slabs,pcat_s,slabs\n")
     assert read_attributes(p, require_status=False) == [
         AttributeValue("color", "Black", "col_1", "active", False),
-        AttributeValue("category", "Slabs", "pcat_s", "active", False)]
+        AttributeValue("category", "Slabs", "pcat_s", "active", False, "slabs")]
 
 
 def test_new_shape_carries_status_and_internal(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid,status,internal\n"
+    p = _file(tmp_path, "category,value,sourceid,status,internal,handle\n"
                         "color,Black,col_1,active,false\n"
                         "color,Grey,col_2,ARCHIVED,False\n"
                         "color,Test,col_3,Active,TRUE\n")
@@ -63,7 +63,7 @@ def test_missing_column_message_names_each_missing_column(tmp_path):
     ("", "false", "status"), ("retired", "false", "status"),
     ("active", "", "internal"), ("active", "yes", "internal")])
 def test_empty_or_invalid_status_or_internal_cell_raises_naming_the_row(tmp_path, status, internal, bad):
-    p = _file(tmp_path, "category,value,sourceid,status,internal\n"
+    p = _file(tmp_path, "category,value,sourceid,status,internal,handle\n"
                         "color,Black,col_1,active,false\n"
                         f"color,Grey,col_2,{status},{internal}\n")
     with pytest.raises(ValueError, match=rf"line 3: {bad}"):
@@ -79,24 +79,24 @@ def test_require_status_without_the_columns_raises(tmp_path, header):
 
 
 def test_one_status_column_alone_is_read_with_the_other_defaulted(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid,status\ncolor,Grey,col_2,archived\n")
+    p = _file(tmp_path, "category,value,sourceid,status,handle\ncolor,Grey,col_2,archived\n")
     assert read_attributes(p, require_status=False) == [AttributeValue("color", "Grey", "col_2", "archived", False)]
 
 
 def test_bom_is_dropped_from_a_file_and_from_text(tmp_path):
-    body = "category,value,sourceid\ncolor,Black,col_1\n"
+    body = "category,value,sourceid,handle\ncolor,Black,col_1\n"
     expected = [AttributeValue("color", "Black", "col_1", "active", False)]
     assert read_attributes(_file(tmp_path, body, encoding="utf-8-sig"), require_status=False) == expected
     assert read_attributes("﻿" + body, require_status=False) == expected
 
 
 def test_text_and_path_forms_read_the_same(tmp_path):
-    body = "category,value,sourceid\r\ncolor,Black,col_1\r\nfinish,Polished,fin_1\r\n"
+    body = "category,value,sourceid,handle\r\ncolor,Black,col_1\r\nfinish,Polished,fin_1\r\n"
     assert read_attributes(body, require_status=False) == read_attributes(_file(tmp_path, body), require_status=False)
 
 
 def test_blank_rows_skipped_and_an_empty_sourceid_kept(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid\n"
+    p = _file(tmp_path, "category,value,sourceid,handle\n"
                         "color,,col_1\n"          # no value: skipped
                         ",Black,col_2\n"          # no category: skipped
                         "\n"                      # blank line: skipped
@@ -107,14 +107,14 @@ def test_blank_rows_skipped_and_an_empty_sourceid_kept(tmp_path):
 
 
 def test_conflicting_duplicate_raises_across_statuses(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid,status,internal\n"
+    p = _file(tmp_path, "category,value,sourceid,status,internal,handle\n"
                         "color,Amber,id_a,archived,false\ncolor,AMBER,id_b,active,true\n")
     with pytest.raises(ValueError, match="unique per category"):
         read_attributes(p, require_status=True)
 
 
 def test_same_id_repeat_and_id_less_repeat_are_allowed(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid\ncolor,Amber,id_a\ncolor,amber,id_a\ncolor,Amber,\n"
+    p = _file(tmp_path, "category,value,sourceid,handle\ncolor,Amber,id_a\ncolor,amber,id_a\ncolor,Amber,\n"
                         "finish,Amber,id_f\n")    # another category: a different name
     assert [a.sourceid for a in read_attributes(p, require_status=False)] == ["id_a", "id_a", "", "id_f"]
 
@@ -126,11 +126,11 @@ def test_append_follows_the_files_header_and_reads_back(tmp_path):
     assert [a.value for a in read_attributes(p, require_status=True)] == ["Black", "Grey"]
 
 
-def test_append_to_the_old_shape_writes_three_columns(tmp_path):
-    p = _file(tmp_path, "category,value,sourceid\ncolor,Black,col_1\n")
+def test_append_to_the_old_shape_writes_its_header_columns(tmp_path):
+    p = _file(tmp_path, "category,value,sourceid,handle\ncolor,Black,col_1\n")
     append_attributes(p, [AttributeValue("color", "Grey", "col_2", "active", False)])
     # csv.writer's own line ending, exactly as the append it replaces wrote
-    assert p.read_bytes() == b"category,value,sourceid\ncolor,Black,col_1\ncolor,Grey,col_2\r\n"
+    assert p.read_bytes() == b"category,value,sourceid,handle\ncolor,Black,col_1\ncolor,Grey,col_2,\r\n"
 
 
 # A module parses attributes.csv when it reads a CSV (the csv module, polars or pandas) and takes the file's columns
@@ -169,14 +169,14 @@ def test_only_medusa_files_parses_the_attributes_file():
 
 def test_adopt_attribute_ids_appends_only_new_values_in_the_files_shape(tmp_path):
     from stone_pipeline.stages.decisions import adopt_attribute_ids
-    old = _file(tmp_path, "category,value,sourceid\ncolor,Black,col_1\n")
+    old = _file(tmp_path, "category,value,sourceid,handle\ncolor,Black,col_1\n")
     filled = {("color", "black"): ("Black", "col_1"), ("color", "sea green"): ("Sea Green", "col_9")}
     assert adopt_attribute_ids(filled, attributes_csv=old) == 1
-    assert old.read_bytes() == b"category,value,sourceid\ncolor,Black,col_1\ncolor,Sea Green,col_9\r\n"
+    assert old.read_bytes() == b"category,value,sourceid,handle\ncolor,Black,col_1\ncolor,Sea Green,col_9,\r\n"
     assert adopt_attribute_ids(filled, attributes_csv=old) == 0        # idempotent
 
     new = tmp_path / "new.csv"
-    new.write_text("category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n", encoding="utf-8")
+    new.write_text("category,value,sourceid,status,internal,handle\ncolor,Black,col_1,archived,false\n", encoding="utf-8")
     assert adopt_attribute_ids(filled, attributes_csv=new) == 1
     assert [(a.value, a.status) for a in read_attributes(new, require_status=True)] == [
         ("Black", "archived"), ("Sea Green", "active")]
@@ -184,7 +184,7 @@ def test_adopt_attribute_ids_appends_only_new_values_in_the_files_shape(tmp_path
 
 def test_finish_ids_reads_the_text_form():
     from stone_pipeline.standardise.tile_plan import finish_ids
-    text = "﻿category,value,sourceid\nfinish,Polished,fin_1\nfinish,Honed,fin_2\ncolor,Black,col_1\n"
+    text = "﻿category,value,sourceid,handle\nfinish,Polished,fin_1\nfinish,Honed,fin_2\ncolor,Black,col_1\n"
     assert finish_ids(text) == {"fin_1", "fin_2"}
 
 

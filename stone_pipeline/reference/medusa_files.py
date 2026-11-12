@@ -18,7 +18,10 @@ from typing import Iterable, Iterator
 
 from stone_pipeline.core.text import match_key
 
-ATTRIBUTE_COLUMNS = ("category", "value", "sourceid")
+# `handle` (table 577, BE-SCRAPER-INTERFACE T1): a category row's D11 handle, '' on every other row. It is how the
+# scraper keys a category (config/categories.category_pcats); the label in `value` is never a key.
+ATTRIBUTE_COLUMNS = ("category", "value", "sourceid", "handle")
+CATEGORY_KIND = "category"
 _STATUS_COLUMNS = ("status", "internal")
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
@@ -41,6 +44,7 @@ class AttributeValue:
     sourceid: str
     status: str        # "active" | "archived"
     internal: bool
+    handle: str = ""   # a category row's D11 handle, exactly as served; '' for every other kind
 
     @property
     def assignable(self) -> bool:
@@ -65,7 +69,8 @@ def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeV
         if not category or not value:
             continue
         item = AttributeValue(category, value, (row.get("sourceid") or "").strip(),
-                              _status(row, fields, label, line), _internal(row, fields, label, line))
+                              _status(row, fields, label, line), _internal(row, fields, label, line),
+                              _handle(row, category, label, line))
         _guard_duplicate(ids, item, label)
         out.append(item)
     return out
@@ -119,7 +124,7 @@ def append_attributes(path: Path, values: Iterable[AttributeValue]) -> None:
     with path.open("a", newline="", encoding="utf-8") as h:
         writer = csv.writer(h)
         for v in values:
-            cells = {"category": v.category, "value": v.value, "sourceid": v.sourceid,
+            cells = {"category": v.category, "value": v.value, "sourceid": v.sourceid, "handle": v.handle,
                      "status": v.status, "internal": "true" if v.internal else "false"}
             writer.writerow([cells.get(name, "") for name in header])
 
@@ -143,6 +148,16 @@ def _parse(handle, label: str, required: tuple[str, ...]) -> Iterator[tuple[int,
         raise ValueError(f"{label}: missing required column(s) {', '.join(missing)}")
     for row in reader:
         yield reader.line_num, row, fields
+
+
+def _handle(row: dict, category: str, label: str, line: int) -> str:
+    """The row's handle: required on a category row, '' on any other (a handle elsewhere is a malformed export)."""
+    handle = (row.get("handle") or "").strip()
+    if category == CATEGORY_KIND and not handle:
+        raise ValueError(f"{label} line {line}: a category row needs its handle")
+    if category != CATEGORY_KIND and handle:
+        raise ValueError(f"{label} line {line}: only a category row carries a handle, not a {category!r} row")
+    return handle
 
 
 def _status(row: dict, fields: set[str], label: str, line: int) -> str:

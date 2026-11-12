@@ -1,4 +1,5 @@
-"""attributes.csv: attribute names -> backend ids (colour, finish, quality, type) and the category pcat ids."""
+"""attributes.csv: attribute names -> backend ids (colour, finish, quality, type). A category's pcat id is NOT read here:
+the category registry (config/categories.category_pcats) is the one reader of the category rows (table 577)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from typing import Optional
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.reference.loaders.common import env, norm
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import CATEGORY_KIND, read_attributes
 
 # Vocabulary categories carried in attributes.csv (section 6), declared by the active product-domain pack
 # (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
@@ -20,11 +21,10 @@ VOCAB_CATEGORIES = tuple(active_pack().attributes)
 
 @dataclass
 class Attributes:
-    """Name to backend id, per vocabulary, plus the two category pcat ids."""
+    """Name to backend id, per vocabulary."""
 
     # category -> {normalized_name -> (canonical_name, id)}
     by_category: dict[str, dict[str, tuple[str, str]]] = field(default_factory=dict)
-    category_pcat: dict[str, str] = field(default_factory=dict)  # 'Slabs'/'Blocks' -> pcat id
 
     def resolve_id(self, category: str, name: str) -> Optional[tuple[str, str]]:
         """Return (canonical_name, id) for an exact normalized name, else None. For types, a synonym
@@ -44,8 +44,7 @@ class Attributes:
         return [canon for canon, _ in self.by_category.get(category, {}).values()]
 
     def all_ids(self) -> list[str]:
-        return list(self.category_pcat.values()) + [
-            i for table in self.by_category.values() for _, i in table.values()]
+        return [i for table in self.by_category.values() for _, i in table.values()]
 
 
 def restricted_values(path: Path | None = None) -> dict[str, set[str]]:
@@ -53,14 +52,15 @@ def restricted_values(path: Path | None = None) -> dict[str, set[str]]:
     (`not AttributeValue.assignable`). Read through medusa_files.read_attributes, the single authority on
     what is restricted (VE2 ruling: no ledger copy). Empty while attributes.csv carries no status/internal
     columns (the expand phase, so nothing is restricted yet) or the file is absent. Values are keyed by
-    `norm` so a caller matches a resolved value name regardless of separator/case/accent."""
+    `norm` so a caller matches a resolved value name regardless of separator/case/accent; a category is keyed by
+    its exact handle (table 577), the identity every category reader uses."""
     path = Path(path) if path is not None else env().SETTINGS.paths.attributes_csv
     if not Path(path).exists():
         return {}
     out: dict[str, set[str]] = defaultdict(set)
     for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
-        if not a.assignable:
-            out[a.category].add(norm(a.value))
+        if not a.assignable:                      # a category by its exact handle, never its label (577)
+            out[a.category].add(a.handle if a.category == CATEGORY_KIND else norm(a.value))
     return dict(out)
 
 
@@ -92,8 +92,6 @@ def load_attributes(path: Path | None = None) -> Attributes:
                              require_status=ATTRIBUTES_STATUS_REQUIRED):
         if not a.sourceid:
             continue
-        if a.category == "category":
-            attrs.category_pcat[a.value] = a.sourceid
-        else:
+        if a.category != CATEGORY_KIND:            # a category is the registry's (keyed by its handle)
             attrs.by_category.setdefault(a.category, {})[norm(a.value)] = (a.value, a.sourceid)
     return attrs
