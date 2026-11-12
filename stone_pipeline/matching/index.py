@@ -129,7 +129,7 @@ def build_variation_index(variant_table, backbone, origin_map=None) -> "Candidat
         # arbitrary first same-name backbone variety -- which (with the shared slab backbone used for
         # every branch) could carry a different stone type and set the wrong block_type.
         key_type = _type_from_key(variant.key)
-        variety = backbone.lookup(variant.name, stone_type=key_type)
+        variety = backbone.variety_of(variant.key, variant.name, stone_type=key_type)   # its own post first
         # block_type IS the Key's type_slug (the sole type authority). backbone.lookup only returns a
         # variety whose stone_type norm-equals key_type, so (variety.stone_type or key_type) already
         # normalized to key_type -- verified 0 mismatches on the committed seed. Use key_type directly so

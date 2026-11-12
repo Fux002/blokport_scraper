@@ -158,7 +158,7 @@ def _sleepless(monkeypatch):
     """Collect sleep durations and allow the fake test hosts past the SSRF guard."""
     sleeps: list[float] = []
     monkeypatch.setattr("scrapers.base.time.sleep", lambda t: sleeps.append(t))
-    monkeypatch.setattr("scrapers.base.url_allowed", lambda u: True)
+    monkeypatch.setattr("stone_pipeline.io.ssrf.url_allowed", lambda u: True)   # the one hop check
     return sleeps
 
 

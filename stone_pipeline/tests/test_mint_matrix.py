@@ -5,14 +5,14 @@ Deliberately small: it reuses the real reference (`load_all`) and the same Canon
 gap every other mint test uses -- no new machinery.
 
 Outcome vocabulary (the `curate.build_curation` result):
-  MINT   a new variety Key appears in result.new_variants[branch]
+  MINT   a new variety Key appears in result.new_variants (one row per (type, name))
   HOLD   the variety is surfaced in result.pending_confirm (operator must decide) and is NOT minted
   (ALIAS onto an existing variety is exercised in test_mint_type_authority / test_mint_resolve_no_duplicate.)
 
-The rule the matrix guards: a variety mints ONLY as (branch, CANONICAL type, clean name), and ONLY once an
+The rule the matrix guards: a variety mints ONLY as (CANONICAL type, clean name), and ONLY once an
 operator CONFIRMS it -- every new variety first HOLDS in pending_confirm (nothing is silently auto-minted).
 Anything without a real type -- absent, non-canonical, or an un-vetted operator value -- also HOLDS, never
-minting a garbage-slug Key. A CONFIRMED variety fans out to every active category, the same identity mints
+minting a garbage-slug Key. A CONFIRMED variety mints ONE Key whatever its categories, the same identity mints
 once, and a same-name multi-type homonym surfaces as two distinct holds (not one).
 """
 
@@ -40,8 +40,7 @@ def _scrape(name: str, raw_type: str = "", sk: str = "s1") -> CanonicalRow:
 
 
 def _minted_keys(res, name_slug: str) -> list[str]:
-    return [r["Key"] for b in ("slab", "block", "tile")
-            for r in res.new_variants[b] if name_slug in r["Key"]]
+    return [r["Key"] for r in res.new_variants if name_slug in r["Key"]]
 
 
 def _is_held(res, name: str) -> bool:
@@ -52,8 +51,8 @@ def _is_held(res, name: str) -> bool:
 
 def test_new_variety_with_a_canonical_type_holds_then_mints_when_confirmed(ref):
     # The confirm-gate: a genuinely-new name + canonical type does NOT auto-mint -- it HOLDS for one operator
-    # confirmation (nothing is silently minted). Once CONFIRMED it mints, fanned out to slab+block+tile, each
-    # Key carrying the type slug. This is the baseline definition of a correct mint under the review queue.
+    # confirmation (nothing is silently minted). Once CONFIRMED it mints ONE Key, its type slug before the `__`.
+    # This is the baseline definition of a correct mint under the review queue.
     held = curate.build_curation([_scrape("Novum Test Stone", raw_type="Granite")], ref)
     assert _is_held(held, "Novum Test Stone")                                    # new variety -> held, not minted
     assert not _minted_keys(held, "novum_test_stone")
@@ -61,8 +60,7 @@ def test_new_variety_with_a_canonical_type_holds_then_mints_when_confirmed(ref):
     views.mint("Novum Test Stone", stone_type="Granite")  # operator confirms
     res = curate.build_curation([_scrape("Novum Test Stone", raw_type="Granite")], ref)
     keys = _minted_keys(res, "novum_test_stone")
-    assert sorted(k.split("_")[0] for k in keys) == ["block", "slab", "tile"]   # one per active category
-    assert all("granite" in k for k in keys)                                     # typed Key everywhere
+    assert [k.split("__")[0] for k in keys] == ["granite"]                       # one variety, its type's Key
     assert not _is_held(res, "Novum Test Stone")                                 # confirmed -> no longer held
 
 
@@ -91,13 +89,12 @@ def test_operator_seed_type_must_also_be_canonical(ref):
 
 
 def test_two_scrapes_of_the_same_identity_mint_once(ref):
-    # two rows cleaning to the SAME (type, name), once CONFIRMED, must not mint two Keys in a branch (dedup).
+    # two rows cleaning to the SAME (type, name), once CONFIRMED, must not mint two Keys (dedup).
     views.mint("Dupe Novel Stone", stone_type="Granite")
     rows = [_scrape("Dupe Novel Stone", raw_type="Granite", sk="a"),
             _scrape("Dupe Novel Stone", raw_type="Granite", sk="b")]
     res = curate.build_curation(rows, ref)
-    slab = [r for r in res.new_variants["slab"] if "dupe_novel_stone" in r["Key"]]
-    assert len(slab) == 1
+    assert len(_minted_keys(res, "dupe_novel_stone")) == 1
 
 
 def test_same_name_two_different_canonical_types_surface_as_two_distinct_holds(ref):

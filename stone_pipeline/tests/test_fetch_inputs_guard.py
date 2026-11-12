@@ -130,14 +130,16 @@ def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
     # Medusa's export also lists other vendors' variants (dev 2026-11-01: non-stone test products, np-cattle-...,
     # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
     export = tmp_path / "variants_export.csv"
-    export.write_text("Id,Key,Name,Image,Aliases\n"
-                      "v1,slab_marble_carrara_0001,Carrara,,\n"
-                      "v2,np-cattle-heifer-limousin-430,Heifer,,\n"
-                      "v3,tile_marble_carrara_0001,Carrara,,\n"
-                      "v4,np-diesel-en590-summer,Diesel,,\n", encoding="utf-8")
+    # the scraper's own are the export's `owner = scraper` rows (PHASE-1-SPEC D5)
+    export.write_text("Id,Key,Name,Aliases,status,Type,owner\n"
+                      "v1,marble__carrara_0001,Carrara,,active,Marble,scraper\n"
+                      "v2,np-cattle-heifer-limousin-430,Heifer,,active,Cattle,\n"
+                      "v3,marble__statuario_0002,Statuario,,active,Marble,scraper\n"
+                      "v4,np-diesel-en590-summer,Diesel,,active,Fuel,\n", encoding="utf-8")
     assert fetch_inputs.own_variants(export) == 2
     lines = export.read_text(encoding="utf-8").splitlines()
-    assert lines == ["Id,Key,Name,Image,Aliases", "v1,slab_marble_carrara_0001,Carrara,,", "v3,tile_marble_carrara_0001,Carrara,,"]
+    assert lines == ["Id,Key,Name,Aliases,status,Type,owner", "v1,marble__carrara_0001,Carrara,,active,Marble,scraper",
+                     "v3,marble__statuario_0002,Statuario,,active,Marble,scraper"]
     assert fetch_inputs.own_variants(export) == 0                     # already clean: nothing to drop, same file
 
 
@@ -149,8 +151,11 @@ def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, m
     # Medusa mid-reset: few stone rows plus many foreign rows. Counted before filtering it passes the thin-copy guard
     # and replaces the full local export with an almost empty one; filtered first, the local export is kept.
     local = tmp_path / "variants_export.csv"
-    local.write_text("Id,Key\n" + "".join(f"v{i},slab_x_{i:04d}\n" for i in range(10)), encoding="utf-8")
-    incoming = "Id,Key\nv1,slab_x_0001\n" + "".join(f"n{i},np-thing-{i}\n" for i in range(30))
+    header = "Id,Key,Name,Aliases,status,Type,owner\n"
+    local.write_text(header + "".join(f"v{i},marble__x_{i:04d},X{i},,active,Marble,scraper\n" for i in range(10)),
+                     encoding="utf-8")
+    incoming = (header + "v1,marble__x_0001,X1,,active,Marble,scraper\n"
+                + "".join(f"n{i},np-thing-{i},Thing {i},,active,Thing,\n" for i in range(30)))
 
     class _Client:
         def get_paginator(self, name):
@@ -161,7 +166,7 @@ def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, m
     monkeypatch.setattr(boto3, "client", lambda *a, **k: _Client())
     monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
     fetch_inputs.fetch_all()
-    assert local.read_text(encoding="utf-8").count("slab_x_") == 10          # the full local export stays
+    assert local.read_text(encoding="utf-8").count("marble__x_") == 10       # the full local export stays
 
 
 def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
@@ -179,7 +184,7 @@ def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
 
 def _committed_base(tmp_path, rows=10):
     (tmp_path / "variants_export_base.csv").write_text(
-        "Key,Name\n" + "".join(f"slab_x_{i:04d},X\n" for i in range(rows)), encoding="utf-8")
+        "Key,Name,Type\n" + "".join(f"slab_x_{i:04d},X,Marble\n" for i in range(rows)), encoding="utf-8")
 
 
 def test_with_no_local_export_a_thin_one_with_rows_stops_the_fetch(tmp_path, monkeypatch):
@@ -202,7 +207,7 @@ def test_with_no_local_export_a_header_only_one_stays_absent(tmp_path, monkeypat
 
 def test_with_no_local_export_a_full_one_is_taken(tmp_path, monkeypatch):
     _committed_base(tmp_path)
-    full = "Id,Key,Name\n" + "".join(f"v{i},slab_x_{i:04d},X\n" for i in range(10))     # an export carries Name
+    full = "Id,Key,Name,Type\n" + "".join(f"v{i},slab_x_{i:04d},X,Marble\n" for i in range(10))   # Name and Type
     _main_with(tmp_path, monkeypatch, "variants_export.csv", full)
     assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8").count("slab_x_") == 10
 
@@ -260,7 +265,7 @@ def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeyp
 
 def test_the_produce_fetch_stops_loud_on_a_malformed_variants_export(tmp_path, monkeypatch):
     malformed = {
-        "empty status cell": "Id,Key,Name,status\nv1,slab_x_0001,X,active\nv2,slab_x_0002,Y,\n",
+        "empty status cell": "Id,Key,Name,Type,status\nv1,slab_x_0001,X,Marble,active\nv2,slab_x_0002,Y,Marble,\n",
         "no Name column": "Id,Key\nv1,slab_x_0001\nv2,slab_x_0002\n",
     }
     for problem, body in malformed.items():
@@ -273,6 +278,6 @@ def test_the_produce_fetch_stops_loud_on_a_malformed_variants_export(tmp_path, m
 
 
 def test_the_produce_fetch_takes_a_variants_export_with_status(tmp_path, monkeypatch):
-    body = "Id,Key,Name,status\nv1,slab_x_0001,X,archived\n"
+    body = "Id,Key,Name,Type,status\nv1,slab_x_0001,X,Marble,archived\n"
     _main_with(tmp_path, monkeypatch, "variants_export.csv", body)
     assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8") == body

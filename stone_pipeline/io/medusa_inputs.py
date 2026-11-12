@@ -18,7 +18,6 @@ from pathlib import Path
 from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.categories import category_for_key
 from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS,
                                             THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED)
 from stone_pipeline.core import logfmt
@@ -41,10 +40,12 @@ _PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_bas
 # export is gitignored, so after every roll it is absent while the committed base (the same scraper-owned variants,
 # Id-free) is in the image. Without this the guard never ran on a fresh task.
 _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
-# The variant exports list every vendor's variants; the scraper keeps only its own (a Key whose prefix is one of its
-# categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
+# The variant exports list every vendor's variants; the scraper keeps only its own: Medusa's export marks them
+# `owner = scraper` (PHASE-1-SPEC D5, from scraper_sync_ref), and the base, which the scraper writes whole, carries no
+# owner column. Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
+OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
 # Medusa's downloads, checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv
 # at import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
@@ -63,14 +64,18 @@ def check_readable(name: str, path: Path) -> None:
 
 
 def own_variants(path: Path) -> int:
-    """Rewrite a variant export keeping only the scraper's own variants (and rows without a Key, as before); returns
-    how many rows it dropped. A file with nothing to drop is left as it is."""
+    """Rewrite a variant export keeping only the scraper's own variants (`owner` = scraper, D5); returns how many rows
+    it dropped. A file without an owner column (the base) is every row the scraper's and is left as it is; an owner
+    value other than `scraper` or empty is refused (ValueError), never read as either."""
     with path.open(encoding="utf-8-sig", newline="") as h:
         rows = list(csv.reader(h))
-    if not rows or "Key" not in rows[0]:
+    if not rows or OWNER_COLUMN not in rows[0]:
         return 0
-    at = rows[0].index("Key")
-    kept = [r for r in rows[1:] if len(r) <= at or not r[at].strip() or category_for_key(r[at])]
+    at = rows[0].index(OWNER_COLUMN)
+    owners = {(r[at] if len(r) > at else "").strip() for r in rows[1:]}
+    if bad := sorted(owners - {OWNER_SCRAPER, ""}):
+        raise ValueError(f"{path.name}: owner column holds {bad}; only {OWNER_SCRAPER!r} or empty are read")
+    kept = [r for r in rows[1:] if len(r) > at and r[at].strip() == OWNER_SCRAPER]
     dropped = len(rows) - 1 - len(kept)
     if dropped:
         with path.open("w", encoding="utf-8", newline="") as h:

@@ -193,6 +193,8 @@ as ONLY_KEY's lists are (`process.read_scope`).
   both of its Spends in `Spend.reserve`).
 - An unknown SKU, a SKU listed twice, or a photo that is no finished photo of a listed listing is refused at the start,
   every one named, before anything is paid (`ScopeRefused`, exit 2). Without a scope the run is as before.
+- A listing that gets no 3D cut-out (any format but `C.CUTOUT_FORMAT`, a block for one) is refused the same way, each SKU
+  named with its format: it would be paid for and get no cut-out, and blocks get no 3D.
 
 ## Tile listings
 

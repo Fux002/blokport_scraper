@@ -53,7 +53,7 @@ def _row(name: str, key: str, stone_type: str = "Onyx", **attrs) -> CanonicalRow
 
 
 def _isolate_curate(monkeypatch, confirm: dict, seed_names: dict, seed_colors: dict | None = None) -> None:
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
+    monkeypatch.setattr(curate, "load_existing", _empty_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     # the legacy per-aspect maps, folded into the one decisions object exactly as production builds it
     actions = {k: {"action": "mint" if v == "yes" else "reject", "seed_name": seed_names.get(k),
@@ -61,8 +61,8 @@ def _isolate_curate(monkeypatch, confirm: dict, seed_names: dict, seed_colors: d
     monkeypatch.setattr(decisions, "load_decisions", lambda: Decisions.from_legacy(actions))
 
 
-def _new(res, branch: str) -> list[dict]:
-    return list(res.new_variants[branch])
+def _new(res) -> list[dict]:
+    return list(res.new_variants)
 
 
 # -- API -----------------------------------------------------------------------
@@ -84,12 +84,11 @@ def test_mint_under_seed_name_creates_the_renamed_variety_with_the_scraped_alias
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="yellow", finish_name="polished")],
                                 loaders.load_all())
-    for b in ("slab", "block", "tile"):
-        rows = _new(res, b)
-        assert [r["Name"] for r in rows] == [RENAMED], (b, rows)
-        assert "_onyx_honey_" in rows[0]["Key"], rows[0]["Key"]
-        assert SCRAPED in rows[0]["Aliases"].split("|"), rows[0]["Aliases"]
-    bb = [r for r in res.backbone_new["slab"] if r["variant"] == RENAMED]
+    rows = _new(res)
+    assert [r["Name"] for r in rows] == [RENAMED], rows
+    assert rows[0]["Key"].startswith("onyx__honey_"), rows[0]["Key"]
+    assert SCRAPED in rows[0]["Aliases"].split("|"), rows[0]["Aliases"]
+    bb = [r for r in res.backbone_new if r["variant"] == RENAMED]
     assert len(bb) == 1
     assert bb[0]["color"] == ["Yellow"]                        # observed colour survives the rename
     assert "Polished" in bb[0]["finishes"]                     # observed finish folded into the type defaults
@@ -98,7 +97,7 @@ def test_mint_under_seed_name_creates_the_renamed_variety_with_the_scraped_alias
 def test_seed_colour_survives_the_rename(monkeypatch):
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): RENAMED}, {("", "honey onyx"): "Gold"})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="yellow")], loaders.load_all())
-    bb = [r for r in res.backbone_new["slab"] if r["variant"] == RENAMED]
+    bb = [r for r in res.backbone_new if r["variant"] == RENAMED]
     assert bb and bb[0]["color"] == ["Gold"]
 
 
@@ -106,10 +105,9 @@ def test_two_spellings_renamed_to_one_name_mint_one_variety(monkeypatch):
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes", ("", "honig onyx"): "yes"},
                     {("", "honey onyx"): RENAMED, ("", "honig onyx"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1"), _row("Honig Onyx", "t2")], loaders.load_all())
-    for b in ("slab", "block", "tile"):
-        rows = _new(res, b)
-        assert [r["Name"] for r in rows] == [RENAMED], (b, rows)
-        assert set(rows[0]["Aliases"].split("|")) >= {SCRAPED, "Honig Onyx"}, rows[0]["Aliases"]
+    rows = _new(res)
+    assert [r["Name"] for r in rows] == [RENAMED], rows
+    assert set(rows[0]["Aliases"].split("|")) >= {SCRAPED, "Honig Onyx"}, rows[0]["Aliases"]
 
 
 def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
@@ -120,8 +118,8 @@ def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
                     {("", "honey onyx"): RENAMED, ("", "honey marble"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1"), _row("Honey Marble", "t2", stone_type="Marble")],
                                 loaders.load_all())
-    rows = _new(res, "slab")
-    by_type = {("_onyx_" in r["Key"] and "Onyx") or ("_marble_" in r["Key"] and "Marble"): r for r in rows}
+    rows = _new(res)
+    by_type = {r["Type"]: r for r in rows}
     assert set(by_type) == {"Onyx", "Marble"}, rows
     assert by_type["Onyx"]["Aliases"] == SCRAPED
     assert by_type["Marble"]["Aliases"] == "Honey Marble"
@@ -130,7 +128,7 @@ def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
 def test_mint_without_a_seed_name_is_unchanged(monkeypatch):
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
     res = curate.build_curation([_row(SCRAPED, "t1")], loaders.load_all())
-    rows = _new(res, "slab")
+    rows = _new(res)
     assert [r["Name"] for r in rows] == [SCRAPED]
     assert rows[0]["Aliases"] == ""
 
@@ -185,11 +183,11 @@ def test_decision_keyed_on_a_type_word_spelling_mints_and_seeds(monkeypatch):
     _isolate_curate(monkeypatch, {("", "bianco white marble"): "yes"}, {("", "bianco white marble"): "Bianco White"},
                     {("", "bianco white marble"): "White"})
     res = curate.build_curation([_row("Bianco White Marble", "b1", stone_type="Marble")], loaders.load_all())
-    rows = _new(res, "slab")
+    rows = _new(res)
     assert [r["Name"] for r in rows] == ["Bianco White"], rows
     # no alias needed: the product's cleaned identity 'Bianco White' binds the new variety by exact name
     assert rows[0]["Aliases"] == ""
-    assert res.backbone_new["slab"][0]["color"] == ["White"]
+    assert res.backbone_new[0]["color"] == ["White"]
 
 
 # -- vendor scope + type-aware unmint (found in the full re-review) ------------------------------------
@@ -201,7 +199,7 @@ def _statement_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([], {}))
-    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine", "Type": "Granite"}])
     return loaders.load_all()
 
 
@@ -213,15 +211,15 @@ def test_the_first_mint_on_a_spelling_decides_every_vendor_and_a_vendor_may_stil
     zucchi = _typed_gap_row("Honey Onyx", "Onyx")
     polonine = _typed_gap_row("Honey Onyx", "Onyx").model_copy(update={"src_site": "polonine"})
     res = curate.build_curation([zucchi, polonine], ref)
-    assert [r["Name"] for r in res.new_variants["slab"]] == ["Honey"]
+    assert [r["Name"] for r in res.new_variants] == ["Honey"]
     assert not any(c.get("variant") == "Honey Onyx" for c in res.pending_confirm)
     # polonine then says its Honey Onyx is a DIFFERENT new stone: that is polonine's own level, beside the global
     assert decisions_store.decide("polonine", "Honey Onyx", "Honey Polonia", "Onyx", color="Beige")["level"] == "vendor"
     res = curate.build_curation([zucchi, polonine], ref)
-    names = sorted(r["Name"] for r in res.new_variants["slab"])
+    names = sorted(r["Name"] for r in res.new_variants)
     assert names == ["Honey", "Honey Polonia"], names
     assert views.scoped()[("polonine", "honey onyx")] == ("Honey Polonia", "Onyx")
-    bb = {r["variant"]: r["color"] for r in res.backbone_new["slab"]}
+    bb = {r["variant"]: r["color"] for r in res.backbone_new}
     assert bb["Honey"] == ["Yellow"] and bb["Honey Polonia"] == ["Beige"]   # each level keeps its own colour
 
 
@@ -231,7 +229,7 @@ def test_a_global_mint_decision_still_decides_every_vendor(tmp_path, monkeypatch
     rows = [_typed_gap_row("Honey Onyx", "Onyx"),
             _typed_gap_row("Honey Onyx", "Onyx").model_copy(update={"src_site": "polonine"})]
     res = curate.build_curation(rows, ref)
-    assert [r["Name"] for r in res.new_variants["slab"]] == ["Honey"]
+    assert [r["Name"] for r in res.new_variants] == ["Honey"]
     assert res.pending_confirm == []
 
 
@@ -257,7 +255,7 @@ def _matched_row(scraped: str, variety: str, stone_type: str = "Granite", **attr
     missing_variation gap, so curate's gap loop skipped it before the operator-override fix."""
     return CanonicalRow(src_site="marenostone", surrogate_key="m1", variety_match_key=scraped,
                         raw_type=stone_type, variation_name=variety,
-                        variation_key=f"slab_{stone_type.lower()}_matched_x",
+                        variation_key=f"{stone_type.lower()}__matched_x",
                         variation_method="exact_name", tree_gaps=[], **attrs)
 
 
@@ -268,11 +266,10 @@ def test_a_matched_row_is_overridden_by_an_operator_mint_rename(monkeypatch):
     _isolate_curate(monkeypatch, {("", "brown granite"): "yes"}, {("", "brown granite"): "Chocolate Classic"})
     res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite", color_name="brown")],
                                 loaders.load_all())
-    for b in ("slab", "block", "tile"):
-        rows = _new(res, b)
-        assert [r["Name"] for r in rows] == ["Chocolate Classic"], (b, rows)
-        assert "_granite_chocolate_classic_" in rows[0]["Key"], rows[0]["Key"]
-        assert "Brown Granite" in rows[0]["Aliases"].split("|"), rows[0]["Aliases"]
+    rows = _new(res)
+    assert [r["Name"] for r in rows] == ["Chocolate Classic"], rows
+    assert rows[0]["Key"].startswith("granite__chocolate_classic_"), rows[0]["Key"]
+    assert "Brown Granite" in rows[0]["Aliases"].split("|"), rows[0]["Aliases"]
 
 
 def test_a_matched_row_without_a_decision_keeps_its_match(monkeypatch):
@@ -280,28 +277,27 @@ def test_a_matched_row_without_a_decision_keeps_its_match(monkeypatch):
     # exactly as before the override.
     _isolate_curate(monkeypatch, {}, {})
     res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite")], loaders.load_all())
-    for b in ("slab", "block", "tile"):
-        assert _new(res, b) == [], (b, _new(res, b))
+    assert _new(res) == [], _new(res)
 
 
 def test_a_mint_name_is_written_by_the_variety_name_rule(monkeypatch):
     # W5: the minted Name is the variety field's display (cleaned, title-cased), so no accent reaches a Name.
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): "Crème Honey"})
     res = curate.build_curation([_row(SCRAPED, "t1")], loaders.load_all())
-    assert [r["Name"] for r in _new(res, "slab")] == ["Creme Honey"]
+    assert [r["Name"] for r in _new(res)] == ["Creme Honey"]
 
 
 def test_a_spelling_with_no_ascii_form_is_held_for_a_stated_name_never_minted(monkeypatch):
     spelling = "Nero 黑 Onyx"
     _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {})
     res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
-    assert _new(res, "slab") == []
+    assert _new(res) == []
     card = next(p for p in res.pending_confirm if p["kind"] == "new")
     assert "no ASCII form" in card["reason"]
     # the operator states an ASCII name for the same spelling: it mints under that name
     _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Marquina"})
     res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
-    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Marquina"]
+    assert [r["Name"] for r in _new(res)] == ["Nero Marquina"]
 
 
 def test_a_mint_backbone_post_writes_each_value_by_its_field(monkeypatch):
@@ -311,12 +307,12 @@ def test_a_mint_backbone_post_writes_each_value_by_its_field(monkeypatch):
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="rosé", finish_name="polìshed")],
                                 loaders.load_all())
-    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    post = next(r for r in res.backbone_new if r["variant"] == SCRAPED)
     assert post["color"] == ["Rose"]
     assert "Polished" in post["finishes"]
     _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="黑")], loaders.load_all())
-    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    post = next(r for r in res.backbone_new if r["variant"] == SCRAPED)
     assert post["color"] == [active_pack().fallback_color]
 
 
@@ -324,4 +320,4 @@ def test_a_stated_name_that_keys_like_the_spelling_still_mints_under_it(monkeypa
     # W15 with W5: 'Nero 黑 Onyx' and its stated 'Nero Onyx' share one key; the stated name is minted.
     _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Onyx"})
     res = curate.build_curation([_row("Nero 黑 Onyx", "t1")], loaders.load_all())
-    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Onyx"]
+    assert [r["Name"] for r in _new(res)] == ["Nero Onyx"]

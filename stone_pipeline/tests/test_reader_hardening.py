@@ -61,10 +61,3 @@ def test_load_attributes_tolerates_a_missing_column(tmp_path):
                         "color,,col_2\n", encoding="utf-8")
     attr = _load_attributes(csv_path)
     assert attr["color"]["black"] == "col_1" and len(attr["color"]) == 1
-
-
-def test_posts_of_tolerates_both_backbone_shapes():
-    from stone_pipeline.stages.emit_catalog import _posts_of
-    assert _posts_of({"posts": [{"key": "a"}]}) == [{"key": "a"}]   # dict-with-posts
-    assert _posts_of([{"key": "b"}]) == [{"key": "b"}]              # bare list
-    assert _posts_of({"other": 1}) == []                           # dict without posts -> empty, no crash

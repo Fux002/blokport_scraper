@@ -194,10 +194,10 @@ def test_the_variation_image_clients_honour_the_profile(built, monkeypatch):
     from stone_pipeline import catalog, prepare_variant_images, refresh_images
     from stone_pipeline.stages import emit_catalog
     _with_profile(monkeypatch, prepare_variant_images, refresh_images, emit_catalog)
-    catalog._s3_image_copier()
+    catalog._s3_object_copier()
     prepare_variant_images._s3_client()
     refresh_images._s3_client()
-    _drive(emit_catalog._s3_variation_keys)
+    _drive(emit_catalog._s3_icon_pairs)
     assert built == [_s3(BOUNDED, PROFILE)] * 4
 
 

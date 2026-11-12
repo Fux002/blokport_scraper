@@ -12,6 +12,7 @@ Run:  python scrapers/fuleistone.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import html
 import re
 from typing import Any, Iterable, Optional
@@ -75,6 +76,7 @@ def _dims_from_size(size_raw: str) -> tuple[str, str, str]:
 
 class FuleistoneScraper(ScraperBase):
     source = "fuleistone"
+    site_domain = urlsplit(API_URL).hostname   # the supplier's public site, from its own URL
     category = "slab"            # the whole "Stone Slabs" scope is one format (no per-row inference)
     # stone.fuleistone.com is Cloudflare-fronted (server: cloudflare / cf-ray), like the other slabware
     # sources. A plain-httpx request works from a residential IP but Cloudflare can block the datacenter IP

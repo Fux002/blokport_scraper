@@ -10,8 +10,6 @@ from stone_pipeline.core.schema import OutputMode
 import dataclasses
 import inspect
 import logging
-import sqlite3
-from contextlib import closing
 
 import cv2
 import numpy as np
@@ -61,32 +59,6 @@ def test_the_retired_fields_an_older_admin_sends_are_ignored_with_a_warning(conf
                                      {"enhance": False, "fal_prompt": "Remove the mark", "watermarked": True})
     assert code == 200 and body["image_pipeline"] is True and not set(_RETIRED) & set(body)
     assert any("enhance, fal_prompt, watermarked" in r.getMessage() for r in caplog.records)
-
-
-def test_a_v8_store_turns_the_image_pipeline_on_for_every_source_and_drops_the_retired_columns(tmp_path):
-    # owner 2026-11-02: the new pipeline is on by default for every existing source, whatever its old enhance said
-    # (dev's enhance=0 only stopped the old enhancer's spend); turning it off is a deliberate admin choice
-    db = tmp_path / "config.db"
-    with closing(sqlite3.connect(db)) as raw:                                # the store as v8 left it
-        raw.executescript(
-            "CREATE TABLE source (source TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1,"
-            " source_code TEXT NOT NULL DEFAULT '', vendor TEXT NOT NULL DEFAULT '',"
-            " origin_default TEXT NOT NULL DEFAULT '', ports TEXT,"
-            " mode TEXT NOT NULL DEFAULT 'review', watermarked INTEGER NOT NULL DEFAULT 0,"
-            " fal_prompt TEXT NOT NULL DEFAULT '', enhance INTEGER NOT NULL DEFAULT 1,"
-            " emit_on_review INTEGER NOT NULL DEFAULT 1, default_bundle_size INTEGER NOT NULL DEFAULT 6,"
-            " min_expected_rows INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT '');"
-            "INSERT INTO source (source, source_code, watermarked, fal_prompt, enhance) VALUES"
-            " ('varsha', 'var', 1, 'Remove the pink mark', 0), ('sentas', 'sen', 0, '', 1);"
-            "PRAGMA user_version = 8;")
-    sources = store.read_sources(db)
-    assert (sources["varsha"].image_pipeline, sources["sentas"].image_pipeline) == (True, True)
-    with closing(sqlite3.connect(db)) as raw:
-        cols = {r[1] for r in raw.execute("PRAGMA table_info(source)")}
-        assert "image_pipeline" in cols and not set(_RETIRED) & cols
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
-    store.upsert_source(dataclasses.replace(sources["varsha"], image_pipeline=False), path=db)
-    assert store.read_sources(db)["varsha"].image_pipeline is False          # a later open keeps the admin's choice
 
 
 def test_the_committed_sources_yaml_carries_no_retired_field():
@@ -158,7 +130,7 @@ def _rule_on(monkeypatch):
         SETTINGS, images=dataclasses.replace(SETTINGS.images, require_standard_photo=True)))
 
 
-KEY = "slab_marble_carrara_0001"
+KEY = "marble__carrara_0001"
 
 
 @pytest.fixture
@@ -170,8 +142,8 @@ def ledger(tmp_path, monkeypatch):
     with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
         lg.upsert("variation", {
-            "key": KEY, "branch": "slab", "type": "Marble", "name": "Carrara", "aliases": "[]",
-            "image_url": f"https://bucket/variations/{KEY}.png", "volume": "", "medusa_id": "V1",
+            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": "[]",
+            "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
     return path

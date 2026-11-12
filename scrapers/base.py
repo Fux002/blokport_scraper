@@ -30,15 +30,10 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from stone_pipeline.io.ssrf import url_allowed
+from stone_pipeline.io.ssrf import SSRFBlocked, follow_redirects
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
-_MAX_REDIRECTS = 5
-
-
-class _SSRFBlocked(Exception):
-    """A fetch target resolved to a non-public host (or non-http(s) scheme) -- never retried."""
 
 VALID_FORMATS = ("slab", "block", "tile")
 # A pool of current desktop UAs; ONE is picked per scraper INSTANCE (per run), not per request, so a
@@ -58,6 +53,10 @@ _RETRY_AFTER_MAX = 300.0
 class ScraperBase:
     # subclass sets these
     source: str = ""
+    # The supplier's public site host, derived from the module's own site URL (as written: a leading "www." is kept,
+    # the market-price match drops it on both sides). The competitor-price register flags a site of this domain as
+    # the owner's supplier (market_prices/register.py check_suppliers); scrapers.run.supplier_domains reads it.
+    site_domain: str = ""
     category: Optional[str] = None          # constant format if every product is one kind
     columns: list[str] = []                 # the site-specific CSV columns (no image/format cols)
     id_field: str = "product_id"            # the row column that uniquely ids a product
@@ -235,44 +234,33 @@ class ScraperBase:
         # Retry-After for a 429, else exponential backoff. A path that skipped either retried at once and ended as
         # "failed after N tries" with no cause.
         cause: Exception | None = None
+
+        def send(hop: str):
+            if self.use_curl_cffi:
+                return self._cffi().request(method, hop, headers=headers, allow_redirects=False, **kwargs)
+            return self._client.request(method, hop, headers=headers, **kwargs)
+
         for attempt in range(self.max_retries):
             wait = self.backoff_base ** attempt
             try:
-                current = url
-                for _ in range(_MAX_REDIRECTS + 1):
-                    # SSRF guard: validate every hop (entry + each redirect target)
-                    if not url_allowed(current):
-                        self.record_failure("ssrf_blocked", method=method, url=current,
-                                             error="non-public host or non-http(s) scheme")
-                        raise _SSRFBlocked(current)
-                    if self.use_curl_cffi:
-                        r = self._cffi().request(method, current, headers=headers,
-                                                 allow_redirects=False, **kwargs)
-                    else:
-                        r = self._client.request(method, current, headers=headers, **kwargs)
-                    if r.status_code in (301, 302, 303, 307, 308):
-                        loc = r.headers.get("location")
-                        if not loc:
-                            cause = RuntimeError(f"HTTP {r.status_code} redirect without a Location: {current}")
-                            break
-                        current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
-                        continue
-                    if r.status_code == 200:
-                        return r
-                    if allow_missing and r.status_code in missing_statuses:
-                        return None   # definitive absence -> caller's end-of-list, not a transient error
-                    if r.status_code == 429:
-                        # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff
-                        cause = RuntimeError(f"rate limited (HTTP 429): {url}")
-                        wait = self._retry_after_seconds(r.headers.get("Retry-After"), attempt)
-                        break
+                # SSRF guard on every hop (the entry and each redirect target); a redirect with no Location, or one
+                # hop too many, raises RedirectFailed: a transient cause, retried below like any other
+                current, r = follow_redirects(url, send)
+                if r.status_code == 200:
+                    return r
+                if allow_missing and r.status_code in missing_statuses:
+                    return None   # definitive absence -> caller's end-of-list, not a transient error
+                if r.status_code == 429:
+                    # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff
+                    cause = RuntimeError(f"rate limited (HTTP 429): {url}")
+                    wait = self._retry_after_seconds(r.headers.get("Retry-After"), attempt)
+                else:
                     r.raise_for_status()
                     # not an error status, yet not the 200 the content needs (e.g. a 204 with no body)
                     cause = RuntimeError(f"HTTP {r.status_code} where 200 was expected: {current}")
-                    break
-                else:
-                    cause = RuntimeError(f"too many redirects: {url}")
-            except _SSRFBlocked:
+            except SSRFBlocked as blocked:
+                self.record_failure("ssrf_blocked", method=method, url=blocked.url,
+                                    error="non-public host or non-http(s) scheme")
                 raise  # permanent -- never retry a blocked target
             except Exception as exc:  # transient: back off and retry
                 cause = exc

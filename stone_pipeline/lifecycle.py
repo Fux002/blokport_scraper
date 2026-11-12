@@ -489,7 +489,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
                 # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
-                # variation content (name/aliases/image/volume) from the freshly-clean base -- upserts
+                # variation content (type/name/aliases) from the freshly-clean base -- upserts
                 # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
                 # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
                 try:
@@ -641,7 +641,7 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
         by_ident: dict[tuple, list[tuple[str, str]]] = {}
         for r in lg.execute("SELECT key, name FROM variation").fetchall():
             k, n = (r["key"] or "").strip(), (r["name"] or "").strip()
-            ident = variety_identity(k, n)[1:]         # branch-free: (type-slug, name-slug)
+            ident = variety_identity(k, n)             # (type-slug, name-slug)
             ident_of[k] = ident
             by_ident.setdefault(ident, []).append((k, n))
         out = {"unminted": [], "varieties": [], "skipped": []}

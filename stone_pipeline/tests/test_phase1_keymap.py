@@ -79,6 +79,44 @@ def test_name_tie_across_envs_aborts():
     assert not res.ok and res.aborts["name_tie"] == ["slab_marble_x_u1"]
 
 
+LIMESTONE = {"limestone": {"Limestone"}}
+
+
+def _st_amber(prod_name):
+    """One identity's three copies as prod held them at the read: the committed base cleaned by #589 ('St Amber')
+    and prod's ledger written before it (`prod_name`)."""
+    return [Record("production", "base_csv", f"{b}_limestone_st_amber_u{i}", name="St Amber", type_name="Limestone")
+            for i, b in enumerate(("slab", "block", "tile"))] + [
+            _led("production", f"{b}_limestone_st_amber_u{i}", "Limestone", prod_name)
+            for i, b in enumerate(("slab", "block", "tile"))]
+
+
+def test_a_spelling_only_difference_maps_to_its_one_new_key_and_is_listed():
+    # 'St. Amber' and 'St Amber' slug alike (core.text.match_key folds punctuation and case), so both spellings give
+    # ONE new Key: no name is chosen, since the map carries none. The difference is listed, never silent.
+    res = build_key_map(_st_amber("St. Amber"), LIMESTONE)
+    assert res.ok, res.aborts
+    assert {m.new_key for m in res.rows} == {new_key("Limestone", "St Amber")} and len(res.rows) == 3
+    assert res.spellings == ["limestone_st_amber (St Amber | St. Amber)"]
+
+
+def test_a_different_name_on_one_identity_still_aborts_as_a_name_tie():
+    # 'St Ambre' slugs apart from 'St Amber': two new Keys, an in-place rename (D1), so the map aborts and lists it
+    res = build_key_map(_st_amber("St Ambre"), LIMESTONE)
+    copies = (f"{b}_limestone_st_amber_u{i}" for i, b in enumerate(("slab", "block", "tile")))
+    assert res.aborts["name_tie"] == sorted(copies)
+    assert res.spellings == []
+
+
+def test_the_run_prints_the_spelling_only_differences_with_the_counts(tmp_path, monkeypatch, capsys):
+    res = build_key_map(_st_amber("St. Amber"), LIMESTONE)
+    monkeypatch.setattr(keymap, "generate", lambda stores, out_csv: (res, "digest"))
+    assert keymap.main([], tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "1 spelling-only" in out
+    assert "  spelling (1): limestone_st_amber (St Amber | St. Amber)" in out
+
+
 def test_two_protected_keys_to_one_new_key_abort():
     recs = [Record("development", "config.protected", "slab_marble_statuario_u1", protected=True),
             Record("development", "config.protected", "block_marble_statuario_u2", protected=True)]

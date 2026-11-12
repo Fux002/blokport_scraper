@@ -18,15 +18,15 @@ import pytest
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 
-KEY = "slab_granite_alpine_00000000-0000-0000-0000-000000000001"
+KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
 def _write(path: Path, name: str, with_id: bool) -> None:
-    fields = (["Id"] if with_id else []) + ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+    fields = (["Id"] if with_id else []) + ["Key", "Name", "Type", "Aliases"]
     with path.open("w", newline="", encoding="utf-8") as h:
         w = csv.DictWriter(h, fieldnames=fields)
         w.writeheader()
-        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Aliases": "Alpine Granite"})
+        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Type": "Granite", "Aliases": "Alpine Granite"})
 
 
 def _paths(tmp_path: Path):
@@ -47,7 +47,7 @@ def test_live_export_wins_when_present(tmp_path, monkeypatch):
     _write(paths.variants_export_base_csv, "Alpine Base", with_id=False)
     monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.export_file
-    assert curate.load_existing("slab").by_name_type[("alpine live", "granite")]["Key"] == KEY
+    assert curate.load_existing().by_name_type[("alpine live", "granite")]["Key"] == KEY
 
 
 def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path, monkeypatch):
@@ -56,10 +56,10 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
     monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.variants_export_base_csv
     # curate's existing index is populated from the base: the alias surface resolves to its owner
-    imp = curate.load_existing("slab")
+    imp = curate.load_existing()
     assert imp.by_name_type[("alpine", "granite")]["Aliases"] == "Alpine Granite"
     # the matcher's table reads the same file
-    table = loaders.load_variants(loaders.existing_varieties_file(), "slab", key_prefix="slab")
+    table = loaders.load_variants(loaders.existing_varieties_file())
     assert [v.key for v in table.by_id.values()] == [KEY]
 
 
@@ -68,4 +68,4 @@ def test_neither_file_is_a_hard_error(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError, match="variants_export.csv"):
         loaders.existing_varieties_file()
     with pytest.raises(FileNotFoundError, match="variants_export_base.csv"):
-        curate.load_existing("slab")
+        curate.load_existing()

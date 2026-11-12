@@ -6,11 +6,11 @@ capped upgrade drip), publishes it to a unique S3 key and dispatches ONE on-dema
 
     python -m stone_pipeline.prepare_variant_images     # generate + de-background + upload to <env>/variations/
 
-A variant with no product, or one whose {Key}.png is already on S3, is never generated, so a re-run never
+A variant with no product, or one whose {Key}/{category}.png is already on S3, is never generated, so a re-run never
 regenerates (or re-charges) an image that exists: the S3 object is its own marker. Generating needs the stack
 (fal_client + torch + FAL_KEY); without it the run spends nothing and fails (TextureJobFailed, a non-zero exit, so
 the failed-job alert fires). The sync's product gate never ships an imageless PRODUCT (a product lists only once its
-{Key}.png is on S3), so a partial run just leaves those products held; the variant RECORDS stay in Medusa.
+{Key}/{category}.png is on S3), so a partial run just leaves those products held; the variant RECORDS stay in Medusa.
 """
 
 from __future__ import annotations
@@ -27,17 +27,16 @@ from pathlib import Path
 from stone_pipeline import refresh_images
 from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.io import storage
+from stone_pipeline.io import storage, variety_icons
 from stone_pipeline.stages import image_prompts
 
 log = logfmt.get_logger("prepare_variant_images")
 
 
 # --- config (single block; no argparse, no inline magic numbers) --------------
-VARIATIONS_PREFIX = f"{ENV_SEGMENT}/variations/"   # where a variant's {Key}.png must land (its Image URL home)
-# rb_images.py writes the background-removed {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
+# rb_images.py writes the background-removed {Key}/{category}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
 DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
-# genetate_images.py writes FLUX's {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./images") and resumes over what is there.
+# genetate_images.py writes FLUX's {Key}/{category}.png here (cwd=image_pipeline, OUTPUT_DIR="./images") and resumes over what is there.
 GEN_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "images"
 # The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
 PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
@@ -84,7 +83,7 @@ def _s3_client():
 
 
 def _target_keys(prompts_path: Path) -> list[str]:
-    """The variant Keys in the queue (output_name IS the Key). A queue that cannot be read, or is not a list of
+    """The icon pair ids in the queue (output_name IS the pair id). A queue that cannot be read, or is not a list of
     objects, is one the job cannot do (TextureJobFailed): never a crash, and never read as an empty queue."""
     try:
         items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
@@ -157,17 +156,16 @@ def _fetch_published_prompts(key: str, client=None) -> bool:
 
 
 def _prune_already_on_s3(prompts_path: Path, targets: list[str]) -> list[str]:
-    """Drop queue entries whose {Key}.png is ALREADY in <env>/variations/ on S3 and rewrite prompts_path so
+    """Drop queue entries whose icon pair ({Key}/{category}.png) is ALREADY on S3 and rewrite prompts_path so
     the generator itself skips them -- the S3 object is the idempotency marker, so a re-dispatch never
     regenerates (or re-charges FAL for) an image that exists. S3 unreachable (keys is None) -> no pruning and
     generate all: the safe default, since we cannot prove an image exists (better a rare re-charge than
     skipping a genuinely missing image and shipping a variant imageless)."""
-    from stone_pipeline.stages.emit_catalog import _s3_variation_keys
-    existing = _s3_variation_keys()
+    existing = _existing_icons()
     if not existing:
         return targets
     items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
-    # An UPGRADE item's {Key}.png exists BY DEFINITION (that is what makes it an upgrade rather than a
+    # An UPGRADE item's icon exists BY DEFINITION (that is what makes it an upgrade rather than a
     # mint), so the mint-idempotency rule below would drop every one of them and silently generate
     # nothing. Keep upgrades; prune only mints, which is where the re-charge risk actually is.
     from stone_pipeline.stages.image_prompts import UPGRADE_MODE
@@ -207,17 +205,23 @@ def _generator_blockers() -> list[str]:
     return blockers
 
 
-def _find_png(key: str) -> Path | None:
-    """The finished {key}.png: BEN2's output in DEBG_OUTPUT_DIR only (the scripts run with cwd=image_pipeline,
-    so that location is fixed). Never anywhere else: FLUX's images/{key}.png still has its background, and
-    uploading it would mark a wrong texture final. Absent -> None (the key is missing, and loud)."""
-    png = DEBG_OUTPUT_DIR / f"{key}.png"
+def _existing_icons() -> set[str] | None:
+    """The pair ids of the icons on S3 (image_prompts' one reading of emit's listing), or None when unknown."""
+    return image_prompts._existing_icons()
+
+
+def _find_png(pid: str) -> Path | None:
+    """The finished `{Key}/{category}.png` of a pair id: BEN2's output in DEBG_OUTPUT_DIR only (the scripts run with
+    cwd=image_pipeline, so that location is fixed). Never anywhere else: FLUX's images/ copy still has its
+    background, and uploading it would mark a wrong texture final. Absent -> None (the pair is missing, and loud)."""
+    png = DEBG_OUTPUT_DIR / f"{pid}.png"
     return png if png.is_file() else None
 
 
 def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]:
-    """Upload each generated {Key}.png (found under image_pipeline/) to <env>/variations/{Key}.png -- the
-    CORRECT prefix the variant's Image URL resolves to. Returns (uploaded, missing_keys). A key whose png the
+    """Upload each generated pair's png (found under image_pipeline/) to its icon key (io.variety_icons.icon_key,
+    `<env>/variations/{Key}/{category}.png`), the icon the variation payload's category_images names. Returns
+    (uploaded, missing pair ids). A pair whose png the
     generator did not produce, or whose upload failed, is REPORTED (missing), never silently skipped: its product
     stays HELD and the caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
     client = client or _s3_client()
@@ -232,7 +236,8 @@ def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]
             missing.append(key)
             continue
         try:
-            client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
+            pair_key, cat = variety_icons.pair_of(key)
+            client.upload_file(str(png), SETTINGS.s3.bucket, variety_icons.icon_key(pair_key, cat.name))
         except (S3UploadFailedError, ClientError, BotoCoreError) as exc:
             # this key's miss, not the job's crash: the rest still land and are marked (never paid twice)
             log.error("variant texture upload failed", extra={"extra_fields": {"key": key, "error": str(exc)}})
@@ -247,7 +252,7 @@ def queue_new_textures() -> int:
     older textures re-made, read against the best-model marker), then, with AUTO_TEXTURE on, publish it to a UNIQUE
     key and dispatch ONE GPU texture job bound to exactly that key (a concurrent produce can never clobber a queue a
     starting job is about to pull). The produce never generates: the job does (run). Their products stay HELD until
-    {Key}.png exists, so every way the job cannot be dispatched is loud. Returns the number of queued textures."""
+    {Key}/{category}.png exists, so every way the job cannot be dispatched is loud. Returns the number of queued textures."""
     # The upgrade drip: once-only via the durable best-model marker, capped so a produce's FAL spend stays
     # predictable. A legacy texture is never held back, just replaced within a few produces. cap 0 == mints only.
     cap = SETTINGS.images.upgrade_batch
@@ -302,7 +307,7 @@ def _dispatch(prompts_path: Path, queued: int) -> None:
 
 def _clear_local_outputs(keys: list[str]) -> None:
     """Remove the queued keys' local FLUX and BEN2 outputs before generating. genetate_images resumes over an existing
-    images/{Key}.png and BEN2 de-backgrounds it, so a PNG an earlier run left on a dev box would otherwise be uploaded
+    images/{Key}/{category}.png and BEN2 de-backgrounds it, so a PNG an earlier run left on a dev box would otherwise be uploaded
     as this run's texture. A fresh GPU task has none. What is already on S3 was pruned from `keys` before this."""
     for key in keys:
         for folder in (GEN_OUTPUT_DIR, DEBG_OUTPUT_DIR):
@@ -336,7 +341,7 @@ def _generate_queued_images() -> list[str]:
 
 def run() -> int:
     """Resolve the queue (the dispatched one on S3, else build locally), generate + de-background, upload
-    each {Key}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued). Raises
+    each {Key}/{category}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued). Raises
     TextureJobFailed when the queue cannot be read or the generator cannot run here, and TexturesIncomplete
     when some textures did not land."""
     prompts_path = _resolve_queue()
@@ -361,7 +366,7 @@ def run() -> int:
                                f"missing {blockers} (fal_client + torch + FAL_KEY)")
 
     _clear_local_outputs(targets)                  # never re-upload a PNG an earlier run left behind
-    failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}.png
+    failed = _generate_queued_images()             # FLUX.2 -> BEN2 -> image_pipeline/to_upload/{Key}/{category}.png
     uploaded, missing = upload_variant_images(targets)
     not_landed = set(missing)
     landed = [k for k in targets if k not in not_landed]
@@ -391,7 +396,7 @@ def run() -> int:
                                  f"(failed scripts {failed}); uploaded {uploaded}; best-model marker "
                                  f"{'written' if marked else 'NOT written'}")
     log.info("variant images prepared", extra={"extra_fields": {"queued": len(targets), "uploaded": uploaded}})
-    print(f"Prepared + uploaded {uploaded}/{len(targets)} new variant image(s) to {VARIATIONS_PREFIX}")
+    print(f"Prepared + uploaded {uploaded}/{len(targets)} new variant image(s) to {variety_icons.VARIATIONS_PREFIX}")
     return uploaded
 
 

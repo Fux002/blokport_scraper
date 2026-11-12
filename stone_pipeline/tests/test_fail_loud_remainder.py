@@ -27,7 +27,7 @@ def test_s3_access_denied_detects_permission_errors_only():
     assert emit_catalog._s3_access_denied(RuntimeError("boom")) is False
 
 
-def test_variation_keys_raises_on_access_denied(monkeypatch):
+def test_icon_pairs_raise_on_access_denied(monkeypatch):
     # a real IAM misconfig must fail loud, not return None (which makes products advertise 404 image links)
     def denied(*a, **k):
         raise _FakeClientError("AccessDenied")
@@ -40,10 +40,10 @@ def test_variation_keys_raises_on_access_denied(monkeypatch):
             client = staticmethod(denied)
     monkeypatch.setitem(__import__("sys").modules, "boto3", _Boto)
     with pytest.raises(_FakeClientError):
-        emit_catalog._s3_variation_keys()
+        emit_catalog._s3_icon_pairs()
 
 
-def test_variation_keys_degrades_to_none_on_transient(monkeypatch):
+def test_icon_pairs_degrade_to_none_on_transient_outside_prod(monkeypatch):
     def slow(*a, **k):
         raise _FakeClientError("SlowDown")             # transient -> fall back, no crash
 
@@ -54,7 +54,7 @@ def test_variation_keys_degrades_to_none_on_transient(monkeypatch):
             def __init__(self, **k): ...
             client = staticmethod(slow)
     monkeypatch.setitem(__import__("sys").modules, "boto3", _Boto)
-    assert emit_catalog._s3_variation_keys() is None
+    assert emit_catalog._s3_icon_pairs() is None
 
 
 def test_review_flag_keeps_its_detail():
@@ -63,10 +63,10 @@ def test_review_flag_keeps_its_detail():
     assert f.detail == "stock could not be determined or derived (no stock signal in the scrape)"   # not dropped
 
 
-def test_variation_keys_without_boto3_says_so(monkeypatch, caplog):
+def test_icon_pairs_without_boto3_say_so(monkeypatch, caplog):
     # #571 review: a missing boto3 was logged as "S3 unreachable", sending the reader to the network. Same fallback
-    # (no listing, the heuristic decides), named for what failed.
+    # (no listing, the ledger keeps its icons), named for what failed.
     monkeypatch.setitem(__import__("sys").modules, "boto3", None)       # `import boto3` raises ModuleNotFoundError
-    assert emit_catalog._s3_variation_keys() is None
+    assert emit_catalog._s3_icon_pairs() is None
     messages = [r.getMessage() for r in caplog.records]
     assert any("boto3" in m for m in messages) and not any("unreachable" in m for m in messages)

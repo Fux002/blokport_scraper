@@ -20,16 +20,16 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import bootstrap, writethrough
 from stone_pipeline.ledger.db import Ledger
 
-_EXPORT_HEADER = "Id,Key,Name,Image,Aliases,Volume per kg (m³/kg)"
-_VARIATION_KEY = "slab_marble_carrara_0001"
+_EXPORT_HEADER = "Id,Key,Name,Type,Aliases"
+_VARIATION_KEY = "marble__carrara_0001"
 
 
 def _write_export(path):
     # the exact columns seed_variations reads; two rows, one with piped aliases
     path.write_text(
         _EXPORT_HEADER + "\n"
-        f"V1,{_VARIATION_KEY},Carrara,,Statuario|Bianco,0.0012\n"
-        "V2,block_granite_preto_0002,Preto,,,\n",
+        f"V1,{_VARIATION_KEY},Carrara,Marble,Statuario|Bianco\n"
+        "V2,granite__preto_0002,Preto,Granite,\n",
         encoding="utf-8",
     )
     return path
@@ -45,9 +45,9 @@ def _open_seeded(ledger_path):
                          backend_id_fingerprint=writethrough.backend_fingerprint())
     now = now_iso()
     ledger.upsert("variation", {
-        "key": _VARIATION_KEY, "branch": "slab", "type": "Marble", "name": "Carrara",
-        "aliases": json.dumps([]), "image_url": "", "image_sha256": None, "image_model": None,
-        "volume": "", "medusa_id": "V1", "payload_hash": "", "state": "synced",
+        "key": _VARIATION_KEY, "type": "Marble", "name": "Carrara",
+        "aliases": json.dumps([]),
+        "medusa_id": "V1", "payload_hash": "", "state": "synced",
         "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
     }, pk=("key",))
     return ledger
@@ -68,11 +68,11 @@ def test_seed_variations_loads_synthetic_export(tmp_path):
         n = bootstrap.seed_variations(ledger, path=export)
         assert n == 2
         row = ledger.execute(
-            "SELECT name, aliases, medusa_id, branch FROM variation WHERE key = ?",
+            "SELECT name, type, aliases, medusa_id FROM variation WHERE key = ?",
             (_VARIATION_KEY,)).fetchone()
     assert row["name"] == "Carrara"
     assert row["medusa_id"] == "V1"
-    assert row["branch"] == "slab"
+    assert row["type"] == "Marble"                                     # the export's Type column
     assert "Statuario" in row["aliases"] and "Bianco" in row["aliases"]   # piped -> json list
 
 
