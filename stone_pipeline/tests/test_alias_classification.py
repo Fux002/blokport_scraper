@@ -288,6 +288,7 @@ def service(tmp_path, monkeypatch):
     up = tmp_path / "to_upload"
     up.mkdir()
     (up / "1_variants_full.csv").write_text("Key,Name\n", encoding="utf-8")
+    (up / "SYNC_STEPS.md").write_text("steps\n", encoding="utf-8")         # a side file the route must carry too
     s3 = _S3()
     monkeypatch.setattr(cleanup, "_to_upload_dir", lambda: up)
     monkeypatch.setattr(cleanup, "_review_dir", lambda: tmp_path / "review")
@@ -316,13 +317,55 @@ def test_the_route_publishes_the_file_and_the_field_and_keeps_the_other_entries(
         f"Key,Value,Class\n{ABS},Nero Assoluto,seed\n".encode()
 
 
-def test_a_second_call_on_an_unchanged_ledger_publishes_the_same_bytes(service, monkeypatch):
+def test_an_empty_local_to_upload_keeps_every_published_entry_and_adds_the_file(service, monkeypatch):
+    # after a dev roll the task's to_upload is empty until the next produce: the route merges into the PUBLISHED
+    # manifest and never reads (or writes) the local folder, so no produce deliverable drops out
     from stone_pipeline import lifecycle
     monkeypatch.setattr(cleanup, "_bucket_prefix", lambda: ("bucket", service["prefix"]))
+    before = _manifest(service)
+    for path in service["up"].iterdir():
+        path.unlink()
+    body, code = lifecycle.alias_classification()
+    after = _manifest(service)
+    assert code == 200
+    assert {k: v for k, v in after.items() if k not in ("files", cleanup.MANIFEST_FIELD)} == \
+        {k: v for k, v in before.items() if k != "files"}          # run_id, produced_at, side_files, contract, env
+    assert {n: e for n, e in after["files"].items() if n != cleanup.FILE_NAME} == before["files"]
+    assert after["files"][cleanup.FILE_NAME]["sha256"] == body["sha256"]
+    assert list(service["up"].iterdir()) == []
+
+
+@pytest.mark.parametrize("published, code", [(None, 409), (b"not json", 500),
+                                             (b'{"contract": "v0", "files": {}}', 500)])
+def test_a_missing_or_unreadable_published_manifest_refuses_and_publishes_nothing(service, monkeypatch, published,
+                                                                                 code):
+    # never a manifest of one: the route only adds to what a produce published
+    from stone_pipeline import lifecycle
+    monkeypatch.setattr(cleanup, "_bucket_prefix", lambda: ("bucket", service["prefix"]))
+    key = f"{service['prefix']}/manifest.json"
+    if published is None:
+        del service["s3"].objects[key]
+    else:
+        service["s3"].objects[key] = published
+    before = dict(service["s3"].objects)
+    body, got = lifecycle.alias_classification()
+    assert got == code and key in body["error"] and service["s3"].objects == before
+
+
+def test_a_second_call_on_an_unchanged_ledger_is_byte_identical_but_generated_at(service, monkeypatch):
+    from stone_pipeline import lifecycle
+    monkeypatch.setattr(cleanup, "_bucket_prefix", lambda: ("bucket", service["prefix"]))
+    times = iter(["2026-11-12T14:00:00Z", "2026-11-12T14:05:00Z"])
+    monkeypatch.setattr(cleanup, "_now", lambda: next(times))
+    manifest_key = f"{service['prefix']}/manifest.json"
+    file_key = f"{service['prefix']}/{cleanup.FILE_NAME}"
     lifecycle.alias_classification()
-    first = _manifest(service)["files"][cleanup.FILE_NAME]
+    first, uploads = service["s3"].objects[manifest_key], service["s3"].versions[file_key]
     lifecycle.alias_classification()
-    assert _manifest(service)["files"][cleanup.FILE_NAME]["sha256"] == first["sha256"]
+    second = service["s3"].objects[manifest_key]
+    assert second != first
+    assert second == first.replace(b"2026-11-12T14:00:00Z", b"2026-11-12T14:05:00Z")
+    assert service["s3"].versions[file_key] == uploads                  # unchanged bytes are not uploaded again
 
 
 def test_the_route_refuses_while_a_variation_is_not_synced_and_publishes_nothing(service, monkeypatch):
