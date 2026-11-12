@@ -65,3 +65,18 @@ def test_no_committed_alias_names_another_variety():
     collisions = ac.find(_committed())
     assert not collisions, (f"{len(collisions)} committed alias(es) name another variety of the same type:\n"
                             + "\n".join(str(c) for c in collisions))
+
+
+def test_the_build_fails_loud_on_a_new_same_type_collision(tmp_path):
+    # the build-time gate: a variety file that would ship an alias naming another same-type variety stops the
+    # build with every collision named, before anything is written
+    from stone_pipeline.stages import emit_catalog
+    base = tmp_path / "variants_export_base.csv"
+    with base.open("w", newline="", encoding="utf-8") as h:
+        csv.writer(h).writerows([emit_catalog._COLS,
+                                 ["slab_marble_brazilian_white_u1", "Brazilian White", "", "White Super", "0.0017"],
+                                 ["slab_marble_white_super_u2", "White Super", "", "", "0.0017"]])
+    out = tmp_path / "1_variants_full.csv"
+    with pytest.raises(ac.AliasCollision, match="'White Super' of Marble 'Brazilian White'"):
+        emit_catalog.build(base, seed_only=True, out_path=out)
+    assert not out.exists()
