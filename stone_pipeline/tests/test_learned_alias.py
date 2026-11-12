@@ -358,6 +358,76 @@ def test_records_with_no_ledger_to_resolve_them_fail_loud(config_db, tmp_path):
     assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
 
 
+# --- the migration owns its input (manager ruling 11-12): the csv is read from its .v2 key on S3, only while the marker
+# is absent; absence is the only error that reads as "nothing to migrate" ---------------------------------------------
+
+WB_NEW = "development/scraper/state/alias_writeback.v2.csv"     # phase 1's copy, the migration's input
+WB_OLD = "development/scraper/state/alias_writeback.csv"        # the pre-phase-1 key
+
+
+class _S3:
+    """In-memory S3 for the migration's read: `objects` by key; `errors` by key raise that S3 error code."""
+
+    def __init__(self, objects=None, errors=None):
+        self.objects, self.errors = dict(objects or {}), dict(errors or {})
+
+    def _raise(self, key, absent_code):
+        code = self.errors.get(key) or (absent_code if key not in self.objects else None)
+        if code:
+            exc = Exception(code)
+            exc.response = {"Error": {"Code": code}}
+            raise exc
+
+    def get_object(self, Bucket, Key):
+        self._raise(Key, "NoSuchKey")
+        return {"Body": SimpleNamespace(read=lambda: self.objects[Key])}
+
+    def head_object(self, Bucket, Key):
+        self._raise(Key, "404")
+        return {}
+
+
+def _migrate_from(tmp_path, monkeypatch, s3):
+    from stone_pipeline.aliases import migrate_learned
+    from stone_pipeline.ledger import snapshot
+    monkeypatch.setattr(migrate_learned, "_s3", lambda: s3, raising=False)
+    monkeypatch.setattr(snapshot, "_s3", lambda: s3)
+    return migrate_learned.run_once(ledger_path=_ledger(tmp_path / "ledger.db"), review_dir=tmp_path / "review")
+
+
+def test_the_migration_reads_its_records_from_the_v2_key(config_db, tmp_path, monkeypatch):
+    s3 = _S3({WB_NEW: b"variation_id,alias,method\n01PATAGONIA,PATAGONIA,phonetic\n"})
+    assert _migrate_from(tmp_path, monkeypatch, s3) == {"active": 1, "dropped": 0}
+    assert [(r["identity_key"], r["value"]) for r in decisions_store.active_learned_aliases()] == [(LIVE, "PATAGONIA")]
+
+
+@pytest.mark.parametrize("code", ["SlowDown", "AccessDenied", "InternalError"])
+def test_an_s3_error_but_absence_raises_and_leaves_no_marker(config_db, tmp_path, monkeypatch, code):
+    from stone_pipeline.aliases import migrate_learned
+    with pytest.raises(Exception, match=code):
+        _migrate_from(tmp_path, monkeypatch, _S3(errors={WB_NEW: code}))
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_the_old_csv_without_its_v2_copy_refuses_and_leaves_no_marker(config_db, tmp_path, monkeypatch):
+    from stone_pipeline.aliases import migrate_learned
+    from stone_pipeline.ledger import snapshot
+    with pytest.raises(snapshot.MigrationPending, match="phase1-migrate"):
+        _migrate_from(tmp_path, monkeypatch, _S3({WB_OLD: b"variation_id,alias,method\n01PATAGONIA,PATAGONIA,phonetic\n"}))
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_a_new_environment_with_neither_key_records_an_empty_migration(config_db, tmp_path, monkeypatch):
+    from stone_pipeline.aliases import migrate_learned
+    assert _migrate_from(tmp_path, monkeypatch, _S3()) == {"active": 0, "dropped": 0}
+    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_a_marked_store_never_reads_s3(config_db, tmp_path, monkeypatch):
+    _migrate_from(tmp_path, monkeypatch, _S3())
+    assert _migrate_from(tmp_path, monkeypatch, _S3(errors={WB_NEW: "AccessDenied", WB_OLD: "AccessDenied"})) is None
+
+
 def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch):
     from stone_pipeline.aliases import migrate_learned
     from stone_pipeline.ledger import snapshot, writethrough
