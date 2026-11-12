@@ -27,6 +27,16 @@ def export_file() -> Path:
     return SETTINGS.paths.export_file
 
 
+def export_version() -> tuple[int, int] | None:
+    """The export's (size, mtime), or None when it is absent: what a cache keyed on the export compares, never a
+    parse (reference.medusa_files.read_variants_export is the one reader)."""
+    try:
+        stat = export_file().stat()
+    except FileNotFoundError:
+        return None
+    return (stat.st_size, stat.st_mtime_ns)
+
+
 def seed_of(backbone) -> dict[str, tuple[Sequence[str], Sequence[str]]]:
     """Key -> (aliases, codes) of every keyed backbone post: the seed's one store of record."""
     return {key: (tuple(v.aliases), tuple(v.codes)) for key, v in backbone.by_key.items()}
