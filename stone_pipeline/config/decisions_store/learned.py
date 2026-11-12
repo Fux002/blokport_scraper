@@ -88,7 +88,7 @@ def list_learned_aliases() -> list[dict]:
 def delete_learned_alias(identity_key: str, norm: str) -> bool:
     """Remove one learned alias, found by its Key and norm: the ONLY way a learned value leaves the table (the review
     API's delete). Forgotten, not rejected: the norm may be proposed again. False when no such row exists."""
-    with closing(store.open_store()) as conn, conn:
+    with closing(_existing_store()) as conn, conn:
         return conn.execute("DELETE FROM learned_alias WHERE identity_key = ? AND norm = ?",
                             (identity_key, norm)).rowcount == 1
 
@@ -99,7 +99,7 @@ def clear_learned_for_keys(keys: Iterable[str]) -> int:
     keys = sorted(set(keys))
     if not keys:
         return 0
-    with closing(store.open_store()) as conn, conn:
+    with closing(_existing_store()) as conn, conn:
         return conn.execute("DELETE FROM learned_alias WHERE identity_key IN (SELECT value FROM json_each(?))",
                             (json.dumps(keys),)).rowcount
 

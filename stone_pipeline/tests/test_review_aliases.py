@@ -38,8 +38,10 @@ CARD_FIELDS = {"id", "identity_key", "variety", "stone_type", "value", "norm", "
 
 @pytest.fixture
 def config_db(tmp_path, monkeypatch):
+    """The config.db the config server's boot leaves (present, seeded): a learned-alias write never creates it."""
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
     return path
 
 
@@ -245,8 +247,7 @@ def _learned_on_every_key():
     _decide("Learned Two", "reject", key=SIBLING)
 
 
-def test_an_unmint_drops_the_learned_rows_of_every_key_of_the_variety(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+def test_an_unmint_drops_the_learned_rows_of_every_key_of_the_variety(config_db, monkeypatch):
     captured: dict = {}
     reset_tests._stub_ledger_and_sync(monkeypatch, captured)   # Crystal White a/b/c + Absolute Black d
     keys = ["granite__crystal_white_a", "granite__crystal_white_b", "granite__crystal_white_c",
@@ -259,8 +260,7 @@ def test_an_unmint_drops_the_learned_rows_of_every_key_of_the_variety(tmp_path, 
     assert [r["identity_key"] for r in _rows()] == ["granite__absolute_black_d"]
 
 
-def test_an_unmint_that_removes_nothing_keeps_every_learned_row(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+def test_an_unmint_that_removes_nothing_keeps_every_learned_row(config_db, monkeypatch):
     reset_tests._stub_ledger_and_sync(monkeypatch, {}, live=2)  # live products, no force: nothing is removed
     _propose("Learned One", key="granite__crystal_white_a")
     assert lifecycle.unmint_variation("granite__crystal_white_a")[1] == 409
