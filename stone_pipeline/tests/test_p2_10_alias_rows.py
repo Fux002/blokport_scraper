@@ -232,7 +232,8 @@ def test_after_the_mint_run_its_operator_rename_reaches_the_index_and_the_payloa
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(backbone, "load_backbone", lambda path=None: backbone.Backbone())
     oro = new_key("Marble", "Calacatta Oro")
-    decisions_store.decide("", "Calacatta Oro Extra Marble Slab", name="Calacatta Oro", stone_type="Marble",
+    # on an undefined spelling a vendor's statement defines its GLOBAL meaning (the rename the operator store reads)
+    decisions_store.decide("zucchi", "Calacatta Oro Extra Marble Slab", name="Calacatta Oro", stone_type="Marble",
                            exists_as=lambda n, t: False, alias_target=lambda n, t: None)
     clean = clean_variety("Calacatta Oro Extra Marble Slab", "Marble")
     base = tmp_path / "variants_export_base.csv"

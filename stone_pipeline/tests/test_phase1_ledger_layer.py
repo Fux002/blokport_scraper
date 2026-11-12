@@ -1,7 +1,7 @@
 """SC-4 (plan SC-3-SC-4-PLAN.md sections 2c and 2d, PHASE-1-SPEC section 4): the ledger layer on v15.
 
-A variety has no category. Its served payload is {type, name, aliases, category_images}, where each icon is its
-(category handle, full S3 key, ETag) pair from emit's listing, and the hash covers the icons, so an icon re-made in
+A variety has no category. Its served payload is {type, name, alias_rows, codes, category_images}, where each icon is
+its (category handle, full S3 key, ETag) pair from emit's listing, and the hash covers the icons, so an icon re-made in
 place re-serves its variety. A product's category is its HANDLE (D11) and its payload has no bundle_size; a product
 lists only once its variety has an icon in the product's own category. The icon S3 keys are built in one place.
 """

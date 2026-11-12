@@ -9,7 +9,6 @@ from __future__ import annotations
 from stone_pipeline.core.schema import OutputMode
 
 import dataclasses
-import json
 import sqlite3
 
 import pytest
