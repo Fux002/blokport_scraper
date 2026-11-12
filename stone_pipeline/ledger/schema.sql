@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS variation (
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     retry_after   TEXT,                                 -- after a failed apply: not served again before this time
+    -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased: an ack leaves the row dirty while it is set,
+    -- so no lease issued before the reserve can sync it away. The next lease clears it.
+    reserved_at   TEXT,
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -175,6 +178,12 @@ CREATE TABLE IF NOT EXISTS product (
     -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
     -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
     photo_ready          INTEGER NOT NULL DEFAULT 1,
+    -- the standardised files the product links that the photos side has not published
+    -- (populate.mark_unpublished_photos, recomputed for every product of the source on every produce): a sorted JSON
+    -- array of object keys, null = none.
+    -- A product with any is never served (sync._ELIGIBLE_PRODUCT). A content fact, not a sync state: a requeue or a
+    -- reset never clears it, only a produce that finds the files published. Not served, so not in payload_hash.
+    photo_unpublished    TEXT,
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids
@@ -216,10 +225,17 @@ CREATE TABLE IF NOT EXISTS inventory (
     made_to_order    INTEGER NOT NULL DEFAULT 0,
     last_synced_qty  INTEGER,
     last_synced_made_to_order INTEGER,                  -- null until first inventory sync
-    reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
-                                                        -- hides it), 'replaced_by_lot' (a bundle split into its
-                                                        -- pieces) vs null (ordinary out-of-stock, stays listed)
+    reason           TEXT,                              -- why qty is 0: 'sold_out' (gone at its supplier: stays
+                                                        -- published, not buyable), 'delisted' (admin take-offline
+                                                        -- or vendor removal, Medusa hides it), 'no_photo' (hidden
+                                                        -- until its standardised photo), 'replaced_by_lot' (a bundle
+                                                        -- split into its pieces) vs null (a plain stock 0: Blokport
+                                                        -- hides it, M4 measured; table 505)
     replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
+    gone_at          TEXT,                              -- the first run its supplier no longer had it (UTC ISO), kept
+                                                        -- while it stays gone (one gone before v18: the first v18
+                                                        -- run's date); null when listed. A gone listing's record is
+                                                        -- never deleted (table 505)
     updated_at       TEXT NOT NULL,
     last_synced_reason   TEXT,                          -- the reason Medusa last acked (null until first sync)
     last_synced_lot_code TEXT,                          -- the lot code Medusa last acked

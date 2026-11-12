@@ -163,7 +163,8 @@ def test_a_hidden_or_discontinued_shape_is_a_plain_stock_zero(cfg, tmp_path):
         populate_discontinued(ledger, [("POL-B", "h-b")])
         lane = _lane(ledger)
         assert lane["POL-A"] == {"sku": "POL-A", "quantity": 0, "made_to_order": False, "reason": "no_photo"}
-        assert lane["POL-B"] == {"sku": "POL-B", "quantity": 0, "made_to_order": False}
+        assert lane["POL-B"] == {"sku": "POL-B", "quantity": 0, "made_to_order": False, "reason": "sold_out",
+                                 "gone_at": ledger.get("inventory", "sku", "POL-B")["gone_at"]}
 
 
 def test_a_soft_reset_re_serves_a_made_to_order_shape(cfg, tmp_path):

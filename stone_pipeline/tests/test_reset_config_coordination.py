@@ -358,6 +358,9 @@ def _stub_ledger_and_sync(monkeypatch, captured, live=0):
         def variation_live_products(self, lg, key):
             return live
 
+        def variation_kept_listings(self, lg, key):
+            return []                                  # no kept record (gone or delisted) shows these varieties (505)
+
         def retire_variation(self, lg, key, force=False, reason="variation_removed"):
             captured.setdefault("retired", []).append(key)
             captured["reason"] = reason

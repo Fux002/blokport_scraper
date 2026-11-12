@@ -79,7 +79,7 @@ def one_source(tmp_path):
 
 def _canned_ledger_op(name, work):
     """The ledger half answered without a ledger: what each verb reads from a successful op."""
-    return {"delisted": 0, "product": 0, "external_ids": [], "config_removed": True,
+    return {"delisted": 0, "product": 0, "unpublished": 0, "external_ids": [], "config_removed": True,
             "unminted": [], "varieties": [], "skipped": []}, 200
 
 

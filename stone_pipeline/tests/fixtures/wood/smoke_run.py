@@ -4,7 +4,8 @@ SCRAPER_DOMAIN_PACK=wood), so the pack, the categories built from it at import a
 It stands in for what a deployment does: Medusa's variants export is published (the seed with ids; here Id = Key, the
 loader's own rule), a deployment with ledger write-through seeds its ledger from it as the sync server does, then the
 produce runs the source and the catalog. The only stub is the image I/O every fixture run stubs (conftest
-scrape_data_dir): a manifest that knows every url, an empty discard pool. No pack value or stone logic is touched."""
+scrape_data_dir): a manifest that knows every url, an empty discard pool, no published photo (the ledger write's
+check, as every fixture run with write-through stubs it). No pack value or stone logic is touched."""
 
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ def _medusa_export() -> None:
 def main() -> None:
     images._readonly_manifest = _EveryUrlImproved
     images._load_discard_set = lambda cfg=None: set()
+    images.published_keys = lambda cfg=None: frozenset()
     _medusa_export()
     if writethrough.enabled():   # a deployment with write-through: the sync server seeds its ledger first
         with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:

@@ -22,6 +22,8 @@ Response `200` (from `sync.purge_discontinued`):
 - `409` if a sync pull is in flight (never purge mid-serve) -- body `{ "error": "..." }`.
 - Semantics: each SKU is tombstoned so Medusa deletes the same set (product + scraper_sync_ref) via the
   `/sync/v1/removed` pull lane.
+- Scope (S-7): the purge deletes only bundles replaced by their lot (`reason: "replaced_by_lot"`). The scraper
+  never purges a gone listing (sold out or hidden) or a delisted vendor's products: their records stay.
 
 ## S-4 -- inventory keying (answers B-2's investigation)
 
@@ -46,8 +48,12 @@ Item (`ledger/sync.py` `failures`):
 ```
 `state` per `type`: `variations`/`products` rows in state `gap_held`; `removed` tombstones stuck in state `dead`;
 `inventory` stock rows at the attempt cap, state `dead`. Abandoned rows of every type are listed too, with
-`state` `"abandoned"`. The lanes come in that order (variations, products, removed, inventory), each newest-first
-and each capped at `limit` (default 200, via `?limit=`), so the list can hold up to four times `limit` items.
+`state` `"abandoned"`. A `products` row can also carry state `photo_unpublished` (additive, ledger v16): a product a
+change waits on (pending or dirty) held back because it links a standardised photo the photos side has not published,
+`error` `photo not published: N files (<first key>)`. It is NOT a dead-letter: it is never served, it clears itself
+when a produce finds the files published, and a requeue (or a reset) cannot revive it. The lanes come in that order
+(variations, products dead-letters, products held by an unpublished photo, removed, inventory), each newest-first
+and each capped at `limit` (default 200, via `?limit=`), so the list can hold up to five times `limit` items.
 
 ## S-3 -- GET /sync/v1/status  (sync server :8723)  -- READ THE GOTCHAS
 
@@ -60,7 +66,8 @@ Response:
   "gap":         { ... },
   "removed":     { "<state>": <count>, ... },   // dead-letters are state 'dead' HERE (NOT gap_held)
   "inventory":   { "total": <int>, "delta": <int>, "dead": <int>, "waiting": <int> },   // NOT a state histogram: NO gap_held key
-  "variation_reconcile": { "orphaned": <int> } }   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "variation_reconcile": { "orphaned": <int> },   // orphaned: DEPRECATED (C13), to be removed; seed-inclusive, not actionable -- use variation.retiring
+  "product_photos": { "unpublished": <int> } }    // additive (v16): the S-2 photo_unpublished items; not a dead-letter, so not in the badge sum below
 ```
 
 Three things that make `status.scraper[type].gap_held` read wrong if assumed:
@@ -87,7 +94,8 @@ them straight through (`ledger/server.py` `dispatch`, `ledger/sync.py` `abandon_
 
 Body: `{ "type": "variations" | "products" | "removed" | "inventory", "external_id": "<str>" }`.
 A row is abandonable only in its dead-letter state: `variations`/`products` in `gap_held`, `removed` in `dead`,
-`inventory` at the attempt cap.
+`inventory` at the attempt cap. A `products` row in state `photo_unpublished` (S-2) is not a dead-letter, so abandoning
+it answers `409`; it clears itself once its photos are published.
 
 | Status | When | Body |
 |---|---|---|
@@ -209,6 +217,36 @@ screen's job.
 
 A statement decided after the last applying produce on record has reached no product, so it is never blocked.
 With no applying produce on record, the produce output decides: products it shows bound block the undo.
+
+## S-7 -- a listing gone at its supplier stays published as sold out (inventory lane; table 505, agreed with M4)
+
+Owner's ruling 11-11. A listing its supplier no longer has (sold or removed) keeps its record, photos and textures
+permanently and comes back under the same SKU if it reappears.
+
+GET `/sync/v1/inventory` item payloads:
+```
+{ "sku": "<SKU>", "quantity": 0, "made_to_order": false, "reason": "sold_out", "gone_at": "<UTC ISO>" }
+    // gone, was published: stays published, stock 0, not buyable, shown as sold out
+{ "sku": "<SKU>", "quantity": 0, "made_to_order": false, "reason": "no_photo" | "delisted", "gone_at": "<UTC ISO>" }
+    // gone, was hidden: keeps its reason and stays hidden (no new display case)
+{ "sku": "<SKU>", "quantity": <N>, "made_to_order": false }
+    // reappeared: a plain stock, no reason, no gone_at
+```
+- `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone (a listing already
+  gone before ledger v18 gets the first v18 run's date). It is absent on a
+  listing that is not gone. Blokport v1 accepts it and does not store it, so it rides the listing's next served stock:
+  a hidden listing whose reason does not change is not served again for `gone_at` alone.
+- Hide reasons: `no_photo`, `delisted`, `held` (#632, stock unknown). Any other reason at stock 0 is shown (sold out) once the
+  backend lane change lands. Today a stock 0 with NO reason is hidden (measured by M4), and the scraper always sends a
+  gone listing with its reason.
+- Never deleted: the scraper never sends a tombstone for a gone listing. The purge (S-1) skips it, a vendor removal
+  unpublishes every product as `delisted` instead of tombstoning, and a hard or factory reset and a seed variety drop
+  spare it. A reset re-serves a spared gone listing once from zero (Medusa is wiped too on a factory reset). A
+  delisted (vendor-removed or taken offline) listing is spared the same way. A variety
+  a gone or delisted listing shows cannot be retired or unminted (409, naming those SKUs).
+- Condition of done (505): the backend lanes never unpublish or hard-delete a `sold_out` listing. The inventory lane
+  stops rejecting it when it is not on sale, and `held` joins the hide set. The scraper half reaches a pull only with or
+  after that change.
 
 ## Notes
 - `combinations` is NOT a sync lane (dormant): it never appears in `/failures` and its `status.combination`
