@@ -19,7 +19,7 @@ from stone_pipeline.stages.curate.existing import ImportFile, alias_list
 @dataclass
 class CurationResult:
     # one entry per (type, name) variety: a variety is one record whatever category its products sit in
-    learned_proposals: list[dict] = field(default_factory=list)  # {identity_key, value, method, source} (P2-10 C2)
+    learned_proposals: list[dict] = field(default_factory=list)  # {identity_key, value, method, source, score}
     new_variants: list[dict] = field(default_factory=list)     # a new variety's row
     backbone_new: list[dict] = field(default_factory=list)     # a new variety's backbone post
     backbone_updates: list[dict] = field(default_factory=list)            # leaf-gap suggestions
@@ -54,8 +54,8 @@ class Curation:
     type_names: dict                # norm(type) -> its canonical Medusa type NAME
     valid_type_norms: set
     last_resort_quality: str
-    alias_new: dict = field(default_factory=dict)          # (name, type) owner -> {spelling: vendor} (confirmed)
-    review_candidates: dict = field(default_factory=dict)  # norm name -> {spelling: vendor} (needs review)
+    alias_new: dict = field(default_factory=dict)          # (name, type) owner -> {spelling: (vendor, score)}
+    review_candidates: dict = field(default_factory=dict)  # norm name -> {spelling: (vendor, score)} (needs review)
     pending_confirm: list = field(default_factory=list)
     new_variant_rows: list = field(default_factory=list)
     suspicious: list = field(default_factory=list)

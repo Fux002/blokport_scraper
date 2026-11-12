@@ -46,10 +46,11 @@ def is_learned(method: str) -> bool:
 class WriteBack:
     """Accumulates the run's learned guesses; flushed at the end as proposals."""
 
-    aliases: list[tuple[str, str, str, str]] = field(default_factory=list)  # (identity Key, alias, method, source)
+    aliases: list[tuple] = field(default_factory=list)  # (identity Key, alias, method, source, score)
     seen_aliases: set[tuple[str, str]] = field(default_factory=set)
 
-    def add_alias(self, identity_key: str, alias: str, method: str = "", source: str = "") -> None:
+    def add_alias(self, identity_key: str, alias: str, method: str = "", source: str = "",
+                  score: float | None = None) -> None:
         alias = (alias or "").strip()
         if not identity_key or not alias:
             return
@@ -57,15 +58,15 @@ class WriteBack:
         if key in self.seen_aliases:
             return
         self.seen_aliases.add(key)
-        self.aliases.append((identity_key, alias, (method or "").strip(), (source or "").strip()))
+        self.aliases.append((identity_key, alias, (method or "").strip(), (source or "").strip(), score))
 
     def flush(self) -> int:
         """Propose this run's learned guesses (decisions_store.propose_learned_aliases: a Key and norm already holding
         a row is left as it is). Returns the number of new proposals."""
         from stone_pipeline.config import decisions_store
         return decisions_store.propose_learned_aliases(
-            {"identity_key": key, "value": alias, "method": method, "source": source}
-            for key, alias, method, source in self.aliases)
+            {"identity_key": key, "value": alias, "method": method, "source": source, "score": score}
+            for key, alias, method, source, score in self.aliases)
 
 
 def _write_records(path: Path, records: list[tuple[str, str, str]]) -> None:

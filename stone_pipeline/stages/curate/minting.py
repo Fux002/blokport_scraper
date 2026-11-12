@@ -45,7 +45,7 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
         # the scraped spelling rides onto the mint row as its own alias (owner[0] == norm(title)); for a
         # variety that does not exist yet emit_alias_rows finds no existing row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
-        c.alias_new.setdefault(owner, {}).setdefault(clean, row.src_site)   # the mint row carries it (W3)
+        c.alias_new.setdefault(owner, {}).setdefault(clean, (row.src_site, None))   # the mint row carries it (W3)
     if owner in c.minted_display:
         return                          # a second spelling of the same renamed variety: alias only
     c.minted_display.add(owner)

@@ -57,7 +57,9 @@ def test_a_fuzzy_bind_is_still_saved():
                        raw_type="Granite", raw_format="Slab")
     stage.resolve_row(row)
     assert row.variation_id == "a" and row.variation_method == "fuzzy"
-    assert stage.writeback.aliases == [("granite__kashmir_golda_1", "Kashmir Goldx", "fuzzy", "zucchi")]
+    [(key, alias, method, source, score)] = stage.writeback.aliases
+    assert (key, alias, method, source) == ("granite__kashmir_golda_1", "Kashmir Goldx", "fuzzy", "zucchi")
+    assert 80 <= score < 100                                              # the fuzzy tier's own score
 
 
 def _volakas_index():
