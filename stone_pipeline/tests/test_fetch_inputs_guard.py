@@ -236,7 +236,7 @@ def test_fetch_attributes_refuses_a_malformed_copy_and_leaves_the_local_file(tmp
     for problem, body in _MALFORMED_ATTRIBUTES.items():
         target = _committed(tmp_path, 26)
         before = target.read_text()
-        with pytest.raises(ValueError, match="attributes.csv"):
+        with pytest.raises(fetch_inputs.AttributesUnavailable, match="attributes.csv"):
             fetch_inputs.fetch_attributes(client=_FakeS3(body), target=target)
         assert target.read_text() == before, problem
         assert _leftovers(tmp_path) == []

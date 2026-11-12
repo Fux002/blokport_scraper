@@ -186,3 +186,28 @@ def test_the_wood_fixture_s_handles_are_synthetic_test_data():
     handles = {v.category_handles for v in read_attributes(path, require_status=False, require_category_handles=True)
                if v.category == "type"}
     assert handles == {("beams", "panels", "planks")}
+
+
+def test_the_seed_s_types_are_read_once_per_backbone_file_version(tmp_path, monkeypatch):
+    # reviewer 2's L1: the config server loads the vocabulary per request (decide, GET /types); parsing the 12,156-post
+    # backbone on each was that request's cost. Read once per file version (path, size, mtime), as C3's seed is.
+    import json
+    import os
+    from stone_pipeline.reference.loaders import backbone
+    seed = tmp_path / "backbone_varieties.json"
+    seed.write_text(json.dumps({"posts": [{"key": "marble__a_1", "variant": "A", "stone_type": "Marble"}]}),
+                    encoding="utf-8")
+    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(backbone_json=seed)))
+    reads, real = [], backbone.read_posts
+    monkeypatch.setattr(backbone, "read_posts", lambda path: reads.append(path) or real(path))
+    path = _file(tmp_path, "type,Marble,t_marble,active,false,\ntype,Gneiss,t_gneiss,active,false,\n")
+    assert loaders.load_attributes(path).canonical_names("type") == ["Marble"]
+    assert loaders.load_attributes(path).canonical_names("type") == ["Marble"]
+    assert loaders.types_outside_pack(path)[0]["type"] == "Gneiss"
+    assert len(reads) == 1
+    seed.write_text(json.dumps({"posts": [{"key": "marble__a_1", "variant": "A", "stone_type": "Marble"},
+                                          {"key": "gneiss__b_2", "variant": "B", "stone_type": "Gneiss"}]}),
+                    encoding="utf-8")
+    os.utime(seed, ns=(1, 1))                                     # a new version even on a coarse-mtime filesystem
+    assert sorted(loaders.load_attributes(path).canonical_names("type")) == ["Gneiss", "Marble"]
+    assert len(reads) == 2
