@@ -341,6 +341,23 @@ def test_an_absent_csv_migrates_nothing_and_still_marks_the_store(config_db, tmp
     assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) is None
 
 
+def test_a_brand_new_environment_records_an_empty_migration(config_db, tmp_path):
+    # Scraper's L2 on SC #650: no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
+    # the ledger is read only to resolve records, and there are none
+    from stone_pipeline.aliases import migrate_learned
+    assert migrate_learned.run_once(writeback_path=tmp_path / "absent.csv", ledger_path=tmp_path / "no-ledger.db",
+                                    review_dir=tmp_path / "review") == {"active": 0, "dropped": 0}
+    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_records_with_no_ledger_to_resolve_them_fail_loud(config_db, tmp_path):
+    from stone_pipeline.aliases import migrate_learned
+    with pytest.raises(FileNotFoundError, match="no ledger"):
+        migrate_learned.run_once(writeback_path=_writeback(tmp_path / "w.csv", [("01PATAGONIA", "PATAGONIA", "phonetic")]),
+                                 ledger_path=tmp_path / "no-ledger.db", review_dir=tmp_path / "review")
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
 def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch):
     from stone_pipeline.aliases import migrate_learned
     from stone_pipeline.ledger import snapshot, writethrough
