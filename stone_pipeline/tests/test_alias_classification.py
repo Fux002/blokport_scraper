@@ -375,3 +375,41 @@ def test_csv_reads_back_as_written(ledger):
     body = cleanup.csv_bytes(cleanup.classify(ledger, _stores(seed={ABS: ['Say "Nero"']})))
     assert list(csv.reader(io.StringIO(body.decode("utf-8")))) == [["Key", "Value", "Class"],
                                                                    [ABS, 'Say "Nero"', "seed"]]
+
+
+# --- the one `removed` judgement, shared with the seed rewrite (Scraper seed, 11-12) --------------------------------------
+def test_the_context_drops_the_variety_s_own_name_from_its_type_s_names():
+    names = {"granite": {"absolute black", "kashmir white"}, "marble": {"carrara"}}
+    context = cleanup.alias_context("Absolute Black", "Granite", names, frozenset({"granite"}), frozenset({"black"}))
+    assert context.same_type_name_keys == frozenset({"kashmir white"}) and context.own_name == "Absolute Black"
+    assert (context.type_words, context.vocabulary_keys) == (frozenset({"granite"}), frozenset({"black"}))
+    assert names["granite"] == {"absolute black", "kashmir white"}           # the caller's map is not changed
+
+
+def test_seed_refusal_is_the_c1_reason_and_a_code_is_never_a_refusal():
+    is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
+    context = cleanup.alias_context("Absolute Black", "Granite", {"granite": {"kashmir white"}},
+                                    frozenset({"granite"}), frozenset({"black"}))
+    assert cleanup.seed_refusal("G654", context, is_code) is None              # a code moves to `codes`, never removed
+    assert cleanup.seed_refusal("Black", context, is_code) == "bare_vocabulary_word"
+    assert cleanup.seed_refusal("Kashmir White", context, is_code) == "same_type_name"
+    assert cleanup.seed_refusal("Nero Assoluto", context, is_code) is None
+
+
+def test_the_vocabulary_is_public(monkeypatch):
+    from stone_pipeline.adapters import tokens
+    monkeypatch.setattr(tokens, "_clear_type_words", lambda: frozenset({"granite"}))
+    monkeypatch.setattr(tokens, "known_values", lambda kind: {"color": ("Black",)}.get(kind, ()))
+    assert cleanup.vocabulary() == (frozenset({"granite"}), frozenset({"black"}))
+
+
+def test_c5_s_removed_set_is_seed_refusal_over_the_same_names(ledger):
+    _variation(ledger, ABS, "Absolute Black", "Granite", aliases=["Black", "Kashmir White", "Nero Assoluto", "G654"])
+    _variation(ledger, KASH, "Kashmir White", "Granite")
+    stores = _stores(seed={ABS: ["Black", "Kashmir White", "Nero Assoluto", "G654"]})
+    removed = {(k, v): why for k, v, cls, why in cleanup.classify(ledger, stores).differences if cls == "removed"}
+    names = {"granite": {"absolute black", "kashmir white"}}
+    context = cleanup.alias_context("Absolute Black", "Granite", names, stores.type_words, stores.vocabulary_keys)
+    expected = {(ABS, v): why for v in ("Black", "Kashmir White", "Nero Assoluto", "G654")
+                if (why := cleanup.seed_refusal(v, context, stores.is_code))}
+    assert removed == expected == {(ABS, "Black"): "bare_vocabulary_word", (ABS, "Kashmir White"): "same_type_name"}
