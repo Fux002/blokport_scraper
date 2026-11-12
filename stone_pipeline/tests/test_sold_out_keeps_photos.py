@@ -161,6 +161,17 @@ def test_the_factory_wipe_keeps_every_key_of_a_kept_photo():
     assert bucket.keys == set(kept) and counts["kept"] == len(kept)
 
 
+def test_the_kept_photos_follow_the_records_a_reset_keeps(tmp_path):
+    # one rule (db.KEPT_SKUS_SQL): the photos a factory wipe spares are those of the records the reset spares, the
+    # vendor-removed (delisted) listings with the gone ones (Mas)
+    from stone_pipeline.ledger.db import KEPT_SKUS_SQL
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _product(ledger, "SEN-DEL", reason="delisted", thumb=f"{URL}/improved/sentas/{A}.jpg")
+        _product(ledger, "SEN-LIVE", qty=4, thumb=f"{URL}/improved/sentas/{B}.jpg")
+        kept_skus = {r["sku"] for r in ledger.execute(KEPT_SKUS_SQL)}
+        assert kept_skus == {"SEN-DEL"} and kept_photos(ledger) == {"sentas": [A]}
+
+
 def test_the_reset_wipes_with_the_ledger_s_kept_set(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr(image_wipe, "wipe_all_product_images", lambda keep: seen.setdefault("keep", keep) or {})
