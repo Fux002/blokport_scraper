@@ -131,15 +131,16 @@ def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
     # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
     export = tmp_path / "variants_export.csv"
     # the scraper's own are the export's `owner = scraper` rows (PHASE-1-SPEC D5)
-    export.write_text("Id,Key,Name,Aliases,status,Type,owner\n"
-                      "v1,marble__carrara_0001,Carrara,,active,Marble,scraper\n"
-                      "v2,np-cattle-heifer-limousin-430,Heifer,,active,Cattle,\n"
-                      "v3,marble__statuario_0002,Statuario,,active,Marble,scraper\n"
-                      "v4,np-diesel-en590-summer,Diesel,,active,Fuel,\n", encoding="utf-8")
+    export.write_text("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"     # Medusa's export (P2-7)
+                      "v1,marble__carrara_0001,Carrara,,,active,Marble,scraper\n"
+                      "v2,np-cattle-heifer-limousin-430,Heifer,,,active,Cattle,\n"
+                      "v3,marble__statuario_0002,Statuario,,,active,Marble,scraper\n"
+                      "v4,np-diesel-en590-summer,Diesel,,,active,Fuel,\n", encoding="utf-8")
     assert fetch_inputs.own_variants(export) == 2
     lines = export.read_text(encoding="utf-8").splitlines()
-    assert lines == ["Id,Key,Name,Aliases,status,Type,owner", "v1,marble__carrara_0001,Carrara,,active,Marble,scraper",
-                     "v3,marble__statuario_0002,Statuario,,active,Marble,scraper"]
+    assert lines == ["Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner",
+                     "v1,marble__carrara_0001,Carrara,,,active,Marble,scraper",
+                     "v3,marble__statuario_0002,Statuario,,,active,Marble,scraper"]
     assert fetch_inputs.own_variants(export) == 0                     # already clean: nothing to drop, same file
 
 
@@ -151,11 +152,11 @@ def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, m
     # Medusa mid-reset: few stone rows plus many foreign rows. Counted before filtering it passes the thin-copy guard
     # and replaces the full local export with an almost empty one; filtered first, the local export is kept.
     local = tmp_path / "variants_export.csv"
-    header = "Id,Key,Name,Aliases,status,Type,owner\n"
-    local.write_text(header + "".join(f"v{i},marble__x_{i:04d},X{i},,active,Marble,scraper\n" for i in range(10)),
+    header = "Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"     # Medusa's export (P2-7)
+    local.write_text(header + "".join(f"v{i},marble__x_{i:04d},X{i},,,active,Marble,scraper\n" for i in range(10)),
                      encoding="utf-8")
-    incoming = (header + "v1,marble__x_0001,X1,,active,Marble,scraper\n"
-                + "".join(f"n{i},np-thing-{i},Thing {i},,active,Thing,\n" for i in range(30)))
+    incoming = (header + "v1,marble__x_0001,X1,,,active,Marble,scraper\n"
+                + "".join(f"n{i},np-thing-{i},Thing {i},,,active,Thing,\n" for i in range(30)))
 
     class _Client:
         def get_paginator(self, name):

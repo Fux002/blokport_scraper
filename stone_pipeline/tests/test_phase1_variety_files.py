@@ -2,7 +2,7 @@
 (1_variants_full.csv, 1_variants_update.csv, variants_export_base.csv) and the curate delta share ONE column list,
 Key, Name, Type, Aliases. Image and Volume are gone: a variety's icons are per (Key, category) pairs on S3 (spec
 section 4), and the volume was never the scraper's. The type is the row's own canonical type NAME, the column the
-backend's new export carries (Id,Key,Name,Aliases,status,Type,owner), never un-slugged from the Key.
+backend's export carries (Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner, P2-7), never un-slugged from the Key.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from stone_pipeline.stages.curate import output as curate_output
 
 COLUMNS = ["Key", "Name", "Type", "Aliases"]
 _KEY = "granite__absolute-black"
-_EXPORT = ("Id,Key,Name,Aliases,status,Type,owner\n"
-           f"var_01,{_KEY},Absolute Black,Nero Assoluto|Black Absolute,active,Granite,scraper\n")
+_EXPORT = ("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"
+           f"var_01,{_KEY},Absolute Black,Nero Assoluto|Black Absolute,,active,Granite,scraper\n")
 
 
 def test_every_variety_file_shares_the_one_column_list():
@@ -28,8 +28,8 @@ def test_every_variety_file_shares_the_one_column_list():
 
 def test_the_export_reader_reads_the_type_and_no_image_or_volume():
     (row,) = medusa_files.read_variants_export(_EXPORT, require_status=True)
-    assert (row.key, row.name, row.id, row.type, row.aliases) == (
-        _KEY, "Absolute Black", "var_01", "Granite", ("Nero Assoluto", "Black Absolute"))
+    assert (row.key, row.name, row.id, row.type, row.aliases, row.admin_aliases) == (
+        _KEY, "Absolute Black", "var_01", "Granite", (), ("Nero Assoluto", "Black Absolute"))
     assert not hasattr(row, "image") and not hasattr(row, "volume")
     assert not hasattr(medusa_files, "VOLUME_COLUMN")
 
