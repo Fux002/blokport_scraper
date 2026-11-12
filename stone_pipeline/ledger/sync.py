@@ -999,15 +999,15 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
 
 
 def kept_photos(ledger: Ledger) -> dict[str, list[str]]:
-    """{source: sorted shas} of every photo a listing that left sale and keeps its record links: gone at its supplier
-    (gone_at) or delisted (table 505). Read from its image links (thumbnail, product and oriented images), whatever
-    their folder (imagestore.photo_of), so a photo's views, its 3D slab and a tile listing's rendered tile all count. A
-    link list that does not read fails loud: a photo left out would be deleted."""
+    """{source: sorted shas} of every photo a kept record links (db.KEPT_SKUS_SQL: a listing gone at its supplier or
+    delisted, the same records a reset spares; table 505). Read from its image links (thumbnail, product and oriented
+    images), whatever their folder (imagestore.photo_of), so a photo's views, its 3D slab and a tile listing's rendered
+    tile all count. A link list that does not read fails loud: a photo left out would be deleted."""
     from stone_pipeline.io import imagestore
     kept: dict[str, set[str]] = {}
     for r in ledger.execute(
             "SELECT p.thumbnail_key AS thumb, p.product_image_keys AS product, p.oriented_image_keys AS oriented "
-            "FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.gone_at IS NOT NULL OR i.reason = 'delisted'"):
+            f"FROM product p WHERE p.sku IN ({KEPT_SKUS_SQL})"):
         for link in (r["thumb"], *json.loads(r["product"] or "[]"), *json.loads(r["oriented"] or "[]")):
             if photo := imagestore.photo_of(link or ""):
                 kept.setdefault(photo[0], set()).add(photo[1])

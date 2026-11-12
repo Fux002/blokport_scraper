@@ -235,9 +235,9 @@ def _resolve(sources, *, require_non_empty: bool = True):
 
 
 def _wipe_product_images(ledger, sync) -> dict:
-    """The factory reset's image wipe, sparing every photo of a listing that left sale and keeps its record (gone at its
-    supplier or delisted, ledger.sync.kept_photos): its assets are permanent (Mas, table 505), and no re-scrape would
-    bring them back."""
+    """The factory reset's image wipe, inside the reset's ledger op (`ledger` and `sync` are the op's): it spares every
+    photo of the records the reset spares (sync.kept_photos over db.KEPT_SKUS_SQL: the gone and the delisted listings),
+    whose assets are permanent (Mas, table 505) and which no re-scrape would bring back."""
     from stone_pipeline.io import image_wipe
     keep = {(source, sha) for source, shas in sync.kept_photos(ledger).items() for sha in shas}
     return image_wipe.wipe_all_product_images(keep=keep)
