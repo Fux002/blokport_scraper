@@ -1,4 +1,4 @@
-"""The scraper's type vocabulary is its PACK's types (table 569; the scraper manager, 11-12).
+"""The scraper's type vocabulary is its PACK's types (table 569; Mas's ruling, 12 Nov).
 
 BlokPort trades every commodity, so its live attributes.csv also lists types like Steel, Wheat and Wine. Taken as
 stone types they made 'Dark Steel', 'Steel Grey', 'Summer Wheat', 'Wild Wine' and 'Wine Red' read as mistyped
@@ -6,13 +6,15 @@ stones (adapters/tokens.explicit_type_word into identity.is_mistyped_variant), s
 listed them and drop_deleted_variants cut them from 1_variants_full: on blokport-dev they were never served.
 
 The export now carries `category_handles` on every type row: the '|'-joined product_category handles (D11) the type
-has a valid combination in, '' when it has none. A type is the PACK's iff its list holds one of the pack's category
-handles (Mas's 569 clause, 12 Nov): a type with only other categories, or with none yet, is EXCLUDED, never guessed,
-and LISTED in the run's review/<env>/types_outside_pack.csv. A new stone type enters the pack with its first
-stone-category combination, made on the BE side. An excluded type is neither a type word nor a vocabulary word and
-never resolves. An attributes.csv without the column is refused. Scoped in ONE place,
+has a valid combination in, '' when it has none. A type is the PACK's iff (i) its list holds one of the pack's
+category handles, OR (ii) the committed seed (backbone_varieties.json, read at runtime) holds a variety of that type.
+Everything else is EXCLUDED, never guessed, and LISTED in the run's review/<env>/types_outside_pack.csv. A seed
+variety whose type BE lists with ONLY non-pack handles fails loud, naming the type (the seed and BE disagree). Both
+facts are read live; no type list lives in code or config. An excluded type is neither a type word nor a vocabulary
+word and never resolves. An attributes.csv without the column is refused. Scoped in ONE place,
 reference.loaders.load_attributes, so every reader of the type vocabulary gets the pack's set. Hermetic: a tmp
-attributes.csv. No em dashes.
+attributes.csv against the committed seed (its types include Granite, Marble, Gneiss and Slate; never Steel, Wine,
+Dolomite Marble or Novelite). No em dashes.
 """
 
 from __future__ import annotations
@@ -30,11 +32,13 @@ from stone_pipeline.reference.medusa_files import read_attributes
 HEADER = "category,value,sourceid,status,internal,category_handles\n"
 ROWS = (
     "type,Granite,t_granite,active,false,blocks|slabs|tiles\n"
-    "type,Marble,t_marble,active,false,blocks|slabs|tiles\n"
-    "type,Gneiss,t_gneiss,active,false,\n"                       # no combination yet: excluded, listed
-    "type,Steel,t_steel,active,false,steel-coils\n"              # only a foreign category: foreign
+    "type,Marble,t_marble,active,false,\n"                      # a seed type, no combination yet: the pack's
+    "type,Gneiss,t_gneiss,active,false,\n"
+    "type,Steel,t_steel,active,false,steel-coils\n"              # only a foreign category, no seed variety
     "type,Wine,t_wine,active,false,bulk-wine\n"
     "type,Slate,t_slate,active,false,bulk-wine|slabs\n"          # one pack category is enough
+    "type,Dolomite Marble,t_dm,active,false,\n"                  # no combination, no seed variety: excluded
+    "type,Novelite,t_nov,active,false,slabs\n"                   # new, no seed variety: enters by its combination
     "color,Grey,c_grey,active,false,\n"
     "color,Red,c_red,active,false,\n"
     "category,Slabs,pcat_s,active,false,\n"
@@ -44,31 +48,59 @@ ROWS = (
 DARK_STEEL = "granite__dark_steel_0aff6871-0874-50f4-a814-169e6a961135"
 
 
+def _file(tmp_path, rows: str) -> Path:
+    path = tmp_path / "attributes.csv"
+    path.write_text(HEADER + rows, encoding="utf-8")
+    return path
+
+
 @pytest.fixture
 def attributes(tmp_path, monkeypatch) -> Path:
     """A tmp attributes.csv, read wherever the vocabulary is loaded (tokens import load_attributes at call time)."""
-    path = tmp_path / "attributes.csv"
-    path.write_text(HEADER + ROWS, encoding="utf-8")
+    path = _file(tmp_path, ROWS)
     real = loaders.load_attributes
     monkeypatch.setattr(loaders, "load_attributes", lambda p=None: real(p or path))
     return path
 
 
-def test_a_type_only_in_foreign_categories_is_not_a_pack_type(attributes):
+def test_the_pack_s_types_are_its_handles_and_its_seed(attributes):
     attrs = loaders.load_attributes(attributes)
-    assert sorted(attrs.canonical_names("type")) == ["Granite", "Marble", "Slate"]
-    assert attrs.resolve_id("type", "Steel") is None and attrs.resolve_id("type", "Wine") is None
+    assert sorted(attrs.canonical_names("type")) == ["Gneiss", "Granite", "Marble", "Novelite", "Slate"]
     assert attrs.resolve_id("type", "Granite") == ("Granite", "t_granite")
 
 
-def test_a_type_with_no_combination_yet_is_excluded_never_guessed(attributes):
-    assert loaders.load_attributes(attributes).resolve_id("type", "Gneiss") is None
-    assert "gneiss" not in tokens._clear_type_words() and "Gneiss" not in tokens.known_values("type")
+def test_cold_start_every_list_empty_the_seed_s_types_are_the_pack_s(tmp_path):
+    rows = "".join(f"type,{t},t_{i},active,false,\n" for i, t in
+                   enumerate(["Granite", "Marble", "Gneiss", "Slate", "Steel", "Wine", "Dolomite Marble"]))
+    assert sorted(loaders.load_attributes(_file(tmp_path, rows)).canonical_names("type")) == [
+        "Gneiss", "Granite", "Marble", "Slate"]
+
+
+def test_steel_and_wine_are_excluded(attributes):
+    attrs = loaders.load_attributes(attributes)
+    assert attrs.resolve_id("type", "Steel") is None and attrs.resolve_id("type", "Wine") is None
+
+
+def test_a_new_type_with_no_seed_variety_enters_at_its_first_pack_category_combination(attributes):
+    assert loaders.load_attributes(attributes).resolve_id("type", "Novelite") == ("Novelite", "t_nov")
+
+
+def test_dolomite_marble_with_no_seed_variety_and_no_combination_is_excluded_never_guessed(attributes):
+    assert loaders.load_attributes(attributes).resolve_id("type", "Dolomite Marble") is None
+    assert "Dolomite Marble" not in tokens.known_values("type")
+
+
+def test_a_seed_type_be_lists_only_outside_the_pack_fails_loud_naming_it(tmp_path):
+    path = _file(tmp_path, "type,Granite,t_granite,active,false,steel-coils\n")
+    with pytest.raises(ValueError, match="Granite"):
+        loaders.load_attributes(path)
+    with pytest.raises(ValueError, match="Granite"):
+        loaders.types_outside_pack(path)
 
 
 def test_every_excluded_type_is_listed_with_its_reason(attributes, tmp_path, monkeypatch):
     assert loaders.types_outside_pack(attributes) == [
-        {"type": "Gneiss", "category_handles": "", "reason": "no_combination"},
+        {"type": "Dolomite Marble", "category_handles": "", "reason": "no_combination"},
         {"type": "Steel", "category_handles": "steel-coils", "reason": "other_categories"},
         {"type": "Wine", "category_handles": "bulk-wine", "reason": "other_categories"},
     ]
@@ -77,7 +109,7 @@ def test_every_excluded_type_is_listed_with_its_reason(attributes, tmp_path, mon
                                                                                    attributes_csv=attributes)))
     assert catalog.write_types_outside_pack() == 3
     assert (review / "types_outside_pack.csv").read_text(encoding="utf-8-sig").splitlines() == [
-        "type,category_handles,reason", "Gneiss,,no_combination", "Steel,steel-coils,other_categories",
+        "type,category_handles,reason", "Dolomite Marble,,no_combination", "Steel,steel-coils,other_categories",
         "Wine,bulk-wine,other_categories"]
 
 

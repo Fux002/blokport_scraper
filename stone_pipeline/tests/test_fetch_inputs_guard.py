@@ -51,8 +51,8 @@ _NO_SUCH_KEY = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "
 def _committed(tmp_path, lines: int):
     """A tmp attributes.csv seeded with `lines` colour rows (the committed baseline stand-in)."""
     target = tmp_path / "attributes.csv"
-    target.write_text("category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(lines)), encoding="utf-8")
+    target.write_text("category,value,sourceid,category_handles\n" + "".join(
+        f"color,c{i},id{i},\n" for i in range(lines)), encoding="utf-8")
     return target
 
 
@@ -65,7 +65,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
     # replace found the first one's file gone (FileNotFoundError, a 500)
     import threading
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
     both = threading.Barrier(2)
 
     class _Together(_FakeS3):
@@ -91,7 +91,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
 
 def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(38))
+    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
     assert fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target) is True
     assert target.read_text().count("color,") == 38          # replaced with the live vocab
     assert _leftovers(tmp_path) == []                         # temp cleaned up
@@ -99,7 +99,7 @@ def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
 
 def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
     target = _committed(tmp_path, 100)
-    thin = "category,value,sourceid\ncolor,c0,id0\n"          # 2 lines << 50% of 101 -> floor keeps committed
+    thin = "category,value,sourceid,category_handles\ncolor,c0,id0,\n"          # 2 lines << 50% of 101 -> floor keeps committed
     assert fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target) is False
     assert target.read_text().count("color,") == 100          # committed seed preserved
     assert _leftovers(tmp_path) == []
@@ -222,10 +222,10 @@ def test_the_thin_copy_floor_is_one_setting():
 # settings parses attributes.csv at import, so a malformed S3 copy written over the good local file would stop every
 # later produce at `import settings`, before its own fetch could heal it. The fetch validates before it replaces.
 _MALFORMED_ATTRIBUTES = {
-    "empty status cell": "category,value,sourceid,status,internal\n" + "".join(
-        f"color,c{i},id{i},active,false\n" for i in range(30)) + "color,cx,idx,,false\n",
-    "conflicting duplicate": "category,value,sourceid\n" + "".join(
-        f"color,c{i},id{i}\n" for i in range(30)) + "color,C0,other\n",
+    "empty status cell": "category,value,sourceid,status,internal,category_handles\n" + "".join(
+        f"color,c{i},id{i},active,false,\n" for i in range(30)) + "color,cx,idx,,false,\n",
+    "conflicting duplicate": "category,value,sourceid,category_handles\n" + "".join(
+        f"color,c{i},id{i},\n" for i in range(30)) + "color,C0,other,\n",
 }
 
 
@@ -258,7 +258,7 @@ def test_the_produce_fetch_never_writes_a_malformed_attributes_file_where_none_w
 
 
 def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeypatch):
-    body = "category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n"
+    body = "category,value,sourceid,status,internal,category_handles\ncolor,Black,col_1,archived,false,\n"
     _main_with(tmp_path, monkeypatch, "attributes.csv", body)
     assert (tmp_path / "attributes.csv").read_text(encoding="utf-8") == body
 
