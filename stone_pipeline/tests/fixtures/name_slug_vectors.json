@@ -1,8 +1,8 @@
 {
-  "_header": "BACKEND-OWNED, THE ONE SLUG RULE (P2-3a, table 175 S1; PHASE-2-SPEC WP2.1). nameSlug(text) is the scraper's slugify step for step: ascii_fold(text) (NFKD, every mark dropped, the non-decomposing letters transliterated, any other non-ASCII removed; an ASCII text is left as it is), lower-cased, each run of anything other than [a-z0-9] made one '-', and the edge '-' trimmed. '&' is never 'and' here: that is the KEY's rule (nameKey), not the slug's. Every `expected` was produced by the scraper's own slugify (SC stone_pipeline/core/text.py), so a backend change that disagrees fails here. P6-4's import handles read this file too (the coordinator, 9 Nov).",
+  "_header": "BACKEND-OWNED, THE ONE SLUG RULE (P2-3a, its R8 table 175 S1 and its delta; PHASE-2-SPEC WP2.1). nameSlug(text) is the scraper's slugify step for step: the words of the name's KEY (nameKey, the scraper's match_key: marks dropped, every non-alphanumeric run a space, '&' read as 'and' per the owner's D1 of 2026-11-04, ASCII-folded, case-folded) joined by '-'. So a slug, a Key and the match key read a name one way: '&' and 'and' give one slug. Every `expected` was produced by the scraper's own slugify (SC stone_pipeline/core/text.py), so a backend change that disagrees fails here. P6-4's import handles read this file too (the coordinator, 9 Nov).",
   "generator": {
     "source": "SC stone_pipeline/core/text.py slugify",
-    "scraper_rev": "89b3b34",
+    "scraper_rev": "98648b3",
     "python_unicode": "16.0.0"
   },
   "cases": [
@@ -44,12 +44,12 @@
     {
       "group": "ampersand",
       "input": "A & B",
-      "expected": "a-b"
+      "expected": "a-and-b"
     },
     {
       "group": "ampersand",
       "input": "Black&White",
-      "expected": "black-white"
+      "expected": "black-and-white"
     },
     {
       "group": "accent",
@@ -265,6 +265,26 @@
       "group": "translit table",
       "input": "\u014b",
       "expected": "n"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black & Gold",
+      "expected": "black-and-gold"
+    },
+    {
+      "group": "ampersand",
+      "input": "a&b",
+      "expected": "a-and-b"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black\uff06Gold",
+      "expected": "black-and-gold"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black\ufe60Gold",
+      "expected": "black-and-gold"
     }
   ]
 }
