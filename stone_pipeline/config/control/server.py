@@ -1321,12 +1321,12 @@ def boot(config_db, ledger_path) -> None:
     # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
-    # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
-    # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
-    # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
+    # just-added colour is rejected at mint until the next full produce, and a REPUBLISH does not fetch inputs. A
+    # failed fetch (S3 error, thin or malformed copy, table 569's category_handles missing) stops the boot loud: the
+    # server never runs on a stale local vocab as if it were Medusa's (34's rev 2, F vs G10).
     from stone_pipeline.io import medusa_inputs
-    if medusa_inputs.fetch_attributes():
-        log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    medusa_inputs.fetch_attributes()
+    log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
     # The name-field kinds: a boot failure is logged, not fatal. The routes that clean a name read the map per
     # request and answer 503 until a later boot or produce fetch has written a valid one.
     try:

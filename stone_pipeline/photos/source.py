@@ -444,8 +444,8 @@ def only(keys, wanted):
 def _sheet(client):
     """This environment's product sheet, its categories read from the environment's CURRENT Medusa export first, as the
     produce does (fetch_inputs, then refresh_category_pcats): category ids differ per environment, prod has no committed
-    export, and a committed one can lag Medusa. A fetch that fails keeps what is on disk, so a prod run without its export
-    fails loud on its first category, never guesses."""
+    export, and a committed one can lag Medusa. A fetch that fails (S3 error, thin or malformed copy) raises, so the run
+    never reads a stale local vocab as Medusa's and never guesses a category."""
     from stone_pipeline.io import medusa_inputs
     from stone_pipeline.config import categories
     medusa_inputs.fetch_attributes(client)

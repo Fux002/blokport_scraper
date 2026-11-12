@@ -132,37 +132,30 @@ def _incoming(target: Path) -> Path:
     return Path(name)
 
 
-def fetch_attributes(client=None, target=None) -> bool:
-    """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, honoring the same
-    thin-copy floor as the full fetch. The config server calls this on BOOT so the review-decision endpoint
-    validates colours/types against Medusa's CURRENT set from container start. Without it a fresh container
-    (every deploy reverts the on-disk file to the committed baseline, which lags Medusa's newer colours)
-    rejects a just-added colour at mint until the next full produce re-fetches it. An S3 failure (no object, no
-    credentials, no endpoint, a transfer whose retries ran out) is logged as an error and keeps the committed copy,
-    returning False: a fresh or offline host still validates against a real seed, and one network blip at boot is no
-    restart loop. Any other error raises. Returns True iff a fresher copy was
-    written. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults
-    to the live attributes_csv path)."""
+def fetch_attributes(client=None, target=None) -> None:
+    """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, by the produce fetch's own
+    checks: the thin-copy floor and check_readable (table 569's category_handles column included). Callers: the config
+    server's boot (the review-decision endpoint validates against Medusa's CURRENT set from container start), the
+    photos run and the hidden-photos page. ONE refusing path (34's rev 2, F vs G10): an S3 failure, a thin copy and a
+    malformed copy each RAISE, naming the file, and the local file is left as it was; it is never kept and served as if
+    it were the fresh vocab. Downloads to a temp then atomically replaces. `target` overrides the destination for tests
+    (defaults to the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = _incoming(target)
     try:
         client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
-        client.download_file(S3_BUCKET, key, str(tmp))
-        # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
-        if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
-            return False
         try:
-            check_readable("attributes.csv", tmp)
-        except ValueError as exc:
-            log.error(f"kept the local attributes.csv: the S3 copy is malformed ({exc})")
-            return False
+            client.download_file(S3_BUCKET, key, str(tmp))
+        except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
+            raise RuntimeError(f"could not fetch s3://{S3_BUCKET}/{key} (attributes.csv): {exc}") from exc
+        # protected base: a thin S3 copy (Medusa mid-reset) is refused, never written over the fuller local file
+        if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
+            raise RuntimeError(f"refusing attributes.csv from S3: it looks thin ({incoming} lines against {current} "
+                               "in the local copy); Medusa's export looks partial (mid-reset?). Re-export it.")
+        check_readable("attributes.csv", tmp)      # malformed (a missing category_handles column included): raises
         os.replace(tmp, target)
-        return True
-    except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
-        log.error(f"could not fetch s3://{S3_BUCKET}/{key}; keeping the committed attributes.csv: {exc}")
-        return False
     finally:
         tmp.unlink(missing_ok=True)
 
