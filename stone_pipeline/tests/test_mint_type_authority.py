@@ -39,7 +39,7 @@ def _slab_imports():
 def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkeypatch):
     exp = tmp_path / "variants_export.csv"
     with exp.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=["Id", "Key", "Name", "Type", "Aliases"])
+        w = csv.DictWriter(h, fieldnames=["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"])   # P2-7
         w.writeheader()
         w.writerow({"Id": "1", "Key": MARBLE_KEY, "Name": "Arabescato", "Type": "Marble"})
         w.writerow({"Id": "2", "Key": GRANITE_KEY, "Name": "Arabescato", "Type": "Granite"})

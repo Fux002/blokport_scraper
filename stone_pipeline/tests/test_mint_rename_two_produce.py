@@ -24,7 +24,7 @@ from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, decisions, match_variation, normalize, reconcile_tree
 from stone_pipeline.tests.test_mint_type_authority import _typed_gap_row
 
-EXPORT_FIELDS = ["Id", "Key", "Name", "Type", "Aliases"]
+EXPORT_FIELDS = ["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"]   # Medusa's export (P2-7)
 EXISTING_KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
@@ -69,7 +69,7 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     # an unrelated existing variety, so the index is a real (non-empty) export
     _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine",
-                                       "Type": "Granite", "Aliases": "Alpine Granite"}])
+                                       "Type": "Granite", "AdminAliases": "Alpine Granite"}])
 
     # -- produce 1: the scrape gaps, the operator mints it as 'Honey' --------------------------------------
     ref1 = loaders.load_all()
@@ -90,7 +90,7 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
 
     # -- boundary: Medusa pulls the variety and re-exports it (Id assigned; no scraper alias rides the export) -----
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": ""}])
+        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx"}])
 
     # -- produce 2: the same scrape binds through the alias surface, nothing is proposed again -------------
     ref2 = loaders.load_all()
@@ -146,7 +146,7 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
 
     # ... Medusa pulls it and re-exports ...
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": minted[0]["Aliases"]}])
+        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx"}])
 
     # ... produce 3: the first mint on a spelling is its GLOBAL meaning: the zucchi product binds to 'Honey'
     # through the alias the rename attached for everyone, and so does another vendor's identical spelling.
@@ -245,7 +245,7 @@ def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monke
 
     # boundary: Medusa re-exports Chocolate Classic ...
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_cc", "Key": cc_key, "Name": "Chocolate Classic", "Type": "Granite", "Aliases": minted[0].get("Aliases", "")}])
+        {"Id": "var_cc", "Key": cc_key, "Name": "Chocolate Classic", "Type": "Granite"}])
 
     # produce 2: marenostone's product re-points to Chocolate Classic via the vendor-scoped alias;
     # another vendor's identical spelling is NOT re-pointed (the statement was marenostone-only).

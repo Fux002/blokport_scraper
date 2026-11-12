@@ -23,11 +23,14 @@ KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
 def _write(path: Path, name: str, with_id: bool) -> None:
-    fields = (["Id"] if with_id else []) + ["Key", "Name", "Type", "Aliases"]
+    # Medusa's export (with an Id) carries the P2-7 columns; the scraper's own base keeps Key,Name,Type,Aliases
+    fields = (["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"] if with_id
+              else ["Key", "Name", "Type", "Aliases"])
     with path.open("w", newline="", encoding="utf-8") as h:
         w = csv.DictWriter(h, fieldnames=fields)
         w.writeheader()
-        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Type": "Granite", "Aliases": "Alpine Granite"})
+        w.writerow({**({"Id": "var_1"} if with_id else {"Aliases": "Alpine Granite"}), "Key": KEY, "Name": name,
+                    "Type": "Granite"})
 
 
 def _paths(tmp_path: Path):

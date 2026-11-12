@@ -41,10 +41,10 @@ def _product(ledger, sku, variation_key, *, state="pending", medusa_id=None, las
 def _export_csv(tmp_path, rows, *, with_status=True):
     """rows: (Id, Key, Name, status). Writes variants_export.csv and returns its Path."""
     p = tmp_path / "variants_export.csv"
-    header = "Id,Key,Name,Type,Aliases" + (",status" if with_status else "")
+    header = "Id,Key,Name,AdminAliases,AdminCodes,Type" + (",status" if with_status else "")   # Medusa's (P2-7)
     lines = [header]
     for _id, key, name, status in rows:
-        cells = [_id, key, name, "Marble", ""] + ([status] if with_status else [])
+        cells = [_id, key, name, "", "", "Marble"] + ([status] if with_status else [])
         lines.append(",".join(cells))
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p

@@ -20,16 +20,16 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import bootstrap, writethrough
 from stone_pipeline.ledger.db import Ledger
 
-_EXPORT_HEADER = "Id,Key,Name,Type,Aliases"
+_EXPORT_HEADER = "Id,Key,Name,AdminAliases,AdminCodes,Type"   # Medusa's export (P2-7)
 _VARIATION_KEY = "marble__carrara_0001"
 
 
 def _write_export(path):
-    # the exact columns seed_variations reads; two rows, one with piped aliases
+    # the columns seed_variations reads; two rows, one with piped hand aliases (never the scraper's)
     path.write_text(
         _EXPORT_HEADER + "\n"
-        f"V1,{_VARIATION_KEY},Carrara,Marble,Statuario|Bianco\n"
-        "V2,granite__preto_0002,Preto,Granite,\n",
+        f"V1,{_VARIATION_KEY},Carrara,Statuario|Bianco,,Marble\n"
+        "V2,granite__preto_0002,Preto,,,Granite\n",
         encoding="utf-8",
     )
     return path

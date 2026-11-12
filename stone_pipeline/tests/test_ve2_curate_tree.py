@@ -51,9 +51,9 @@ def _export_status(tmp_path, rows):   # rows: (Id, Key, Name, status)
     p = tmp_path / "export_status.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Type", "Aliases", "status"])
+        w.writerow(["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type", "status"])   # P2-7
         for vid, key, nm, st in rows:
-            w.writerow([vid, key, nm, "Marble", "", st])
+            w.writerow([vid, key, nm, "", "", "Marble", st])
     return p
 
 
@@ -370,9 +370,9 @@ def test_the_curate_index_reads_the_archived_flag_from_the_export(tmp_path, monk
     p = tmp_path / "variants_export.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Id", "Key", "Name", "Type", "Aliases", "status"])
-        w.writerow(["v1", "marble__carrara_1", "Carrara", "Marble", "", "archived"])
-        w.writerow(["v2", "marble__statuario_1", "Statuario", "Marble", "", "active"])
+        w.writerow(["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type", "status"])   # P2-7
+        w.writerow(["v1", "marble__carrara_1", "Carrara", "", "", "Marble", "archived"])
+        w.writerow(["v2", "marble__statuario_1", "Statuario", "", "", "Marble", "active"])
     monkeypatch.setattr(cur_existing, "existing_varieties_file", lambda: p)
     slab = cur_existing.load_existing()
     assert slab.by_name_type[(proj.norm("Carrara"), "marble")]["archived"] is True
