@@ -203,3 +203,48 @@ def test_a_delta_row_the_export_already_holds_is_not_republished():
     rows = [{"Key": CASA, "Name": "Casa Blue", "Type": "Marble", "Aliases": "New Spelling"},
             {"Key": GALAXY, "Name": "Black Galaxy", "Type": "Granite", "Aliases": ""}]
     assert output.new_variety_rows(rows, export_keys={CASA}) == [rows[1]]
+
+
+# --- a mint's own spellings are its operator renames (manager, 11-12) -----------------------------------------------
+def test_an_operator_rename_is_the_spelling_curate_attaches_to_the_mint():
+    # minting.py attaches the CLEANED scraped spelling (context.variety_identity: clean_variety(spelling, type)) to a
+    # renamed mint's row; the operator store states the same value, so the mint's alias survives the mint run
+    from stone_pipeline.adapters.tokens import clean_variety
+    from stone_pipeline.aliases.stores import operator_aliases
+    from stone_pipeline.aliases.surfaces import OperatorAlias
+    row = {"source": "", "spelling_norm": "calacatta oro extra marble slab", "spelling": "Calacatta Oro Extra Marble Slab",
+           "verdict": "is", "name": "Calacatta Oro", "stone_type": "Marble"}
+    clean = clean_variety(row["spelling"], "Marble")
+    assert operator_aliases([row]) == [OperatorAlias("Calacatta Oro", "Marble", clean)]
+
+
+def test_after_the_mint_run_its_operator_rename_reaches_the_index_and_the_payload(tmp_path, monkeypatch):
+    # the run after the mint: the minted variety is in the base, its mint statement in config.db, its post in no
+    # backbone file (the leaf overlay creates no Key and no alias). Its spelling comes from the operator store.
+    import csv
+    import dataclasses
+    from stone_pipeline.adapters.tokens import clean_variety
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.reference.loaders import backbone, load_variants
+    from stone_pipeline.stages import emit_catalog
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(backbone, "load_backbone", lambda path=None: backbone.Backbone())
+    oro = new_key("Marble", "Calacatta Oro")
+    decisions_store.decide("", "Calacatta Oro Extra Marble Slab", name="Calacatta Oro", stone_type="Marble",
+                           exists_as=lambda n, t: False, alias_target=lambda n, t: None)
+    clean = clean_variety("Calacatta Oro Extra Marble Slab", "Marble")
+    base = tmp_path / "variants_export_base.csv"
+    base.write_text(f"Key,Name,Type,Aliases\n{oro},Calacatta Oro,Marble,\n", encoding="utf-8")
+    from stone_pipeline.aliases import stores as alias_stores
+    assert clean in load_variants(base, alias_stores.scraper_stores()).by_id[oro].aliases
+    paths = dataclasses.replace(SETTINGS.paths, review_dir=tmp_path / "review",
+                                variants_export_csv=tmp_path / "no_export.csv", curate_delta_csv=tmp_path / "no.csv")
+    monkeypatch.setattr(emit_catalog, "SETTINGS", dataclasses.replace(SETTINGS, paths=paths))
+    out = tmp_path / "out" / "1_variants_full.csv"
+    out.parent.mkdir()
+    emit_catalog.build(base, icons={}, out_path=out)
+    sidecar = json.loads((out.parent / alias_payload.ALIAS_SIDECAR).read_text(encoding="utf-8"))
+    assert sidecar[oro]["alias_rows"] == [{"value": clean, "method": "operator"}]
+    with out.open(encoding="utf-8-sig", newline="") as h:
+        assert [r["Aliases"] for r in csv.DictReader(h)] == [clean]
