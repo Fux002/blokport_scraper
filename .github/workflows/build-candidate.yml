@@ -7,6 +7,9 @@
 #
 # Dispatched FROM main: AWS_DEPLOY_ROLE_ARN trusts refs/heads/main only, so a run on any other ref is refused before
 # credentials are asked for. The input reaches a step only through env, never interpolated into a script.
+#
+# Every ECR read is `aws ecr batch-get-image` (ecr:BatchGetImage), because the deploy role's policy allows that and NOT
+# ecr:DescribeImages (run 43155861223 refused there with AccessDenied; infra/main.tf's EcrPushPull statement).
 name: Build candidate image
 
 on:
@@ -31,6 +34,9 @@ env:
   # The entrypoint smoke is deploy.yml's own import line, read from the BUILT commit, so the candidate passes exactly
   # the smoke its own code would pass on a main deploy, and the module list has one home.
   SMOKE_ANCHOR: '--entrypoint python "$REPO:core" -c "import '
+  # The manifest types `docker build` + `docker push` store. Without the schema-1 type, ECR returns the stored manifest
+  # itself, so the digest read back is the one the push named, never a converted manifest's.
+  ACCEPTED_MEDIA_TYPES: "application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json"
 
 jobs:
   build:
@@ -70,20 +76,29 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
 
-      # Only ImageNotFound means the tag is free: any other failure (access, throttling, network) must not read as
-      # "absent", or a push would replace an existing image under the same tag.
+      # FREE only when the answer is no image and exactly one failure, ImageNotFound, for this exact tag. An image, any
+      # other failure code, a failed call (AccessDenied, throttling, network) or an answer that does not parse refuses:
+      # none of them may read as "absent", or a push would replace an existing image under the same tag.
       - name: Refuse a tag that already exists
         env:
           SHA: ${{ inputs.ref }}
         run: |
-          if found=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" 2>&1); then
-            echo "::error::refused: $ECR_REPOSITORY:$SHA already exists; a candidate image is never rebuilt"
-            exit 1
-          elif ! grep -q ImageNotFoundException <<<"$found"; then
-            echo "::error::could not check whether $ECR_REPOSITORY:$SHA exists: $found"
+          # shellcheck disable=SC2086 # ACCEPTED_MEDIA_TYPES is a space-separated list, split on purpose
+          if ! answer=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" \
+              --accepted-media-types $ACCEPTED_MEDIA_TYPES --output json 2>&1); then
+            echo "::error::refused: could not check whether $ECR_REPOSITORY:$SHA exists: $answer"
             exit 1
           fi
-          echo "$ECR_REPOSITORY:$SHA is free"
+          state=$(jq -r --arg tag "$SHA" '
+            if (.images | length) > 0 then "exists"
+            elif (.failures | length) == 1 and .failures[0].failureCode == "ImageNotFound"
+                 and .failures[0].imageId.imageTag == $tag then "free"
+            else "unknown" end' <<<"$answer") || { echo "::error::refused: the answer does not parse: $answer"; exit 1; }
+          case "$state" in
+            free) echo "$ECR_REPOSITORY:$SHA is free" ;;
+            exists) echo "::error::refused: $ECR_REPOSITORY:$SHA already exists; a candidate image is never rebuilt"; exit 1 ;;
+            *) echo "::error::refused: could not tell whether $ECR_REPOSITORY:$SHA exists: $answer"; exit 1 ;;
+          esac
 
       - name: Build the core image and smoke-import its entrypoints
         env:
@@ -100,7 +115,8 @@ jobs:
           echo "Entrypoint imports OK in $REPO:$SHA"
 
       # The one push: the explicit :<sha> ref. The image carries no other local tag, so nothing else can be pushed.
-      - name: Push :<sha> and print its digest
+      - name: Push :<sha>
+        id: push
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           SHA: ${{ inputs.ref }}
@@ -108,8 +124,24 @@ jobs:
           REPO="$REGISTRY/$ECR_REPOSITORY"
           PUSHED=$(docker push "$REPO:$SHA" | tee /dev/stderr | sed -n "s/^$SHA: digest: \(sha256:[0-9a-f]\{64\}\) size: [0-9]*$/\1/p")
           [ -n "$PUSHED" ] || { echo "::error::refused: docker push named no digest for $REPO:$SHA"; exit 1; }
-          READ=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" --query 'imageDetails[0].imageDigest' --output text)
-          [ "$READ" = "$PUSHED" ] || { echo "::error::refused: ECR reads $READ for :$SHA, the push said $PUSHED"; exit 1; }
-          echo "pushed $REPO:$SHA ($PUSHED)"
+          echo "digest=$PUSHED" >> "$GITHUB_OUTPUT"
+
+      # The digest is printed only when ECR's own answer for the tag (exactly one image, no failure) names the digest
+      # the push named.
+      - name: Read the digest back and print it
+        env:
+          SHA: ${{ inputs.ref }}
+          PUSHED: ${{ steps.push.outputs.digest }}
+        run: |
+          # shellcheck disable=SC2086 # ACCEPTED_MEDIA_TYPES is a space-separated list, split on purpose
+          if ! answer=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" \
+              --accepted-media-types $ACCEPTED_MEDIA_TYPES --output json 2>&1); then
+            echo "::error::refused: could not read $ECR_REPOSITORY:$SHA back: $answer"
+            exit 1
+          fi
+          READ=$(jq -r 'if (.images | length) == 1 and (.failures | length) == 0 then .images[0].imageId.imageDigest else "" end' \
+            <<<"$answer") || { echo "::error::refused: the answer does not parse: $answer"; exit 1; }
+          [ -n "$READ" ] && [ "$READ" = "$PUSHED" ] || { echo "::error::refused: ECR answers $answer for :$SHA, the push said $PUSHED"; exit 1; }
+          echo "pushed $ECR_REPOSITORY:$SHA ($PUSHED)"
           echo "### $ECR_REPOSITORY:$SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "digest \`$PUSHED\` (push and ECR read-back agree); :core and prod tags untouched" >> "$GITHUB_STEP_SUMMARY"
