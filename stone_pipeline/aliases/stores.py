@@ -1,7 +1,7 @@
 """The alias stores read from where they live, for aliases.surfaces (P2-10 C3): the seed from the backbone's posts, the
-operator's renames from config.db's `statement` table, and the backend's hand rows from the export's AdminAliases and
-AdminCodes columns. The matcher (reference.loaders) and alias_target (config.varieties) both read through here, so they
-can never see two different alias sets. No em dashes."""
+operator's renames from config.db's `statement` table, the ACTIVE learned aliases from config.db's `learned_alias` (C2),
+and the backend's hand rows from the export's AdminAliases and AdminCodes columns. The matcher (reference.loaders) and
+alias_target (config.varieties) both read through here, so they can never see two different alias sets. No em dashes."""
 from __future__ import annotations
 
 import logging
@@ -46,13 +46,15 @@ def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
 
 
 def scraper_stores(backbone=None) -> Stores:
-    """The scraper's own stores (seed and operator); the hand rows come with the export a caller reads. The
-    statements are read only when config.db exists (a read never creates it)."""
+    """The scraper's own stores (seed, operator, active learned); the hand rows come with the export a caller reads.
+    The statements are read only when config.db exists, and the learned reader creates no store either (a read never
+    creates it). A proposed or rejected learned alias is no surface."""
     from stone_pipeline.config import decisions_store, store
     from stone_pipeline.reference.loaders.backbone import load_backbone
     rows = decisions_store.statement_rows() if store.config_db_path().exists() else []
     return Stores(seed=seed_of(backbone if backbone is not None else load_backbone()),
-                  operator=operator_aliases(rows))
+                  operator=operator_aliases(rows),
+                  learned=[(r["identity_key"], r["value"]) for r in decisions_store.active_learned_aliases()])
 
 
 def admin_of(records) -> dict[str, tuple[Sequence[str], Sequence[str]]]:

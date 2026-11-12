@@ -45,7 +45,7 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
         # the scraped spelling rides onto the mint row as its own alias (owner[0] == norm(title)); for a
         # variety that does not exist yet emit_alias_rows finds no existing row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
-        c.alias_new.setdefault(owner, set()).add(clean)        # emit writes it by the alias rule (W3)
+        c.alias_new.setdefault(owner, {}).setdefault(clean, row.src_site)   # the mint row carries it (W3)
     if owner in c.minted_display:
         return                          # a second spelling of the same renamed variety: alias only
     c.minted_display.add(owner)
@@ -261,8 +261,7 @@ def leaf_updates(rows: list[CanonicalRow], result: CurationResult) -> None:
 
 def finish(c: Curation, result: CurationResult) -> None:
     result.counts = {
-        "alias_additions": len(result.alias_additions),
-        "confirmed_alias_additions": sum(1 for r in result.alias_additions if r.get("_status") == "confirmed"),
+        "learned_proposals": len(result.learned_proposals),
         "new_variants": len(result.new_variants),
         "distinct_new_varieties": len(c.new_variant_rows),
         "backbone_updates": len(result.backbone_updates),
