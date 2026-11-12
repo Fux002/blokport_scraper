@@ -177,7 +177,7 @@ def test_a_hard_reset_spares_gone_listings_and_tombstones_the_rest(tmp_path, sco
         _prod(ledger, "SEN-LIVE", qty=5)
         out = reset_sync_state(ledger, source_codes=["sen"] if scoped else None, hard=True)
         assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["SEN-LIVE"]
-        assert out["product_tombstoned"] == 1 and out["gone_kept"] == 2
+        assert out["product_tombstoned"] == 1 and out["records_kept"] == 2
         assert _stock(ledger, "SEN-GONE") == (0, "sold_out", FIRST) and ledger.get("product", "sku", "SEN-GONE")
         assert _stock(ledger, "SEN-HID") == (0, "no_photo", FIRST)
         assert ledger.get("product", "sku", "SEN-LIVE") is None
@@ -199,12 +199,32 @@ def test_a_gone_listing_a_hard_reset_spares_is_served_again_once_from_zero(tmp_p
                                       "gone_at": FIRST}
 
 
+@pytest.mark.parametrize("scoped", [False, True])
+def test_a_hard_reset_spares_a_vendor_removed_listing_and_re_serves_it_once(tmp_path, scoped):
+    # Mas: a vendor-removed (delisted) listing's record survives a factory reset, as a gone one's does
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-DEL", qty=0, reason="delisted")
+        _prod(ledger, "SEN-LIVE", qty=5)
+        out = reset_sync_state(ledger, source_codes=["sen"] if scoped else None, hard=True)
+        assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["SEN-LIVE"]
+        assert out["records_kept"] == 1 and _stock(ledger, "SEN-DEL") == (0, "delisted", None)
+        product, stock = ledger.get("product", "sku", "SEN-DEL"), ledger.get("inventory", "sku", "SEN-DEL")
+        assert (product["state"], product["medusa_id"]) == ("pending", None) and stock["last_synced_reason"] is None
+
+
+def test_a_seed_drop_keeps_a_variety_a_vendor_removed_listing_shows(tmp_path):
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-DEL", qty=0, reason="delisted", key="marble__del_1")
+        out = reconcile_variations_to_seed(ledger, seed_keys=set(), protected=set(), seed_identities=set())
+        assert out["varieties_kept"] == ["marble__del_1"] and ledger.get("product", "sku", "SEN-DEL") is not None
+
+
 def test_a_seed_drop_keeps_a_variety_a_gone_listing_shows(tmp_path):
     with _open(tmp_path) as ledger:
         _prod(ledger, "SEN-GONE", qty=0, reason="sold_out", gone_at=FIRST, key="marble__gone_1")
         _prod(ledger, "SEN-LIVE", qty=5, key="marble__live_2")
         out = reconcile_variations_to_seed(ledger, seed_keys=set(), protected=set(), seed_identities=set())
-        assert out["kept_for_gone"] == ["marble__gone_1"] and "marble__gone_1" not in out["dropped_keys"]
+        assert out["varieties_kept"] == ["marble__gone_1"] and "marble__gone_1" not in out["dropped_keys"]
         assert ledger.get("variation", "key", "marble__gone_1") is not None
         assert ledger.get("product", "sku", "SEN-GONE") is not None
         assert ledger.get("variation", "key", "marble__live_2") is None
