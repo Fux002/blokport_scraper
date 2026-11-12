@@ -267,7 +267,7 @@ def test_serve_isolates_a_row_with_corrupt_json(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "marble__good", state="pending")
         _variation(ledger, "marble__bad", state="pending")
-        ledger.execute("UPDATE variation SET aliases = '{corrupt' WHERE key = 'marble__bad'")
+        ledger.execute("UPDATE variation SET alias_rows = '{corrupt' WHERE key = 'marble__bad'")
         served = ready_variations(ledger)                       # must NOT raise
         keys = {v["external_id"] for v in served}
         assert "marble__good" in keys and "marble__bad" not in keys   # good served, bad dropped
