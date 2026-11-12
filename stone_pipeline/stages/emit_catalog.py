@@ -85,6 +85,9 @@ ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of al
 # mirrors this folder to S3 and never deletes, so every run's list stays there.
 ALIAS_COLLISIONS_RUNS = "alias_collisions_dropped_runs"
 _ALIAS_COLLISION_FIELDS = ["Key", "variety", "alias", "collides_with", "collides_with_key"]
+# review list of the live export's Keys emit did not re-add: tombstoned or acked deleted (table 575 / G5)
+EXPORT_KEYS_TOMBSTONED = "export_keys_tombstoned.csv"
+_TOMBSTONED_FIELDS = ["Key", "Name", "tombstone", "reason"]
 
 
 def _run_stamp() -> str:
@@ -225,6 +228,28 @@ def _rows(path: Path) -> list[dict]:
             for v in read_variants_export(path, require_status=variants_status_required(path)) if v.key]
 
 
+def _not_tombstoned(rows: list[dict]) -> list[dict]:
+    """The live export's rows minus every variety the scraper is deleting or Medusa has deleted (table 575 / G5). A
+    stale export still lists such a Key; re-added, populate's E5 would clear its tombstone and the variety would
+    resurrect. Keyed on Key only. Read-only on the ledger. With write-through off, or before the first write created
+    the ledger (a first produce: record_catalog creates it after this build), no tombstone exists, so nothing is
+    skipped; a ledger that exists but cannot be opened raises. Every skipped Key is listed for the operator
+    (EXPORT_KEYS_TOMBSTONED, rewritten each build) and counted."""
+    from stone_pipeline.ledger import sync, writethrough
+    if not writethrough.enabled() or not writethrough.ledger_path().exists():
+        return rows
+    with writethrough.connect(bind=False) as ledger:
+        gone = sync.tombstoned_variations(ledger)
+    kept = [r for r in rows if r["Key"] not in gone]
+    listed = [{"Key": r["Key"], "Name": r["Name"], "tombstone": gone[r["Key"]][0], "reason": gone[r["Key"]][1]}
+              for r in sorted(rows, key=lambda r: r["Key"]) if r["Key"] in gone]
+    csvio.write_dicts(SETTINGS.paths.review_dir / EXPORT_KEYS_TOMBSTONED, _TOMBSTONED_FIELDS, listed, sanitize=True)
+    if listed:
+        log.warning("live export Keys not re-added: tombstoned or deleted (a stale export)", extra={"extra_fields": {
+            "count": len(listed), "report": EXPORT_KEYS_TOMBSTONED, "keys": [r["Key"] for r in listed][:20]}})
+    return kept
+
+
 def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | None = None,
           *, seed_only: bool = False, out_path: Path | None = None) -> Path:
     """Assemble to_upload/1_variants_full.csv from the committed base (the complete source-of-truth variety set) +
@@ -248,7 +273,7 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     order = list(by_key)
     live = SETTINGS.paths.export_file
     if not seed_only and existing_path != live:              # seed_only: no live-export union (hermetic)
-        for r in _rows(live):
+        for r in _not_tombstoned(_rows(live)):
             if r["Key"] not in by_key:
                 by_key[r["Key"]] = r
                 order.append(r["Key"])

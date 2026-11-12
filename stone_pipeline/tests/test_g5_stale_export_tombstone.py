@@ -134,8 +134,16 @@ def test_without_write_through_there_is_no_ledger_and_the_union_is_unchanged(tmp
     assert emitted == [KEPT, FRESH] and listed == []
 
 
-def test_with_write_through_on_a_missing_ledger_fails_loud(tmp_path, monkeypatch):
-    with pytest.raises(FileNotFoundError, match="no sync ledger"):
+def test_before_the_first_write_creates_the_ledger_nothing_is_skipped_and_none_is_created(tmp_path, monkeypatch):
+    # a first produce: record_catalog creates the ledger after this build, so no tombstone can exist yet
+    emitted, listed, _ = _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, FRESH])
+    assert emitted == [KEPT, FRESH] and listed == []
+    assert not (tmp_path / "dev.ledger").exists()
+
+
+def test_a_ledger_that_cannot_be_opened_fails_loud(tmp_path, monkeypatch):
+    (tmp_path / "dev.ledger").write_bytes(b"not a sqlite file")
+    with pytest.raises(sqlite3.DatabaseError):
         _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, FRESH])
 
 

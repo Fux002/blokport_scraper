@@ -101,9 +101,12 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                     [(key, i["category_handle"], i["s3_key"], i["etag"]) for i in icons])
             n += 1
     # E5: a re-minted variety must not carry a stale variation-tombstone, or Medusa's /removed pull would
-    # delete the freshly re-created variety. Clear any variation tombstone now back in the produced set.
+    # delete the freshly re-created variety. Clear any variation tombstone now back in the produced set, and its
+    # acked-delete memory (G5). Only the base or curate's delta can bring such a Key back: emit's live-export union
+    # skips them (emit_catalog._not_tombstoned).
     ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id IN "
                    "(SELECT key FROM variation WHERE in_full = 1)")
+    ledger.execute("DELETE FROM variation_deleted WHERE key IN (SELECT key FROM variation WHERE in_full = 1)")
     return n
 
 
