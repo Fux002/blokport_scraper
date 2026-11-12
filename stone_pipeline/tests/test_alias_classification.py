@@ -396,15 +396,6 @@ def test_the_route_is_dispatched(monkeypatch):
     assert dispatch("GET", ["aliases", "classification"], None)[0] == 405
 
 
-def test_the_publisher_adds_a_top_level_field_to_the_manifest(tmp_path):
-    from stone_pipeline.io import deliverables
-    (tmp_path / "a.csv").write_text("x\n", encoding="utf-8")
-    s3 = _S3()
-    out = deliverables.publish_deliverables(s3, "b", tmp_path, "p", "R1", extra={"alias_classification": {"n": 1}})
-    assert out["manifest"]["alias_classification"] == {"n": 1}
-    assert json.loads(s3.objects["p/manifest.json"])["alias_classification"] == {"n": 1}
-
-
 def test_a_produce_drops_a_stale_classification_file(tmp_path, monkeypatch):
     # a produce moves the ledger on, so the file no longer describes it: the next publish must not carry it
     import dataclasses

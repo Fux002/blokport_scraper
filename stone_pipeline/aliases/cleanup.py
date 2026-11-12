@@ -335,20 +335,16 @@ def build(ledger) -> Built:
 
 
 def publish(ledger) -> dict:
-    """The route's work (lifecycle.alias_classification): build, write the file into to_upload, and publish to_upload
-    with the file's manifest entry and the `alias_classification` field, keeping the produce's run id and every other
-    entry. Read-only on the ledger and config.db."""
-    from stone_pipeline.io.deliverables import MANIFEST_NAME, publish_deliverables, published_manifest
+    """The route's work (lifecycle.alias_classification): build, then merge the file's entry and the
+    `alias_classification` field into the PUBLISHED manifest, carrying every other entry and the produce's run id.
+    It never reads the local to_upload (empty on the service after a roll until the next produce). Read-only on the
+    ledger and config.db; an absent or unreadable published manifest refuses (deliverables.merge_into_published)."""
+    from stone_pipeline.io.deliverables import merge_into_published
     built = build(ledger)
     classification, generated_at = built.classification, built.generated_at
-    up = _to_upload_dir()
-    (up / FILE_NAME).write_bytes(csv_bytes(classification))
     bucket, prefix = _bucket_prefix()
-    client = _s3_client()
-    run_id = published_manifest(client, bucket, f"{prefix}/{MANIFEST_NAME}").get("run_id")
-    published = publish_deliverables(client, bucket, up, prefix, run_id,
-                                     extra={MANIFEST_FIELD: manifest_field(classification, generated_at)})
-    entry = published["manifest"]["files"][FILE_NAME]
+    entry = merge_into_published(_s3_client(), bucket, prefix, FILE_NAME, csv_bytes(classification),
+                                 MANIFEST_FIELD, manifest_field(classification, generated_at))
     return {"file": FILE_NAME, "rows": entry["rows"], "sha256": entry["sha256"],
             "variations": classification.variations, "tombstoned": classification.tombstoned,
             "removed": sum(d[2] == "removed" for d in classification.differences), "generated_at": generated_at,
