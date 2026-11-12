@@ -17,6 +17,7 @@ which the ledger serves as the variety's category_images (PHASE-1-SPEC section 4
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -101,6 +102,13 @@ def _drop_alias_collisions(rows: list[dict]) -> None:
     if listed:
         log.warning("aliases dropped: each names another variety of the same type", extra={"extra_fields": {
             "count": len(listed), "report": ALIAS_COLLISIONS_REVIEW, "aliases": listed[:20]}})
+
+
+def alias_collisions_dropped() -> int:
+    """How many aliases the last build dropped as collisions, read from the review list it always writes, so the run
+    summary states the count of the very list the operator opens."""
+    with (SETTINGS.paths.review_dir / ALIAS_COLLISIONS_REVIEW).open(encoding="utf-8-sig", newline="") as h:
+        return sum(1 for _ in csv.DictReader(h))
 
 
 def _s3_access_denied(exc) -> bool:

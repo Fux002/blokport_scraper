@@ -1,7 +1,7 @@
 """An alias may never equal the name of ANOTHER variety of the SAME stone type (Mas, 11-11): compared
 case-insensitively after the same name cleaning (adapters.tokens.clean_variety under the type). Such an alias binds a
 listing of one stone to a different stone, and nothing merges by name without the owner's word. A variety is one
-identity (type, cleaned name): its own copies in other categories, and an alias that only repeats its own name, are not
+identity (type, cleaned name): every spelling under its one Key, and an alias that only repeats its own name, are not
 collisions. The same name under ANOTHER type is a different stone that matching keeps apart (type first): legitimate
 (Mas, 11-11).
 
@@ -10,7 +10,6 @@ committed vocabulary at 0 (tests/test_alias_collisions.py); at emit a collision 
 listed, never a stop (stages/emit_catalog.py). No em dashes."""
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -43,21 +42,11 @@ def _clean(text: str, stone_type: str) -> str:
     return clean_variety(text, stone_type).casefold()
 
 
-_UUID_TAIL = re.compile(r"_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-_BRANCH_HEAD = re.compile(r"^(slab|block|tile)_")
-
-
-def _core(key: str) -> str:
-    """A Key's identity core: the Key without its uuid and, for an old per-category Key, its category prefix. A
-    base row and its backbone post share the Key; old slab/block/tile copies of one variety share the core."""
-    return _BRANCH_HEAD.sub("", _UUID_TAIL.sub("", key))
-
-
 def find(varieties: Iterable[Variety]) -> list[Collision]:
     """Every alias whose cleaned form is the cleaned name of a different variety of the same type. Sorted, each
     (alias, carrying identity, other identity) once. One variety is every (type, cleaned name) that appears under one
-    Key or one identity core (Scraper M2): a backbone post spelling its own variety 'G562' under 'G562 Maple Red''s
-    Key is that variety's own name, never another variety."""
+    Key (Scraper M2): a backbone post spelling its own variety 'G562' under 'G562 Maple Red''s Key is that variety's
+    own name, never another variety."""
     rows = list(varieties)
     parent: dict = {}
 
@@ -70,14 +59,14 @@ def find(varieties: Iterable[Variety]) -> list[Collision]:
     def node_of(v):
         return (v.stone_type.casefold(), _clean(v.name, v.stone_type))
 
-    first_of_core: dict = {}
+    first_of_key: dict = {}
     for v in rows:
         n = node_of(v)
         root(n)
-        if (core := _core(v.key)) in first_of_core:
-            parent[root(n)] = root(first_of_core[core])
+        if v.key in first_of_key:
+            parent[root(n)] = root(first_of_key[v.key])
         else:
-            first_of_core[core] = n
+            first_of_key[v.key] = n
     identity = {}                      # cleaned name -> {(type, cleaned name): (type, name, key)}
     for v in rows:
         cleaned = _clean(v.name, v.stone_type)
