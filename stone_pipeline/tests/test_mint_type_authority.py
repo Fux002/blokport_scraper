@@ -182,9 +182,11 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
     ref = loaders.load_all()
 
     from stone_pipeline.core.schema import GapKind, TreeGap
-    g = TreeGap(src_site="polonine", surrogate_key="v1", raw_name="Verde Scuro",
-                normalized_name="verde scuro", gap_kind=GapKind.missing_variation)
-    row = CanonicalRow(src_site="polonine", surrogate_key="v1", variety_match_key="Verde Scuro",
+    # 'Verde Scuro Onyx' cleans to the shared surface 'verde scuro' (both owners), but is neither variety's name nor an
+    # alias either carries, so the arm's choice of owner shows as the Key its proposal lands on (P2-10 C2)
+    g = TreeGap(src_site="polonine", surrogate_key="v1", raw_name="Verde Scuro Onyx",
+                normalized_name="verde scuro onyx", gap_kind=GapKind.missing_variation)
+    row = CanonicalRow(src_site="polonine", surrogate_key="v1", variety_match_key="Verde Scuro Onyx",
                        raw_type="Onyx", variation_method="exact_name_ambiguous", tree_gaps=[g])
     res = curate.build_curation([row], ref)
 

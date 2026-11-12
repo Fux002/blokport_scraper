@@ -56,7 +56,7 @@ def test_polonine_spine_runs_and_is_deterministic(tmp_path, scrape_data_dir, see
             assert row.category_pcat_id == category("slab").pcat_id
 
 
-def test_no_value_below_floor_reaches_ids(tmp_path, scrape_data_dir):
+def test_no_value_below_floor_reaches_ids(tmp_path, scrape_data_dir, seeded_config_store):
     """Property check (section 14A): a null/unresolved attribute never ships a
     guessed id; an unresolved attribute leaves the id null and flags."""
     out = tmp_path / "outputs"

@@ -24,7 +24,17 @@ def ref():
 
 
 @pytest.fixture(scope="module")
-def emitted(tmp_path_factory, scrape_data_dir):
+def module_config_store(tmp_path_factory):
+    """A seeded config store for the module-scoped run below (a learned-alias write never creates config.db)."""
+    from stone_pipeline.config import store
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("BLOKPORT_CONFIG_DB", str(tmp_path_factory.mktemp("config") / "config.db"))
+        store.seed_from_yaml()
+        yield
+
+
+@pytest.fixture(scope="module")
+def emitted(tmp_path_factory, scrape_data_dir, module_config_store):
     out = tmp_path_factory.mktemp("outputs")
     run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     path = glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0]
@@ -32,7 +42,7 @@ def emitted(tmp_path_factory, scrape_data_dir):
         return list(csv.DictReader(handle))
 
 
-def test_header_matches_template_exactly(emitted, tmp_path_factory, scrape_data_dir):
+def test_header_matches_template_exactly(emitted, tmp_path_factory, scrape_data_dir, seeded_config_store):
     out = tmp_path_factory.mktemp("outputs2")
     run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     path = glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0]

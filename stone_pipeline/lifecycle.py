@@ -236,9 +236,11 @@ def _resolve(sources, *, require_non_empty: bool = True):
 
 def alias_classification() -> tuple[dict, int]:
     """POST /config/v1/aliases/classification (P2-10 C5): write and publish the alias classification file and its
-    manifest field from the LIVE ledger and config.db, read-only, in the exclusive slot (no run, no other op). 409
-    naming the Keys when a variation is not synced, or naming the values no store owns; 409 when busy."""
+    manifest field from the LIVE ledger and config.db, read-only, in the exclusive slot (no run, no other op), merged
+    into the PUBLISHED manifest. 409 naming the Keys when a variation is not synced, or naming the values no store
+    owns; 409 when busy or no manifest is published; 500 naming a published manifest it cannot read."""
     from stone_pipeline.aliases import cleanup
+    from stone_pipeline.io import deliverables
     from stone_pipeline.ledger import writethrough
     try:
         with _exclusive("alias_classification"):
@@ -250,6 +252,10 @@ def alias_classification() -> tuple[dict, int]:
         return {"error": str(exc), "keys": exc.keys}, 409
     except cleanup.Unclassifiable as exc:
         return {"error": str(exc), "refused": [{"key": k, "value": v, "reason": why} for k, v, why in exc.refused]}, 409
+    except deliverables.PublishedManifestAbsent as exc:
+        return {"error": str(exc)}, 409
+    except deliverables.PublishedManifestUnreadable as exc:
+        return {"error": str(exc)}, 500
 
 
 def _ledger_op(name: str, work):
