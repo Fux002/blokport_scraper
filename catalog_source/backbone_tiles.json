@@ -265035,44 +265035,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_marble_volakas_79ea08ad-2e0c-5174-a04e-cde3d2509dc2",
-      "variant": "Volakas",
-      "category": "Tiles",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Sawn Cut",
-        "Brushed and Tumbled",
-        "Leathered",
-        "Honed and Brushed",
-        "Tumbled",
-        "Acid Washed",
-        "Honed",
-        "Waterjet",
-        "Split Face",
-        "Bush Hammered and Brushed",
-        "Brushed",
-        "Chiseled",
-        "Antique",
-        "Raw",
-        "Bush Hammered",
-        "Sandblasted",
-        "Polished",
-        "Sandblasted and Brushed"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_marble_volakas_79ea08ad-2e0c-5174-a04e-cde3d2509dc2.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_marble_guangxi_white_9ad0a8ff-cd66-5323-ae5f-1e567d1f60bd",
       "variant": "Guangxi White",
       "category": "Tiles",
@@ -455912,7 +455874,8 @@
         "Persian Volakas Marble",
         "Salsali Volacas",
         "Persian Volakas",
-        "Volakas Marble"
+        "Volakas Marble",
+        "Volakas"
       ],
       "image_file": "tile_marble_volocas_50bfaa91-e605-5f18-b77b-affc7c872cea.png",
       "exists": "no",

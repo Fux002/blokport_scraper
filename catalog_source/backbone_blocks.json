@@ -222909,38 +222909,6 @@
       "key": "block_marble_verde_issorie_9a5b692c-dc58-4e34-8cbf-8bd4f056d66a"
     },
     {
-      "variant_id": 57,
-      "variant": "Volakas",
-      "category": "Blocks",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn and Squared",
-        "Diamond Wire Sawn and Un-squared",
-        "Chain Sawn and Squared",
-        "Chain Sawn and Un-squared",
-        "Drill Split and Squared",
-        "Drill Split and Un-squared",
-        "Flame Jet and Squared",
-        "Flame Jet and Un-squared",
-        "Water Jet Cut and Squared",
-        "Water Jet Cut and Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_57_marble_volakas.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "block_marble_volakas_d3e32216-8ffd-4307-adaa-a92fd5308fbc"
-    },
-    {
       "variant_id": 294,
       "variant": "Guangxi White",
       "category": "Blocks",
@@ -385415,7 +385383,8 @@
         "Persian Volakas Marble",
         "Salsali Volacas",
         "Persian Volakas",
-        "Volakas Marble"
+        "Volakas Marble",
+        "Volakas"
       ],
       "image_file": "block_rb_9915_marble_volocas.png",
       "exists": "no",

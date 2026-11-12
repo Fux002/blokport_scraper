@@ -270938,45 +270938,6 @@
       "key": "slab_marble_verde_issorie_549de6da-a1e0-4ebf-8c3d-76336e4bcd74"
     },
     {
-      "variant_id": 57,
-      "variant": "Volakas",
-      "category": "Slabs",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Sawn Cut",
-        "Brushed and Tumbled",
-        "Leathered",
-        "Honed and Brushed",
-        "Tumbled",
-        "Acid Washed",
-        "Honed",
-        "Waterjet",
-        "Split Face",
-        "Bush Hammered and Brushed",
-        "Brushed",
-        "Chiseled",
-        "Antique",
-        "Raw",
-        "Bush Hammered",
-        "Sandblasted",
-        "Polished",
-        "Sandblasted and Brushed"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_57_marble_volakas.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "slab_marble_volakas_0a662110-822d-48bf-b173-44cb20ac532a"
-    },
-    {
       "variant_id": 294,
       "variant": "Guangxi White",
       "category": "Slabs",
@@ -465878,7 +465839,8 @@
         "Persian Volakas Marble",
         "Salsali Volacas",
         "Persian Volakas",
-        "Volakas Marble"
+        "Volakas Marble",
+        "Volakas"
       ],
       "image_file": "slab_rb_9915_marble_volocas.png",
       "exists": "no",
