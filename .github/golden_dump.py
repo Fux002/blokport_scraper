@@ -4,7 +4,8 @@ wraps that module's `_scenario` and, after each scenario has run, writes the row
 
 RUN_SOURCE_GOLDEN_DUMP=<dir> names the folder. Per scenario, <dir>/<scenario>/ holds:
 - LEDGER_<table>.csv: every ledger table, header first, rows sorted, wall-clock timestamps masked as <ts>;
-- alias_writeback.csv: the learned-alias write-back, if the run wrote one;
+- alias_writeback.csv: the learned-alias write-back, if the run wrote one (before P2-10 C2);
+- CONFIG_learned_alias.csv: the scenario config.db's learned_alias table (P2-10 C2), dumped like a ledger table;
 - <source run>/tree_gaps.csv and <source run>/products_rejects.csv: each source run's review files of those names.
 Without the variable the plugin does nothing. No em dashes.
 """
@@ -26,15 +27,15 @@ def _masked(value) -> str:
     return _TIMESTAMP.sub("<ts>", "" if value is None else str(value))
 
 
-def _dump_ledger(ledger: Path, into: Path) -> None:
-    con = sqlite3.connect(ledger)
+def _dump_tables(db: Path, into: Path, prefix: str, tables=None) -> None:
+    con = sqlite3.connect(db)
     try:
-        tables = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        tables = tables or [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
         for table in tables:
             cur = con.execute(f'SELECT * FROM "{table}"')
             header = [d[0] for d in cur.description]
             rows = sorted([_masked(v) for v in row] for row in cur)
-            with (into / f"LEDGER_{table}.csv").open("w", newline="", encoding="utf-8") as h:
+            with (into / f"{prefix}_{table}.csv").open("w", newline="", encoding="utf-8") as h:
                 csv.writer(h).writerows([header, *rows])
     finally:
         con.close()
@@ -50,7 +51,10 @@ def _dump(scenario_dir: Path, root: Path) -> None:
     if into.exists():
         shutil.rmtree(into)
     into.mkdir(parents=True)
-    _dump_ledger(scenario_dir / "scenario.ledger", into)
+    _dump_tables(scenario_dir / "scenario.ledger", into, "LEDGER")
+    config_db = scenario_dir / "config.db"
+    if config_db.exists():                     # a scenario's own store (P2-10 C2); a base that predates it has none
+        _dump_tables(config_db, into, "CONFIG", ["learned_alias"])
     out = scenario_dir / "out"
     for writeback in sorted(out.rglob("alias_writeback.csv")):
         _copy_masked(writeback, into / writeback.relative_to(out))

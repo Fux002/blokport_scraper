@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from stone_pipeline import prepare_variant_images
+from stone_pipeline.aliases.cleanup import FILE_NAME as ALIAS_CLASSIFICATION_FILE
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.adapters.tokens import explicit_type_word
@@ -299,6 +300,9 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
     for old in to_upload.glob("3_products_*.csv"):
         old.unlink()
     (to_upload / STANDARDISE.PHOTOS_FILE).unlink(missing_ok=True)
+    # the alias classification describes the ledger at the moment it was written (aliases.cleanup): a produce moves
+    # the ledger on, so the next publish must not carry it (the backend refuses a missing file, never a stale one)
+    (to_upload / ALIAS_CLASSIFICATION_FILE).unlink(missing_ok=True)
     (to_upload / STANDARDISE.DEFAULTED_FILE).unlink(missing_ok=True)
     header: list[str] | None = None
     all_rows: list[list[str]] = []

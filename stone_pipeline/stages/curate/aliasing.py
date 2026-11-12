@@ -41,11 +41,12 @@ def collect_matched_aliases(c: Curation) -> None:
             owner = (nnm, proj.norm(type_slug_from_key(row.variation_key))) if row.variation_key \
                 else by_name_owner(c, nnm, row.type_name or row.raw_type or "")
             if owner:
-                c.alias_new.setdefault(owner, set()).add(spelling)
+                c.alias_new.setdefault(owner, {}).setdefault(spelling, (row.src_site, None))
         elif (row.variation_method or "") in ("review", "semantic_review", "review_generic"):
             for flag in row.review_flags:
                 if flag.field == "variation" and flag.best_guess:
-                    c.review_candidates.setdefault(proj.norm(flag.best_guess), set()).add(spelling)
+                    c.review_candidates.setdefault(proj.norm(flag.best_guess), {}).setdefault(
+                        spelling, (row.src_site, None))
 
 
 def collision_owners(c: Curation, row, gap) -> set[tuple[str, str]]:
@@ -62,31 +63,30 @@ def drop_confirmed_from_review(c: Curation) -> None:
     # A spelling already CONFIRMED as an alias of its real owner must NOT also be proposed as a needs-review
     # alias onto a different fuzzy-near variety -- or an operator could rubber-stamp a wrong merge.
     confirmed = {proj.norm(s) for spset in c.alias_new.values() for s in spset}
-    c.review_candidates = {tgt: sp for tgt, sp in ((tgt, {s for s in sp if proj.norm(s) not in confirmed})
+    c.review_candidates = {tgt: sp for tgt, sp in ((tgt, {s: v for s, v in sp.items() if proj.norm(s) not in confirmed})
                                                    for tgt, sp in c.review_candidates.items()) if sp}
 
 
-# --- phase 3: emit alias additions -----------------------------------------------------------------------
+# --- phase 3: propose the learned aliases ----------------------------------------------------------------
 def emit_alias_rows(c: Curation, result: CurationResult) -> None:
-    def emit(target, spellings: set[str], confirmed: bool) -> None:
+    """Each spelling curate's arms attached to an EXISTING variety becomes a learned-alias PROPOSAL on that variety's
+    Key (P2-10 C2): never an import row, so a guess reaches no seed and no matcher until a review makes it active.
+    method 'curate_confirmed' for an arm that named the one owner, 'curate_review' for a needs-review suggestion;
+    source is the vendor whose listing proposed it and score the arm's own (0..100) where it has one. A spelling the
+    variety already carries is not proposed."""
+    def propose(target, spellings: dict[str, tuple], method: str) -> None:
         # target is a (name, type) OWNER (a confirmed alias -> the exact variety) or a bare NAME (a
-        # needs-review suggestion, which has no chosen type). One row for the one variety it names.
+        # needs-review suggestion, which has no chosen type). Proposals go to the one variety it names.
         existing = (c.existing.by_name_type.get(target) if isinstance(target, tuple)
                     else c.existing.by_name.get(target))
         if not existing:
             return  # no existing variety (a new mint carries its own spellings on its row)
-        current = alias_list(existing["Aliases"])
-        have = {proj.norm(a) for a in current}
-        additions = [s for s in sorted(spellings) if proj.norm(s) not in have]
-        if not additions:
-            return
-        result.alias_additions.append({
-            "Key": existing["Key"], "Name": existing["Name"], "Type": existing["Type"],
-            "Aliases": "|".join(current + additions),
-            "_added": "|".join(additions),
-            "_status": "confirmed" if confirmed else "needs_review",
-        })
+        have = {proj.norm(a) for a in alias_list(existing["Aliases"])} | {proj.norm(existing["Name"])}
+        result.learned_proposals.extend(
+            {"identity_key": existing["Key"], "value": spelling, "method": method, "source": spellings[spelling][0],
+             "score": spellings[spelling][1]}
+            for spelling in sorted(spellings) if proj.norm(spelling) not in have)
     for owner, spellings in c.alias_new.items():                 # owner = (name, type)
-        emit(owner, spellings, confirmed=True)
+        propose(owner, spellings, "curate_confirmed")
     for name_norm, spellings in c.review_candidates.items():     # bare name (no chosen type)
-        emit(name_norm, spellings, confirmed=False)
+        propose(name_norm, spellings, "curate_review")
