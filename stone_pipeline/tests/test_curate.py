@@ -43,7 +43,7 @@ def test_a_guessed_bind_proposes_its_spelling_on_the_matched_key(ref):
     result = curate.build_curation([row], ref)
     # the spelling attaches to the Granite Alpine (matched Key), never the same-named Marble one
     assert result.learned_proposals == [{"identity_key": alpine_granite["Key"], "value": "Alpine Qx9",
-                                         "method": "curate_confirmed", "source": "polonine"}]
+                                         "method": "curate_confirmed", "source": "polonine", "score": None}]
 
 
 def test_exact_match_is_not_proposed_as_alias(ref):
@@ -116,7 +116,7 @@ def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch
     # proposed as a learned alias of the nearest existing variety, for review
     nearest_key = curate.load_existing().by_name[proj.norm(nearest)]["Key"]
     assert {"identity_key": nearest_key, "value": "Suppliers Rebrand Xyz", "method": "curate_review",
-            "source": "polonine"} in result.learned_proposals
+            "source": "polonine", "score": 82.0} in result.learned_proposals   # the gap's nearest score
 
 
 def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, monkeypatch):

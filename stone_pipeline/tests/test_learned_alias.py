@@ -3,7 +3,8 @@
 
 The table shape is frozen by the scraper manager (11-12): learned_alias(identity_key, value, norm, method, source,
 status, first_seen, decided_by, decided_at), PRIMARY KEY (identity_key, norm), norm = core.text.match_key(value),
-status in proposed | active | rejected.
+status in proposed | active | rejected; plus a nullable score REAL (the manager 11-12, PHASE-2-SPEC:176), the proposing
+arm's own score on 0..100 where it has one, NULL otherwise and for a migrated row.
   * the matcher's guesses (WriteBack.add_alias) and curate's alias arms write `proposed`: a proposal is not a
     matcher input, and a norm once rejected for a variety is never proposed again;
   * config.db goes from phase 1's v12 to v13 in place (an additive table); a store from before phase 1 stays refused,
@@ -37,7 +38,8 @@ from stone_pipeline.tests.test_origin_aware_matching import _stage
 
 KEY = "granite__kashmir_golda_1"
 CARRARA = "marble__bianco_carrara_C"
-COLUMNS = ["identity_key", "value", "norm", "method", "source", "status", "first_seen", "decided_by", "decided_at"]
+READ_COLUMNS = ["identity_key", "value", "norm", "method", "source", "status", "first_seen", "decided_by", "decided_at"]
+COLUMNS = READ_COLUMNS + ["score"]
 
 
 @pytest.fixture
@@ -53,8 +55,8 @@ def _rows(path) -> list[dict]:
         return [dict(r) for r in conn.execute("SELECT * FROM learned_alias ORDER BY identity_key, norm")]
 
 
-def _proposal(value, key=KEY, method="fuzzy", source="zucchi"):
-    return {"identity_key": key, "value": value, "method": method, "source": source}
+def _proposal(value, key=KEY, method="fuzzy", source="zucchi", score=None):
+    return {"identity_key": key, "value": value, "method": method, "source": source, "score": score}
 
 
 # --- config.db v13 ---------------------------------------------------------------------------------------------------
@@ -63,10 +65,11 @@ def test_the_learned_alias_table_has_the_frozen_shape(config_db):
     with closing(store.open_store()) as conn:
         info = conn.execute("PRAGMA table_info(learned_alias)").fetchall()
         assert [r["name"] for r in info] == COLUMNS
+        assert {r["name"]: (r["type"], r["notnull"]) for r in info}["score"] == ("REAL", 0)
         assert [r["name"] for r in sorted((r for r in info if r["pk"]), key=lambda r: r["pk"])] == ["identity_key",
                                                                                                       "norm"]
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute("INSERT INTO learned_alias VALUES ('k', 'v', 'v', 'fuzzy', '', 'maybe', 't', NULL, NULL)")
+            conn.execute("INSERT INTO learned_alias VALUES ('k', 'v', 'v', 'fuzzy', '', 'maybe', 't', NULL, NULL, NULL)")
     assert store.SCHEMA_VERSION == 13 and store.PHASE1_SCHEMA_VERSION == 12
 
 
@@ -102,11 +105,12 @@ def test_the_phase_1_store_migration_stamps_phase_1_s_own_version(tmp_path):
 # --- the store: proposed, active, rejected ---------------------------------------------------------------------------
 
 def test_a_proposal_is_stored_as_proposed_and_is_not_active(config_db):
-    assert decisions_store.propose_learned_aliases([_proposal("Kashmir Goldx")]) == 1
+    assert decisions_store.propose_learned_aliases([_proposal("Kashmir Goldx", score=91.5)]) == 1
     [row] = _rows(config_db)
-    assert {k: row[k] for k in ("identity_key", "value", "norm", "method", "source", "status", "decided_by")} == {
+    assert {k: row[k] for k in ("identity_key", "value", "norm", "method", "source", "status", "decided_by",
+                                "score")} == {
         "identity_key": KEY, "value": "Kashmir Goldx", "norm": match_key("Kashmir Goldx"), "method": "fuzzy",
-        "source": "zucchi", "status": "proposed", "decided_by": None}
+        "source": "zucchi", "status": "proposed", "decided_by": None, "score": 91.5}
     assert row["first_seen"] and row["decided_at"] is None
     assert decisions_store.active_learned_aliases() == []
 
@@ -124,7 +128,7 @@ def test_approving_a_proposal_makes_it_active(config_db):
     [row] = decisions_store.active_learned_aliases()
     assert row["identity_key"] == KEY and row["value"] == "Kashmir Goldx" and row["status"] == "active"
     assert row["decided_by"] == "operator" and row["decided_at"]
-    assert set(row) == set(COLUMNS)
+    assert set(row) == set(READ_COLUMNS)                        # the reader's shape is unchanged by the score
 
 
 def test_a_rejected_norm_is_never_proposed_again(config_db):
@@ -199,6 +203,8 @@ def test_a_fuzzy_bind_is_proposed_on_its_variety_key(config_db):
     assert stage.writeback.flush() == 1
     assert [(r["identity_key"], r["value"], r["method"], r["source"], r["status"]) for r in _rows(config_db)] == [
         (KEY, "Kashmir Goldx", "fuzzy", "zucchi", "proposed")]
+    [row] = _rows(config_db)
+    assert row["score"] is not None and 80 <= row["score"] < 100       # the fuzzy tier's own score, 0..100
     assert decisions_store.active_learned_aliases() == []
 
 
@@ -218,7 +224,7 @@ def test_curate_s_learned_alias_is_a_proposal_not_an_import_row(monkeypatch, ref
                        variation_name="Bianco Carrara", variation_method="fuzzy")
     res = curate.build_curation([row], ref)
     assert res.learned_proposals == [{"identity_key": CARRARA, "value": "Bianco Carara", "method": "curate_confirmed",
-                                      "source": "zucchi"}]
+                                      "source": "zucchi", "score": None}]
     assert not hasattr(res, "alias_additions")
 
 
@@ -228,7 +234,8 @@ def test_write_curation_stores_curate_s_proposals(config_db, monkeypatch):
     stored: list = []
     monkeypatch.setattr(output.decisions_store, "propose_learned_aliases", lambda rows: stored.extend(rows) or 0)
     monkeypatch.setattr(output, "_write_files", lambda result, rows: None)
-    proposals = [{"identity_key": CARRARA, "value": "Bianco Carara", "method": "curate_confirmed", "source": "zucchi"}]
+    proposals = [{"identity_key": CARRARA, "value": "Bianco Carara", "method": "curate_confirmed", "source": "zucchi",
+                  "score": None}]
     output.write_curation(CurationResult(learned_proposals=proposals), [])
     assert stored == proposals
 
@@ -276,6 +283,7 @@ def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary
     report = _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic"),        # by the ledger's medusa_id
                                  (OTHER, "China White", "fuzzy")])                 # already a new Key
     assert report == {"active": 2, "dropped": 0}
+    assert [r["score"] for r in _rows(config_db)] == [None, None]          # a migrated row carries no score
     assert [(r["identity_key"], r["value"], r["method"], r["status"], r["decided_by"], r["source"])
             for r in decisions_store.active_learned_aliases()] == [
         (LIVE, "PATAGONIA", "phonetic", "active", "migration", ""),
