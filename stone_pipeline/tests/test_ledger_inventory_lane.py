@@ -199,6 +199,8 @@ def test_a_bootstrap_row_is_in_medusa_even_once_a_run_makes_it_dirty(tmp_path):
         assert (ledger.get("product", "sku", "B-1")["state"], ledger.get("product", "sku", "B-1")["payload_hash"]) == (
             "synced", "")
         assert withdraw_unsent(ledger, [], SourceConfig(source="s", source_code="s")) == 1   # the unsent one is
+        # back on sale: a hard reset tombstones a product Medusa holds (a delisted one it spares, table 505)
+        ledger.execute("UPDATE inventory SET qty = 3, reason = NULL WHERE sku = 'B-1'")
         sync.reset_sync_state(ledger, hard=True)
         assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["B-1"]
 
