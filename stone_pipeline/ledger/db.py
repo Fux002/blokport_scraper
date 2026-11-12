@@ -31,8 +31,10 @@ SCHEMA_VERSION = 20  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per 
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
-#                      v20: variation_deleted -- the varieties Medusa acked deleted (table 575 / G5). v16 to v19
-#                           are taken by #596, #591, C4 and #634 (the manager's queue): the later merge renumbers.
+#                      v20: variation_deleted -- the varieties Medusa acked deleted (table 575 / G5).
+#                      v16 to v19 are RESERVED for #596, #591, C4 (SC #651) and #634, in that order (the manager's
+#                      queue). SC #677 merges only AFTER those four. If any of them is still open when SC #677 merges,
+#                      the numbers are re-assigned at that merge, by the queue rule; never two PRs on one number.
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
