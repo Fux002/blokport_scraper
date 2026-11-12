@@ -20,8 +20,10 @@ def _rows(path):
 
 
 def test_a_run_s_guesses_are_proposed_once_with_their_provenance(tmp_path, monkeypatch):
+    from stone_pipeline.config import store
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()                    # the config server's store: a proposal never creates it
     w = wb.WriteBack()
     w.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi", score=88.0)
     w.add_alias("granite__a_1", "some scraped spelling", method="phonetic", source="sentas")   # the run's dup
