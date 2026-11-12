@@ -4,7 +4,7 @@ Produce 1: the scrape gaps on 'Honey Onyx'; the operator's mint decision carries
            curate mints 'Honey' (Onyx) with 'Honey Onyx' as its alias and emits the row.
 Boundary:  Medusa pulls the new variety and re-exports variants_export.csv (the ONE file both the matcher and
            curate read -- loaders.existing_varieties_file). Modelled here by appending the emitted row, with a
-           Medusa id, to the export. The export carries no scraper alias (P2-7: only the backend's hand rows).
+           Medusa id, to the export. The matcher never reads the export's Aliases (P2-10 C3).
 Produce 2: the same scrape must resolve onto the 'Honey' Key through the alias surface (no gap, no re-mint),
            its alias coming from the operator store, the rename statement in config.db (P2-10 C3/C4), and curate
            must not propose anything new for it.
@@ -87,9 +87,9 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     assert honey_key.startswith("onyx__honey_")
     assert "Honey Onyx" in minted[0]["Aliases"].split("|")
 
-    # -- boundary: Medusa pulls the variety and re-exports it (Id assigned; no scraper alias rides the export) -----
+    # -- boundary: Medusa pulls the variety and re-exports it (Id assigned) ----------------------------------------
     _write_export(paths.export_file, _read_export(paths.export_file) + [
-        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": ""}])
+        {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Type": "Onyx", "Aliases": minted[0]["Aliases"]}])
 
     # -- produce 2: the same scrape binds through the alias surface, nothing is proposed again -------------
     ref2 = loaders.load_all()
