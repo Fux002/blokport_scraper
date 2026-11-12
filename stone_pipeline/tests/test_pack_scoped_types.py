@@ -211,3 +211,25 @@ def test_the_seed_s_types_are_read_once_per_backbone_file_version(tmp_path, monk
     os.utime(seed, ns=(1, 1))                                     # a new version even on a coarse-mtime filesystem
     assert sorted(loaders.load_attributes(path).canonical_names("type")) == ["Gneiss", "Marble"]
     assert len(reads) == 2
+
+
+def test_a_seed_the_pack_names_but_does_not_ship_fails_loud_naming_it(tmp_path, monkeypatch):
+    # the manager's rule (reviewer 2's LOW): a pack whose yaml names a backbone_file must have it; reading the absent
+    # file as "no seed types" would quietly shrink stone's vocabulary on a broken image
+    missing = tmp_path / "backbone_varieties.json"
+    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(backbone_json=missing)))
+    with pytest.raises(FileNotFoundError, match="backbone_varieties.json"):
+        loaders.load_attributes(_file(tmp_path, ROWS))
+
+
+def test_a_pack_that_names_no_seed_has_only_its_combinations_types(tmp_path, monkeypatch):
+    # ...and a pack naming none (lime) has no seed variety, so rule (ii) adds no type and no backbone is read
+    import dataclasses
+    from stone_pipeline.config import domain
+    from stone_pipeline.reference.loaders import attributes as attributes_mod, backbone
+    seedless = dataclasses.replace(domain.active_pack(), backbone_file=None)
+    monkeypatch.setattr(domain, "active_pack", lambda: seedless)
+    monkeypatch.setattr(attributes_mod, "active_pack", lambda: seedless)
+    monkeypatch.setattr(backbone, "read_posts", lambda path: pytest.fail(f"read the backbone {path}"))
+    rows = "type,Granite,t_granite,active,false,blocks|slabs|tiles\ntype,Marble,t_marble,active,false,\n"
+    assert loaders.load_attributes(_file(tmp_path, rows)).canonical_names("type") == ["Granite"]

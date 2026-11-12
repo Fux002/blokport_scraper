@@ -338,3 +338,36 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
     assert [c["name"] for c in p.categories] == ["shirt", "pants"]   # a different category model
     assert "crystal" not in p.ambiguous_type_words             # no stone vocabulary leaked in
     assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700
+
+
+# -- a pack's seed (the manager's rule, 12 Nov, reviewer 2's LOW on SC #663) -------------------------------------------
+def test_a_pack_that_names_no_backbone_file_loads_with_no_seed(tmp_path, monkeypatch):
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    del pack["backbone_file"]
+    _write_pack(tmp_path, pack)
+    assert domain.load_pack("bad").backbone_file is None
+
+
+def test_a_backbone_file_the_pack_names_must_be_a_file_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["backbone_file"] = ""
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="backbone_file"):
+        domain.load_pack("bad")
+
+
+def test_lime_ships_no_seed_while_stone_and_wood_name_theirs():
+    assert domain.load_pack("lime").backbone_file is None
+    assert domain.load_pack("stone").backbone_file == "backbone_varieties.json"
+    assert domain.load_pack("wood").backbone_file == "backbone_varieties.json"
+
+
+def test_a_pack_that_names_no_seed_has_no_backbone_path_to_read(monkeypatch):
+    import dataclasses
+    from stone_pipeline.config import settings
+    seedless = dataclasses.replace(domain.load_pack("stone"), name="seedless", backbone_file=None)
+    monkeypatch.setattr(domain, "active_pack", lambda: seedless)
+    with pytest.raises(FileNotFoundError, match="seedless.*names no backbone_file"):
+        settings.SETTINGS.paths.backbone_json
