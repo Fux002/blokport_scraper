@@ -88,23 +88,38 @@ def _pack_handles() -> frozenset[str]:
     return frozenset(c["plural"] for c in active_pack().categories)   # D11: a category's handle is the pack's plural
 
 
-def _in_pack(value: AttributeValue, pack_handles: frozenset[str]) -> bool:
-    """A type is the PACK's iff one of its valid combinations is in a pack category (table 569, Mas's clause 12 Nov). A
-    type with only other categories (BlokPort's Steel coils, Bulk wine) or none yet is not: it is never guessed in,
-    and enters the pack with its first stone-category combination, made on the BE side."""
-    return not pack_handles.isdisjoint(value.category_handles or ())
+def _seed_types() -> frozenset[str]:
+    """norm of every type a variety of the pack's committed seed carries (its backbone, read live through the one
+    backbone reader). An absent seed raises: the pack's types cannot be judged without it."""
+    from stone_pipeline.reference.loaders.backbone import read_posts
+    return frozenset(norm(p["stone_type"]) for p in read_posts(env().SETTINGS.paths.backbone_json)
+                     if p.get("stone_type"))
+
+
+def _in_pack(value: AttributeValue, pack_handles: frozenset[str], seed_types: frozenset[str]) -> bool:
+    """A type is the PACK's iff (i) one of its valid combinations is in a pack category, OR (ii) the committed seed holds
+    a variety of that type (table 569, Mas's ruling 12 Nov; both read live, no type list anywhere). Anything else
+    (BlokPort's Steel or Wine, a type with no combination and no seed variety) is never guessed in. A seed type that BE
+    lists with ONLY non-pack handles raises, naming the type: the seed and BE disagree, and neither side wins quietly."""
+    handles = value.category_handles or ()
+    by_handle = not pack_handles.isdisjoint(handles)
+    in_seed = norm(value.value) in seed_types
+    if in_seed and handles and not by_handle:
+        raise ValueError(f"type {value.value!r}: the committed seed holds varieties of it, but BlokPort lists it only in "
+                         f"non-pack categories ({'|'.join(handles)}); the seed and BE disagree (table 569)")
+    return by_handle or in_seed
 
 
 def types_outside_pack(path: Path | None = None) -> list[dict]:
     """Every type load_attributes leaves out, sorted by name, with its handles and why (`no_combination` or
     `other_categories`): the run lists them (catalog.write_types_outside_pack), so an exclusion is never silent."""
-    pack_handles = _pack_handles()
+    pack_handles, seed_types = _pack_handles(), _seed_types()
     path = Path(path or env().SETTINGS.paths.attributes_csv)
     return sorted(({"type": a.value, "category_handles": "|".join(a.category_handles or ()),
                     "reason": "other_categories" if a.category_handles else "no_combination"}
                    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED,
                                             require_category_handles=True)
-                   if a.category == "type" and not _in_pack(a, pack_handles)), key=lambda t: t["type"])
+                   if a.category == "type" and not _in_pack(a, pack_handles, seed_types)), key=lambda t: t["type"])
 
 
 def load_attributes(path: Path | None = None) -> Attributes:
@@ -114,10 +129,10 @@ def load_attributes(path: Path | None = None) -> Attributes:
     An attributes.csv without the category_handles column is refused: without it no type can be placed in the pack.
     read_attributes guards conflicting duplicates."""
     path = Path(path or env().SETTINGS.paths.attributes_csv)
-    pack_handles = _pack_handles()
+    pack_handles, seed_types = _pack_handles(), _seed_types()
     attrs = Attributes()
     for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED, require_category_handles=True):
-        if not a.sourceid or (a.category == "type" and not _in_pack(a, pack_handles)):
+        if not a.sourceid or (a.category == "type" and not _in_pack(a, pack_handles, seed_types)):
             continue
         if a.category == "category":
             attrs.category_pcat[a.value] = a.sourceid
