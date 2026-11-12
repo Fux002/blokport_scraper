@@ -85,12 +85,12 @@ def test_a_variety_s_copies_become_one_dirty_v15_row_with_its_icons(tmp_path):
     report = store_writer.build_ledger(_old_ledger(tmp_path / "old.db"), new_db, _key_map(), SURVIVORS, set(), PAIRS)
     assert report.aborts == {}
     with Ledger.open(new_db, env="development") as lg:            # the v15 DAL opens it: the env guard holds
-        rows = [dict(r) for r in lg.execute("SELECT key, type, name, aliases, medusa_id, state FROM variation")]
+        rows = [dict(r) for r in lg.execute("SELECT key, type, name, alias_rows, codes, medusa_id, state FROM variation")]
         icons = [tuple(r) for r in lg.execute("SELECT category_handle, s3_key, etag FROM variation_category_image")]
         product = lg.get("product", "sku", "SEN-1")
         removed = [r["external_id"] for r in lg.execute("SELECT external_id FROM removed")]
         assert lg.get("inventory", "sku", "SEN-1")["qty"] == 3
-    assert rows == [{"key": NEW, "type": "Marble", "name": "Carrara", "aliases": '["Carrara C", "Bianco"]',
+    assert rows == [{"key": NEW, "type": "Marble", "name": "Carrara", "alias_rows": None, "codes": None,
                      "medusa_id": "V-SLAB", "state": "dirty"}]
     assert icons == [("blocks", f"{VARIATIONS_PREFIX}{NEW}/block.png", "e-b"),
                      ("slabs", f"{VARIATIONS_PREFIX}{NEW}/slab.png", "e-s")]
