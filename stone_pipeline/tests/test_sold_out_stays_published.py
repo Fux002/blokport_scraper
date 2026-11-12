@@ -233,13 +233,25 @@ def test_a_seed_drop_keeps_a_variety_a_gone_listing_shows(tmp_path):
 @pytest.mark.parametrize("force", [False, True])
 def test_a_variety_a_gone_listing_shows_cannot_be_retired_and_nothing_is_deleted(tmp_path, force):
     # manager's ruling on #634: one rule, fails loud, the operator decides first (force does not override it)
-    from stone_pipeline.ledger.sync import GoneListingsShowVariety, retire_variation
+    from stone_pipeline.ledger.sync import KeptListingsShowVariety, retire_variation
     with _open(tmp_path) as ledger:
         _prod(ledger, "SEN-GONE", qty=0, reason="sold_out", gone_at=FIRST)
-        with pytest.raises(GoneListingsShowVariety, match="SEN-GONE"):
+        with pytest.raises(KeptListingsShowVariety, match="SEN-GONE"):
             retire_variation(ledger, "marble__v_1", force=force)
         assert ledger.get("product", "sku", "SEN-GONE") is not None
         assert ledger.get("variation", "key", "marble__v_1") is not None
+        assert ledger.execute("SELECT COUNT(*) FROM removed").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_a_variety_a_vendor_removed_listing_shows_cannot_be_retired_either(tmp_path, force):
+    # review LOW on #634: one rule with the reset (db.KEPT_SKUS_SQL): a delisted record is kept, so its variety stays
+    from stone_pipeline.ledger.sync import KeptListingsShowVariety, retire_variation
+    with _open(tmp_path) as ledger:
+        _prod(ledger, "SEN-DEL", qty=0, reason="delisted")
+        with pytest.raises(KeptListingsShowVariety, match="SEN-DEL"):
+            retire_variation(ledger, "marble__v_1", force=force)
+        assert ledger.get("product", "sku", "SEN-DEL") is not None
         assert ledger.execute("SELECT COUNT(*) FROM removed").fetchone()[0] == 0
 
 
