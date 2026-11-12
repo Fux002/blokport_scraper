@@ -44,8 +44,11 @@ COLUMNS = READ_COLUMNS + ["score"]
 
 @pytest.fixture
 def config_db(tmp_path, monkeypatch):
+    """An isolated config.db the config server's boot would leave: present and seeded from sources.yaml (a learned-alias
+    write never creates the store)."""
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
     return path
 
 
@@ -352,3 +355,32 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     produce.run(None, "inventory")
     assert calls == ["fetch", "migrate", "build"]
+
+
+# --- a proposal never leaves a store that hides sources.yaml (CI's `certify all`, 12 Nov) ------------------------------
+
+def test_a_proposal_with_no_config_db_refuses_and_creates_no_file(tmp_path, monkeypatch):
+    # the store is created only by the config server's boot (restore from S3, then seed); a write that created it
+    # would hide sources.yaml from load_sources (CI's certify found no sources) and, on the service, make the boot skip
+    # its restore
+    path = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    with pytest.raises(store.ConfigStoreError, match="config.db absent"):
+        decisions_store.propose_learned_aliases([_proposal("Kashmir Goldx")])
+    with pytest.raises(store.ConfigStoreError, match="config.db absent"):
+        decisions_store.record_learned_migration("m", [])
+    assert not path.exists()
+
+
+@pytest.fixture(scope="module")
+def module_config_db():
+    import os
+    return os.environ.get("BLOKPORT_CONFIG_DB")
+
+
+def test_a_module_scoped_fixture_sees_an_isolated_config_store(module_config_db):
+    # a module-scoped fixture runs before the function-scoped isolation; it must not reach the checkout's config.db
+    from pathlib import Path
+    from stone_pipeline.config.settings import SETTINGS
+    assert module_config_db and Path(module_config_db) != SETTINGS.paths.workspace_root / "config.db"
+    assert not Path(module_config_db).exists()

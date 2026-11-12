@@ -124,7 +124,7 @@ def test_constants_report_shape(ref):
 
 
 # --- integration: stages.json + per-stage metrics on a real run ---------------
-def test_run_writes_per_stage_diagnostics(tmp_path, scrape_data_dir):
+def test_run_writes_per_stage_diagnostics(tmp_path, scrape_data_dir, seeded_config_store):
     out = tmp_path / "outputs"
     out.mkdir()
     manifest = run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
