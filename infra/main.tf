@@ -523,6 +523,8 @@ module "sync_service_prod" {
   standardise_enabled             = var.prod_standardise_auto
   standardise_budget_usd          = var.prod_standardise_budget_usd
   standardise_clean_budget_usd    = var.prod_standardise_clean_budget_usd
+  standardise_scope_key           = var.prod_standardise_scope_key
+  standardise_run_cap_usd         = var.prod_standardise_run_cap_usd
   standardise_clean               = var.prod_standardise_clean
   standardise_gpu_vcpus           = var.prod_standardise_gpu_vcpus
   standardise_idle_gpu_vcpus      = var.gpu_idle_vcpus
