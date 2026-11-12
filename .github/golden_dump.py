@@ -5,7 +5,7 @@ wraps that module's `_scenario` and, after each scenario has run, writes the row
 RUN_SOURCE_GOLDEN_DUMP=<dir> names the folder. Per scenario, <dir>/<scenario>/ holds:
 - LEDGER_<table>.csv: every ledger table, header first, rows sorted, wall-clock timestamps masked as <ts>;
 - alias_writeback.csv: the learned-alias write-back, if the run wrote one;
-- <source run>/tree_gaps.csv: each source run's review/tree_gaps.csv.
+- <source run>/tree_gaps.csv and <source run>/products_rejects.csv: each source run's review files of those names.
 Without the variable the plugin does nothing. No em dashes.
 """
 from __future__ import annotations
@@ -54,8 +54,9 @@ def _dump(scenario_dir: Path, root: Path) -> None:
     out = scenario_dir / "out"
     for writeback in sorted(out.rglob("alias_writeback.csv")):
         _copy_masked(writeback, into / writeback.relative_to(out))
-    for gaps in sorted(out.glob("*/review/tree_gaps.csv")):
-        _copy_masked(gaps, into / gaps.parent.parent.name / "tree_gaps.csv")
+    for name in ("tree_gaps.csv", "products_rejects.csv"):
+        for path in sorted(out.glob(f"*/review/{name}")):
+            _copy_masked(path, into / path.parent.parent.name / name)
 
 
 def pytest_collection_modifyitems(items):
