@@ -417262,40 +417262,6 @@
       "merged_from": []
     },
     {
-      "key": "marble__volakas_f7d0b39e-6eef-5d5b-bde4-10f716b6ceb4",
-      "variant": "Volakas",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Sawn Cut",
-        "Brushed and Tumbled",
-        "Leathered",
-        "Honed and Brushed",
-        "Tumbled",
-        "Acid Washed",
-        "Honed",
-        "Waterjet",
-        "Split Face",
-        "Bush Hammered and Brushed",
-        "Brushed",
-        "Chiseled",
-        "Antique",
-        "Raw",
-        "Bush Hammered",
-        "Sandblasted",
-        "Polished",
-        "Sandblasted and Brushed"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "merged_from": []
-    },
-    {
       "key": "marble__volakas_gold_d751d62f-9581-5e75-a993-89e20d138c2a",
       "variant": "Volakas Gold",
       "stone_type": "Marble",
@@ -417497,7 +417463,8 @@
         "Persian Volakas Marble",
         "Salsali Volacas",
         "Persian Volakas",
-        "Volakas Marble"
+        "Volakas Marble",
+        "Volakas"
       ],
       "merged_from": []
     },
