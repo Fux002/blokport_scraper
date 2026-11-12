@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS variation (
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     retry_after   TEXT,                                 -- after a failed apply: not served again before this time
+    -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased: an ack leaves the row dirty while it is set,
+    -- so no lease issued before the reserve can sync it away. The next lease clears it.
+    reserved_at   TEXT,
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -175,6 +178,12 @@ CREATE TABLE IF NOT EXISTS product (
     -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
     -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
     photo_ready          INTEGER NOT NULL DEFAULT 1,
+    -- the standardised files the product links that the photos side has not published
+    -- (populate.mark_unpublished_photos, recomputed for every product of the source on every produce): a sorted JSON
+    -- array of object keys, null = none.
+    -- A product with any is never served (sync._ELIGIBLE_PRODUCT). A content fact, not a sync state: a requeue or a
+    -- reset never clears it, only a produce that finds the files published. Not served, so not in payload_hash.
+    photo_unpublished    TEXT,
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids

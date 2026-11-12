@@ -46,6 +46,7 @@ CONFLICTS_SUBDIR = "conflicts"               # under standard/: the produce's co
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a hosted image's S3 url/key contains this substring
+STANDARD_MARKER = f"/products/{STANDARD_SUBDIR}/"   # so does a standardised file a product links (its views, its 3D)
 
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
 # hosted url or key -- the one identity the photo process (filename) and Stage 7 (improved url) share.
@@ -71,6 +72,21 @@ def standard_key(source: str, sha256: str, view: str) -> str:
 
 def cutout_prefix() -> str:
     return standard_prefix(CUTOUT_SUBDIR)
+
+
+def published_prefixes() -> tuple[str, ...]:
+    """The folders the photos publish keeps (stone_pipeline.photos.publish): each standardised view, the 3D cut-outs and
+    the tile records. The one notion of "published": publish removes what it no longer chooses under exactly these,
+    and the produce never lets a product serve a standardised file that is not under them
+    (populate.mark_unpublished_photos)."""
+    return tuple(standard_prefix(folder) for folder in (*STANDARD_VIEWS, CUTOUT_SUBDIR, TILE_SUBDIR))
+
+
+def standard_object_key(url: str) -> Optional[str]:
+    """The object key of a standardised file a product links (a view, a 3D cut-out), or None for any other image (a
+    scraped or improved photo): the files the produce checks against the published set."""
+    i = url.find(STANDARD_MARKER) if url else -1
+    return f"{_PRODUCTS}/{STANDARD_SUBDIR}/{url[i + len(STANDARD_MARKER):]}" if i >= 0 else None
 
 
 def cutout_key(source: str, sha256: str, ext: str) -> str:

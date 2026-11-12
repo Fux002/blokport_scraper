@@ -27,10 +27,14 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 15  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 17  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
-#                      migration (phase1.migrate_stores) writes v15 stores; an older ledger is refused (_apply_schema).
+#                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
+#                      v16: product.photo_unpublished -- the standardised files a product links that are not
+#                           published (never served while any); null on every existing row until its next produce.
+#                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
+PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -69,6 +73,17 @@ CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = 
 # Forget the last synced stock, so the row serves again from zero (a reset).
 FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
                            "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
+# Re-serve a variation once with its whole payload, a re-mark (POST /sync/v1/reserve, an un-archive). Every state
+# becomes 'dirty' except pending and dirty (they already serve once), retiring (being deleted, its tombstone serves
+# /removed: never resurrected) and an operator-abandoned dead-letter (a terminal verdict: only new content or a global
+# reset clears it); a leased (syncing) row too. What keeps an ack of a lease issued BEFORE the mark from
+# syncing the row away: for a content change (populate.py) it is the new payload_hash, which that ack's echoed hash
+# no longer matches; a re-mark keeps the hash, so it is the stamp reserved_at. The ack records what Medusa did but
+# leaves a stamped row dirty, and only the next lease clears the stamp (sync.ready_variations), so only a lease issued
+# after the mark can sync it. The one parameter is the time.
+RESERVE_SQL = ("state = CASE WHEN state IN ('pending', 'dirty', 'retiring') OR abandoned_at IS NOT NULL THEN state "
+               "ELSE 'dirty' END, "
+               "reserved_at = COALESCE(reserved_at, ?)")
 
 
 class LedgerError(Exception):
@@ -171,16 +186,29 @@ class Ledger:
         # Apply the DDL once per database, not on every open (the sync server opens a connection per request).
         # PRAGMA user_version makes a reopen a no-op. A brand-new file (version 0) gets the schema; a ledger from
         # before phase 1 (1 to 14) is REFUSED: its rows carry old Keys, and only the store migration may turn them
-        # into v15 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
+        # into phase 1 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
+        # A phase 1 ledger (v15 on) gains the later columns in place (_migrate).
         from_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if from_version >= SCHEMA_VERSION:
             return
-        if from_version > 0:
-            raise LedgerError(f"ledger schema {from_version} predates phase 1 (v{SCHEMA_VERSION}): run the store "
+        if 0 < from_version < PHASE1_VERSION:
+            raise LedgerError(f"ledger schema {from_version} predates phase 1 (v{PHASE1_VERSION}): run the store "
                               "migration (RUN_MODE=phase1-migrate), never open it in place")
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._migrate()
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.conn.execute("UPDATE ledger_meta SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """The columns added after v15, onto a phase 1 ledger created before them (CREATE IF NOT EXISTS never alters
+        an existing table). Each is a no-op on a fresh file, which schema.sql already gave them."""
+        prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
+        if "photo_unpublished" not in prod_cols:   # v16: no backfill, the next produce of each source computes it
+            self.conn.execute("ALTER TABLE product ADD COLUMN photo_unpublished TEXT")
+        variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
+        if "reserved_at" not in variation_cols:   # v17: NULL = no reserve waiting for a lease
+            self.conn.execute("ALTER TABLE variation ADD COLUMN reserved_at TEXT")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

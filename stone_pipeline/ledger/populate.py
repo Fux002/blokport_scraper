@@ -16,6 +16,7 @@ from stone_pipeline.config.categories import category
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.io import imagestore
 from stone_pipeline.io.variety_icons import ICON_SIDECAR, icon_key
 from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso, variation_icons
 from stone_pipeline.ledger.payloads import product_hash, variation_hash
@@ -300,20 +301,56 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
 
 
 def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
-    """Withdraw this source's products that Medusa never received (not db.in_medusa_sql, waiting to be served) and
-    that this run no longer produces: dropped by the supplier, held this run, or found not to be a product
-    (a void slab). Left waiting, the next pull would create them with stale data and stock. A product
-    already in Medusa (the delist owns it) or in flight ('syncing') is untouched; a withdrawn product that
-    comes back is simply written again. Returns how many were withdrawn."""
+    """Withdraw the unsent change of this source's products waiting to be served (pending or dirty) that this run no
+    longer produces: dropped by the supplier, held this run, or found not to be a product (a void slab). Left waiting,
+    the next pull would serve stale data and stock, and photos the photos side has since removed (publish drops the
+    photos of a listing that left the sheet).
+    - Never received by Medusa (not db.in_medusa_sql): the row and its stock are deleted; one that comes back is written
+      again as new.
+    - Held by Medusa: only the unsent change is withdrawn. The row stays and the delist owns it (stock 0 through
+      populate_discontinued, design 5A; never the removed lane, which deletes from Medusa): state synced, its failure
+      bookkeeping cleared, payload_hash blank, since the ledger no longer holds the content Medusa acked, so a later
+      return to the emit always differs and re-serves as dirty.
+    A product in flight ('syncing') is untouched. Returns how many were withdrawn."""
     produced = {_sku(r, cfg) for r in rows}
-    stale = [r["sku"] for r in ledger.execute(
-        f"SELECT p.sku FROM product p WHERE p.source = ? AND NOT {in_medusa_sql('p')} "
-        "AND p.state IN ('pending', 'dirty')",
-        (cfg.source_code,)) if r["sku"] not in produced]
-    for sku in stale:
-        ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
-        ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
+    stale = [(r["sku"], r["held"]) for r in ledger.execute(
+        f"SELECT p.sku, {in_medusa_sql('p')} AS held FROM product p "
+        "WHERE p.source = ? AND p.state IN ('pending', 'dirty')", (cfg.source_code,)) if r["sku"] not in produced]
+    now = now_iso()
+    for sku, held in stale:
+        if held:
+            ledger.execute("UPDATE product SET state = 'synced', sync_attempts = 0, sync_error = NULL, "
+                           "retry_after = NULL, payload_hash = '', updated_at = ? WHERE sku = ?", (now, sku))
+        else:
+            ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
+            ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
     return len(stale)
+
+
+def _linked_standard(row) -> set[str]:
+    """The object keys of the standardised files a product row links (thumbnail, gallery, oriented faces, 3D)."""
+    urls = [row["thumbnail_key"], row["model_3d_key"], *json.loads(row["product_image_keys"] or "[]"),
+            *json.loads(row["oriented_image_keys"] or "[]")]
+    return {key for url in urls if url and (key := imagestore.standard_object_key(url))}
+
+
+def mark_unpublished_photos(ledger: Ledger, published: frozenset[str], cfg: SourceConfig) -> list[str]:
+    """Record, for every product of this source (emitted this run or not), the standardised files it links that are not
+    in `published` (images.published_keys: the folders the photos publish keeps), as photo_unpublished: a sorted JSON
+    array, null when every one is published. A product with any is never served (sync._ELIGIBLE_PRODUCT): the produce
+    never lets a product serve a photo the photos side has not published. Scraped and improved photos are out of scope.
+    Writes only a value that changes (no sync state, no updated_at: it is a content fact, not a sync step). Returns the
+    SKUs that have any, sorted."""
+    marked = []
+    for row in ledger.execute("SELECT sku, thumbnail_key, product_image_keys, oriented_image_keys, model_3d_key, "
+                              "photo_unpublished FROM product WHERE source = ?", (cfg.source_code,)).fetchall():
+        missing = sorted(_linked_standard(row) - published)
+        value = json.dumps(missing) if missing else None
+        if value != row["photo_unpublished"]:
+            ledger.execute("UPDATE product SET photo_unpublished = ? WHERE sku = ?", (value, row["sku"]))
+        if missing:
+            marked.append(row["sku"])
+    return sorted(marked)
 
 
 def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
