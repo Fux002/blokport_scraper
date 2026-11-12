@@ -6,7 +6,7 @@ from ben2 import BEN_Base
 
 # ------------------------------------------------------------------ CONFIG ---
 INPUT_DIR = "./images"
-OUTPUT_DIR = "./to_upload"     # background-removed {Key}.png, ready for S3 dev/variations/
+OUTPUT_DIR = "./to_upload"     # background-removed {Key}/{category}.png, the icon pair ready for S3
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 SKIP_EXISTING = True          # skip images already done (resume support)
 BEN2_REPO = "PramaLLC/BEN2"
@@ -18,13 +18,12 @@ BEN2_REVISION = "e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f"
 # -----------------------------------------------------------------------------
 
 
-def make_output_name(filename):
-    """Keep the name (it is already the variant Key) and force a .png extension.
-    The generator wrote {Key}.png, so the background-removed file stays {Key}.png
-    and matches the variant's Image URL dev/variations/{Key}.png exactly. (The old
-    flow inserted '_rb_' here; that legacy rb naming has been retired.)
+def make_output_name(relative):
+    """Keep the relative path (it is already the icon pair, {Key}/{category}) and force a .png extension, so the
+    background-removed file is the pair's icon the upload names. (The old flow inserted '_rb_' here; that legacy
+    rb naming has been retired.)
     """
-    return Path(filename).stem + ".png"
+    return Path(relative).with_suffix(".png")
 
 
 def initialize_ben2_model():
@@ -62,8 +61,8 @@ def process_images():
     input_dir.mkdir(exist_ok=True)
     output_dir.mkdir(exist_ok=True)
 
-    files = sorted(f for f in os.listdir(input_dir)
-                   if Path(f).suffix.lower() in IMAGE_EXTENSIONS)
+    files = sorted(p.relative_to(input_dir) for p in input_dir.rglob("*")
+                   if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS)
 
     if not files:
         print(f"❌ No images found in '{input_dir}'.")
@@ -93,6 +92,7 @@ def process_images():
             foreground = remove_background_ben2(model, input_path)
             # write-then-rename so an interruption never leaves a truncated {Key}.png that
             # SKIP_EXISTING would then skip forever (shipping a corrupt image).
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = output_path.with_suffix(".png.tmp")
             foreground.save(tmp, format="PNG")
             tmp.replace(output_path)

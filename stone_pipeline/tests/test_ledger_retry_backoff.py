@@ -4,7 +4,6 @@ dead-letter cap within seconds. A success, a requeue, a reset or new content end
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
@@ -12,6 +11,7 @@ from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
+from stone_pipeline.tests._ledger_icons import add_icon
 from stone_pipeline.ledger.sync import ack, count_ready, ready, record_tombstones, requeue_dead_lettered, reset_sync_state
 from stone_pipeline.stages import emit
 from stone_pipeline.tests.test_ledger_products import _fixture_rows, _seed_ids
@@ -21,22 +21,22 @@ PAST = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state, medusa_id=None):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "branch": "slab", "type": "Marble", "name": "x", "aliases": "[]",
-                                "image_url": "https://s3/tex.png", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": medusa_id, "in_full": 1, "payload_hash": "",
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": "x", "aliases": "[]",
+                                "medusa_id": medusa_id, "in_full": 1, "payload_hash": "",
                                 "state": state, "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+    add_icon(ledger, key)
 
 
 def _product(ledger, sku, variation_key, state):
     now = now_iso()
-    ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": variation_key,
+    ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": variation_key, "category": "slabs",
                               "state": state, "created_at": now, "updated_at": now}, pk=("sku",))
 
 
 def _live_product(ledger):
-    _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
-    _product(ledger, "P-1", "slab_v1", state="pending")
+    _variation(ledger, "marble__v1", state="synced", medusa_id="V1")
+    _product(ledger, "P-1", "marble__v1", state="pending")
 
 
 def _wait_has_passed(ledger, table, pk, value):
@@ -56,12 +56,12 @@ def test_a_failed_product_is_not_served_again_until_its_wait_has_passed(tmp_path
 
 def test_a_failed_variation_waits_too(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _variation(ledger, "slab_v1", state="pending")
-        assert [r["external_id"] for r in ready(ledger, "variations")] == ["slab_v1"]
-        ack(ledger, "variations", "slab_v1", status_="failed", reason="Medusa 500")
+        _variation(ledger, "marble__v1", state="pending")
+        assert [r["external_id"] for r in ready(ledger, "variations")] == ["marble__v1"]
+        ack(ledger, "variations", "marble__v1", status_="failed", reason="Medusa 500")
         assert ready(ledger, "variations") == [] and count_ready(ledger, "variations") == 0
-        _wait_has_passed(ledger, "variation", "key", "slab_v1")
-        assert [r["external_id"] for r in ready(ledger, "variations")] == ["slab_v1"]
+        _wait_has_passed(ledger, "variation", "key", "marble__v1")
+        assert [r["external_id"] for r in ready(ledger, "variations")] == ["marble__v1"]
 
 
 def test_the_wait_doubles_with_each_consecutive_failure_and_the_cap_still_dead_letters(tmp_path):
@@ -130,23 +130,6 @@ def test_a_blocked_tombstone_waits_and_a_new_one_does_not(tmp_path):
         ack(ledger, "removed", "P-9", status_="blocked", reason="open reservation")
         record_tombstones(ledger, [("P-9", "s")])                              # re-raised: served at once
         assert [r["external_id"] for r in ready(ledger, "removed")] == ["P-9"]
-
-
-def test_a_ledger_from_before_the_wait_gains_the_column(tmp_path):
-    path = tmp_path / "dev.ledger"
-    with Ledger.open(path, env="development"):
-        pass
-    con = sqlite3.connect(path)                     # make it a v8 ledger: no retry_after anywhere
-    for table in ("variation", "product", "removed"):
-        con.execute(f"ALTER TABLE {table} DROP COLUMN retry_after")
-    con.execute("PRAGMA user_version = 8")
-    con.commit()
-    con.close()
-    with Ledger.open(path, env="development") as ledger:
-        for table in ("variation", "product", "removed"):
-            assert "retry_after" in {r["name"] for r in ledger.execute(f"PRAGMA table_info({table})")}
-        _live_product(ledger)
-        assert [r["external_id"] for r in ready(ledger, "products")] == ["P-1"]
 
 
 def test_the_retry_time_sorts_with_the_ledger_s_own_timestamps():

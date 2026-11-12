@@ -7,22 +7,22 @@ The catalog is a pure function of two inputs that NEVER alias:
 This stage assembles the full file the user uploads, so nothing is hand-merged or
 stamped in place and re-running yields an identical file:
 
-  existing export            ─┐
-  curate's delta              ├─►  1_variants_full.csv    (existing ∪ new ∪ union-fill,
-  union gap-fill (all cats)  ─┘                            Image + Volume stamped, names cleaned)
+  committed base + export    ─┐
+  curate's delta             ─┴─►  1_variants_full.csv    (one row per variety, names cleaned)
                                     └─►  1_variants_update.csv  (the full rows the delta names)
+
+Beside them it writes the icon side file (variant_image_shas.json): each produced variety's icon pairs listed on S3,
+which the ledger serves as the variety's category_images (PHASE-1-SPEC section 4).
 """
 
 from __future__ import annotations
 
+import csv
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-# Never import the frozen CATEGORIES tuple here: union-fill must read the runtime registry
-# (active_categories), never an import-time snapshot (the slab-only-mint regression; test_categories
-# guards that this module has no such attribute).
-from stone_pipeline.config.categories import active_categories, category_for_key
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
     UnfoldableName,
@@ -32,8 +32,11 @@ from stone_pipeline.core.text import (
     split_bracket_alias,
 )
 from stone_pipeline.io import storage
+from stone_pipeline.io.variety_icons import ICON_SIDECAR, VARIATIONS_PREFIX, icon_pair
+from stone_pipeline.phase1.variety_key import variety_key_type
+from stone_pipeline.reference import alias_collisions
 from stone_pipeline.reference.loaders import field_kinds, variants_status_required
-from stone_pipeline.reference.medusa_files import read_variants_export
+from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 
 log = logfmt.get_logger("emit_catalog")
 
@@ -75,7 +78,56 @@ def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
             "count": len(drops), "report": str(path)}})
 
 
-_COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+_COLS = VARIETY_FILE_COLUMNS
+ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of aliases dropped at emit (Mas, 11-12)
+# Each run's list under its own UTC stamp: the base keeps only the emitted aliases (base := 1_variants_full), so a
+# dropped alias is gone for good and the current list is overwritten by the next run (Scraper L2). The review upload
+# mirrors this folder to S3 and never deletes, so every run's list stays there.
+ALIAS_COLLISIONS_RUNS = "alias_collisions_dropped_runs"
+_ALIAS_COLLISION_FIELDS = ["Key", "variety", "alias", "collides_with", "collides_with_key"]
+
+
+def _run_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _drop_alias_collisions(rows: list[dict]) -> list[dict]:
+    """An alias equal to another live variety's name of the same type (an operator mint equal to a seed alias) would
+    bind one stone's listing to another (Mas, 11-11): it is DROPPED from its row, logged, and returned for the review
+    list. The produce never stops on it; CI holds the committed vocabulary at 0."""
+    collisions = alias_collisions.find(
+        alias_collisions.Variety(r["Key"], r["Type"], r["Name"], tuple(a for a in r["Aliases"].split("|") if a))
+        for r in rows)
+    gone: dict[str, set[str]] = {}
+    for c in collisions:
+        gone.setdefault(c.key, set()).add(c.alias)
+    for r in rows:
+        if r["Key"] in gone:
+            r["Aliases"] = "|".join(a for a in r["Aliases"].split("|") if a and a not in gone[r["Key"]])
+    listed = [{"Key": c.key, "variety": f"{c.variety[0]} {c.variety[1]}", "alias": c.alias,
+               "collides_with": f"{c.collides_with[0]} {c.collides_with[1]}", "collides_with_key": c.other_key}
+              for c in collisions]
+    if listed:
+        log.warning("aliases dropped: each names another variety of the same type", extra={"extra_fields": {
+            "count": len(listed), "report": ALIAS_COLLISIONS_REVIEW, "aliases": listed[:20]}})
+    return listed
+
+
+def _list_alias_collisions(listed: list[dict]) -> None:
+    """The review list of this run's dropped aliases (the run summary counts it), and, when any dropped, its
+    per-run copy."""
+    review = SETTINGS.paths.review_dir
+    csvio.write_dicts(review / ALIAS_COLLISIONS_REVIEW, _ALIAS_COLLISION_FIELDS, listed, sanitize=True)
+    if listed:
+        csvio.write_dicts(review / ALIAS_COLLISIONS_RUNS / f"{_run_stamp()}.csv", _ALIAS_COLLISION_FIELDS, listed,
+                          sanitize=True)
+
+
+def alias_collisions_dropped() -> int:
+    """How many aliases the last produce build dropped as collisions, read from the review list every such build
+    writes, so the run summary states the count of the very list the operator opens."""
+    with (SETTINGS.paths.review_dir / ALIAS_COLLISIONS_REVIEW).open(encoding="utf-8-sig", newline="") as h:
+        return sum(1 for _ in csv.DictReader(h))
 
 
 def _s3_access_denied(exc) -> bool:
@@ -88,45 +140,46 @@ def _s3_access_denied(exc) -> bool:
                     "SignatureDoesNotMatch", "AuthorizationHeaderMalformed", "403")
 
 
-def _s3_variation_keys():
-    """Map {variant Key: S3 ETag} for every {Key}.png in <env>/variations/, via ONE list call -- or
-    None when S3 is genuinely unreachable (no boto3/creds, e.g. CI/local), so the caller falls back.
-    The ETag is the image's content fingerprint (free from the same listing); the ledger folds it into
-    the variation payload_hash so a REGENERATED texture (same {Key}.png URL, new bytes -- e.g. the
-    one-time best-model refresh) re-serves, which a URL-only hash misses. Membership (`key in keys`)
-    still answers "does the object exist", so the image gate is unchanged. READ-ONLY, so it runs even
-    under s3.dry_run (dry_run only suppresses WRITES; variant images are uploaded out-of-band by the
-    image_pipeline). This is the authority for whether a variant may advertise its image -- a Key with
-    no object must NOT point Medusa at a 404."""
-    from stone_pipeline.config.settings import ENV_SEGMENT
+def _s3_icon_pairs() -> dict[str, dict[str, str]] | None:
+    """{Key: {category name: ETag}} for every variety icon in <env>/variations/ (PHASE-1-SPEC section 4), via ONE
+    paginated listing. Any other object under the prefix (an icon of the old flat layout, a marker file) is counted
+    and logged, never read as an icon. READ-ONLY, so it runs even under s3.dry_run.
+
+    None only OUTSIDE production when S3 cannot be reached (no boto3 or credentials: CI, local), and the ledger then
+    keeps the icons it holds. In production a failed listing raises, because category_images are never sent from a
+    fallback (spec section 4). A permission error is an IAM misconfig and raises everywhere."""
     s3 = SETTINGS.s3
+    pairs: dict[str, dict[str, str]] = {}
+    other = 0
     try:
-        # bounded timeouts + capped retries so a network stall can't hang the build (boto3's default
-        # has no connect-timeout cap); standard retry mode for transient throttling.
+        # bounded timeouts + capped retries so a network stall can't hang the build
         client = storage.aws_client("s3", config=storage.BOUNDED, profile=s3.credentials_profile)
-        prefix = f"{ENV_SEGMENT}/variations/"
-        keys: dict[str, str] = {}
-        for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=VARIATIONS_PREFIX):
             for obj in page.get("Contents", []):
-                name = obj["Key"][len(prefix):]
-                if name.endswith(".png"):
-                    keys[name[:-4]] = (obj.get("ETag") or "").strip('"')   # content fingerprint, quotes stripped
-        return keys
+                pair = icon_pair(obj["Key"])
+                if pair is None:
+                    other += 1
+                    continue
+                key, cat = pair
+                pairs.setdefault(key, {})[cat.name] = (obj.get("ETag") or "").strip('"')
     except ImportError as exc:                    # boto3 is not installed here (a lean local environment)
-        log.warning("boto3 is not installed, so variation images are not listed; image gate falls back to the heuristic",
+        if IS_PRODUCTION:
+            raise
+        log.warning("boto3 is not installed, so variety icons are not listed; the ledger keeps its icons",
                     extra={"extra_fields": {"error": str(exc)}})
         return None
     except Exception as exc:
-        # AccessDenied is an IAM MISCONFIG, not "S3 unreachable". Swallowing it returned None, so the caller
-        # fell back to the has_export_image/backed heuristic and advertised {Key}.png for objects it never
-        # confirmed exist -> Medusa 404s. Fail loud on a permission error; degrade only on transient/network.
-        if _s3_access_denied(exc):
-            log.error("S3 AccessDenied listing variation images; refusing to guess image links (would 404). "
-                      "Fix the task IAM.", extra={"extra_fields": {"error": str(exc)}})
+        if IS_PRODUCTION or _s3_access_denied(exc):
+            log.error("listing the variety icons on S3 failed; refusing to serve icons from a guess",
+                      extra={"extra_fields": {"error": str(exc)}})
             raise
-        log.warning("S3 unreachable listing variation images; image gate falls back to the heuristic",
+        log.warning("S3 unreachable listing the variety icons; the ledger keeps its icons",
                     extra={"extra_fields": {"error": str(exc)}})
         return None
+    if other:
+        log.info("objects under the variations prefix that are not icon pairs",
+                 extra={"extra_fields": {"count": other}})
+    return pairs
 
 
 def _consolidate(rows: list[dict]) -> list[dict]:
@@ -135,8 +188,9 @@ def _consolidate(rows: list[dict]) -> list[dict]:
     T'/'Rosal B' -> 'Rosal'). Every other variant passes through UNTOUCHED -- distinct same-name
     variants are NOT deduped and real names ('Rosal Codacal Favor', 'Agata Black') never merge,
     because only a row whose clean_variety_name DIFFERS from its name (a code was stripped) is
-    folded. If a base with the clean name already exists it absorbs the code as an alias; otherwise
-    the first coded row is renamed to the base (its Key survives the in-place Medusa rename)."""
+    folded. If a base of the same type with the clean name already exists it absorbs the code as an
+    alias; otherwise the first coded row is renamed to the base (its Key survives the in-place Medusa
+    rename). A fold never crosses types: a variety's identity is (type, name)."""
     coded, passthrough = [], []
     for r in rows:
         clean = clean_variety_name(r["Name"]) or r["Name"]
@@ -144,11 +198,9 @@ def _consolidate(rows: list[dict]) -> list[dict]:
     out = [r for _, r in passthrough]
     base_by: dict[tuple, dict] = {}
     for r in out:                                                      # existing real bases to fold into
-        cat = category_for_key(r["Key"])
-        base_by.setdefault(((cat.label if cat else ""), r["Name"].casefold()), r)
+        base_by.setdefault((variety_key_type(r["Key"]), r["Name"].casefold()), r)
     for clean, r in coded:
-        cat = category_for_key(r["Key"])
-        gkey = ((cat.label if cat else ""), clean.casefold())
+        gkey = (variety_key_type(r["Key"]), clean.casefold())
         target = base_by.get(gkey)
         new_aliases = {r["Name"].strip()} | {a.strip() for a in (r.get("Aliases") or "").split("|") if a.strip()}
         if target is None:                                            # no base yet -> this row becomes it
@@ -160,18 +212,7 @@ def _consolidate(rows: list[dict]) -> list[dict]:
             cur = {a.strip() for a in (target.get("Aliases") or "").split("|") if a.strip()}
             target["Aliases"] = "|".join(sorted((cur | new_aliases) - {""}
                                                 - {a for a in (cur | new_aliases) if a.casefold() == clean.casefold()}))
-            target["Image"] = target.get("Image") or r.get("Image") or ""
     return out
-
-
-def _image_link(key: str, has_export_image: bool, backed: bool,
-                s3_keys: dict[str, str] | set[str] | None, base: str) -> str:
-    """The variant's Image cell. When S3 is known (`s3_keys` not None) a variant advertises its
-    link IFF the {Key}.png exists -- never a 404. When S3 is unreachable, fall back to the prior
-    heuristic (already-imaged OR product-backed) so CI/local output is unchanged."""
-    if s3_keys is not None:
-        return f"{base}{key}.png" if key in s3_keys else ""
-    return f"{base}{key}.png" if (has_export_image or backed) else ""
 
 
 def _rows(path: Path) -> list[dict]:
@@ -180,120 +221,24 @@ def _rows(path: Path) -> list[dict]:
     path = Path(path)
     if not path.exists():
         return []
-    return [dict(zip(_COLS, (v.key, v.name, v.image, "|".join(v.aliases), v.volume)))
+    return [dict(zip(_COLS, (v.key, v.name, v.type, "|".join(v.aliases))))
             for v in read_variants_export(path, require_status=variants_status_required(path)) if v.key]
 
 
-def _posts_of(data) -> list[dict]:
-    """The posts of a backbone JSON, tolerant of either committed shape (a bare list OR {"posts": [...]}),
-    matching how reference.loaders reads the same files -- so a shape drift degrades a mirror, not crashes."""
-    return data.get("posts", data if isinstance(data, list) else []) if isinstance(data, dict) else (
-        data if isinstance(data, list) else [])
-
-
-def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
-    """Category uniformity by UNION: a variety belongs to the STONE, not a format, so every variety present
-    in ANY active fan-out category must exist in ALL of them -- no category is a master. Collect the union
-    of varieties (identified by (type, clean name)) across every fan-out category, then for each fan-out
-    category emit the rows it is MISSING, with a deterministic gen_key and the variety's Name/Aliases.
-
-    Presence is tested by (type, name), NOT by Key: the base carries LEGACY uuid4 keys (from the original
-    Medusa export) while gen_key mints uuid5, so a Key match would treat every existing variety as missing
-    and duplicate all of them under a second key. Checking the identity means an existing variety -- under
-    any key form -- is left untouched (additive; images preserved) and only a genuinely-absent category
-    gets a fresh row. This makes the base a fixed point (every category is carried forward) and means a
-    block-only variety is added to slab and tile, and a NEWLY activated category is fully backfilled the
-    first time it emits, with no code change (the future-category requirement). Derived from the CLEANED
-    base rows, never the raw backbone, so cleaned names/aliases are what propagate."""
-    from stone_pipeline.reference.loaders import type_slug_from_key
-    from stone_pipeline.stages.curate import gen_key
-    from stone_pipeline.matching import projections as proj
-    # Read the RUNTIME registry (active_categories), never the frozen CATEGORIES tuple: a category's
-    # active flag depends on its Medusa pcat, which is refreshed from the on-disk export after import
-    # (refresh_category_pcats). Iterating CATEGORIES here would gate the union-fill on the stale import
-    # snapshot, so when block/tile pcats were absent at import the fan-out silently dropped to slab-only
-    # and a genuinely-new variety was minted in one category only. curate.active_branches() already reads
-    # the runtime registry; this makes the emit safety net agree with it.
-    fanout = [c.name for c in active_categories() if c.fan_out]
-    fanout_set = set(fanout)
-    present: dict[str, set[tuple[str, str]]] = {b: set() for b in fanout}
-    # canonical variety -> (type_slug, Name, Aliases). First-seen wins, but a row that carries aliases is
-    # preferred so the union never loses aliases to an alias-less duplicate in another category.
-    varieties: dict[tuple[str, str], tuple[str, str, str]] = {}
-    for k, s in by_key.items():
-        br = k.split("_", 1)[0]
-        if br not in fanout_set:
-            continue
-        ts = type_slug_from_key(k)
-        ident = (proj.norm(ts), proj.norm(s.get("Name", "")))
-        present[br].add(ident)
-        cand = (ts, s.get("Name", ""), s.get("Aliases", ""))
-        cur = varieties.get(ident)
-        if cur is None or (not cur[2] and cand[2]):
-            varieties[ident] = cand
-    out: dict[str, dict] = {}
-    skipped: dict[tuple, list] = {}   # ident -> [(branch, reason)]: a category that could NOT be filled
-    for br in fanout:
-        for ident, (ts, disp, aliases) in varieties.items():
-            if ident in present[br]:
-                continue                          # category already carries this variety (any key form)
-            mk = gen_key(br, ts, disp)
-            if mk in by_key:                      # a row with this exact key already exists in the input
-                skipped.setdefault(ident, []).append((br, "key_already_in_by_key"))
-                continue
-            if mk in out:                         # already queued this run (defensive dedup)
-                skipped.setdefault(ident, []).append((br, "key_already_queued"))
-                continue
-            out[mk] = {"Key": mk, "Name": disp, "Image": "",
-                       "Aliases": aliases, "Volume per kg (m³/kg)": ""}
-    # DIAGNOSTIC (pure logging, no behaviour change): log the EXACT per-category fill decision for any
-    # variety whose NAME is present in some-but-not-all fan-out categories (the real slab-only symptom).
-    # Keyed on PRESENCE only (not on `out`), so a fill that lands in `out` cannot mask the case. For each
-    # missing category: was it FILLED (queued in out), skipped because the deterministic key already exists
-    # in by_key, or not reached at all -- plus, for a filled row, whether that key is ALSO in by_key (which
-    # means build()'s `filled = [... if key not in by_key]` will DISCARD the fill). This is the line that
-    # ends the guessing: it states, in the run's own log, why block/tile were not created.
-    name_nonuniform: dict[str, dict] = {}
-    for ident, (ts, disp, aliases) in varieties.items():
-        present_in = [b for b in fanout if ident in present[b]]
-        if not (0 < len(present_in) < len(fanout)):
-            continue
-        miss = {}
-        for b in fanout:
-            if b in present_in:
-                continue
-            mk = gen_key(b, ts, disp)
-            if mk in out:
-                miss[b] = "filled_AND_in_by_key(discarded)" if mk in by_key else "filled"
-            elif mk in by_key:
-                miss[b] = "skip:key_in_by_key"
-            else:
-                miss[b] = "not_reached"
-        name_nonuniform[f"{disp}|{ident[0]}"] = {"present_in": sorted(present_in), "missing": miss}
-    if name_nonuniform:
-        log.warning("uniform-fill: name-non-uniform varieties + per-category decision",
-                    extra={"extra_fields": {"fanout": fanout, "count": len(name_nonuniform),
-                                            "detail": dict(list(name_nonuniform.items())[:25])}})
-    return list(out.values())
-
-
-def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
+def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | None = None,
           *, seed_only: bool = False, out_path: Path | None = None) -> Path:
-    """Assemble to_upload/1_variants_full.csv from the committed base (the complete
-    source-of-truth variant set) + this run's delta (curate's outputs/<env>/curate_delta.csv), and
-    to_upload/1_variants_update.csv as the subset of the full rows the delta names (one cleaning point).
+    """Assemble to_upload/1_variants_full.csv from the committed base (the complete source-of-truth variety set) +
+    this run's delta (curate's outputs/<env>/curate_delta.csv), and to_upload/1_variants_update.csv as the subset of
+    the full rows the delta names (one cleaning point). One row per variety (type, name): a variety has no category.
 
-    image_keys: the set of variant Keys that actually have a {Key}.png on S3. When provided (or
-    resolvable from S3), a variant advertises its image link IFF its image exists -- so the file
-    can never point Medusa at a missing image. Pass an explicit set in tests; None resolves it from
-    S3, and a None result there (S3 genuinely absent) falls back to the prior heuristic.
+    icons: {Key: {category name: ETag}}, the icon pairs on S3. Pass it in tests; None lists S3 (_s3_icon_pairs).
+    The produced varieties' pairs go to the side file the ledger serves from; when S3 is not listed (outside
+    production only) the side file is left as it is.
 
-    seed_only: rebuild HERMETICALLY from the committed base alone -- no live Medusa export, no update
-    delta, no retired-decision filter, no product-backed lookup, no live S3. This is the cold-start seed
-    projection (the fixed point `seed.verify` checks): the deterministic transforms only, so the result
-    depends solely on the committed seed, never on the operator's shell/S3/config.db. Production builds
-    leave it False. out_path: write here instead of the standard artifact (so a seed_only verify never
-    clobbers a real 1_variants_full.csv)."""
+    seed_only: rebuild HERMETICALLY from the committed base alone -- no live Medusa export, no update delta, no
+    retired-decision filter, no S3. This is the cold-start seed projection (the fixed point `seed.verify` checks):
+    the deterministic transforms only, so the result depends solely on the committed seed. out_path: write here
+    instead of the standard artifact (so a seed_only verify never clobbers a real 1_variants_full.csv)."""
     # Seed from the BASE (committed, complete, Id-free source of truth), never the live export: a cold
     # start has a thin/empty live export (Medusa emptied), but the catalog must still rebuild the whole
     # set and grow from there. The live export is unioned only as a safety net, so a variety Medusa minted
@@ -315,28 +260,13 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
         else:
             by_key[r["Key"]] = r
             order.append(r["Key"])                            # genuinely new variant
-    filled = [m for m in _uniform_rows(by_key) if m["Key"] not in by_key]  # union-fill missing categories
-    rows = [by_key[k] for k in order] + filled
-    # DIAGNOSTIC (pure logging): snapshot each variety's per-category coverage after every filter, so a
-    # slab-only outcome names the EXACT stage that removed its other categories (input drift vs a specific
-    # filter) instead of us inferring it. Identity = the branch-independent Key core (type+name slug).
-    _stages: list[tuple[str, set]] = []
-    def _snap(label: str) -> None:
-        s = set()
-        for r in rows:
-            head = r["Key"].rsplit("_", 1)[0]
-            if "_" in head:
-                b, core = head.split("_", 1)
-                s.add((b, core))
-        _stages.append((label, s))
-    _snap("assembled")
+    rows = [by_key[k] for k in order]
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
     from stone_pipeline.stages import decisions
     retired = set() if seed_only else decisions.load_retired()   # seed_only: no config.db retired filter
     if retired:
         rows = [r for r in rows if r["Key"] not in retired]
-    _snap("retired")
     # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
     # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
     # (a stale 'Z Astoria'). NOTE: a variety's stone TYPE is authoritative -- it is assigned from the Key
@@ -346,59 +276,20 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
     # entry is surfaced for review by seed.verify / the consistency report instead, never deleted here.
     from stone_pipeline.reference import loaders
     rows = [r for r in rows if not looks_like_artifact(r["Name"])]
-    _snap("artifact")
     rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
-    _snap("consolidate")
-
-    from stone_pipeline.stages.image_prompts import product_backed_keys
-    backed = set() if seed_only else product_backed_keys()    # variants a product references (ambient)
-    base = SETTINGS.curation.variant_image_base               # dev/prod switch via env
-    # seed_only: never touch live S3 (None -> the deterministic has_export_image heuristic reproduces the
-    # base's own image cells). Otherwise use the passed key set, or resolve it from S3.
-    s3_keys = None if seed_only else (image_keys if image_keys is not None else _s3_variation_keys())
     alias_drops: list[tuple[str, str]] = []
     for r in rows:
-        cat = category_for_key(r["Key"])
-        # advertise the image link only when the image really exists (see _image_link): a
-        # product-backed variant whose image was never generated -- or whose Key drifted in a
-        # catalog rename -- stays BLANK instead of pointing Medusa at a 404.
-        r["Image"] = _image_link(r["Key"], bool((r.get("Image") or "").strip()),
-                                  r["Key"] in backed, s3_keys, base)
-        r["Volume per kg (m³/kg)"] = cat.volume_per_kg if cat else ""
         alias_drops.extend((r["Key"], alias) for alias in _write_names(r))
     _report_alias_drops(alias_drops)
 
-    # THE dedup gate: collapse every (branch,type,name) that resolves to more than one Key to a single
-    # survivor before write. 1_variants_full feeds BOTH the committed base (base := full) AND the ledger,
-    # so gating uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship
-    # no matter how it entered (dirty base, stale live-export union, a re-key old side still in Medusa).
-    # Keyed on (branch, type, name) so genuine multi-type homonyms (Aqua Blue as gneiss/granite/...) are
-    # preserved. This is the one place the pipeline enforces variety identity.
+    # THE dedup gate: collapse every (type, name) that resolves to more than one Key to a single survivor
+    # before write. 1_variants_full feeds BOTH the committed base (base := full) AND the ledger, so gating
+    # uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship no matter how it
+    # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
-    _snap("collapse")
-    # Report any variety left in some-but-not-all fan-out categories, naming the filter stage that dropped
-    # each missing category (the first snapshot where it went absent after having been present).
-    _fanout = {c.name for c in active_categories() if c.fan_out}
-    _cov: dict = {}
-    for _b, _core in _stages[-1][1]:
-        _cov.setdefault(_core, set()).add(_b)
-    _nonuniform = {c: brs for c, brs in _cov.items() if 0 < len(brs) < len(_fanout)}
-    if _nonuniform:
-        _detail = {}
-        for _core, _brs in list(_nonuniform.items())[:20]:
-            _miss = {}
-            for _mb in sorted(_fanout - _brs):
-                _dropped_by, _seen = "not_in_input", False
-                for _lbl, _s in _stages:
-                    if (_mb, _core) in _s:
-                        _seen = True
-                    elif _seen:
-                        _dropped_by = _lbl        # was present, gone at this stage -> this filter dropped it
-                        break
-                _miss[_mb] = _dropped_by
-            _detail[_core] = {"have": sorted(_brs), "dropped_by": _miss}
-        log.warning("catalog left non-uniform varieties", extra={"extra_fields": {
-            "fanout": sorted(_fanout), "non_uniform_count": len(_nonuniform), "detail": _detail}})
+    dropped_aliases = _drop_alias_collisions(rows)
+    if not seed_only:                     # seed.verify's projection never rewrites the produce's list (Scraper L1)
+        _list_alias_collisions(dropped_aliases)
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
@@ -409,23 +300,15 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
         # the incremental upload: the full file's rows this run's delta names, the SAME cleaned row objects in
         # full-file order, so the two upload files can never disagree on a Name or alias
         csvio.write_dicts(path.parent / "1_variants_update.csv", _COLS, update_rows(rows, delta), sanitize=False)
-    # Sidecar {Key: image content fingerprint (S3 ETag)} for every variant advertising an image. The
-    # ledger folds this into the variation payload_hash so a REGENERATED texture (same {Key}.png URL,
-    # new bytes) flips the variation dirty and re-serves -- a URL-only hash would miss it and Medusa
-    # would keep the stale image forever. Written ONLY when S3 was actually listed (s3_keys is a dict):
-    # when S3 is unreachable (CI/local, or a passed-in key set) the prior sidecar is left untouched, so a
-    # transient S3 blip can never blank every fingerprint and spuriously re-serve the whole catalog.
-    if isinstance(s3_keys, dict):
-        shas = {r["Key"]: s3_keys[r["Key"]]
-                for r in rows if (r.get("Image") or "").strip() and s3_keys.get(r["Key"])}
-        sha_path = SETTINGS.paths.to_upload_dir / "variant_image_shas.json"
-        sha_path.write_text(json.dumps(dict(sorted(shas.items())), ensure_ascii=False), encoding="utf-8")
-    # count GENUINELY new rows from the FINAL set (after artifact-filter + consolidation), not from
-    # the pre-filter `order` -- else dropped/folded rows inflate the 'new' metric.
+        listed = icons if icons is not None else _s3_icon_pairs()
+        if listed is not None:
+            # every produced variety's pairs, sorted, so the same listing writes the same bytes; a variety with no
+            # pair is absent, which the ledger reads as "no icon" (the listing is the icons' authority)
+            produced = {r["Key"] for r in rows}
+            pairs = {k: dict(sorted(v.items())) for k, v in sorted(listed.items()) if k in produced}
+            (path.parent / ICON_SIDECAR).write_text(json.dumps(pairs, ensure_ascii=False), encoding="utf-8")
     existing_keys = set(order[:n_existing])
-    filled_keys = {m["Key"] for m in filled}
-    new_count = sum(1 for r in rows if r["Key"] not in existing_keys and r["Key"] not in filled_keys)
     log.info("variants_full emitted", extra={"extra_fields": {
         "rows": len(rows), "existing": n_existing,
-        "new": new_count, "union_filled": len(filled)}})
+        "new": sum(1 for r in rows if r["Key"] not in existing_keys)}})
     return path

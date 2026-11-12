@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import functools
 import json
+import math
 import re
 
 from stone_pipeline.config import domain
@@ -227,6 +228,80 @@ def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, defau
     return default
 
 
+def _dimension_overrides(row: CanonicalRow, ref: ReferenceData, category: str) -> dict[str, float]:
+    """The operator's length/width/height overrides for the row, in metres (flat-dims: height = thickness, width =
+    the short face). A value that is not a positive finite number, or that lies outside the category's plausible
+    band, raises, so the row guard dead-letters the row loudly instead of publishing a wrong size: an override skips
+    the unit correction (a person states metres), so an office "325" meant as 3.25 m must not become a 325 m slab."""
+    if ref.overrides is None:
+        return {}
+    ranges = active_pack().dimension_ranges[category]
+    out: dict[str, float] = {}
+    for field in ("length", "width", "height"):
+        raw = ref.overrides.get(row.src_site, row.surrogate_key or "", field)
+        if raw is None:
+            continue
+        try:
+            metres = float(raw)
+        except ValueError:
+            metres = float("nan")
+        if not (math.isfinite(metres) and metres > 0):
+            raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is not a positive number of metres")
+        band_lo, band_hi = _plausible_band(*ranges.get(field, (0.0, 5.0)))
+        if not band_lo <= metres <= band_hi:
+            raise ValueError(f"{field} override {raw!r} for {row.surrogate_key!r} is outside the {category} band "
+                             f"{band_lo:g} to {band_hi:g} m")
+        out[field] = metres
+    return out
+
+
+def _dimension(row: CanonicalRow, field: str, scraped: float | None, default: float, category: str,
+               methods: list[str], overridden: dict[str, float], source: str = "parsed") -> float | None:
+    """One canonical dimension: the operator's override when it sets one (recorded `<field>:override`), else the
+    scraped value resolved by _resolve_dimension. An override is checked against the vendor's own value every run
+    and never silently gives way to it, nor overwrites it unreported: a DIFFERENT vendor value flags both values, an
+    EQUAL one flags the override as redundant (the premise of the exception no longer holds, so remove it)."""
+    if field not in overridden:
+        return _resolve_dimension(row, field, scraped, default, category, methods, source)
+    value = overridden[field]
+    methods.append(f"{field}:override")
+    if scraped is not None:
+        vendor = round(_normalize_unit(scraped, field, category)[0], 3)
+        mine = round(value, 3)
+        if vendor != mine:
+            row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_override_differs, raw_value=str(vendor),
+                                    best_guess=str(mine), confidence=Confidence.medium, method="override",
+                                    src_url=row.src_url))
+        else:
+            row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_override_redundant, raw_value=str(vendor),
+                                    best_guess=f"{mine} (override redundant, remove)", confidence=Confidence.high,
+                                    method="override", src_url=row.src_url))
+    return value
+
+
+_FACE_SWAP = {"length": "width", "width": "length"}
+
+
+def _order_faces(row: CanonicalRow, length: float | None, width: float | None, methods: list[str],
+                 first_flag: int) -> tuple[float | None, float | None]:
+    """The flat-dims convention (height = thickness): length is the LONGER plan face, width the shorter. Applied once,
+    after the unit correction (a unit-less '203' meant as 2.03 m would otherwise sort as the longer) and after an
+    override (an override is ordered too). On a swap the provenance follows the values: each face's method label and
+    the flags this step raised (from `first_flag`) trade names, and the swap is recorded as `faces:ordered`. A face
+    that is None (held for retry) leaves nothing to order, and neither does a face that is not positive: a parsed 0 is
+    a data error, kept where the vendor put it so validate rejects it, never moved."""
+    if length is None or width is None or length <= 0 or width <= 0 or width <= length:
+        return length, width
+    for i, method in enumerate(methods):
+        name, _, how = method.partition(":")
+        if name in _FACE_SWAP:
+            methods[i] = f"{_FACE_SWAP[name]}:{how}"
+    for flag in row.review_flags[first_flag:]:
+        flag.field = _FACE_SWAP.get(flag.field, flag.field)
+    methods.append("faces:ordered")
+    return width, length
+
+
 def _plausible_band(lo: float, hi: float) -> tuple[float, float]:
     """The plausible band around a pack range (lo, hi): the ONE tolerance the unit correction and the
     out-of-range check share, so they can never disagree."""
@@ -260,6 +335,7 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
     category = dimension_category(row)
+    first_flag = len(row.review_flags)             # the flags this step raises (_order_faces relabels only those)
     defaults = active_pack().dimension_defaults[category]
 
     faces: dict[str, float] = {}
@@ -280,24 +356,29 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     # raw -> canonical, once: raw 'height' is the SHORT FACE -> canonical width; the thickness -> canonical
     # height. Every shape lying flat, so face area is length x width and thickness bands read height.
     methods: list[str] = []
-    length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods,
-                                face_source)
-    width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods,
-                               face_source)
-    height = _resolve_dimension(row, "height", thickness, defaults["height"], category, methods)
+    # An operator override (state/overrides.py) is the top strategy, applied HERE rather than in _apply_overrides
+    # (which runs after this function), so the weight below is derived from the overridden size.
+    overridden = _dimension_overrides(row, ref, category)
+    length = _dimension(row, "length", faces.get("length"), defaults["length"], category, methods, overridden,
+                        face_source)
+    width = _dimension(row, "width", faces.get("height"), defaults["width"], category, methods, overridden,
+                       face_source)
+    height = _dimension(row, "height", thickness, defaults["height"], category, methods, overridden)
 
     # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would
     # inflate the freight weight to thousands of tonnes. Correct it generally (every source, every dimension)
     # against the category's physical range; never touches a value that is valid as metres. See _normalize_unit.
-    length, _lc = _normalize_unit(length, "length", category)
-    height, _hc = _normalize_unit(height, "height", category)
-    width, _wc = _normalize_unit(width, "width", category)
+    # An override is stated in metres by a person, so it is never "corrected".
+    length, _lc = (length, False) if "length" in overridden else _normalize_unit(length, "length", category)
+    height, _hc = (height, False) if "height" in overridden else _normalize_unit(height, "height", category)
+    width, _wc = (width, False) if "width" in overridden else _normalize_unit(width, "width", category)
     for _name, _corr, _val in (("length", _lc, length), ("height", _hc, height), ("width", _wc, width)):
         if _corr:
             methods.append(f"{_name}:cm_to_m")
             row.add_flag(ReviewFlag(field=_name, code=FlagCode.dimension_unit_corrected,
                                     best_guess=f"{_val}m (read as centimetres)",
                                     confidence=Confidence.medium, method="cm_to_m", src_url=row.src_url))
+    length, width = _order_faces(row, length, width, methods, first_flag)
 
     weight, weight_method = _derive_weight(row, ref, length, width, height)
     methods.append(weight_method)
@@ -311,7 +392,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
         if not band_lo <= value <= band_hi:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
                                     raw_value=str(value), confidence=Confidence.low,
-                                    method="range_check", src_url=row.src_url))
+                                    method="range_check", src_url=row.src_url,   # detail: what it was checked against
+                                    detail=f"band {band_lo:g} to {band_hi:g}"))
 
     row.length = round(length, 3) if length is not None else None
     row.width = round(width, 3) if width is not None else None

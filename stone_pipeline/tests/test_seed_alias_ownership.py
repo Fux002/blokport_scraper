@@ -33,8 +33,7 @@ def _assert_owned_by_pietra_grey(records):
     assert holders == {OWNER}, holders
 
 
-@pytest.mark.parametrize("path", ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-                                  "catalog_source/backbone_tiles.json"])
+@pytest.mark.parametrize("path", ["catalog_source/backbone_varieties.json"])
 def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
     posts = json.loads((ROOT / path).read_text(encoding="utf-8"))["posts"]
     _assert_owned_by_pietra_grey([(p["variant"], set(p["aliases"])) for p in posts if p["stone_type"] == TYPE])
@@ -44,7 +43,7 @@ def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
                                   "from_medusa/production/variants_export_base.csv"])
 def test_base_pietra_gray_spellings_belong_to_pietra_grey(path):
     with open(ROOT / path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["Key"].split("_")[1] == TYPE.lower()]
+        rows = [r for r in csv.DictReader(f) if r["Type"] == TYPE]          # the base's own type column
     _assert_owned_by_pietra_grey([(r["Name"], set(filter(None, r["Aliases"].split("|")))) for r in rows])
 
 
@@ -64,8 +63,7 @@ def _assert_volakas_moved(records):
         assert VOLAKAS_ADDED <= aliases
 
 
-@pytest.mark.parametrize("path", ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-                                  "catalog_source/backbone_tiles.json"])
+@pytest.mark.parametrize("path", ["catalog_source/backbone_varieties.json"])
 def test_backbone_volakas_spellings_left_spider_red_for_volocas(path):
     posts = json.loads((ROOT / path).read_text(encoding="utf-8"))["posts"]
     _assert_volakas_moved([(p["variant"], set(p["aliases"])) for p in posts if p["stone_type"] == TYPE])
@@ -75,5 +73,5 @@ def test_backbone_volakas_spellings_left_spider_red_for_volocas(path):
                                   "from_medusa/production/variants_export_base.csv"])
 def test_base_volakas_spellings_left_spider_red_for_volocas(path):
     with open(ROOT / path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if r["Key"].split("_")[1] == TYPE.lower()]
+        rows = [r for r in csv.DictReader(f) if r["Type"] == TYPE]          # the base's own type column
     _assert_volakas_moved([(r["Name"], set(filter(None, r["Aliases"].split("|")))) for r in rows])

@@ -77,9 +77,26 @@ class FlagCode(str, Enum):
     # transient: a required dimension's FETCH failed (recoverable, e.g. HTTP 429) -> the row is HELD for
     # retry, NOT defaulted. The twin of no_image, the deliberate counterpart to dimension_defaulted.
     dimension_unavailable = "dimension_unavailable"
+    # an operator override (state/overrides.py) set a dimension, and the vendor's own scraped value DIFFERS from it:
+    # both are reported (raw_value the vendor's, best_guess the override's) and the override is kept until removed
+    dimension_override_differs = "dimension_override_differs"
+    # the vendor's scraped value now EQUALS the override: it is redundant, so the operator can remove it (grade 3)
+    dimension_override_redundant = "dimension_override_redundant"
     weight_derived = "weight_derived"
     attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"
+    # a variety sold in several colours, no colour from the vendor and none stated by the operator for (source,
+    # variety): the colour is UNCONFIRMED. A new listing is held (validate); a published one keeps the colour it has
+    # and is queued (curate's colour_unconfirmed card), so an operator states it once for the vendor's variety.
+    colour_unconfirmed = "colour_unconfirmed"
+    # the vendor named several colours (normalize records it; reconcile applies rule 1: the pack's multicolour value,
+    # or unconfirmed when the pack or its vocabulary has none); best_guess keeps the first one named, the colour the
+    # matcher narrows by and such a listing carried before rule 1
+    multicolour_from_vendor = "multicolour_from_vendor"
+    # ...and the variety does not allow the multicolour value yet: a PUBLISHED listing keeps the colour it carried
+    # (best_guess of the flag above, raw_value here) and keeps updating while the leaf waits for approval; a new one
+    # is held on the leaf gap as usual
+    multicolour_leaf_pending = "multicolour_leaf_pending"
     type_overridden_by_variety = "type_overridden_by_variety"
     attr_from_variety = "attr_from_variety"
     noncanonical_attr_casing = "noncanonical_attr_casing"

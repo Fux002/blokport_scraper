@@ -166,6 +166,18 @@ variable "standardise_clean_budget_usd" {
   description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD: the month's cap of the hosted clean-up edits and their checks, all runs together, apart from the process budget (owner 2026-11-05). Empty = no edit is paid."
 }
 
+variable "standardise_scope_key" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_SCOPE_KEY: the S3 key of a scoped photos run's scope ({listings, restandardise}, STANDARDISE_PROCESS.md 'A scoped run'). Set only for that run: while set, every photos run is scoped and a close-only or clicks-only run is refused. Empty = not passed (the task definition is unchanged)."
+}
+
+variable "standardise_run_cap_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_RUN_CAP_USD: a scoped run's own cap, required with standardise_scope_key (select.RunCap, binding both monthly budgets). Empty = not passed."
+}
+
 variable "standardise_job_definition_name" {
   type        = string
   default     = ""

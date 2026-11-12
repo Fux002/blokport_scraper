@@ -27,6 +27,7 @@ Run:  python scrapers/brumagran.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import json
 import random
 import re
@@ -129,6 +130,7 @@ def photo_urls_from_fotos(fotos: list) -> list[str]:
 
 class BrumagranScraper(ScraperBase):
     source = "brumagran"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     category = "slab"        # Bruma is slab inventory, one row per bundle (item 3)
     id_field = "bundle_id"   # images named brumagran_<bundle_id>_<idx>
     use_curl_cffi = True   # Cloudflare-fronted SlabWare tenant

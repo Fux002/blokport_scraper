@@ -83,23 +83,24 @@ def test_variety_identity_collapse_rules():
     """The ONE identity rule the pipeline dedups by: alias-in-slug twins collapse, homonyms + multi-word
     types stay distinct, malformed name-slugs fold to one identity."""
     from stone_pipeline.reference.loaders import variety_identity as vi, collapse_to_survivors
-    # alias baked into the legacy name-slug -> same identity as the clean survivor
-    assert vi("slab_granite_verde_ubatuba_ubatuba_d0f6", "Verde Ubatuba") == \
-           vi("slab_granite_verde_ubatuba_571d", "Verde Ubatuba")
+    # alias baked into the name-slug -> same identity as the clean survivor (the identity reads the NAME)
+    assert vi("granite__verde_ubatuba_ubatuba_d0f6", "Verde Ubatuba") == \
+           vi("granite__verde_ubatuba_571d", "Verde Ubatuba")
     # genuine multi-type homonym -> DIFFERENT identity (type differs), never merged
-    assert vi("tile_marble_super_white_a", "Super White") != vi("tile_onyx_super_white_b", "Super White")
+    assert vi("marble__super_white_a", "Super White") != vi("onyx__super_white_b", "Super White")
     # multi-word stone type is not truncated
-    assert vi("slab_sodalite_syenite_polar_c", "Polar")[1] == "sodalite_syenite"
+    assert vi("sodalite_syenite__polar_c", "Polar")[0] == "sodalite_syenite"
 
+    seed = "granite__x_111a-0000-4000-8000-000000000001"
     rows = [
-        {"Key": "slab_granite_x_111a-0000-4000-8000-000000000001", "Name": "X", "Aliases": "a", "Image": ""},
-        {"Key": "slab_granite_x_x_222b-0000-4000-8000-000000000002", "Name": "X", "Aliases": "b", "Image": "u"},
-        {"Key": "tile_onyx_x_333c-0000-4000-8000-000000000003", "Name": "X", "Aliases": "", "Image": ""},
+        {"Key": seed, "Name": "X", "Aliases": "a"},
+        {"Key": "granite__x_x_222b-0000-4000-8000-000000000002", "Name": "X", "Aliases": "b"},
+        {"Key": "onyx__x_333c-0000-4000-8000-000000000003", "Name": "X", "Aliases": ""},
     ]
-    out = collapse_to_survivors(rows, seed_keys=frozenset(["slab_granite_x_111a-0000-4000-8000-000000000001"]))
+    out = collapse_to_survivors(rows, seed_keys=frozenset([seed]))
     keys = {r["Key"] for r in out}
-    assert "slab_granite_x_111a-0000-4000-8000-000000000001" in keys       # seed survivor kept
-    assert "slab_granite_x_x_222b-0000-4000-8000-000000000002" not in keys  # twin dropped
-    assert "tile_onyx_x_333c-0000-4000-8000-000000000003" in keys           # homonym (onyx) kept
-    surv = next(r for r in out if r["Key"].endswith("000000000001"))
-    assert "b" in surv["Aliases"] and surv["Image"] == "u"                   # loser alias + image folded in
+    assert seed in keys                                                      # seed survivor kept
+    assert "granite__x_x_222b-0000-4000-8000-000000000002" not in keys       # twin dropped
+    assert "onyx__x_333c-0000-4000-8000-000000000003" in keys                # homonym (onyx) kept
+    surv = next(r for r in out if r["Key"] == seed)
+    assert "b" in surv["Aliases"]                                            # loser alias folded in

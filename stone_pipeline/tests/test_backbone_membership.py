@@ -18,7 +18,7 @@ from stone_pipeline.stages import decisions
 
 
 def _variety(name="Tiger Black", stone_type="Granite", colors=("Black",), finishes=("Polished",), quals=("A",)):
-    return BackboneVariety(variant=name, category="Slabs", stone_type=stone_type,
+    return BackboneVariety(variant=name, stone_type=stone_type,
                            colors=list(colors), finishes=list(finishes), qualities=list(quals), aliases=[])
 
 
@@ -85,10 +85,10 @@ def test_record_minted_membership_skips_a_bad_attribute_or_empty_value():
 
 
 def test_write_minted_membership_from_curate_posts():
-    posts = {"slab": [{"variant": "Everest Quartzite", "stone_type": "Quartzite",
-                       "color": ["Grey"], "finishes": ["Honed", "Polished"], "qualities": ["A"]}],
-             "block": [{"variant": "Everest Quartzite", "stone_type": "Quartzite",   # same variety, dedup
-                        "color": ["Grey"], "finishes": ["Honed"], "qualities": ["A"]}]}
+    posts = [{"variant": "Everest Quartzite", "stone_type": "Quartzite",
+              "color": ["Grey"], "finishes": ["Honed", "Polished"], "qualities": ["A"]},
+             {"variant": "Everest Quartzite", "stone_type": "Quartzite",   # a repeated value, written once
+              "color": ["Grey"], "finishes": ["Honed"], "qualities": ["A"]}]
     written = decisions.write_minted_membership(posts)
     assert written == 4                                 # Grey, Honed, Polished, A -- once each
     overlay = ds.backbone_leaf_overlay()[("everest quartzite", "quartzite")]

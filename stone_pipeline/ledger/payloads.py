@@ -4,24 +4,19 @@ One function builds each payload from a row: a stored ledger row at serve time, 
 write (both carry the table's column names). The payload_hash is taken over that same dict, so it covers exactly
 what is served: a served field that changes re-serves the entity, a field that is not served never does.
 
-Beside the payload, the hash takes the versions of the content behind a served url that stays the same when its
-bytes change, which the payload alone cannot show: a variety texture's fingerprint (variation.image_sha256, the
-{Key}.png is re-made in place) and the ETags of a product's standardised files (CanonicalRow.standard_version), plus
-the product contract below. No em dashes (design principle 2).
+A variety's icons travel in its payload as (category handle, S3 key, ETag) pairs (PHASE-1-SPEC section 4), so the
+hash over the payload already re-serves an icon re-made in place. Beside a product's payload, the hash takes the ETags
+of its standardised files (CanonicalRow.standard_version, re-made in place under the same names) and the product
+contract below. No em dashes (design principle 2).
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
-from stone_pipeline.config.categories import CATEGORIES
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import payload_hash
-
-# a variation always belongs to a category (strict): branch is NOT NULL and constrained, so every served
-# variation maps to one canonical category label. Derived from the pack-built category registry.
-_CATEGORY = {c.name: c.label for c in CATEGORIES}
 
 # Bump when the PRODUCT payload must re-serve to every product while each one's served dict is unchanged (e.g.
 # Blokport starts reading a field it ignored before): it is in the product hash, so a bump flips every product
@@ -32,36 +27,40 @@ PRODUCT_PAYLOAD_CONTRACT = "v6-model-3d"
 # made-to-order state afterwards), so they are outside the hash: a change of one never re-serves a product.
 _CREATE_ONLY = ("photo_ready", "made_to_order")
 
+# The pair rows' columns (the variation_category_image table) and their names on the wire (apply-variation.ts).
+_ICON_WIRE = (("category_handle", "category"), ("s3_key", "s3_key"), ("etag", "etag"))
+
 
 def payload_hash_of(payload: Mapping[str, Any], *versions: Any) -> str:
     """The payload_hash of a served payload plus the content versions behind its urls."""
     return payload_hash([json.dumps(payload, sort_keys=True, ensure_ascii=False), *versions])
 
 
-def variation_payload(v: Mapping[str, Any]) -> dict:
-    """The variation payload Blokport receives (GET /sync/v1/variations)."""
+def variation_payload(v: Mapping[str, Any], icons: Iterable[Mapping[str, Any]]) -> dict:
+    """The variation payload Blokport receives (GET /sync/v1/variations): a variety has no category (phase 1, D3);
+    its icons are its `variation_category_image` rows, one per category handle, in handle order so the same pairs
+    always serve (and hash) the same."""
     return {
-        "category": _CATEGORY.get(v["branch"], ""),
         "type": v["type"],
         "name": v["name"],
         "aliases": json.loads(v["aliases"] or "[]"),
-        "image_url": v["image_url"] or "",
+        "category_images": [{wire: i[col] for col, wire in _ICON_WIRE}
+                            for i in sorted(icons, key=lambda i: i["category_handle"])],
     }
 
 
-def variation_hash(v: Mapping[str, Any]) -> str:
-    """The variation's payload_hash: its served payload and its texture's fingerprint (a texture re-made at the same
-    url re-serves)."""
-    return payload_hash_of(variation_payload(v), v["image_sha256"])
+def variation_hash(v: Mapping[str, Any], icons: Iterable[Mapping[str, Any]]) -> str:
+    """The variation's payload_hash: its served payload, icons included (an icon re-made in place has a new ETag, so
+    its variety re-serves)."""
+    return payload_hash_of(variation_payload(v, icons))
 
 
 def product_payload(p: Mapping[str, Any]) -> dict:
     """The product payload Blokport receives (GET /sync/v1/products). Everything in it is an external reference
     Blokport resolves on its side, except the supplier's port ids and the per-source company_id."""
     return {
-        # category + type are OWNED by the variation (identity = category/type/name); the product INHERITS them via
-        # variation_external_id. The NAMES are sent too, denormalized, for display/filtering only, so Medusa never
-        # joins product -> variation to show the stone type. They equal the variation's by construction.
+        # the product's own category, by HANDLE (D11, apply-product.ts productCategoryOf), and its variety's type,
+        # which Blokport checks against the variety it binds by variation_external_id (identity = type, name)
         "variation_external_id": p["variation_key"],
         "category": p["category"] or "", "type": p["type"] or "",
         "color": p["color"], "finish": p["finish"], "quality": p["quality"],
@@ -80,7 +79,6 @@ def product_payload(p: Mapping[str, Any]) -> dict:
         # origin_country_code (provenance) and of ports (departure); null when the source configured none.
         "collection_country_code": p["collection_country_code"],
         "collection_city": p["collection_city"],
-        "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
         # LOTS: every piece of a lot carries the same lot_code and its place in the cut order; Blokport groups the
         # catalog on lot_code. Both null outside a lot.
         "lot_code": p["lot_code"],

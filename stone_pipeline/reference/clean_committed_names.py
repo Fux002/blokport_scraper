@@ -20,22 +20,22 @@ from functools import partial
 from pathlib import Path
 
 from stone_pipeline.core.text import clean_alias_list
+from stone_pipeline.phase1.variety_key import new_key
 from stone_pipeline.reference.loaders import field_kinds as fk
+from stone_pipeline.reference.loaders.identity import type_slug_from_key
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "stone_pipeline" / "tests" / "fixtures" / "field-kinds.json"
 BASES = ["from_medusa/development/variants_export_base.csv", "from_medusa/production/variants_export_base.csv"]
-BACKBONES = ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
-             "catalog_source/backbone_tiles.json", "catalog_source/backbone_additions/slab.json",
-             "catalog_source/backbone_additions/block.json", "catalog_source/backbone_additions/tile.json"]
-SLAB_BACKBONE = "catalog_source/backbone_slabs.json"
+# the ONE variety backbone and the ONE committed additions file (spec rev 8 section 3)
+BACKBONES = ["catalog_source/backbone_varieties.json", "catalog_source/backbone_additions/varieties.json"]
+VARIETY_BACKBONE = "catalog_source/backbone_varieties.json"
 # (file, {column: (field, rule)}): rule "display" for a variety Name (title-cased as emit writes it), "clean" for a
 # place, port or vocabulary name (case kept)
 TABLES = [
     ("catalog_source/origin_map.csv", {"variety": (fk.VARIATION_NAME, "display"), "stone_type": (fk.TYPE_NAME, "clean"),
                                        "city": (fk.PRODUCT_ORIGIN_CITY, "clean"),
                                        "county": (fk.PRODUCT_ORIGIN_COUNTY, "clean")}),
-    ("catalog_source/missing_variants.csv", {"Name": (fk.VARIATION_NAME, "display")}),
     ("catalog_source/ports.csv", {"name": (fk.PORT_NAME, "clean"), "region_name": (fk.PORT_REGION_NAME, "clean")}),
     ("catalog_source/backbone_additions/backbone_value_updates.csv", {"variety": (fk.VARIATION_NAME, "display")}),
     # a synonym's canonical value is Medusa's vocabulary spelling: cleaned, never re-cased
@@ -74,11 +74,10 @@ def _write_csv(header: list[str], rows: list[dict], like: str) -> str:
 def clean_base(text: str) -> str:
     from stone_pipeline.stages import emit_catalog
     header, rows = _read_csv(text)
-    seen: dict[tuple[str, str, str], str] = {}
+    seen: dict[tuple[str, str], str] = {}
     for row in rows:
         emit_catalog._write_names(row)              # emit's own rule: raises for a Name with no ASCII form
-        branch, _, rest = row["Key"].partition("_")
-        ident = (branch, rest.split("_", 1)[0], row["Name"].casefold())
+        ident = (type_slug_from_key(row["Key"]), row["Name"].casefold())   # a variety: (type, name), no category
         if ident in seen and seen[ident] != row["Key"]:
             raise Refused(f"{row['Key']} and {seen[ident]} would share the cleaned Name {row['Name']!r}")
         seen[ident] = row["Key"]
@@ -100,7 +99,7 @@ def clean_backbone(text: str) -> str:
     leaf values (type, category, colours, finishes, qualities) are Medusa's vocabulary spellings, cleaned with their
     case kept, never re-cased ('Brushed and Tumbled'). merged_from is NOT cleaned: it is the audit record of what a
     merge removed."""
-    doc = json.loads(text)
+    doc = json.loads(text)          # the raw document, not read_posts: it is rewritten whole, held posts included
     posts = doc["posts"] if isinstance(doc, dict) else doc
     alias = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
     for post in posts:
@@ -117,14 +116,14 @@ def clean_backbone(text: str) -> str:
 
 
 def _check_keys_stay(before: dict[str, str], after: dict[str, str]) -> None:
-    """No Key moves: every slab variant's deterministic tile Key is the same before and after cleaning (the tile
-    backbone mirrors the slab one). Compared before/after, so a tile post already missing on main is not counted."""
-    from stone_pipeline.stages.curate.keys import gen_key
-    old, new = (json.loads(t[SLAB_BACKBONE])["posts"] for t in (before, after))
+    """No Key moves: every variety post's deterministic Key (the one rule, over its type and name) is the same
+    before and after cleaning. Compared before/after, so a post already missing on main is not counted."""
+    # the raw texts, not read_posts: the comparison is of the documents before and after cleaning
+    old, new = (json.loads(t[VARIETY_BACKBONE])["posts"] for t in (before, after))
     moved = [o["variant"] for o, n in zip(old, new)
-             if gen_key("tile", o["stone_type"], o["variant"]) != gen_key("tile", n["stone_type"], n["variant"])]
+             if new_key(o["stone_type"], o["variant"]) != new_key(n["stone_type"], n["variant"])]
     if moved:
-        raise Refused(f"{len(moved)} tile Keys would move, first {moved[:5]}")
+        raise Refused(f"{len(moved)} Keys would move, first {moved[:5]}")
 
 
 def plan() -> dict[str, str]:

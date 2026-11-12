@@ -28,8 +28,8 @@ def _slot_recorder(calls):
 
 
 @pytest.mark.parametrize("verb,memory", [
-    (lambda: lifecycle.retire_variation("slab_granite_x_1"), "add_retired"),
-    (lambda: lifecycle.un_retire("slab_granite_x_1"), "remove_retired"),
+    (lambda: lifecycle.retire_variation("granite__x_1"), "add_retired"),
+    (lambda: lifecycle.un_retire("granite__x_1"), "remove_retired"),
 ])
 def test_retire_memory_is_written_inside_the_slot(monkeypatch, verb, memory):
     calls: list[str] = []

@@ -179,8 +179,7 @@ def test_soft_reset_preserves_a_retiring_variety(tmp_path, monkeypatch):
     from stone_pipeline.ledger.sync import retire_variation
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X", "aliases": "[]",
-                                "image_url": "u", "image_sha256": None, "image_model": None, "volume": "",
+        lg.upsert("variation", {"key": "K", "type": "Marble", "name": "X", "aliases": "[]",
                                 "medusa_id": "VID", "in_full": 0, "payload_hash": "", "state": "synced",
                                 "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now},
                   pk=("key",))
@@ -221,25 +220,25 @@ def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
     from stone_pipeline.ledger.db import Ledger, now_iso
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": "slab_v1", "branch": "slab", "type": "Marble", "name": "x",
-                                "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
-                                "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+        lg.upsert("variation", {"key": "marble__v1", "type": "Marble", "name": "x",
+                                "aliases": "[]",
+                                "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
-        lg.upsert("product", {"sku": "POL-1", "source": "pol", "variation_key": "slab_v1", "medusa_id": "PID",
+        lg.upsert("product", {"sku": "POL-1", "source": "pol", "variation_key": "marble__v1", "medusa_id": "PID",
                               "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
 
     body, code = lifecycle.reset()                       # soft
     assert code == 200 and body["mode"] == "soft" and body["reset"]["variation"] >= 1
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         assert lg.get("product", "sku", "POL-1")["state"] == "pending"   # kept, re-served
-        assert lg.get("variation", "key", "slab_v1")["medusa_id"] is None
+        assert lg.get("variation", "key", "marble__v1")["medusa_id"] is None
 
     body, code = lifecycle.reset(hard=True)              # hard
     assert code == 200 and body["mode"] == "hard"
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         assert lg.get("product", "sku", "POL-1") is None                 # scraper output dropped
-        assert lg.get("variation", "key", "slab_v1") is not None         # base config kept
+        assert lg.get("variation", "key", "marble__v1") is not None         # base config kept
 
 
 def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
@@ -422,10 +421,10 @@ def test_dispatch_routes_variation_retire_and_un_retire(monkeypatch):
                         lambda key, force=False: seen.update(retire=(key, force)) or ({"retired": key}, 200))
     monkeypatch.setattr(lifecycle, "un_retire",
                         lambda key: seen.update(un_retire=key) or ({"un_retired": key}, 200))
-    code, _ = dispatch("POST", ["variations", "slab_marble_x_1", "retire"], {"force": True})
-    assert code == 200 and seen["retire"] == ("slab_marble_x_1", True)
-    code, _ = dispatch("POST", ["variations", "slab_marble_x_1", "un_retire"], None)
-    assert code == 200 and seen["un_retire"] == "slab_marble_x_1"
+    code, _ = dispatch("POST", ["variations", "marble__x_1", "retire"], {"force": True})
+    assert code == 200 and seen["retire"] == ("marble__x_1", True)
+    code, _ = dispatch("POST", ["variations", "marble__x_1", "un_retire"], None)
+    assert code == 200 and seen["un_retire"] == "marble__x_1"
     assert dispatch("GET", ["variations", "x", "retire"], None)[0] == 405      # wrong method
 
 

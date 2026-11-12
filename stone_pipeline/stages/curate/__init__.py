@@ -8,15 +8,13 @@ A run surfaces two things the reference is missing:
   - new variants: a scraped name that matched nothing; after an alias-vs-new
     decision it may be a genuinely new variety to create.
 
-The system emits additions in the EXACT import-file format (Key,Name,Image,
-Aliases) so they can be loaded into Medusa to create/update variants, which then
-assigns ids and re-exports the id files the pipeline matches against. It never
-rewrites the supplied files; it writes separate curation files for review.
+The system emits additions in the variety-file format (Key, Name, Type, Aliases) so they can be loaded
+into Medusa to create/update varieties, which then assigns ids and re-exports the id files the pipeline
+matches against. It never rewrites the supplied files; it writes separate curation files for review.
 
-Because a stone is the same material as a slab, block, or tile (only the id and
-Key prefix differ), an addition is emitted for every category's import file.
-Keys match the existing convention exactly: {branch}_{type}_{name}_{uuid}, where
-the uuid is a deterministic uuid5 (stable across runs, structurally a valid uuid).
+A variety is ONE record per (type, name), whatever category its products sit in (PHASE-1-SPEC rev 8): one
+addition per variety, never a copy per category. Its Key is phase1.variety_key's one rule,
+{type slug}__{name slug}_{uuid5}, deterministic (stable across runs).
 
 THE CLEANING / VERIFICATION FLOW spans several stages, each doing its cleaning at the
 point in the pipeline where the needed information first exists -- so the order is:
@@ -34,13 +32,12 @@ The single rule for every gate's position: do the cheapest, most DECISIVE thing 
 REUSE before MINT; when uncertain, HOLD for human review rather than guess.
 
 The package, one module per responsibility (each phase reads and writes the shared Curation context):
-  keys        deterministic Keys, branches, image names
   existing    the existing-variety index (one read of the export/base), per (name, type)
   context     the shared context, the result, the ONE identity derivation, the decision lookup
   review      review cards, scraped evidence, the HOLD outcomes
   aliasing    phase 1 (matched-row aliases) and phase 3 (alias additions), alias routing
   classify    phase 2: classify each gapped variety in strict priority order
-  minting     phase 4 (new variants: import row, backbone post, image) and phase 5 (leaf suggestions)
+  minting     phase 4 (new variants: import row, backbone post, image items) and phase 5 (leaf suggestions)
   attributes  the attribute (colour/finish/type/quality) curation
   output      the written outputs and operator queues
   pipeline    build_curation and the stage entry `run`
@@ -55,15 +52,13 @@ from stone_pipeline.core.text import looks_like_artifact as _looks_like_artifact
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.stages.curate.attributes import build_attribute_curation, write_attribute_curation
 from stone_pipeline.stages.curate.context import CurationResult, alias_model as _alias_model
-from stone_pipeline.stages.curate.existing import ImportFile, load_all_existing, load_existing
-from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, gen_key, image_filename, image_url
+from stone_pipeline.stages.curate.existing import ImportFile, load_existing
 from stone_pipeline.stages.curate.output import write_curation
 from stone_pipeline.stages.curate.pipeline import build_curation, run
 from stone_pipeline.stages.curate.review import code_reason as _code_reason, review_evidence as _review_evidence
 
 __all__ = [
-    "BRANCHES", "CurationResult", "ImportFile", "SETTINGS", "active_branches", "build_attribute_curation",
-    "build_curation", "gen_key", "image_filename", "image_url", "load_all_existing", "load_existing", "proj",
-    "run", "write_attribute_curation", "write_curation",
+    "CurationResult", "ImportFile", "SETTINGS", "build_attribute_curation", "build_curation", "load_existing",
+    "proj", "run", "write_attribute_curation", "write_curation",
     "_alias_model", "_code_reason", "_looks_like_artifact", "_review_evidence",
 ]

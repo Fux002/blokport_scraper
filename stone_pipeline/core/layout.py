@@ -93,7 +93,7 @@ def write_steps_md(layout: RunLayout, *, source: str, run_id: str, health: str,
 
 
 def write_sync_md(*, counts: dict, sources: list[str], products: dict[str, int],
-                  inventory: int = 0, discontinued: int = 0) -> Path:
+                  inventory: int = 0, discontinued: int = 0, aliases_dropped: int = 0) -> Path:
     """The upload checklist, written to to_upload/<env>/SYNC_STEPS.md (next to the files
     it describes). Says what to push to that env's Medusa, in order."""
     g = counts.get
@@ -111,6 +111,9 @@ def write_sync_md(*, counts: dict, sources: list[str], products: dict[str, int],
         "confirmed alias updates (incremental - no need to re-send the full list).",
         f"  ({g('alias_additions', 0) - g('confirmed_alias_additions', 0)} more aliases need a look first - "
         f"`review/{ENV_NAME}/alias_candidates.csv`, NOT in the update file.)",
+        f"  ({aliases_dropped} alias(es) dropped at emit, each the name of another variety of the same type: "
+        f"`review/{ENV_NAME}/alias_collisions_dropped.csv`, NOT in either file; every run's list stays in "
+        f"`review/{ENV_NAME}/alias_collisions_dropped_runs/`.)",
         f"Then DOWNLOAD Medusa's variant export and SAVE it as  `from_medusa/{ENV_NAME}/variants_export.csv`",
         "(the catalog reads it as the 'existing' set on the next run).",
         "",

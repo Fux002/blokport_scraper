@@ -159,7 +159,14 @@ def list_pending(kind: str) -> list[dict]:
         # correctly disables approve/reject. list_decided_leaves already exposes ref; pending now matches.
         item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
-        if kind == "variety":
+        if kind == "variety" and item.get("kind") == "colour_unconfirmed":
+            # a colour card's decision is the colour the vendor's variety was stated in (Decisions.listing_colour),
+            # whatever else that vendor's spellings bind to
+            item["current_color"] = dec.listing_colour(item.get("src", ""), item.get("variant", ""),
+                                                       item.get("stone_type", ""))
+            item["decided"] = item["current_color"] is not None
+            item["current_action"] = "colour" if item["decided"] else None
+        elif kind == "variety":
             # a variety statement carries a mint/rename/reject AND may carry a bind
             _project_decision(item, dec)
         elif kind == "origin":

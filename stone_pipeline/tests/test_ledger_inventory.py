@@ -11,11 +11,11 @@ from stone_pipeline.stages import emit
 
 def _seed_variations(ledger: Ledger) -> None:
     now = now_iso()
-    for key, mid in [("slab_marble_a_0001", "V1"), ("block_marble_b_0002", "V2")]:
+    for key, mid in [("marble__a_0001", "V1"), ("marble__b_0002", "V2")]:
         ledger.upsert("variation", {
-            "key": key, "branch": key.split("_", 1)[0], "type": "Marble", "name": "X",
-            "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
-            "volume": "", "medusa_id": mid, "payload_hash": "", "state": "synced",
+            "key": key, "type": "Marble", "name": "X",
+            "aliases": "[]",
+            "medusa_id": mid, "payload_hash": "", "state": "synced",
             "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
         }, pk=("key",))
 
