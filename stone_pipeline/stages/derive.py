@@ -394,6 +394,15 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                                     raw_value=str(value), confidence=Confidence.low,
                                     method="range_check", src_url=row.src_url,   # detail: what it was checked against
                                     detail=f"band {band_lo:g} to {band_hi:g}"))
+    # a plan face longer than any real one of its category (the pack's measured face_max) is a data error, never a
+    # size: flagged here, held at validate. Judged on the stored (rounded) size, so a face at the maximum is kept.
+    limit = active_pack().face_max.get(category)
+    if limit is not None:
+        for name, value in (("length", length), ("width", width)):
+            if value is not None and round(value, 3) > limit:
+                row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_implausible, raw_value=str(value),
+                                        confidence=Confidence.low, method="face_max", src_url=row.src_url,
+                                        detail=f"face max {limit:g} m ({category})"))
 
     row.length = round(length, 3) if length is not None else None
     row.width = round(width, 3) if width is not None else None

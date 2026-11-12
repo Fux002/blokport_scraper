@@ -125,6 +125,13 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Unreadable size (zero or malformed)", kind="transient",
                 recovery="Lists on the next scrape that carries a valid size. If it persists, the source's size "
                          "parse needs a fix.", stage="Derive"),
+    Requirement("dimension_implausible", "length and width each within the category's face maximum (pack face_max)",
+                "the vendor's size, ordered; a face longer than any real one of its category is a data error and "
+                "is held, published or not",
+                title="Implausible size (a face longer than any real one)", kind="decision",
+                recovery="Check the listing's size at the supplier, then set the true size in the dimension overrides "
+                         "file (RUNBOOK), or wait for the supplier to correct it; it lists on the next produce.",
+                stage="Derive"),
     Requirement("stock_undetermined", "inventory_quantity determined (a real value, including 0) or made to order",
                 "a count, a piece-count derived from an available stock area, or made to order (a free-size "
                 "shape); else held",

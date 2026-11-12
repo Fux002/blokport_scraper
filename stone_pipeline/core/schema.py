@@ -70,6 +70,9 @@ class FlagCode(str, Enum):
     format_inferred = "format_inferred"
     format_unresolved = "format_unresolved"
     dimension_out_of_range = "dimension_out_of_range"
+    # a plan face (length/width) longer than its category's measured maximum (the pack's face_max): a data error,
+    # never a real size, so validate HOLDS the row (rule dimension_implausible), published or not
+    dimension_implausible = "dimension_implausible"
     # a dimension stored in the wrong unit (centimetres read as metres, ~100x too large) was corrected to
     # metres against the category's physical range, before weight -- flagged so the source can be verified.
     dimension_unit_corrected = "dimension_unit_corrected"

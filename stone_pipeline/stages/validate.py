@@ -178,6 +178,11 @@ def validate_row(row: CanonicalRow, require_images: bool = False, *,
         if (getattr(row, dim, None) or 0) <= 0:
             row.add_reject(RejectReason(rule="dimension_invalid", detail=dim))
             break
+    # A plan face longer than any real one of its category (derive's dimension_implausible, MB-1) is a data error: held,
+    # PUBLISHED OR NOT (no `listed` exemption, unlike colour_unconfirmed: the value itself is wrong).
+    implausible = {f.field for f in row.review_flags if f.code == FlagCode.dimension_implausible}
+    if implausible:
+        row.add_reject(RejectReason(rule="dimension_implausible", detail="|".join(sorted(implausible))))
     # Stock must be DETERMINED before a product can be sold: derive left inventory_quantity None (flagged
     # stock_undetermined) when it could neither read a count nor derive one from a stock area. Emitting it
     # would ship a fabricated 0 (a false out-of-stock); HOLD it for review instead -- exactly like a
