@@ -342,11 +342,14 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
 
 # -- a pack's seed (the manager's rule, 12 Nov, reviewer 2's LOW on SC #663) -------------------------------------------
 def test_a_pack_that_names_no_backbone_file_loads_with_no_seed(tmp_path, monkeypatch):
+    # the real stone pack less its backbone_file line: a whole, loadable pack (the _valid_pack_dict shape only proves
+    # a malformation, its attributes are not a real vocabulary)
+    text = domain._pack_path("stone").read_text(encoding="utf-8")
+    assert text.count("\nbackbone_file: backbone_varieties.json\n") == 1
+    (tmp_path / "stone.yaml").write_text(text.replace("\nbackbone_file: backbone_varieties.json\n", "\n"),
+                                         encoding="utf-8")
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
-    pack = _valid_pack_dict()
-    del pack["backbone_file"]
-    _write_pack(tmp_path, pack)
-    assert domain.load_pack("bad").backbone_file is None
+    assert domain.load_pack("stone").backbone_file is None
 
 
 def test_a_backbone_file_the_pack_names_must_be_a_file_name(tmp_path, monkeypatch):
