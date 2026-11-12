@@ -71347,6 +71347,8 @@
         "G4562 Granite",
         "G4563",
         "G561",
+        "G562",
+        "G562 Granite",
         "Guangxi Red",
         "Guangxi Red Granite",
         "Maple Leaf Red",
@@ -71956,6 +71958,7 @@
         "Classic Red",
         "Cotton Rose Granite",
         "Flower Pink Granite",
+        "G635 Granite",
         "Light Rose Pink",
         "Padang Pink Granite",
         "Padang Rosa Granite",
@@ -71977,6 +71980,7 @@
         "Anxi Rose",
         "Cotton Rose",
         "Flower Pink",
+        "G635",
         "Padang Pink",
         "Padang Rosa",
         "Pink Flower",
@@ -209096,6 +209100,7 @@
         "Hauteville Calcaire",
         "Hauteville Villon Ambre",
         "Hauteville-lompnes",
+        "Hauteville",
         "Mornoux",
         "Hauteville Rose",
         "Calcaire Hauteville Rose"
@@ -228320,7 +228325,8 @@
         "Rosal Codacal Favor",
         "Rosal Cd Limestone",
         "Rosal Limestone",
-        "Rosal Cd"
+        "Rosal Cd",
+        "Rosal"
       ],
       "merged_from": []
     },
@@ -251924,6 +251930,7 @@
         "White Ariston Marble",
         "Drama White Marble",
         "Kavala White Marble",
+        "Ariston",
         "Ariston Venus",
         "Galaxy Classico",
         "White Ariston",
@@ -287545,6 +287552,7 @@
         "Connemara Marble",
         "Connemarble Green Marble",
         "Connemara Lissoughter Marble",
+        "Connemara",
         "Connemara Lissoughter",
         "Irish Green Extra Marble",
         "Ireland Green Marble",
@@ -395713,8 +395721,10 @@
         "A"
       ],
       "aliases": [
+        "Silver Wave Marble",
         "Silver Brown Wave Marble",
         "Silver Wooden Brown Marble",
+        "Silver Wave",
         "Silver Brown Wave",
         "Silver Wooden Brown"
       ],
