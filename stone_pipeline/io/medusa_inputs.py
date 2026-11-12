@@ -51,7 +51,9 @@ OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
 # file once S3 is fixed.
 _READERS = {
-    "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED),
+    # table 569: a download without category_handles is refused HERE, so it never replaces the local file
+    "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED,
+                                                   require_category_handles=True),
     "variants_export.csv": lambda path: read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED),
 }
 

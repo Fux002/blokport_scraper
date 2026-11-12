@@ -53,17 +53,20 @@ class AttributeValue:
         return self.status == "active" and not self.internal
 
 
-def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeValue]:
+def read_attributes(src: Path | str, *, require_status: bool,
+                    require_category_handles: bool = False) -> list[AttributeValue]:
     """attributes.csv -> its values, in file order. `src` is the file's Path, or a str holding the file's TEXT
     (a str is never taken as a path). A row without category or value is skipped; an empty sourceid is kept
     (each caller decides what an id-less value means). Without a status/internal column every value is active
-    and not internal, unless `require_status`, which makes the absent column an error. A conflicting duplicate
-    raises: two values of one category that match_key to the same name with different ids, across all statuses,
-    since the value->id map would otherwise silently keep the last one."""
+    and not internal, unless `require_status`, which makes the absent column an error; `require_category_handles`
+    does the same for category_handles (table 569: the fetch's check and the type vocabulary require it). A
+    conflicting duplicate raises: two values of one category that match_key to the same name with different ids,
+    across all statuses, since the value->id map would otherwise silently keep the last one."""
     label = str(src) if isinstance(src, Path) else "attributes.csv"
     out: list[AttributeValue] = []
     ids: dict[tuple[str, str], AttributeValue] = {}
-    required = ATTRIBUTE_COLUMNS + (_STATUS_COLUMNS if require_status else ())
+    required = (ATTRIBUTE_COLUMNS + (_STATUS_COLUMNS if require_status else ())
+                + ((CATEGORY_HANDLES_COLUMN,) if require_category_handles else ()))
     for line, row, fields in _rows(src, label, required):
         category = (row.get("category") or "").strip()
         value = (row.get("value") or "").strip()

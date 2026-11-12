@@ -10,7 +10,7 @@ from typing import Optional
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.reference.loaders.common import env, norm
-from stone_pipeline.reference.medusa_files import CATEGORY_HANDLES_COLUMN, AttributeValue, read_attributes
+from stone_pipeline.reference.medusa_files import AttributeValue, read_attributes
 
 # Vocabulary categories carried in attributes.csv (section 6), declared by the active product-domain pack
 # (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
@@ -100,10 +100,7 @@ def load_attributes(path: Path | None = None) -> Attributes:
     path = Path(path or env().SETTINGS.paths.attributes_csv)
     pack_handles = frozenset(c["plural"] for c in active_pack().categories)   # D11: a category's handle
     attrs = Attributes()
-    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
-        if a.category == "type" and a.category_handles is None:
-            raise ValueError(f"{path}: missing required column {CATEGORY_HANDLES_COLUMN} (table 569): the type "
-                             "vocabulary cannot be scoped to the pack without it")
+    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED, require_category_handles=True):
         if not a.sourceid or (a.category == "type" and _foreign_type(a, pack_handles)):
             continue
         if a.category == "category":
