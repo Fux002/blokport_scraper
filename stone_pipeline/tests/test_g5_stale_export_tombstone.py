@@ -179,6 +179,40 @@ def test_r7_a_blocked_variation_tombstone_stays_pending_and_its_key_is_skipped(t
     assert [(r["Key"], r["tombstone"]) for r in listed] == [(GONE, "pending")]
 
 
+def test_r7_holds_through_dead_and_abandon_and_populate_keeps_the_dead_tombstone(tmp_path, monkeypatch):
+    # the manager's finding (3): a blocked tombstone backs off and goes 'dead' on the max_attempts-th block, and an
+    # operator may then abandon it; the scraper's decision stands, so the Key stays skipped. Finding (1): populate's E5
+    # deletes a tombstone in ANY state once its Key is produced, so the skip must cover 'dead' too.
+    with _ledger(tmp_path / "dev.ledger") as ledger:
+        _variation(ledger, GONE)
+        sync.retire_variation(ledger, GONE)
+        for _ in range(SETTINGS.sync.max_attempts):
+            sync.ack(ledger, "removed", GONE, status_="blocked")
+        assert ledger.get("removed", "external_id", GONE)["state"] == "dead"
+    emitted, listed, out = _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, GONE])
+    assert emitted == [KEPT] and [(r["Key"], r["tombstone"]) for r in listed] == [(GONE, "dead")]
+    with _ledger(tmp_path / "dev.ledger") as ledger:
+        sync.abandon_dead_letter(ledger, "removed", GONE)
+        populate.populate_variations_full(ledger, out)
+        assert ledger.get("removed", "external_id", GONE)["state"] == "dead"
+    emitted, listed, _ = _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, GONE])
+    assert emitted == [KEPT] and [(r["Key"], r["tombstone"]) for r in listed] == [(GONE, "dead")]
+
+
+def test_an_unminted_variety_is_skipped_by_its_tombstone_and_after_its_done_ack(tmp_path, monkeypatch):
+    # the manager's finding (2): unmint tombstones with variation_unminted and never writes the retired memory
+    # (lifecycle.py:672 calls sync.retire_variation; only retire calls add_retired), so the skip must not depend on it
+    with _ledger(tmp_path / "dev.ledger") as ledger:
+        _variation(ledger, GONE)
+        sync.retire_variation(ledger, GONE, reason="variation_unminted")
+    emitted, listed, _ = _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, GONE])
+    assert emitted == [KEPT] and [(r["tombstone"], r["reason"]) for r in listed] == [("pending", "variation_unminted")]
+    with _ledger(tmp_path / "dev.ledger") as ledger:
+        assert sync.ack(ledger, "removed", GONE, status_="done") == 1
+    emitted, listed, _ = _emit(tmp_path, monkeypatch, base=[KEPT], export=[KEPT, GONE])
+    assert emitted == [KEPT] and [(r["tombstone"], r["reason"]) for r in listed] == [("done", "variation_unminted")]
+
+
 # --- R6: the ledger version and its in-place migration ------------------------------------------------------------
 def test_r6_a_phase1_ledger_gains_variation_deleted_in_place(tmp_path):
     path = tmp_path / "dev.ledger"
