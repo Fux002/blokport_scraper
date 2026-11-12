@@ -93,6 +93,15 @@ def test_a_boot_with_a_malformed_copy_serves_and_names_it(attributes, tmp_path, 
     assert _unavailable(server.dispatch("GET", ["types"], None), "category_handles")
 
 
+def test_every_read_of_attributes_csv_on_the_server_answers_503_while_its_fetch_stands_refused(
+        attributes, tmp_path, monkeypatch):
+    # reviewer 2's LOW: the restricted (archived or internal) values and ids come from the same file; the id-paste route
+    # reads nothing else of it, so it served the stale file's restrictions
+    _boot(monkeypatch, tmp_path, _S3(THIN))
+    assert _unavailable(server.dispatch("PUT", ["review", "attributes", "Grey"],
+                                        {"kind": "color", "medusa_id": "col_grey"}), "thin")
+
+
 def test_a_photos_page_whose_fetch_is_refused_answers_503_naming_why(attributes, monkeypatch):
     from stone_pipeline.photos import review as rv
     monkeypatch.setattr(rv, "client", lambda: _S3(THIN))
