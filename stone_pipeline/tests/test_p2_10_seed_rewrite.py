@@ -1,0 +1,146 @@
+"""P2-10: the committed seed rewritten ONCE, so the backbone is the whole seed store (stone_pipeline.aliases.seed_rewrite).
+Reds (a), (b) and (d) of the manager's brief (11-12); (c), the seed fixed point and seed.verify, stays pinned by
+test_cold_start_idempotence and test_committed_names_fixed_point. Exclusions are only the two NAMED lists in
+catalog_source/seed_alias_differences.csv: `removed` (exactly the shared C1 judgement, cleanup.seed_refusal) and
+`no_post` (the base-only Keys, the manager's ruling). No em dashes."""
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from stone_pipeline.core.alias_problem import code_matcher
+from stone_pipeline.core.text import match_key
+
+REPO = Path(__file__).resolve().parents[2]
+BACKBONE = REPO / "catalog_source" / "backbone_varieties.json"
+DIFFERENCES = REPO / "catalog_source" / "seed_alias_differences.csv"
+BASES = [REPO / "from_medusa" / env / "variants_export_base.csv" for env in ("development", "production")]
+IS_CODE = code_matcher(r"[Gg]\d+[A-Za-z]?")
+NO_POST_KEYS = 67                      # SC-3 rev 2.3: the base-only Keys, measured 11-12, the same in both bases
+
+
+def _posts() -> dict[str, dict]:
+    return {p["key"]: p for p in json.loads(BACKBONE.read_text(encoding="utf-8"))["posts"] if p.get("key")}
+
+
+def _differences(cls: str) -> list[dict]:
+    if not DIFFERENCES.exists():
+        return []
+    with DIFFERENCES.open(encoding="utf-8", newline="") as handle:
+        return [r for r in csv.DictReader(handle) if r["Class"] == cls]
+
+
+def _base_rows() -> list[tuple[str, dict]]:
+    out = []
+    for base in BASES:
+        with base.open(encoding="utf-8-sig", newline="") as handle:
+            out += [(base.parent.name, r) for r in csv.DictReader(handle)]
+    return out
+
+
+# --- (a) every committed base alias is on its Key's post, or on a named list ---------------------------------------
+def test_every_committed_base_alias_is_on_its_key_s_post_or_named():
+    posts = {k: {match_key(v) for v in [*p.get("aliases", []), *p.get("codes", [])]} for k, p in _posts().items()}
+    removed = {(r["Key"], match_key(r["Value"])) for r in _differences("removed")}
+    no_post = {r["Key"] for r in _differences("no_post")}
+    missing = [f"{env} {r['Key']} {a!r}" for env, r in _base_rows() for a in (r["Aliases"] or "").split("|")
+               if a and match_key(a) not in posts.get(r["Key"], set())
+               and (r["Key"], match_key(a)) not in removed and r["Key"] not in no_post]
+    assert not missing, f"{len(missing)} base alias(es) on no post and no named list:\n" + "\n".join(missing[:50])
+
+
+def test_the_no_post_list_names_exactly_the_base_keys_without_a_post():
+    posts = _posts()
+    base_only = {r["Key"] for _, r in _base_rows() if r["Key"] not in posts}
+    assert len(base_only) == NO_POST_KEYS
+    assert {r["Key"] for r in _differences("no_post")} == base_only
+
+
+def test_the_removed_list_is_exactly_the_shared_c1_judgement():
+    """Every listed value is refused by cleanup.seed_refusal in its Key's context (the committed base names, the
+    same call C5 classes `removed` by), and every base value it refuses is listed."""
+    from stone_pipeline.aliases.cleanup import alias_context, seed_refusal, vocabulary
+    names = {r["Key"]: (r["Name"], r["Type"]) for _, r in _base_rows()}
+    posts = _posts()
+    by_type: dict[str, set[str]] = {}
+    for name, type_ in names.values():
+        by_type.setdefault(match_key(type_), set()).add(match_key(name))
+    type_words, vocabulary_keys = vocabulary()
+
+    def refusal(key: str, value: str):
+        name, type_ = names.get(key) or (posts[key]["variant"], posts[key]["stone_type"])
+        return seed_refusal(value, alias_context(name, type_, by_type, type_words, vocabulary_keys), IS_CODE)
+
+    listed = _differences("removed")
+    assert listed, "no removed list"
+    wrong = [(r["Key"], r["Value"], r["Reason"]) for r in listed if refusal(r["Key"], r["Value"]) != r["Reason"]]
+    assert not wrong, wrong[:20]
+    keys = {(r["Key"], match_key(r["Value"])) for r in listed}
+    unlisted = [(r["Key"], a) for _, r in _base_rows() for a in (r["Aliases"] or "").split("|")
+                if a and refusal(r["Key"], a) and (r["Key"], match_key(a)) not in keys]
+    assert not unlisted, unlisted[:20]
+
+
+def test_named_moves():
+    posts = _posts()
+    assert {"Blue King A", "Blue King B"} <= set(posts["granite__blue_king_291b4daa-ef0b-52e9-8e47-807d49122a2e"]["aliases"])
+    assert "Crema S" in posts["cantera__crema_5ff023ed-36bb-5f38-8c01-b7606cb3e408"]["aliases"]        # a coded name form
+    assert {"G684", "G3518"} <= set(posts["basalt__china_black_6c9e08fc-b275-548f-86f7-a305be3d2af1"]["codes"])
+    removed = {(r["Key"], r["Value"]): r["Reason"] for r in _differences("removed")}
+    assert removed[("alabaster__angel_pink_dabe3591-f378-5a57-8d81-62d35d35ec60", "Angel Pink Alabaster")] == \
+        "own_name_type_word"
+    assert removed[("marble__white_super_0caae4a1-7d46-5dac-b34c-028b9616bac6", "White Super Es")] == "same_type_name"
+
+
+RENAMED_POSTS = 13                     # the manager's ruling (11-12): coded variants take the base Name
+
+
+def test_a_coded_post_variant_takes_its_base_name_and_keeps_the_coded_form_as_an_alias():
+    posts = _posts()
+    names = {r["Key"]: r["Name"] for _, r in _base_rows()}
+    renamed = _differences("renamed")
+    assert len(renamed) == RENAMED_POSTS
+    assert [(r["Key"], r["Value"]) for r in renamed if posts[r["Key"]]["variant"] != names[r["Key"]]
+            or r["Value"] not in posts[r["Key"]]["aliases"]] == []
+    rosal = posts["limestone__rosal_10cbf934-0687-5e6b-a23b-50afe310f65f"]
+    assert rosal["variant"] == "Rosal" and "Rosal B" in rosal["aliases"]
+
+
+# --- (b) a code is never an alias, and every post states its codes -------------------------------------------------
+def test_no_committed_post_alias_is_a_code():
+    coded = [f"{k} {a!r}" for k, p in _posts().items() for a in p.get("aliases", []) if IS_CODE(a)]
+    assert not coded, f"{len(coded)} post alias(es) are codes, they belong in `codes`:\n" + "\n".join(coded[:50])
+
+
+def test_every_post_states_its_codes_and_each_is_a_code():
+    posts = _posts().values()
+    assert all(isinstance(p.get("codes"), list) for p in posts)
+    assert [c for p in posts for c in p["codes"] if not IS_CODE(c)] == []
+
+
+# --- (d) deterministic and idempotent --------------------------------------------------------------------------------
+def test_a_second_run_changes_nothing():
+    from stone_pipeline.aliases import seed_rewrite
+    rendered = seed_rewrite.render()
+    assert {p: rendered[p] == (REPO / p).read_bytes() for p in seed_rewrite.WRITES} == \
+        {p: True for p in seed_rewrite.WRITES}
+
+
+_DIGESTS = ("import hashlib; from stone_pipeline.aliases import seed_rewrite as s; "
+            "print(*(hashlib.sha256(b).hexdigest() for _, b in sorted(s.render().items())))")
+
+
+@pytest.mark.parametrize("hash_seed", ["0", "4242"])
+def test_the_output_is_byte_identical_under_any_hash_seed(hash_seed):
+    from stone_pipeline.aliases import seed_rewrite
+    env = {**os.environ, "PYTHONHASHSEED": hash_seed, "PYTHONPATH": str(REPO)}
+    out = subprocess.run([sys.executable, "-c", _DIGESTS], cwd=REPO, env=env, capture_output=True, text=True,
+                         check=True).stdout.split()
+    assert out == [hashlib.sha256((REPO / p).read_bytes()).hexdigest() for p in sorted(seed_rewrite.WRITES)]
