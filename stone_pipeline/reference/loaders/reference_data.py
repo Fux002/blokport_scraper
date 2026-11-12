@@ -122,7 +122,8 @@ def existing_varieties_file() -> Path:
     alias-vs-new index): the live Medusa export when it exists, else the committed Id-free base.
 
     The base is a CORRECT source for both readers, not a degraded fallback: neither reads the Medusa Id. They
-    use Key, Name, Aliases, Image and Volume and derive the type from the Key, all of which the base carries,
+    use Key, Name and Type (a variety's aliases come from the alias stores, never from either file's Aliases;
+    P2-10 C3), all of which the base carries,
     and the base is the canonical full variety union while the live export lags it after a factory reset
     (lifecycle._prune_stale_medusa_export deletes the export; Blokport re-exports only after the next pull).
     Reading the base in that window keeps every existing variety known, so nothing is minted twice. Only

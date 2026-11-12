@@ -127,16 +127,13 @@ def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]], se
 
 def _alias_map(live: list[Variety]) -> dict[tuple[str, str], str | None]:
     """(norm alias or code, norm type) -> canonical NAME, over the SAME surfaces the matcher indexes
-    (aliases.surfaces: seed, operator, the export's hand rows), so "is this a known alias" has one answer. None
-    where the value sits on two distinct same-type varieties (ambiguous, never guessed)."""
+    (aliases.surfaces: seed, operator, active learned, the export's hand rows), so "is this a known alias" has one
+    answer. None where the value sits on two distinct same-type varieties (ambiguous, never guessed). The seed and the
+    hand rows are read once per file version (aliases.stores), so a rebuild after a decision parses neither again."""
     from stone_pipeline.aliases import stores as alias_stores
-    from stone_pipeline.reference.medusa_files import read_variants_export
-    path = alias_stores.export_file()
-    # the export's own reader decides its columns; a host with no export yet has no hand rows to add
-    records = read_variants_export(path, require_status=False) if path.exists() else []
     scraper = alias_stores.scraper_stores()
     stores = Stores(seed=scraper.seed, operator=scraper.operator, learned=scraper.learned,
-                    admin=alias_stores.admin_of(records))
+                    admin=alias_stores.export_admin_rows())
     surfaces, _ = surfaces_by_key(live, stores, alias_stores.is_code())
     hits: dict[tuple[str, str], set[str]] = {}
     for v in live:
