@@ -17,13 +17,9 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
-from stone_pipeline.tests._category_registry import set_category_pcats
 
-
-@pytest.fixture(autouse=True)
-def _category_pcats(monkeypatch):
-    # the synthetic category pcats, on the registry: a category is never the ledger's (table 577)
-    set_category_pcats(monkeypatch, {"slab": "PC1", "block": "PC2"})
+# the synthetic category pcats (PC1, PC2) on the registry: a category is never the ledger's (table 577)
+pytestmark = pytest.mark.usefixtures("ledger_product_pcats")
 
 
 def _seed_ids(ledger: Ledger) -> None:

@@ -42,7 +42,7 @@ def test_new_shape_carries_status_and_internal(tmp_path):
 
 
 def test_reordered_and_extra_columns_parse_by_header_name(tmp_path):
-    p = _file(tmp_path, " internal ,extra, sourceid ,status,value,category\nfalse,x,col_1,active,Black,color\n")
+    p = _file(tmp_path, " internal ,extra, sourceid ,status,value,category, handle \nfalse,x,col_1,active,Black,color,\n")
     assert read_attributes(p, require_status=True) == [AttributeValue("color", "Black", "col_1", "active", False)]
 
 
@@ -120,9 +120,9 @@ def test_same_id_repeat_and_id_less_repeat_are_allowed(tmp_path):
 
 
 def test_append_follows_the_files_header_and_reads_back(tmp_path):
-    p = _file(tmp_path, "sourceid,category,value,status,internal,note\ncol_1,color,Black,active,false,x\n")
+    p = _file(tmp_path, "sourceid,category,value,status,internal,note,handle\ncol_1,color,Black,active,false,x,\n")
     append_attributes(p, [AttributeValue("color", "Grey", "col_2", "active", False)])
-    assert p.read_text(encoding="utf-8").splitlines()[-1] == "col_2,color,Grey,active,false,"
+    assert p.read_text(encoding="utf-8").splitlines()[-1] == "col_2,color,Grey,active,false,,"
     assert [a.value for a in read_attributes(p, require_status=True)] == ["Black", "Grey"]
 
 

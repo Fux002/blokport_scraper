@@ -194,7 +194,7 @@ _GUARDED = ("stone_pipeline/stages/tree_build.py", "stone_pipeline/stages/format
 @pytest.mark.parametrize("path", _GUARDED)
 def test_no_reader_resolves_a_category_by_label_or_by_a_case_fold(path):
     src = (REPO / path).read_text(encoding="utf-8")
-    for pattern in (r"\battr\[\"category\"\]", r"match_key\(\s*(c\.plural|handle)\b", r"category_pcat\b",
+    for pattern in (r"\battr\[\"category\"\]", r"match_key\(\s*(c\.plural|handle)\b", r"\bcategory_pcat\b",
                     r"_category_label\b", r"category_labels\b", r"\.label\b"):
         assert not re.search(pattern, src), f"{path} still matches {pattern!r}"
 

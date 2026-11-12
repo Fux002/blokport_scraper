@@ -68,6 +68,13 @@ def tree_category_pcats(monkeypatch):
 
 
 @pytest.fixture
+def ledger_product_pcats(monkeypatch):
+    """test_ledger_products' synthetic category pcats (PC1 slabs, PC2 blocks) on the registry (table 577)."""
+    from stone_pipeline.tests._category_registry import LEDGER_PRODUCT_PCATS, set_category_pcats
+    set_category_pcats(monkeypatch, LEDGER_PRODUCT_PCATS)
+
+
+@pytest.fixture
 def slab_category_pcat(monkeypatch):
     """The Slabs category on SLAB_PCAT, so a canonical row on that pcat is stored under `slabs` (table 577)."""
     from stone_pipeline.tests._category_registry import set_category_pcats

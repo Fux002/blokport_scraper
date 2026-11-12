@@ -12,6 +12,8 @@ from stone_pipeline.config import categories
 
 # the pcat ids the tree-build tests write into their attributes.csv
 TREE_PCATS = {"slab": "cat_slab", "block": "cat_block", "tile": "cat_tile"}
+# the pcat ids test_ledger_products' canonical rows carry (its _fixture_rows), shared by the modules that import them
+LEDGER_PRODUCT_PCATS = {"slab": "PC1", "block": "PC2"}
 # the stone pack's category label -> its handle (D11), for writing a category row the way T1 does
 HANDLE_OF_LABEL = {c.label: c.handle for c in categories.CATEGORIES}
 
