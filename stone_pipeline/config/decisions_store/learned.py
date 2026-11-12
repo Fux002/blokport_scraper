@@ -45,6 +45,11 @@ def propose_learned_aliases(proposals: Iterable[dict]) -> int:
     rows = [_row(p) for p in proposals]
     if not rows:
         return 0
+    if not store.config_db_path().exists():
+        # The produce writes here on its own (no operator act), so on a host with no config.db yet (a laptop run,
+        # CI's certify) this write would create the store EMPTY, and load_sources would then read that store and find
+        # no sources. Seed it from sources.yaml first, exactly as the config server does at boot.
+        store.seed_from_yaml()
     now = _now()
     with closing(store.open_store()) as conn, conn:
         return sum(conn.execute(
