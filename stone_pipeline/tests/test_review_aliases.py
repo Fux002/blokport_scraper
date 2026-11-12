@@ -32,6 +32,7 @@ from stone_pipeline.tests import test_reset_config_coordination as reset_tests
 KEY = "granite__kashmir_gold_a"
 SIBLING = "granite__kashmir_gold_b"
 BYSTANDER = "marble__bianco_carrara_c"
+OTHER_GRANITE = "granite__absolute_black_d"
 CARD_FIELDS = {"id", "identity_key", "variety", "stone_type", "value", "norm", "method", "source", "score",
                "status", "first_seen", "decided_by", "decided_at"}
 
@@ -53,7 +54,8 @@ def ledger(tmp_path, monkeypatch):
     now = now_iso()
     with Ledger.open(path, env="development") as lg:
         for key, name, type_ in ((KEY, "Kashmir Gold", "Granite"), (SIBLING, "Kashmir Gold", "Granite"),
-                                 (BYSTANDER, "Bianco Carrara", "Marble")):
+                                 (BYSTANDER, "Bianco Carrara", "Marble"),
+                                 (OTHER_GRANITE, "Absolute Black", "Granite")):
             lg.upsert("variation", {"key": key, "type": type_, "name": name, "aliases": "[]", "medusa_id": None,
                                     "in_full": 1, "payload_hash": "", "state": "pending", "first_seen": now,
                                     "last_synced": None, "created_at": now, "updated_at": now}, pk=("key",))
@@ -192,6 +194,44 @@ def test_a_malformed_id_is_400(config_db, ledger, bad):
         code, out = server.dispatch(method, ["review", "aliases", quote(bad, safe="")], body)
         assert code == 400 and "id" in out["error"]
     assert _rows()[0]["status"] == "proposed"
+
+
+# --- approve keeps C1's alias boundary at the decision itself --------------------------------------------------------
+
+@pytest.mark.parametrize("value, key, reason", [
+    ("G603", KEY, "is_code"),                          # the pack's code pattern accepts it: a code, never an alias
+    ("Kashmir Gold", KEY, "own_name"),                 # the variety's own name
+    ("Kashmir Gold Granite", KEY, "own_name_type_word"),
+    ("Absolute Black", KEY, "same_type_name"),         # another live granite's name
+    ("Granite", KEY, "bare_vocabulary_word"),
+])
+def test_approve_refuses_a_value_the_alias_boundary_refuses(config_db, ledger, value, key, reason):
+    _propose(value, key=key)
+    code, body = _decide(value, "approve", key=key)
+    assert code == 400 and body["reason"] == reason and reason in body["error"]
+    assert [r["status"] for r in _rows()] == ["proposed"]                       # the row is unchanged
+    assert decisions_store.active_learned_aliases() == []
+
+
+def test_approve_refuses_a_key_with_no_live_variety(config_db, ledger):
+    _propose("Ghost Spelling", key="granite__gone_z")
+    code, body = _decide("Ghost Spelling", "approve", key="granite__gone_z")
+    assert code == 400 and body["reason"] == "no_live_key"
+    assert [r["status"] for r in _rows()] == ["proposed"]
+
+
+def test_reject_is_allowed_on_a_value_the_boundary_refuses(config_db, ledger):
+    _propose("G603")
+    code, body = _decide("G603", "reject")
+    assert code == 200 and body["status"] == "rejected"
+
+
+def test_approve_with_no_ledger_is_a_503_naming_it(config_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "absent.db"))
+    _propose("Kashmir Golda")
+    code, body = _decide("Kashmir Golda", "approve")
+    assert code == 503 and "ledger" in body["error"]
+    assert [r["status"] for r in _rows()] == ["proposed"]
 
 
 # --- DELETE: the only removal -----------------------------------------------------------------------------------------
