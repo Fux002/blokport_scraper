@@ -6,11 +6,13 @@ stones (adapters/tokens.explicit_type_word into identity.is_mistyped_variant), s
 listed them and drop_deleted_variants cut them from 1_variants_full: on blokport-dev they were never served.
 
 The export now carries `category_handles` on every type row: the '|'-joined product_category handles (D11) the type
-has a valid combination in, '' when it has none. A type is FOREIGN iff its list is non-empty and holds none of the
-pack's category handles; a foreign type is neither a type word nor a vocabulary word and never resolves. '' stays a
-pack type, so a new stone type with no combination yet still types its listings. An attributes.csv without the
-column is refused. Scoped in ONE place, reference.loaders.load_attributes, so every reader of the type vocabulary
-gets the pack's set. Hermetic: a tmp attributes.csv. No em dashes.
+has a valid combination in, '' when it has none. A type is the PACK's iff its list holds one of the pack's category
+handles (Mas's 569 clause, 12 Nov): a type with only other categories, or with none yet, is EXCLUDED, never guessed,
+and LISTED in the run's review/<env>/types_outside_pack.csv. A new stone type enters the pack with its first
+stone-category combination, made on the BE side. An excluded type is neither a type word nor a vocabulary word and
+never resolves. An attributes.csv without the column is refused. Scoped in ONE place,
+reference.loaders.load_attributes, so every reader of the type vocabulary gets the pack's set. Hermetic: a tmp
+attributes.csv. No em dashes.
 """
 
 from __future__ import annotations
@@ -23,12 +25,13 @@ import pytest
 from stone_pipeline import catalog
 from stone_pipeline.adapters import tokens
 from stone_pipeline.reference import loaders
+from stone_pipeline.reference.medusa_files import read_attributes
 
 HEADER = "category,value,sourceid,status,internal,category_handles\n"
 ROWS = (
     "type,Granite,t_granite,active,false,blocks|slabs|tiles\n"
     "type,Marble,t_marble,active,false,blocks|slabs|tiles\n"
-    "type,Gneiss,t_gneiss,active,false,\n"                       # no combination yet: still a stone type
+    "type,Gneiss,t_gneiss,active,false,\n"                       # no combination yet: excluded, listed
     "type,Steel,t_steel,active,false,steel-coils\n"              # only a foreign category: foreign
     "type,Wine,t_wine,active,false,bulk-wine\n"
     "type,Slate,t_slate,active,false,bulk-wine|slabs\n"          # one pack category is enough
@@ -53,14 +56,29 @@ def attributes(tmp_path, monkeypatch) -> Path:
 
 def test_a_type_only_in_foreign_categories_is_not_a_pack_type(attributes):
     attrs = loaders.load_attributes(attributes)
-    assert sorted(attrs.canonical_names("type")) == ["Gneiss", "Granite", "Marble", "Slate"]
+    assert sorted(attrs.canonical_names("type")) == ["Granite", "Marble", "Slate"]
     assert attrs.resolve_id("type", "Steel") is None and attrs.resolve_id("type", "Wine") is None
     assert attrs.resolve_id("type", "Granite") == ("Granite", "t_granite")
 
 
-def test_a_type_with_no_combination_yet_is_still_a_pack_type(attributes):
-    assert loaders.load_attributes(attributes).resolve_id("type", "Gneiss") == ("Gneiss", "t_gneiss")
-    assert "gneiss" in tokens._clear_type_words()
+def test_a_type_with_no_combination_yet_is_excluded_never_guessed(attributes):
+    assert loaders.load_attributes(attributes).resolve_id("type", "Gneiss") is None
+    assert "gneiss" not in tokens._clear_type_words() and "Gneiss" not in tokens.known_values("type")
+
+
+def test_every_excluded_type_is_listed_with_its_reason(attributes, tmp_path, monkeypatch):
+    assert loaders.types_outside_pack(attributes) == [
+        {"type": "Gneiss", "category_handles": "", "reason": "no_combination"},
+        {"type": "Steel", "category_handles": "steel-coils", "reason": "other_categories"},
+        {"type": "Wine", "category_handles": "bulk-wine", "reason": "other_categories"},
+    ]
+    review = tmp_path / "review"
+    monkeypatch.setattr(catalog, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(review_dir=review,
+                                                                                   attributes_csv=attributes)))
+    assert catalog.write_types_outside_pack() == 3
+    assert (review / "types_outside_pack.csv").read_text(encoding="utf-8-sig").splitlines() == [
+        "type,category_handles,reason", "Gneiss,,no_combination", "Steel,steel-coils,other_categories",
+        "Wine,bulk-wine,other_categories"]
 
 
 def test_a_type_with_one_pack_category_among_foreign_ones_is_a_pack_type(attributes):
@@ -112,11 +130,27 @@ def test_the_fetch_refuses_an_attributes_download_without_category_handles(tmp_p
 
 
 _REPO = Path(__file__).resolve().parents[2]
-_COMMITTED = sorted([*(_REPO / "from_medusa").glob("*/attributes.csv"),
-                     *(_REPO / "stone_pipeline" / "tests" / "fixtures").rglob("attributes.csv")])
 
 
-@pytest.mark.parametrize("path", _COMMITTED, ids=lambda p: str(p.relative_to(_REPO)))
-def test_each_committed_attributes_file_carries_category_handles(path):
-    attrs = loaders.load_attributes(path)                                   # refuses a file without the column
-    assert attrs.canonical_names("type")
+def test_the_committed_dev_attributes_carry_blokport_dev_s_real_handles():
+    # SOURCE (never inferred): P1X's read of blokport-dev, full-model-plan/569-type-categories/runs/
+    # 55988743-blokport-dev-20261112T1307Z.out (sha256 1d2bba1f582489752b2709835a86d7b48b1c974df4f17f38442381a50d3044a2):
+    # 30 stone types in blocks|slabs|tiles, and Dolomite Marble with no live combination.
+    path = _REPO / "from_medusa" / "development" / "attributes.csv"
+    types = {v.value: v.category_handles for v in read_attributes(path, require_status=False,
+                                                                     require_category_handles=True)
+             if v.category == "type"}
+    assert len(types) == 31 and types.pop("Dolomite Marble") == ()
+    assert set(types.values()) == {("blocks", "slabs", "tiles")}
+    assert loaders.types_outside_pack(path) == [
+        {"type": "Dolomite Marble", "category_handles": "", "reason": "no_combination"}]
+    assert len(loaders.load_attributes(path).canonical_names("type")) == 30
+
+
+def test_the_wood_fixture_s_handles_are_synthetic_test_data():
+    # SYNTHETIC: the wood fixture is test data, not an export; its types carry the wood pack's own three handles
+    path = _REPO / "stone_pipeline" / "tests" / "fixtures" / "wood" / "workspace" / "from_medusa" / "development" \
+        / "attributes.csv"
+    handles = {v.category_handles for v in read_attributes(path, require_status=False, require_category_handles=True)
+               if v.category == "type"}
+    assert handles == {("beams", "panels", "planks")}
