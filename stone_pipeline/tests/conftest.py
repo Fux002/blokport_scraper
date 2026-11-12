@@ -54,10 +54,33 @@ def _isolate_magnitude_baselines(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(magnitude_drift, "_path", lambda: path)
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_config_store_for_the_session(tmp_path_factory):
+    """The same isolation for a module-scoped fixture, which runs before the per-test one below: a pipeline run there
+    proposes its learned aliases into config.db (P2-10 C2), and must never reach the checkout's own config.db (CI's
+    `certify all` then read that store and found no sources)."""
+    absent = tmp_path_factory.mktemp("noconfig_session") / "absent.db"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("BLOKPORT_CONFIG_DB", str(absent))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_config_store(monkeypatch, tmp_path_factory):
     absent = tmp_path_factory.mktemp("noconfig") / "absent.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
+
+
+@pytest.fixture
+def seeded_config_store(monkeypatch, tmp_path_factory):
+    """A private config.db seeded from the committed sources.yaml, as the config server seeds it at boot. For a test
+    that runs several sources in one process: a run proposes its learned guesses into config.db (P2-10 C2), and a
+    store first created by that write would hold no sources, so the next source's load_source would find none."""
+    from stone_pipeline.config import store
+    path = tmp_path_factory.mktemp("config") / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
+    return path
 
 
 @pytest.fixture(autouse=True)
