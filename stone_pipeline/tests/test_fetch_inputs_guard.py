@@ -246,16 +246,16 @@ def test_the_produce_fetch_stops_loud_on_a_malformed_attributes_file(tmp_path, m
     for problem, body in _MALFORMED_ATTRIBUTES.items():
         local = _committed(tmp_path, 26)
         before = local.read_text()
-        with pytest.raises(ValueError, match="attributes.csv"):
+        with pytest.raises(fetch_inputs.AttributesUnavailable, match="attributes.csv"):
             _main_with(tmp_path, monkeypatch, "attributes.csv", body)
         assert local.read_text() == before, problem                 # the good local file stays
         assert not local.with_suffix(".csv.incoming").exists()
 
 
 def test_the_produce_fetch_never_writes_a_malformed_attributes_file_where_none_was(tmp_path, monkeypatch):
-    with pytest.raises(ValueError):
+    with pytest.raises(fetch_inputs.AttributesUnavailable):
         _main_with(tmp_path, monkeypatch, "attributes.csv", _MALFORMED_ATTRIBUTES["empty status cell"])
-    assert list(tmp_path.iterdir()) == []
+    assert [p.name for p in tmp_path.iterdir()] == ["attributes.csv.unavailable"]     # only the recorded reason
 
 
 def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeypatch):

@@ -108,14 +108,17 @@ def test_a_later_successful_fetch_clears_it(attributes, tmp_path, monkeypatch):
     assert server.dispatch("GET", ["types"], None)[0] == 200
 
 
+class _Listing(_S3):
+    """The produce's view of S3: the from_medusa/ prefix lists attributes.csv alone."""
+
+    def get_paginator(self, _):
+        key = f"{medusa_inputs.ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
+        return SimpleNamespace(paginate=lambda **k: [{"Contents": [{"Key": key}]}])
+
+
 def test_the_produce_s_successful_fetch_clears_it(attributes, tmp_path, monkeypatch):
     _boot(monkeypatch, tmp_path, _S3(THIN))
-
-    class _Client(_S3):
-        def get_paginator(self, _):
-            key = f"{medusa_inputs.ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
-            return SimpleNamespace(paginate=lambda **k: [{"Contents": [{"Key": key}]}])
-    monkeypatch.setattr(medusa_inputs, "aws_client", lambda *a, **k: _Client(FULLER))
+    monkeypatch.setattr(medusa_inputs, "aws_client", lambda *a, **k: _Listing(FULLER))
     medusa_inputs.fetch_all()
     assert server.dispatch("GET", ["types"], None)[0] == 200
 
@@ -124,3 +127,28 @@ def test_every_fetch_outside_the_boot_still_refuses_loud(attributes):
     # one refusing path (34's rev 2): the photos run and a photos page raise; only the BOOT records instead of raising
     with pytest.raises(medusa_inputs.AttributesUnavailable, match="thin"):
         medusa_inputs.fetch_attributes(client=_S3(THIN))
+
+
+def test_the_produce_s_fetch_refuses_a_thin_copy_loud_and_leaves_the_local_file(attributes, monkeypatch):
+    # the manager's ruling (G10's attributes half): a produce never runs on the local vocab during a Medusa reset
+    before = attributes.read_text(encoding="utf-8")
+    monkeypatch.setattr(medusa_inputs, "aws_client", lambda *a, **k: _Listing(THIN))
+    with pytest.raises(medusa_inputs.AttributesUnavailable, match=r"thin \(2 lines against 101 in the local copy\)"):
+        medusa_inputs.fetch_all()
+    assert attributes.read_text(encoding="utf-8") == before
+    assert sorted(p.name for p in attributes.parent.iterdir()) == ["attributes.csv", "attributes.csv.unavailable"]
+    assert _unavailable(server.dispatch("GET", ["types"], None), "thin")          # and the server says so
+
+
+@pytest.mark.parametrize("production", [True, False])
+def test_a_refused_attributes_fetch_stops_the_produce_in_every_environment(monkeypatch, production):
+    # produce._fetch_inputs keeps development best-effort for an S3 outage, but a refused vocabulary is no outage
+    from stone_pipeline import produce
+
+    def refused():
+        raise medusa_inputs.AttributesUnavailable("the S3 copy looks thin (2 lines against 101 in the local copy)")
+    monkeypatch.setattr(medusa_inputs, "fetch_all", refused)
+    monkeypatch.setattr(produce, "IS_PRODUCTION", production, raising=False)
+    with pytest.raises(SystemExit) as stop:
+        produce._fetch_inputs()
+    assert stop.value.code == 2
