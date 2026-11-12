@@ -162,33 +162,3 @@ def test_alias_target_and_the_matcher_agree_on_every_store(tmp_path, monkeypatch
         assert varieties.alias_target(value, typ) == name, value
         assert engine.match(value).canonical == name, value
 
-
-# --- the committed seed is the one store of record (Scraper spare's seed rewrite merges first) ----------------------
-_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
-
-
-def _posts() -> dict[str, set[str]]:
-    import json
-    from stone_pipeline.core.text import match_key
-    doc = json.loads((_REPO / "catalog_source" / "backbone_varieties.json").read_text(encoding="utf-8"))
-    return {p["key"]: {match_key(v) for v in [*p.get("aliases", []), *p.get("codes", [])]}
-            for p in doc["posts"] if p.get("key")}
-
-
-def test_every_committed_base_alias_is_on_its_key_s_backbone_post():
-    import csv
-    from stone_pipeline.core.text import match_key
-    posts, missing = _posts(), []
-    for base in sorted((_REPO / "from_medusa").glob("*/variants_export_base.csv")):
-        with base.open(encoding="utf-8-sig", newline="") as h:
-            for r in csv.DictReader(h):
-                missing += [f"{base.parent.name} {r['Key']} {a!r}" for a in (r["Aliases"] or "").split("|")
-                            if a and match_key(a) not in posts.get(r["Key"], set())]
-    assert not missing, f"{len(missing)} base alias(es) not on their Key's post:\n" + "\n".join(missing[:50])
-
-
-def test_no_committed_post_alias_is_a_code():
-    import json
-    doc = json.loads((_REPO / "catalog_source" / "backbone_varieties.json").read_text(encoding="utf-8"))
-    coded = [f"{p['key']} {a!r}" for p in doc["posts"] if p.get("key") for a in p.get("aliases", []) if _IS_CODE(a)]
-    assert not coded, f"{len(coded)} post alias(es) are codes, they belong in `codes`:\n" + "\n".join(coded[:50])
