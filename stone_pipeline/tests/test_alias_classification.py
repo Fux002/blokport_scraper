@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from stone_pipeline.aliases import cleanup
+from stone_pipeline.core import text
 from stone_pipeline.core.alias_problem import code_matcher
 from stone_pipeline.core.text import match_key
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -508,3 +509,17 @@ def test_the_route_writes_the_open_items_and_reports_the_admin_rows(service, mon
     assert code == 200 and (body["open_items"], body["admin_rows"]) == (1, "absent")
     assert open_items.read_open_items(tmp_path / "review" / open_items.OPEN_FILE) == [
         {"kind": "digit_non_code", "key": KASH, "value": "Bianco 2000", "reason": "digit_not_code"}]
+
+
+def test_a_non_latin_value_is_classed_on_its_own_row_never_merged_with_its_latin_part(ledger):
+    # Mas, 13 Nov: values key by alias_key. match_key reads a pure-CJK value as empty (the whole file refused) and a
+    # mixed one as its Latin part (merged into that row); alias_key keeps the script, so each is its own row
+    alias_key = getattr(text, "alias_key", match_key)
+    values = ["Wratza 维纳多", "Wratza", "巴比伦金"]
+    _variation(ledger, ABS, "Absolute Black", "Granite", aliases=values)
+    stores = cleanup.Stores(seed={ABS: frozenset(alias_key(v) for v in values)}, operator={}, learned={},
+                            is_code=code_matcher(r"[Gg]\d+[A-Za-z]?"))
+    result = cleanup.classify(ledger, stores)
+    assert [d for d in result.differences if d[2] == "refused"] == []
+    assert _rows(result) == [(ABS, "Wratza", "seed"), (ABS, "Wratza 维纳多", "seed"),
+                             (ABS, "巴比伦金", "seed")]

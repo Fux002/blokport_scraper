@@ -116,28 +116,28 @@ def test_set_decision_validates_attribute_and_action():
 
 # -- the pending queue (surface -> decided drops off) --------------------------
 
-def test_surface_then_decided_drops_off_the_queue():
+def test_surface_then_decided_drops_off_the_queue(seeded_config_store):
     assert decisions.write_backbone_leaf_pending([_suggestion()]) == 1
     assert [i["add_value"] for i in ds.list_pending("backbone_leaf")] == ["B"]
     ds.approve_leaf_pending()
     assert decisions.write_backbone_leaf_pending([_suggestion()]) == 0   # decided -> not re-surfaced
 
 
-def test_incomplete_suggestions_are_skipped():
+def test_incomplete_suggestions_are_skipped(seeded_config_store):
     rows = [_suggestion(), {"variety": "", "attribute": "quality", "add_value": "B"}]
     assert decisions.write_backbone_leaf_pending(rows) == 1              # the blank-variety row is dropped
 
 
 # -- the review API (:4200) ----------------------------------------------------
 
-def test_get_lists_pending_with_current_action():
+def test_get_lists_pending_with_current_action(seeded_config_store):
     decisions.write_backbone_leaf_pending([_suggestion(verdict="verify_match")])
     code, body = server.dispatch("GET", ["review", "backbone"], None)
     assert code == 200 and body["backbone"][0]["add_value"] == "B"
     assert body["backbone"][0]["current_action"] is None                # undecided
 
 
-def test_pending_item_carries_the_ref_the_put_accepts():
+def test_pending_item_carries_the_ref_the_put_accepts(seeded_config_store):
     # The review UI enables approve/reject off b.ref; the composite leaf ref cannot be rebuilt client-side
     # from the display fields, so the GET must hand it over -- and it must be exactly the ref the PUT resolves.
     decisions.write_backbone_leaf_pending([_suggestion()])
@@ -148,7 +148,7 @@ def test_pending_item_carries_the_ref_the_put_accepts():
     assert code == 200 and ds.backbone_leaf_overlay() == {("tiger black", "granite"): {"quality": ["B"]}}
 
 
-def test_put_single_verdict_then_reflected():
+def test_put_single_verdict_then_reflected(seeded_config_store):
     decisions.write_backbone_leaf_pending([_suggestion()])
     ref = "|".join(("tiger black", "granite", "quality", "b"))
     code, body = server.dispatch("PUT", ["review", "backbone", ref], {"action": "approve"})
@@ -158,7 +158,7 @@ def test_put_single_verdict_then_reflected():
     assert server.dispatch("GET", ["review", "backbone"], None)[1]["backbone"][0]["current_action"] == "approve"
 
 
-def test_put_bad_action_is_400_and_unknown_ref_is_404():
+def test_put_bad_action_is_400_and_unknown_ref_is_404(seeded_config_store):
     decisions.write_backbone_leaf_pending([_suggestion()])
     ref = "|".join(("tiger black", "granite", "quality", "b"))
     assert server.dispatch("PUT", ["review", "backbone", ref], {"action": "nope"})[0] == 400
@@ -166,7 +166,7 @@ def test_put_bad_action_is_400_and_unknown_ref_is_404():
     assert server.dispatch("PUT", ["review", "backbone", "no|such|quality|x"], {"action": "approve"})[0] == 404
 
 
-def test_bulk_approve_all_and_by_verdict():
+def test_bulk_approve_all_and_by_verdict(seeded_config_store):
     decisions.write_backbone_leaf_pending([
         _suggestion(value="B", verdict="likely_real"),
         _suggestion(attribute="finish", value="Honed", verdict="verify_match")])

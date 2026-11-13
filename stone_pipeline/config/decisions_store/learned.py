@@ -1,5 +1,6 @@
 """Learned aliases (P2-10 C2): the spellings the pipeline GUESSED for a variety, in config.db `learned_alias`, keyed by
-the variety's identity Key and norm = core.text.match_key(value).
+the variety's identity Key and norm = core.text.alias_key(value) (match_key for an all-Latin value, so no stored
+row's norm changes).
 
 The lifecycle is one rule: the matcher's guesses and curate's alias arms PROPOSE; an operator decision makes a row
 ACTIVE or REJECTED; only an active row is a matcher input. A (Key, norm) holds one row, so a proposal never
@@ -12,7 +13,7 @@ from contextlib import closing
 from typing import Iterable
 
 from stone_pipeline.config import store
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key
 
 from ._common import InvalidDecision, _now
 
@@ -28,21 +29,9 @@ def active_learned_aliases() -> list[dict]:
             f"SELECT {', '.join(_COLUMNS)} FROM learned_alias WHERE status = 'active' ORDER BY identity_key, norm")]
 
 
-def _existing_store():
-    """A write connection to config.db, which must already exist. Every learned-alias writer goes through here: the
-    store is created only by the config server's boot (restore from S3, then seed from sources.yaml), never by a write.
-    A write that created it would leave an EMPTY store that hides sources.yaml from load_sources, and on the service a
-    present local file would make the boot skip its restore (a stale store)."""
-    path = store.config_db_path()
-    if not path.exists():
-        raise store.ConfigStoreError(f"config.db absent at {path}: the produce writes learned proposals only into an "
-                                     "existing store (the config server creates it: restore, then seed)")
-    return store.open_store(path)
-
-
 def _row(proposal: dict) -> tuple:
     key, value = (proposal.get("identity_key") or "").strip(), (proposal.get("value") or "").strip()
-    norm = match_key(value)
+    norm = alias_key(value)
     if not key or not norm:
         raise InvalidDecision(f"a learned alias needs an identity Key and a value with a key: {proposal!r}")
     return (key, value, norm, (proposal.get("method") or "").strip(), (proposal.get("source") or "").strip(),
@@ -58,7 +47,7 @@ def propose_learned_aliases(proposals: Iterable[dict]) -> int:
     if not rows:
         return 0
     now = _now()
-    with closing(_existing_store()) as conn, conn:
+    with closing(store.open_existing_store()) as conn, conn:
         return sum(conn.execute(
             "INSERT OR IGNORE INTO learned_alias (identity_key, value, norm, method, source, score, status, "
             "first_seen) VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?)", (*row, now)).rowcount for row in rows)
@@ -69,10 +58,10 @@ def decide_learned_alias(identity_key: str, value: str, status: str, decided_by:
     'rejected' (never proposed again). False when no such row exists (nothing changes)."""
     if status not in _DECISIONS:
         raise InvalidDecision(f"a learned alias is decided 'active' or 'rejected', not {status!r}")
-    with closing(_existing_store()) as conn, conn:
+    with closing(store.open_existing_store()) as conn, conn:
         return conn.execute("UPDATE learned_alias SET status = ?, decided_by = ?, decided_at = ? "
                             "WHERE identity_key = ? AND norm = ?",
-                            (status, decided_by, _now(), identity_key, match_key(value))).rowcount == 1
+                            (status, decided_by, _now(), identity_key, alias_key(value))).rowcount == 1
 
 
 def learned_migration_done(name: str) -> bool:
@@ -88,7 +77,7 @@ def record_learned_migration(name: str, rows: Iterable[dict]) -> int:
     rows written."""
     now = _now()
     written = 0
-    with closing(_existing_store()) as conn, conn:
+    with closing(store.open_existing_store()) as conn, conn:
         for row in map(_row, rows):
             written += conn.execute(
                 "INSERT INTO learned_alias (identity_key, value, norm, method, source, score, status, first_seen, "

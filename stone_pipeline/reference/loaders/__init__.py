@@ -36,7 +36,7 @@ from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.reference.loaders.attributes import (VOCAB_CATEGORIES, Attributes,
                                                          attributes_status_required, load_attributes,
-                                                         restricted_ids, restricted_values)
+                                                         restricted_ids, restricted_values, types_outside_pack)
 from stone_pipeline.reference.loaders.backbone import Backbone, BackboneVariety, load_backbone
 from stone_pipeline.reference.loaders.common import log, norm as _norm
 from stone_pipeline.reference.loaders.identity import (collapse_to_survivors, is_mistyped_variant,
@@ -58,6 +58,7 @@ from stone_pipeline.reference.loaders.variants import (ExistingVariants, Variant
 __all__ = [
     "IS_PRODUCTION", "SETTINGS", "content_hash", "log",
     "Attributes", "VOCAB_CATEGORIES", "load_attributes", "attributes_status_required", "restricted_values",
+    "types_outside_pack",
     "restricted_ids",
     "Backbone", "BackboneVariety", "load_backbone",
     "collapse_to_survivors", "is_mistyped_variant", "pristine_seed_keys", "survivor_of", "type_slug_from_key",

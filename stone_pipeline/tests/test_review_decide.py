@@ -176,6 +176,7 @@ def test_delete_decide_clears():
 
 
 def test_variety_card_carries_the_spellings_a_statement_is_keyed_on():
+    store.seed_from_yaml()                            # the config server boot creates the store
     from stone_pipeline.stages import decisions as stage_decisions
     pending = [{"variant": "Amazon Green", "reason": "r", "stone_type": "Granite", "src": "marenostone",
                 "scraped": "Amazon Green Granite", "sources": ["marenostone"]},
@@ -230,6 +231,7 @@ def test_resolved_is_empty_without_a_produce(tmp_path):
 # --- one list, one card shape -------------------------------------------------------------------------------
 
 def test_variants_list_includes_origin_confirmations_as_origin_cards():
+    store.seed_from_yaml()                            # the config server boot creates the store
     from stone_pipeline.stages import decisions as stage_decisions
     stage_decisions.write_confirm_file([{"variant": "Amazon Green", "reason": "r", "stone_type": "Granite",
                                          "src": "marenostone", "scraped": "Amazon Green Granite", "kind": "collision",
@@ -265,6 +267,7 @@ def test_a_vendor_naming_a_different_stone_from_a_global_mint_gets_its_own_level
 
 
 def test_a_card_shared_by_two_vendors_decides_each_listing_under_its_own_vendor():
+    store.seed_from_yaml()                            # the config server boot creates the store
     from stone_pipeline.stages import decisions as stage_decisions
     stage_decisions.write_confirm_file([
         {"variant": "Via Lactea", "reason": "r", "stone_type": "Granite", "src": "polonine",

@@ -336,7 +336,7 @@ def _env_stores(root: Path, env: str) -> StorePaths:
     (d / "additions.json").write_text(json.dumps([
         {"key": "block_avocatus_u7", "variant": "Avocatus", "stone_type": ""}]), encoding="utf-8")
     (d / "attributes.csv").write_text(
-        "category,value,sourceid\ntype,Marble,1\ntype,Granite,2\ntype,Onyx,3\ncolor,Black,4\n", encoding="utf-8")
+        "category,value,sourceid,handle\ntype,Marble,1\ntype,Granite,2\ntype,Onyx,3\ncolor,Black,4\n", encoding="utf-8")
     return StorePaths(env=env, ledger_db=d / "ledger.db", config_db=d / "config.db", base_csv=d / "base.csv",
                       backbone_files=(d / "backbone.json",), backbone_additions=(d / "additions.json",),
                       attributes_csv=d / "attributes.csv")
@@ -359,7 +359,7 @@ def test_generate_end_to_end(tmp_path):
 
 def test_vocab_loads_only_type_rows(tmp_path):
     p = tmp_path / "attributes.csv"
-    p.write_text("category,value,sourceid\ntype,Marble,1\ncolor,Marble,2\ntype,Dolomite Marble,3\n",
+    p.write_text("category,value,sourceid,handle\ntype,Marble,1\ncolor,Marble,2\ntype,Dolomite Marble,3\n",
                  encoding="utf-8")
     vocab = load_type_vocab([p])
     assert vocab == {"marble": {"Marble"}, "dolomite_marble": {"Dolomite Marble"}}

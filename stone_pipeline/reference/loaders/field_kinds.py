@@ -1,8 +1,10 @@
 """The kind of every name field the scraper writes, read from the backend's field-kinds.json (PHASE-0 N16).
 
 The backend publishes the ONE map; this module is its one reader, so no second list of kinds exists in code. A field
-is a NAME (`clean_name`: ASCII letters, digits, spaces, hyphens and apostrophes; displayed title-cased) or an
-IDENTIFIER (`clean_identifier`: printable ASCII, punctuation and case kept). There is no default map and no default
+is a NAME (`clean_name`: ASCII letters, digits, spaces, hyphens and apostrophes; displayed title-cased), an
+IDENTIFIER (`clean_identifier`: printable ASCII, punctuation and case kept), or an ALIAS (`clean_alias`: letters of any
+script kept as written, ASCII digits, spaces, hyphens and apostrophes; displayed title-cased; 34's OWNED-NAMES-CLEAN
+row, variation_alias.value). There is no default map and no default
 kind: an absent, malformed or foreign file, or one that does not list a field the scraper writes, is a load error.
 """
 
@@ -13,7 +15,7 @@ import json
 from pathlib import Path
 
 from stone_pipeline.config.settings import BRAND, SETTINGS
-from stone_pipeline.core.text import clean_identifier, clean_name, title_case
+from stone_pipeline.core.text import clean_alias, clean_identifier, clean_name, title_case
 
 COLOR_NAME = "color.name"
 FINISH_NAME = "finish.name"
@@ -35,7 +37,9 @@ REQUIRED = frozenset({
     PRODUCT_ORIGIN_CITY, PRODUCT_ORIGIN_COUNTY, PRODUCT_TITLE, PRODUCT_CATEGORY_NAME, QUALITY_NAME, TYPE_NAME,
     VARIATION_NAME, VARIATION_ALIAS_VALUE,
 })
-NAME, IDENTIFIER = "name", "identifier"
+NAME, IDENTIFIER, ALIAS = "name", "identifier", "alias"
+# each kind's cleaning rule (core/text.py), the one dispatch clean() and display() read
+_CLEAN = {NAME: clean_name, IDENTIFIER: clean_identifier, ALIAS: clean_alias}
 # the attribute vocabularies (review cards, the attribute-id route) and the field each one's value is
 ATTRIBUTE_FIELDS = {"color": COLOR_NAME, "finish": FINISH_NAME, "type": TYPE_NAME, "quality": QUALITY_NAME}
 
@@ -68,7 +72,7 @@ def parse(raw: bytes, where) -> dict[str, str]:
     missing = sorted(REQUIRED - fields.keys())
     if missing:
         raise FieldKindsError(f"{where}: missing fields {missing}")
-    unknown = sorted(f"{k}={v!r}" for k, v in fields.items() if v not in (NAME, IDENTIFIER))
+    unknown = sorted(f"{k}={v!r}" for k, v in fields.items() if v not in _CLEAN)
     if unknown:
         raise FieldKindsError(f"{where}: unknown kind {unknown}")
     return dict(fields)
@@ -106,10 +110,14 @@ def require_present() -> None:
 
 
 def clean(field: str, text: str) -> str:
-    """`text` cleaned by its field's kind; raises UnfoldableName for a letter with no ASCII form."""
-    return clean_name(text) if kind(field) == NAME else clean_identifier(text)
+    """`text` cleaned by its field's kind; raises UnfoldableName for a letter with no ASCII form (name, identifier) and
+    AliasRefused for a refused alias (alias)."""
+    return _CLEAN[kind(field)](text)
 
 
 def display(field: str, text: str) -> str:
-    """`text` as the scraper writes it: a name is cleaned and title-cased, an identifier cleaned with its case kept."""
-    return title_case(clean_name(text)) if kind(field) == NAME else clean_identifier(text)
+    """`text` as the scraper writes it: a name or an alias is cleaned and title-cased (casing only, any script), an
+    identifier cleaned with its case kept."""
+    field_kind = kind(field)
+    cleaned = _CLEAN[field_kind](text)
+    return cleaned if field_kind == IDENTIFIER else title_case(cleaned)
