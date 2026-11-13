@@ -66,3 +66,26 @@ def test_the_review_decisions_doc_names_no_scoped_alias_table():
     # the vendor alias is a vendor `is` statement (config.db `statement`); the scoped_alias table is a legacy one the
     # store migrates away (config/store.py _LEGACY_DECISION_TABLES)
     assert "scoped_alias" not in (REPO / "REVIEW_DECISIONS.md").read_text(encoding="utf-8")
+
+
+# --- emit and curate: what C2 and C4 took (P2-10 C7's last two deletions) -------------------------------------------
+
+def test_emit_reads_no_variants_file_s_aliases(tmp_path):
+    # emit's base-as-input alias merge is gone: a variety's aliases come from the alias stores alone (C4 D1/D3), so
+    # a file's Aliases cells never reach a row
+    from stone_pipeline.phase1.variety_key import new_key
+    from stone_pipeline.stages import emit_catalog
+    base = tmp_path / "variants_export_base.csv"
+    base.write_text(f"Key,Name,Type,Aliases\n{new_key('Marble', 'Casa Blue')},Casa Blue,Marble,Azul Casa|Casablue\n",
+                    encoding="utf-8")
+    assert [r["Aliases"] for r in emit_catalog._rows(base)] == [""]
+
+
+def test_curate_s_delta_reads_no_alias():
+    # curate's global learned-alias write is gone: a spelling for an EXISTING variety is a learned_alias proposal (C2),
+    # and the delta holds only Keys the export lacks (C4 D4), so the delta writer never reads a row's aliases
+    tree = ast.parse((PACKAGE / "stages" / "curate" / "output.py").read_text(encoding="utf-8"))
+    found = [node.lineno for node in ast.walk(tree)
+             if (isinstance(node, ast.Constant) and node.value == "Aliases")
+             or (isinstance(node, ast.Attribute) and node.attr == "aliases")]
+    assert found == []
