@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from stone_pipeline.aliases import migrate_learned
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.ledger.db import Ledger, now_iso
 
@@ -298,7 +299,7 @@ def test_save_state_is_a_noop_without_a_writeback(tmp_path, monkeypatch):
 
 def test_restore_state_never_clobbers_a_warm_writeback(tmp_path, monkeypatch):
     fake = _FakeS3()
-    fake.store[(snapshot.S3_BUCKET, snapshot.state_writeback_key("development"))] = b"variation_id,alias,method\nV1,Old,fuzzy\n"
+    fake.store[(snapshot.S3_BUCKET, migrate_learned.writeback_key("development"))] = b"variation_id,alias,method\nV1,Old,fuzzy\n"
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     wb = tmp_path / "alias_writeback.csv"
     monkeypatch.setattr(snapshot, "_writeback_path", lambda env=None: wb)

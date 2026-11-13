@@ -349,7 +349,7 @@ def _finalize_ids(row: CanonicalRow, ref: ReferenceData) -> None:
     row.finish_id = _map_id(ref, "finish", row.finish_name)
     row.quality_id = _map_id(ref, "quality", row.quality_name)
     row.type_id = _map_id(ref, "type", row.type_name)
-    row.category_pcat_id = category_pcat_for_branch(branch_of(row), ref)
+    row.category_pcat_id = category_pcat_for_branch(branch_of(row))
     row.category_method = "branch"
 
 

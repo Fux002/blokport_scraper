@@ -330,9 +330,6 @@ def test_render_combinations_reads_its_temp_dumps_even_when_status_required(monk
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", True)
     monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", True)
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        ledger.upsert("attribute", {"category": "category", "value": "Slabs", "medusa_id": "A",
-                                    "state": "synced", "created_at": now_iso(), "updated_at": now_iso()},
-                      pk=("category", "value"))
         for i, finish in enumerate(category("block").finishes):   # the vocabulary holds block's declared set
             ledger.upsert("attribute", {"category": "finish", "value": finish, "medusa_id": f"F{i}",
                                         "state": "synced", "created_at": now_iso(), "updated_at": now_iso()},

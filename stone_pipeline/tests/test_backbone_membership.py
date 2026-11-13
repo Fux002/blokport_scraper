@@ -66,7 +66,7 @@ def test_overlay_ignores_a_type_less_key():
 
 # -- the durable write: a mint's membership round-trips through config.db ---------------------------------
 
-def test_record_minted_membership_becomes_an_approved_overlay(config_db=None):
+def test_record_minted_membership_becomes_an_approved_overlay(seeded_config_store, config_db=None):
     ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White"),
                                  ("Alpine Luxe", "Granite", "finish", "Polished")])
     overlay = ds.backbone_leaf_overlay()
@@ -77,14 +77,14 @@ def test_record_minted_membership_becomes_an_approved_overlay(config_db=None):
     assert bb.lookup("Alpine Luxe", "Granite").colors == ["White"]
 
 
-def test_record_minted_membership_skips_a_bad_attribute_or_empty_value():
+def test_record_minted_membership_skips_a_bad_attribute_or_empty_value(seeded_config_store):
     n = ds.record_minted_membership([("V", "Granite", "not_an_attr", "X"),
                                      ("V", "Granite", "color", ""), ("V", "Granite", "color", "Red")])
     assert n == 1                                       # only the valid (color, Red) row
     assert ds.backbone_leaf_overlay()[("v", "granite")] == {"color": ["Red"]}
 
 
-def test_write_minted_membership_from_curate_posts():
+def test_write_minted_membership_from_curate_posts(seeded_config_store):
     posts = [{"variant": "Everest Quartzite", "stone_type": "Quartzite",
               "color": ["Grey"], "finishes": ["Honed", "Polished"], "qualities": ["A"]},
              {"variant": "Everest Quartzite", "stone_type": "Quartzite",   # a repeated value, written once
@@ -97,7 +97,7 @@ def test_write_minted_membership_from_curate_posts():
 
 # -- lifecycle: unmint drops the membership beside the statement ------------------------------------------
 
-def test_clear_for_variety_drops_the_membership_it_rode_beside():
+def test_clear_for_variety_drops_the_membership_it_rode_beside(seeded_config_store):
     ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")])
     assert ds.backbone_leaf_overlay()                   # present
     ds.clear_for_variety("Alpine Luxe", "granite")      # unmint's clear
@@ -123,21 +123,21 @@ def test_heal_prefers_the_statement_seed_colour_over_observed():
     assert ds.backbone_leaf_overlay()[("alpine luxe", "granite")] == {"color": ["White"]}   # seed, not Grey
 
 
-def test_heal_falls_back_to_observed_when_no_seed_colour():
+def test_heal_falls_back_to_observed_when_no_seed_colour(seeded_config_store):
     row = _drifted_row("Everest Quartzite", "Quartzite", color="Grey", finish="Honed", quality="A")
     decisions.heal_drifted_membership([row])
     got = ds.backbone_leaf_overlay()[("everest quartzite", "quartzite")]
     assert got == {"color": ["Grey"], "finish": ["Honed"], "quality": ["A"]}
 
 
-def test_heal_leaves_a_colourless_variety_to_surface_honestly():
+def test_heal_leaves_a_colourless_variety_to_surface_honestly(seeded_config_store):
     # no seed colour, no observed colour -> no colour is guessed (it surfaces as needs-a-colour)
     decisions.heal_drifted_membership([_drifted_row("Smoky Quartzite", "Quartzite", finish="Polished")])
     got = ds.backbone_leaf_overlay().get(("smoky quartzite", "quartzite"), {})
     assert "color" not in got and got.get("finish") == ["Polished"]
 
 
-def test_heal_ignores_rows_without_the_drift_flag():
+def test_heal_ignores_rows_without_the_drift_flag(seeded_config_store):
     from stone_pipeline.core.schema import CanonicalRow
     ok = CanonicalRow(src_site="varsha", surrogate_key="s2", variation_name="Fine", type_name="Granite",
                       color_name="Black", review_flags=[])

@@ -23,7 +23,11 @@ from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.derive import derive_inventory
 from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
-from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
+from stone_pipeline.tests._category_registry import LEDGER_PRODUCT_PCATS, set_category_pcats
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
+
+# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's (table 577)
+pytestmark = pytest.mark.usefixtures("slab_category_pcat")
 from stone_pipeline.tests.test_ledger_products import _fixture_rows, _seed_ids
 
 KEY = "marble__pietra_grey_0001"
@@ -50,7 +54,6 @@ def _seed(ledger: Ledger) -> None:
         "medusa_id": "V1", "payload_hash": "", "state": "synced", "first_seen": now,
         "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
     add_icon(ledger, KEY)
-    seed_slab_category(ledger)
 
 
 def _synced(ledger: Ledger, rows, cfg) -> None:
@@ -202,7 +205,9 @@ def test_a_made_to_order_shape_is_live_and_a_vendor_take_offline_delists_it(cfg,
         assert sync.live_products(ledger, ["pol"]) == 0
 
 
-def test_the_ledger_render_of_a_made_to_order_product_equals_emit(cfg, tmp_path):
+def test_the_ledger_render_of_a_made_to_order_product_equals_emit(cfg, tmp_path, monkeypatch):
+    # its rows carry PC1 / PC2: on the registry (table 577), in place of this module's SLAB_PCAT
+    set_category_pcats(monkeypatch, LEDGER_PRODUCT_PCATS)
     rows = _fixture_rows()
     rows[0].made_to_order = True
     columns = emit.read_template_columns()

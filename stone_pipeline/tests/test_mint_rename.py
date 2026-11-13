@@ -33,7 +33,9 @@ RENAMED = "Honey"
 
 @pytest.fixture
 def config_db(tmp_path, monkeypatch):
+    from stone_pipeline.config import store
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml()                            # the config server boot creates the store; a produce never does
     return tmp_path / "config.db"
 
 

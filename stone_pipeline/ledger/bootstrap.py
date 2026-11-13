@@ -19,17 +19,20 @@ from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.payloads import variation_hash
 from stone_pipeline.phase1.variety_key import variety_key_problem
-from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
+from stone_pipeline.reference.medusa_files import CATEGORY_KIND, read_attributes, read_variants_export
 
 
 def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:
     """Load attributes.csv (category, value, sourceid) into the `attribute` table,
     each `synced` with its Medusa id. This is the existing controlled vocabulary;
-    NEW discovered values are a different path (design C3, the pull contract)."""
+    NEW discovered values are a different path (design C3, the pull contract). Category rows are skipped: a
+    category is the registry's, by its exact handle (table 577)."""
     path = Path(path or SETTINGS.paths.attributes_csv)
     now = now_iso()
     n = 0
     for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if a.category == CATEGORY_KIND:
+            continue
         ledger.upsert("attribute", {
             "category": a.category,
             "value": a.value,
@@ -43,13 +46,14 @@ def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:
 
 
 def restore_attribute_ids(ledger: Ledger, path: str | Path | None = None) -> int:
-    """Re-stamp EVERY attribute value's Medusa id (category / color / finish / quality / type) from
-    attributes.csv, marking those rows `synced`. Returns the number restored.
+    """Re-stamp EVERY attribute value's Medusa id (color / finish / quality / type) from attributes.csv, marking
+    those rows `synced`. Returns the number restored. A category is not here: its pcat is the registry's
+    (table 577), so a reset can never null it.
 
     An attribute id is PRE-EXISTING Medusa identity (env vocab carried in from_medusa/<env>/attributes.csv),
     never a scraper-assigned sync id. A global sync reset nulls ALL of them via the attribute overlay reset,
-    but populate/render reads each product's category AND color/finish/quality/type id from this table -- a
-    nulled id emits a product with an empty attribute (and, for category, wedges the pull). open_ledger only
+    but populate/render reads each product's color/finish/quality/type id from this table -- a
+    nulled id emits a product with an empty attribute. open_ledger only
     re-seeds when the variation table is EMPTY, which a non-hard reset never leaves it, so restore here. A
     genuinely NEW value (scraped, not yet in attributes.csv) is absent from the file, so it stays `pending`
     for normal sync -- exactly as before, just no longer limited to the category rows."""
@@ -59,7 +63,7 @@ def restore_attribute_ids(ledger: Ledger, path: str | Path | None = None) -> int
     now = now_iso()
     n = 0
     for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
-        if not a.sourceid:
+        if not a.sourceid or a.category == CATEGORY_KIND:   # a category is the registry's (table 577)
             continue
         n += ledger.execute(
             "UPDATE attribute SET medusa_id = ?, state = 'synced', updated_at = ? "
