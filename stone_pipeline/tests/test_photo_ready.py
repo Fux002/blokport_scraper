@@ -152,7 +152,7 @@ def test_a_hidden_product_dropped_and_back_in_a_run_that_cannot_tell_stays_hidde
     _acked(ledger_path)
     _record(ledger_path, [], discontinued=[(SKU, "h-aaa")],
             replaced={SKU: "L1"} if drop == "replaced_by_lot" else None)
-    assert _state(ledger_path)[1:3] == (False, None if drop == "discontinued" else "replaced_by_lot")
+    assert _state(ledger_path)[1:3] == (False, "no_photo" if drop == "discontinued" else "replaced_by_lot")   # 505
     _record(ledger_path, [_row(None)])              # back, in a run whose photo pool was unread
     assert _state(ledger_path)[1:3] == (False, "no_photo")
 
