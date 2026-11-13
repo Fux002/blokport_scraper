@@ -234,6 +234,30 @@ def _resolve(sources, *, require_non_empty: bool = True):
     return list(sources), [rows[s].source_code for s in sources], None
 
 
+def alias_classification() -> tuple[dict, int]:
+    """POST /config/v1/aliases/classification (P2-10 C5): write and publish the alias classification file and its
+    manifest field from the LIVE ledger and config.db, read-only, in the exclusive slot (no run, no other op), merged
+    into the PUBLISHED manifest. 409 naming the Keys when a variation is not synced, or naming the values no store
+    owns; 409 when busy or no manifest is published; 500 naming a published manifest it cannot read."""
+    from stone_pipeline.aliases import cleanup
+    from stone_pipeline.io import deliverables
+    from stone_pipeline.ledger import writethrough
+    try:
+        with _exclusive("alias_classification"):
+            with writethrough.connect(bind=False) as ledger:
+                return cleanup.publish(ledger), 200
+    except _Busy as exc:
+        return {"error": str(exc)}, 409
+    except cleanup.NotAllSynced as exc:
+        return {"error": str(exc), "keys": exc.keys}, 409
+    except cleanup.Unclassifiable as exc:
+        return {"error": str(exc), "refused": [{"key": k, "value": v, "reason": why} for k, v, why in exc.refused]}, 409
+    except deliverables.PublishedManifestAbsent as exc:
+        return {"error": str(exc)}, 409
+    except deliverables.PublishedManifestUnreadable as exc:
+        return {"error": str(exc)}, 500
+
+
 def _wipe_product_images(ledger, sync) -> dict:
     """The factory reset's image wipe, inside the reset's ledger op (`ledger` and `sync` are the op's): it spares every
     photo of the records the reset spares (sync.kept_photos over db.KEPT_SKUS_SQL: the gone and the delisted listings),

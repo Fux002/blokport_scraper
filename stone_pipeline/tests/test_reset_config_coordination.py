@@ -30,8 +30,9 @@ def _fake_ledger_op(name, work):
 _all, _none = (lambda n, t: True), (lambda n, t: None)   # the seeded statements bind existing varieties
 
 
-def _seed_config(tmp_path, monkeypatch):
+def _seed_config(tmp_path, monkeypatch, yaml_path=None):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)        # the config server boot creates the store; a produce never does
     # a review queue (2 kinds), a pasted attribute id, a mint+seed decision, a retired key, an approved leaf
     decisions_store.replace_pending("variety", [{"ref": "black absolute", "payload": {"variant": "Black Absolute"}}])
     decisions_store.replace_pending("attribute", [{"ref": "finish:leathered", "payload": {"value": "Leathered"}}])
@@ -68,8 +69,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     # the ledger reset itself is covered in test_ledger_sync; here we test only the config coordination
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
 
@@ -97,8 +97,7 @@ def test_global_reset_snapshots_both_stores_immediately_scoped_does_not(tmp_path
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     calls: list[str] = []
 
     def ledger_op_that_snapshots(name, work):
@@ -127,8 +126,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
     monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # pristine wipes images
     # guard the real scrape-cache wipe (rmtree + S3) behind a recorder, so the test never touches real dirs
@@ -163,8 +161,7 @@ def test_pristine_keep_images_skips_the_product_image_wipe(tmp_path, monkeypatch
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
     wipe_calls: list[bool] = []
     monkeypatch.setattr(cleanup_images, "wipe_all_product_images",
@@ -189,8 +186,7 @@ def test_pristine_keep_scrape_skips_the_scrape_cache_wipe(tmp_path, monkeypatch)
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
     monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})
     monkeypatch.setattr(snapshot, "wipe_artifacts",
@@ -277,8 +273,7 @@ def test_only_the_factory_reset_wipes_images(tmp_path, monkeypatch):
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("varsha:\n  source_code: var\n  vendor: V\n"
                          "zucchi:\n  source_code: zuc\n  vendor: Z\n", encoding="utf-8")
-    _seed_config(tmp_path, monkeypatch)
-    store.seed_from_yaml(yaml_path=yaml_path)
+    _seed_config(tmp_path, monkeypatch, yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
     monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
 

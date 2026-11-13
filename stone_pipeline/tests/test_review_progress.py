@@ -78,7 +78,7 @@ def _use(monkeypatch, actions=None, scoped=None, origins=None, widen=None):
     monkeypatch.setattr(ds, "load_decisions", lambda **_: decided)
 
 
-def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
+def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path, seeded_config_store):
     """The regression from prod: "this is an existing variety" is stored in scoped_alias, NOT
     variety_decision. Reading only variety_decision left every aliased card looking untouched."""
     _use(monkeypatch, scoped={("zucchi", "agata dark blue"): ("Agata Blue", "Agate")})   # no mint/reject anywhere
@@ -96,7 +96,7 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     assert out["untouched name"]["decided"] is False
 
 
-def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
+def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch, seeded_config_store):
     """The Gold-card bug: a card's ref is the CLEANED name (type word stripped), but decide() keys a mint
     and an alias on the SCRAPED spelling. Matching on ref alone missed every card whose cleaner stripped a
     suffix. Match on the card's spellings/listings instead."""
@@ -115,7 +115,7 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
     assert card["current_seed_type"] == "Granite"
 
 
-def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
+def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch, seeded_config_store):
     """decide() stores a mint under the scraped spelling, not the ref -- same mismatch class as the alias."""
     _use(monkeypatch, actions={("", "blue dunes quartzite"): {"action": "mint", "alias_of": None,
                                                               "seed_color": None, "seed_type": "Quartzite",
@@ -129,7 +129,7 @@ def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
     assert card["current_seed_type"] == "Quartzite"
 
 
-def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
+def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch, seeded_config_store):
     """The reattachment gap Blokport flagged: a renamed GLOBAL mint is keyed on the scraped spelling
     (a listing value), with NO scoped_alias to catch it. If the card's `spellings` doesn't include that
     listing spelling, the flag missed -> a successful mint showed undecided on refresh."""
@@ -147,7 +147,7 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
     assert card["current_seed_type"] == "Granite"
 
 
-def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
+def test_origin_card_decided_when_its_listing_is_bound(monkeypatch, seeded_config_store):
     """An origin card is keyed (source, variety, type), but confirming it BINDS the vendor spelling -- a
     scoped_alias on the listing (source, scraped). Reading only the origin country by ref missed the bind,
     so a confirmed origin card came back undecided (the Amazon White case)."""
@@ -163,7 +163,7 @@ def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
     assert card["current_alias_of"] == "Silver Stream"
 
 
-def test_every_decided_card_names_its_action(monkeypatch):
+def test_every_decided_card_names_its_action(monkeypatch, seeded_config_store):
     """Invariant Blokport relies on: decided:true always carries current_action (never a bare "Decided").
     Covers the origin-country case (action "origin") that previously had decided:true with no action."""
     _use(monkeypatch, origins={("marenostone", "amazon white", "marble"): "IR"})   # country only, no bind
@@ -176,7 +176,7 @@ def test_every_decided_card_names_its_action(monkeypatch):
     assert card["current_action"] == "origin"          # was None before -> bare "Decided"
 
 
-def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
+def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch, seeded_config_store):
     """When the operator ticked "add to documented origins" (widen), the card shows it -- widened=True and
     the documented country -- keyed on the DECIDED target variety, like the rest of the decision."""
     bound = {("zucchi", "amazon marble"): ("Silver Stream", "Marble")}
@@ -207,7 +207,7 @@ _FOO = ('{"variant": "Foo", "src": "vendor", "scraped": "Foo",'
         ' "listings": [{"source": "vendor", "scraped": "Foo"}]}')
 
 
-def test_a_scoped_bind_supersedes_a_stale_mint_in_the_display(monkeypatch):
+def test_a_scoped_bind_supersedes_a_stale_mint_in_the_display(monkeypatch, seeded_config_store):
     """The card must show the LAST decision. A mint left behind under a different source (a global mint, a
     cross-vendor spelling) that clear_decisions cannot drop must NOT shadow the newer per-vendor bind: the
     card reads the alias, not the superseded mint."""
@@ -223,7 +223,7 @@ def test_a_scoped_bind_supersedes_a_stale_mint_in_the_display(monkeypatch):
     assert card["current_seed_name"] is None            # the stale mint's seeds are gone from the display
 
 
-def test_a_mint_plus_rename_still_reads_as_the_mint(monkeypatch):
+def test_a_mint_plus_rename_still_reads_as_the_mint(monkeypatch, seeded_config_store):
     """A mint+rename writes both a mint and a scoped alias pointing at the minted name -- that is ONE
     decision and must still read as the mint (not be mistaken for a superseding bind)."""
     card = _one_card(monkeypatch,
@@ -240,7 +240,7 @@ _TYPELESS = ('{"variant": "Foo", "src": "vendor", "scraped": "Foo", "stone_type"
              ' "listings": [{"source": "vendor", "scraped": "Foo"}]}')
 
 
-def test_a_decided_type_less_card_is_re_keyable_by_the_decided_type(monkeypatch):
+def test_a_decided_type_less_card_is_re_keyable_by_the_decided_type(monkeypatch, seeded_config_store):
     """A type-less scraped variety carries stone_type='' (the vendor declared no type). Once decided, the
     card must still expose a type so the operator can restate it -- backfilled from the decided (alias
     target / mint) type. Without it the UI has nothing to key on and Confirm cannot fire."""
@@ -254,7 +254,7 @@ def test_a_decided_type_less_card_is_re_keyable_by_the_decided_type(monkeypatch)
     assert card["listings"] == [{"source": "vendor", "scraped": "Foo"}]   # identity fields untouched
 
 
-def test_an_undecided_type_less_card_keeps_its_empty_type(monkeypatch):
+def test_an_undecided_type_less_card_keeps_its_empty_type(monkeypatch, seeded_config_store):
     """Backfill is decided-only: an untouched type-less card stays type-less (there is no decision to key
     it on yet), so nothing is invented."""
     card = _one_card(monkeypatch, actions={}, aliases={}, payload=_TYPELESS)
@@ -262,7 +262,7 @@ def test_an_undecided_type_less_card_keeps_its_empty_type(monkeypatch):
     assert card["stone_type"] == ""
 
 
-def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch):
+def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch, seeded_config_store):
     """An origin card must be restated through the SAME statement as a variety card. It was missing the
     current_seed_* fields the editor uses to prefill/re-key name+type, so the UI locked its name to the
     bound variety. It now carries the decision's target name (current_alias_of) AND type

@@ -26,15 +26,18 @@ def test_a_name_with_no_ascii_form_stops_emit_naming_the_key():
 
 
 def test_aliases_are_split_cleaned_and_their_drops_reported(monkeypatch):
-    # a store's value is cleaned into its pieces by the alias rule; a piece with no ASCII form is dropped and reported
+    # a store's value is cleaned into its pieces by the alias rule (C4); the alias kind (Mas, 13 Nov) keeps every
+    # script and accent: the CJK half is an alias, an accent twin collapses onto the first spelling, and only a
+    # refused alias (mojibake) is dropped and reported
     from stone_pipeline.aliases import stores as alias_stores
     from stone_pipeline.aliases.surfaces import Stores
-    seed = {"granite__x_1": (["Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a", "Ros\u00e9", "rose"],
-                             [])}
+    seed = {"granite__x_1": (["Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a", "Ros\u00e9", "rose",
+                              "K?r?ehir Nero Picasso", "Black Picasso"], [])}
     monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores(seed=seed))
     aliases, codes, dropped = emit_catalog._alias_rows([_row("Wratza")], seed_only=False)
-    assert aliases["granite__x_1"] == [("Wratza Limestone", "seed"), ("Rose", "seed")]
-    assert codes["granite__x_1"] == [] and dropped == [("granite__x_1", "\u7ef4\u7eb3\u591a")]
+    assert aliases["granite__x_1"] == [("Wratza Limestone", "seed"), ("\u7ef4\u7eb3\u591a", "seed"),
+                                       ("Ros\u00e9", "seed"), ("Black Picasso", "seed")]
+    assert codes["granite__x_1"] == [] and dropped == [("granite__x_1", "K?r?ehir Nero Picasso")]
 
 
 def test_a_bracketed_alternative_leaves_the_name_and_is_the_seed_s_alias():

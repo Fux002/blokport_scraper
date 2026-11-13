@@ -189,34 +189,6 @@
     ]
   },
   {
-    "key": "marble__calcite_blue_c9bea828-d948-5e35-9a7f-23bd2879527b",
-    "variant": "Calcite Blue",
-    "stone_type": "Marble",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "merged_from": [],
-    "categories": [
-      "block",
-      "slab",
-      "tile"
-    ]
-  },
-  {
     "key": "quartzite__cappadocia_54f1632b-7478-5ebc-a8d0-f27089622ff9",
     "variant": "Cappadocia",
     "stone_type": "Quartzite",

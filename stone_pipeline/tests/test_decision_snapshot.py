@@ -20,7 +20,7 @@ def snapshots(monkeypatch):
     return calls
 
 
-def test_a_decision_written_through_the_api_is_snapshotted_at_once(snapshots):
+def test_a_decision_written_through_the_api_is_snapshotted_at_once(snapshots, seeded_config_store):
     decisions.write_attributes_to_add([
         {"kind": "finish", "value": "Leathered", "count": 12, "suggested_value": "", "action": "", "medusa_id": ""}])
     code, _ = server.dispatch("PUT", ["review", "attributes", "Leathered"], {"kind": "finish", "medusa_id": "pcol_9"})
@@ -54,6 +54,8 @@ _NO_OPERATOR_DECISION = {
     # writes to S3 (clicks/, owner/, removed/), durable once written, inside the photo process's run lock; config.db is
     # only read (the sources' image pipeline switch)
     ("PUT", ("photos", "clicks", "{sku}")), ("DELETE", ("photos", "clicks", "{sku}")), ("POST", ("photos", "decisions")),
+    # P2-10 C5: the alias classification file, published from the ledger and config.db read-only (no decision recorded)
+    ("POST", ("aliases", "classification")),
 }
 # Every write route that changes the ledger, with a body that reaches its ledger op.
 _LEDGER_WRITES = {

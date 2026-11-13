@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from stone_pipeline.aliases.surfaces import Surfaces
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key, match_key
 
 ALIAS_SIDECAR = "variety_alias_rows.json"
 # the scraper's own methods: the hand rows (admin) are the backend's and are never sent back
@@ -15,10 +15,11 @@ SENT_METHODS = ("seed", "operator", "learned")
 
 
 def rows_of(surfaces: Surfaces) -> tuple[list[dict], list[str]]:
-    """(alias_rows, codes) of one variety: the scraper's values only, each list ordered by match_key (the backend
-    nameKey's paired twin), so the same set always serves, and hashes, the same."""
+    """(alias_rows, codes) of one variety: the scraper's values only, alias_rows ordered by alias_key (the backend
+    aliasKey's paired twin; match_key for an all-Latin value) and codes by match_key, so the same set always serves,
+    and hashes, the same."""
     rows = sorted(({"value": v, "method": m} for v, m in surfaces.aliases if m in SENT_METHODS),
-                  key=lambda r: (match_key(r["value"]), r["value"]))
+                  key=lambda r: (alias_key(r["value"]), r["value"]))
     codes = sorted((v for v, m in surfaces.codes if m in SENT_METHODS), key=lambda v: (match_key(v), v))
     return rows, codes
 

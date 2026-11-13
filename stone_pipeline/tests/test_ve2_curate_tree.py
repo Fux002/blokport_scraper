@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import csv
 
+import pytest
+
 from stone_pipeline.config.categories import category
 from stone_pipeline.core.text import match_key
 from stone_pipeline.stages import tree_build
+from stone_pipeline.tests._category_registry import set_category_pcats, with_handle
 from stone_pipeline.tests.test_tree_build import (_FINISH_IDS, COL, FIN, _backbone, _export, _for,
                                                   _post, _products, _prow)
+
+# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 # the same vocabulary as test_tree_build._attrs, but written WITH status/internal columns so values can be
 # marked archived/internal. sourceids match so backbone/product references resolve.
@@ -30,11 +36,12 @@ def _attrs_status(tmp_path, archived=(), internal=(), name="attributes.csv"):
     p = tmp_path / name
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid", "status", "internal"])
+        w.writerow(["category", "value", "sourceid", "status", "internal", "handle"])
         for cat, val, sid in _ATTR_ROWS:
             w.writerow([cat, val, sid,
                         "archived" if (cat, val) in archived else "active",
-                        "true" if (cat, val) in internal else "false"])
+                        "true" if (cat, val) in internal else "false",
+                        with_handle((cat, val))[-1]])
     return p
 
 
@@ -42,8 +49,8 @@ def _attrs_plain(tmp_path, name="attributes_plain.csv"):
     p = tmp_path / name
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
-        w.writerows(_ATTR_ROWS)
+        w.writerow(["category", "value", "sourceid", "handle"])
+        w.writerows(with_handle(r) for r in _ATTR_ROWS)
     return p
 
 
@@ -160,8 +167,6 @@ def test_an_acked_product_absent_from_this_runs_emit_keeps_its_restricted_tuple(
 # --- curate items 2, 3, 4 ---------------------------------------------------
 
 from types import SimpleNamespace  # noqa: E402
-
-import pytest  # noqa: E402
 
 from stone_pipeline.matching import projections as proj  # noqa: E402
 from stone_pipeline.reference import loaders  # noqa: E402
@@ -280,7 +285,7 @@ def test_a_global_mint_is_held_by_any_vendors_ve2_card():
     assert not any(g["decision"] == "mint" for g in held)   # global held by varsha's card -> no duplicate gap
 
 
-def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards():
+def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards(seeded_config_store):
     # fix 3: the archived_variety card's stone_type gives it a (name, type) ref, so write_confirm_file keeps it
     # separate from a type-less listing of the same name (which would otherwise swallow it into one card).
     from stone_pipeline.stages import decisions
@@ -305,13 +310,15 @@ def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monk
     assert "Reactivate it in Blokport" in card["reason"] and "quality in Review" not in card["reason"]
 
 
-def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path):
+def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path, monkeypatch):
     # fix 4: when ONLY the category pcat is missing (not colour/quality), main writes an empty missing. The
     # post-filter classification must preserve that '' (not write 'restricted'), so the file is byte-identical.
+    # A category's pcat is the registry's (table 577), so the shortfall is a registry with no pcat on this env.
+    set_category_pcats(monkeypatch, {"slab": "", "block": "", "tile": ""})
     p = tmp_path / "attrs_no_category.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
+        w.writerow(["category", "value", "sourceid", "handle"])
         w.writerows([r for r in _ATTR_ROWS if r[0] != "category"])   # NO category pcat rows
     bb = _backbone(tmp_path, [_post("marble__carrara_1", "Carrara", ["Polished"], color=("White",))])
     exp = _export(tmp_path, [("v1", "marble__carrara_1", "Carrara")])

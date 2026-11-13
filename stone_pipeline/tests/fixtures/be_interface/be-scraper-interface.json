@@ -1,0 +1,223 @@
+{
+  "schema": "be-scraper-interface",
+  "rev": 1,
+  "doc": "blokport_research full-model-plan/BE-SCRAPER-INTERFACE.md (table 572)",
+  "rule_vocabulary": {
+    "id": "non-empty, no whitespace",
+    "text": "non-empty",
+    "text|empty": "any text, empty allowed",
+    "enum:<a|b|...>": "exactly one of the listed values; an empty member (a trailing |) allows empty",
+    "pipe_list": "empty, or non-empty values joined by |",
+    "int>=0": "a whole number of zero or more",
+    "number|empty": "a decimal number, or empty"
+  },
+  "files": {
+    "T1": {
+      "path": "from_medusa/attributes.csv",
+      "direction": "BE->SC",
+      "writer": "src/utils/scraper-sync/scraper-vocab-export.ts buildAttributesCsv",
+      "golden": "attributes.csv",
+      "columns": [
+        {
+          "name": "category",
+          "rule": "enum:color|finish|type|quality|category",
+          "required": true
+        },
+        {
+          "name": "value",
+          "rule": "text",
+          "required": true
+        },
+        {
+          "name": "sourceid",
+          "rule": "id",
+          "required": true
+        },
+        {
+          "name": "status",
+          "rule": "enum:active|archived",
+          "required": false
+        },
+        {
+          "name": "internal",
+          "rule": "enum:true|false",
+          "required": false
+        },
+        {
+          "name": "category_handles",
+          "rule": "pipe_list",
+          "required": true
+        },
+        {
+          "name": "handle",
+          "rule": "text|empty",
+          "required": true
+        }
+      ],
+      "row_order": "kind in sets.T1_kinds order, then value, then sourceid, code-unit"
+    },
+    "T2": {
+      "path": "from_medusa/field-kinds.json",
+      "direction": "BE->SC",
+      "writer": "src/model/brand/field-kinds-file.ts fieldKindsFile",
+      "golden": [
+        "field-kinds.blokport.json",
+        "field-kinds.wudport.json"
+      ],
+      "json_shape": {
+        "keys": [
+          "brand",
+          "fields"
+        ],
+        "brand": "text",
+        "fields": "object: field name -> enum:name|identifier|alias, keys sorted code-unit"
+      }
+    },
+    "T3": {
+      "path": "from_medusa/variants_export.csv",
+      "direction": "BE->SC",
+      "writer": "src/utils/scraper-sync/scraper-vocab-export.ts buildVariantsCsv",
+      "golden": "variants_export.csv",
+      "columns": [
+        {
+          "name": "Id",
+          "rule": "id",
+          "required": false
+        },
+        {
+          "name": "Key",
+          "rule": "id",
+          "required": true
+        },
+        {
+          "name": "Name",
+          "rule": "text",
+          "required": true
+        },
+        {
+          "name": "Aliases",
+          "rule": "pipe_list",
+          "required": false
+        },
+        {
+          "name": "status",
+          "rule": "enum:active|archived",
+          "required": false
+        },
+        {
+          "name": "Type",
+          "rule": "text",
+          "required": true
+        },
+        {
+          "name": "owner",
+          "rule": "enum:scraper|",
+          "required": false
+        }
+      ],
+      "row_order": "Key, as the read orders it"
+    },
+    "T4": {
+      "path": "from_medusa/products_export.csv",
+      "direction": "BE->SC",
+      "writer": "src/utils/scraper-sync/scraper-vocab-export.ts buildProductsCsv",
+      "golden": "products_export.csv",
+      "columns": [
+        {
+          "name": "Variant Sku",
+          "rule": "id",
+          "required": true
+        },
+        {
+          "name": "Product Handle",
+          "rule": "id",
+          "required": false
+        },
+        {
+          "name": "Inventory Quantity",
+          "rule": "int>=0",
+          "required": false
+        }
+      ],
+      "row_order": "Variant Sku, as the read orders it"
+    },
+    "T5": {
+      "path": "from_medusa/ports.csv",
+      "direction": "BE->SC",
+      "writer": "src/utils/scraper-sync/scraper-vocab-export.ts buildPortsCsv",
+      "golden": "ports.csv",
+      "columns": [
+        {
+          "name": "id",
+          "rule": "id",
+          "required": true
+        },
+        {
+          "name": "name",
+          "rule": "text",
+          "required": false
+        },
+        {
+          "name": "un_locode",
+          "rule": "text|empty",
+          "required": false
+        },
+        {
+          "name": "country_iso",
+          "rule": "text|empty",
+          "required": false
+        },
+        {
+          "name": "latitude",
+          "rule": "number|empty",
+          "required": false
+        },
+        {
+          "name": "longitude",
+          "rule": "number|empty",
+          "required": false
+        },
+        {
+          "name": "region_name",
+          "rule": "text|empty",
+          "required": false
+        },
+        {
+          "name": "port_size",
+          "rule": "text|empty",
+          "required": false
+        }
+      ],
+      "row_order": "name, localeCompare"
+    }
+  },
+  "sets": {
+    "T1_kinds": [
+      "color",
+      "finish",
+      "type",
+      "quality",
+      "category"
+    ],
+    "attribute_statuses": [
+      "active",
+      "archived"
+    ],
+    "T6_ack_statuses": [
+      "created",
+      "updated",
+      "skipped",
+      "failed",
+      "done",
+      "blocked"
+    ]
+  },
+  "goldens_sha256": {
+    "be/attributes.csv": "af538ed356e7e6264066fe5275a4bdf192a98ad7e499e5ad0a51d1963ff3d495",
+    "be/field-kinds.blokport.json": "b7ac11ffe483818200cbaab56e024a5e59b263c139c17f994d3ecf3ad0fd03e5",
+    "be/field-kinds.wudport.json": "33decce24010a22c109d0f6f8b64bdedd646fbbbc5267cb9cb91751eea61ca9e",
+    "be/ports.csv": "fa78c81f7b530ad87278e8694853679a3981613541ae94e97c6df4d7bc78df20",
+    "be/products_export.csv": "6986cdc73f0b140a2628789658196aaad2bb48cc5ebf39c5e4220258e922a8d2",
+    "be/variants_export.csv": "ab6b7145c0128c4c7e881200eb4b837488a6984ff59ce460488156f97797c0f1"
+  }
+}

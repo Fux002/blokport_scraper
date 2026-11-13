@@ -306,7 +306,7 @@ def _sheet(*rows):
 NAMES = {"v_tb_slab": "Tiger Black", "v_tb_tile": "Tiger Black", "v_tbm_slab": "Tiger Black", "v_nb_tile": "Navy Blue",
          "v_rb_slab": "Royal Beige", "v_rb_tile": "Royal Beige"}
 VARIANTS = "Id,Key,Name,Type\n" + "".join(f"{k},key_{k},{v},Marble\n" for k, v in NAMES.items())
-ATTRIBUTES = f"category,value,sourceid\nfinish,Polished,{POLISHED}\nfinish,Flamed,{FLAMED}\n"
+ATTRIBUTES = f"category,value,sourceid,handle\nfinish,Polished,{POLISHED}\nfinish,Flamed,{FLAMED}\n"
 
 
 def _products(sheet):
