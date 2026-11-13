@@ -7,11 +7,11 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from market_prices import config
-from market_prices.register import SLUG, Country, Register, Words, supplier_keys, supplier_problem
+from market_prices.brand import SLUG, load_brand_document
+from market_prices.register import Country, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
@@ -199,21 +199,8 @@ def check_ids_apart(layouts: Layouts, register: Register) -> None:
 
 def load_layouts(brand: str, layouts_dir: Path = config.LAYOUTS_DIR) -> Layouts:
     """The validated layouts of one brand. Any problem raises, so no file is read on a half-read layout file."""
-    if not SLUG.fullmatch(brand):
-        raise LayoutError(f"brand {brand!r} must match {SLUG.pattern}")
+    layouts = load_brand_document(layouts_dir, brand, Layouts, LayoutError, "sheet layouts")
     path = layouts_dir / f"{brand}.yaml"
-    try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise LayoutError(f"no sheet layouts for brand {brand!r} at {path}") from exc
-    except yaml.YAMLError as exc:
-        raise LayoutError(f"{path} is not valid YAML: {exc}") from exc
-    try:
-        layouts = Layouts.model_validate(document)
-    except ValidationError as exc:
-        raise LayoutError(f"{path} does not validate: {exc}") from exc
-    if layouts.brand != brand:
-        raise LayoutError(f"{path} declares brand {layouts.brand!r}")
     suppliers = supplier_keys()
     for competitor in layouts.competitors:
         if problem := supplier_problem(f"{path}: competitor {competitor.competitor_id}", competitor.site_domain,

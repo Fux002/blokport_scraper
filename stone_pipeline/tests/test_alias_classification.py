@@ -296,7 +296,7 @@ def service(tmp_path, monkeypatch):
     monkeypatch.setattr(cleanup, "_export_file", lambda: tmp_path / "no_export.csv")
     monkeypatch.setattr(cleanup, "_s3_client", lambda: s3)
     monkeypatch.setattr(cleanup, "load_stores", lambda: _stores(seed={ABS: ["Nero Assoluto"]}))
-    deliverables.publish_deliverables(s3, "bucket", up, "dev/scraper/to_upload", "R1")
+    deliverables.publish_deliverables(s3, "bucket", up, "dev/scraper/to_upload", "R1", brand="blokport")
     return {"path": path, "up": up, "s3": s3, "prefix": "dev/scraper/to_upload"}
 
 

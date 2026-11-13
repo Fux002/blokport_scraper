@@ -27,7 +27,7 @@ PRODUCT_PATH = r"^/p/[a-z0-9-]+/?$"
 
 def _site(site_id="retail", base_url=BASE, discovery=None, **overrides) -> dict:
     site = {
-        "site_id": site_id, "seller_name": "Retail", "seller_type": "merchant", "seller_country": "GB",
+        "brand": "wudport", "site_id": site_id, "seller_name": "Retail", "seller_type": "merchant", "seller_country": "GB",
         "served_market": "GB", "platform": "schema_org_product", "base_url": base_url,
         "discovery": discovery if discovery is not None else {"sitemaps": ["/sitemap-products.xml"],
                                                               "product_path": PRODUCT_PATH},

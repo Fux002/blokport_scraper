@@ -6,6 +6,7 @@ CONTRACT_VERSION = "2"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
+VOCABULARY_DIR = Path(__file__).resolve().parent / "vocabulary"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
@@ -66,10 +67,8 @@ SCHEMA_ORG_MAX_NESTING = 32
 # site_status detail names the most common reasons listings were skipped, the rest summed
 MALFORMED_REASONS_SHOWN = 3
 
-# The dev pilot (market_prices/pilot.py): ONE approved site of ONE brand, run against dev's bucket, then a summary with
-# the first rows. It refuses any site the register has not approved, and any environment but development.
-PILOT_BRAND = "blokport"
-PILOT_SITE_ID = "ceralith"
+# The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
+# with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
 PILOT_SAMPLE_ROWS = 5
 
 # The sheet intake (market_prices/intake.py): the owner's competitor price sheets, from

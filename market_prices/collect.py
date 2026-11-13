@@ -13,6 +13,7 @@ from typing import Callable, Iterable
 from pydantic import BaseModel, ValidationError
 
 from market_prices import config
+from market_prices.brand import require_run_brand
 from market_prices.collectors import COLLECTORS
 from market_prices.fetching import (
     SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse,
@@ -182,7 +183,10 @@ def _write_csv(path: Path, model: type[BaseModel], rows: Iterable[BaseModel]) ->
 
 
 def write_run(result: RunResult, root: Path) -> Path:
-    """The run's folder under `root`. Re-writing the same result gives byte-identical files."""
+    """The run's folder under `root`. Re-writing the same result gives byte-identical files. Every row must be the
+    run's brand (brand_required), checked before anything is written."""
+    require_run_brand(result.brand, result.observations, "observations")
+    require_run_brand(result.brand, result.statuses, "site_status rows")
     run_dir = root / result.brand / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(run_dir / config.OBSERVATIONS_FILE, Observation, result.observations)
