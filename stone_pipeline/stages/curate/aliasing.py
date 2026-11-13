@@ -81,7 +81,8 @@ def emit_alias_rows(c: Curation, result: CurationResult) -> None:
                     else c.existing.by_name.get(target))
         if not existing:
             return  # no existing variety (a new mint carries its own spellings on its row)
-        have = {proj.norm(a) for a in alias_list(existing["Aliases"])} | {proj.norm(existing["Name"])}
+        have = ({proj.norm(a) for a in alias_list(existing["Aliases"])} | {proj.norm(existing["Name"])}
+                | {proj.norm(code) for code in alias_list(existing.get("Codes", ""))})
         result.learned_proposals.extend(
             {"identity_key": existing["Key"], "value": spelling, "method": method, "source": spellings[spelling][0],
              "score": spellings[spelling][1]}

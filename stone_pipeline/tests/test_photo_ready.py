@@ -9,7 +9,6 @@ from __future__ import annotations
 from stone_pipeline.core.schema import OutputMode
 
 import dataclasses
-import json
 import sqlite3
 
 import pytest
@@ -37,7 +36,7 @@ def ledger_path(tmp_path, monkeypatch):
     with _open(path) as ledger:                     # a synced variety with a slab icon, so its products serve
         now = now_iso()
         ledger.upsert("variation", {
-            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
+            "key": KEY, "type": "Marble", "name": "Carrara", "alias_rows": "[]", "codes": "[]",
             "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
@@ -63,7 +62,7 @@ def _row(standard_photo, qty="5"):
 
 def _record(path, rows, *, mode=OutputMode.FULL, discontinued=(), replaced=None):
     assert writethrough.record_source(rows, list(discontinued), load_source("polonine"),
-                                      mode=mode, replaced=replaced, path=path)
+                                      mode=mode, published=frozenset(), replaced=replaced, path=path)
 
 
 def _acked(path):

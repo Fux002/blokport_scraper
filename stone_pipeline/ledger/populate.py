@@ -12,10 +12,12 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from stone_pipeline.aliases import payload as alias_payload
 from stone_pipeline.config.categories import category, category_by_pcat
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.io import imagestore
 from stone_pipeline.io.variety_icons import ICON_SIDECAR, icon_key
 from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso, variation_icons
 from stone_pipeline.ledger.payloads import product_hash, variation_hash
@@ -47,12 +49,17 @@ def read_icon_sidecar(path: Path) -> dict[str, list[dict]] | None:
 
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     """Reflect a produced variety file (1_variants_full.csv, or the base on a reset) onto the variation table: write
-    each variety's content (type, name, aliases) and its icons, and mark it in_full=1; insert a new variety as pending
-    (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state and
-    first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves."""
-    _key, _name, _type, _aliases = _VARIANTS_FULL_COLS
+    each variety's content (type, name, alias_rows, codes) and its icons, and mark it in_full=1; insert a new variety
+    as pending (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state
+    and first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves.
+    alias_rows and codes come from the alias sidecar emit writes beside the file (aliases.payload); with no sidecar
+    (the base a reset populates from) populate SETS both NULL, overwriting any earlier value: not computed, held from
+    the serve until a produce computes them, so no stale spelling is served. A sidecar
+    without a produced variety fails loud: a NULL there would hold a variety the produce did compute."""
+    _key, _name, _type, _ = _VARIANTS_FULL_COLS
     now = now_iso()
     sidecar = read_icon_sidecar(Path(path).parent / ICON_SIDECAR)
+    alias_sidecar = alias_payload.read_sidecar(Path(path).parent)
     stored = variation_icons(ledger) if sidecar is None else {}
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
@@ -64,15 +71,16 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
             if (problem := variety_key_problem(key)) is not None:
                 raise ValueError(f"{Path(path).name}: {key!r} is not a variety Key ({problem})")
             name, type_ = r.get(_name) or "", r.get(_type) or ""
-            aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
+            alias_rows, codes = _alias_cells(alias_sidecar, key, name, Path(path).name)
             icons = sidecar.get(key, []) if sidecar is not None else stored.get(key, [])
-            ph = variation_hash({"type": type_, "name": name, "aliases": json.dumps(aliases)}, icons)
+            ph = variation_hash({"type": type_, "name": name, "alias_rows": alias_rows, "codes": codes}, icons)
             ledger.execute(
-                "INSERT INTO variation (key, type, name, aliases, medusa_id, in_full, payload_hash, "
+                "INSERT INTO variation (key, type, name, alias_rows, codes, medusa_id, in_full, payload_hash, "
                 "state, first_seen, last_synced, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET type = excluded.type, name = excluded.name, "
-                "aliases = excluded.aliases, in_full = 1, payload_hash = excluded.payload_hash, "
+                "alias_rows = excluded.alias_rows, codes = excluded.codes, in_full = 1, "
+                "payload_hash = excluded.payload_hash, "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
                 # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
                 # 'retiring' variety that reappears in the produced set (its exclusion was cleared) must
@@ -92,7 +100,7 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "ELSE variation.retry_after END, "
                 "abandoned_at = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
                 "ELSE variation.abandoned_at END",
-                (key, type_, name, json.dumps(aliases), None, ph, "pending", now, None, now, now),
+                (key, type_, name, alias_rows, codes, None, ph, "pending", now, None, now, now),
             )
             if sidecar is not None:   # the listing is the icons' authority: a pair gone from S3 is gone here
                 ledger.execute("DELETE FROM variation_category_image WHERE key = ?", (key,))
@@ -105,6 +113,17 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id IN "
                    "(SELECT key FROM variation WHERE in_full = 1)")
     return n
+
+
+def _alias_cells(sidecar: dict | None, key: str, name: str, file: str) -> tuple[str | None, str | None]:
+    """The stored (alias_rows, codes) JSON of one produced variety: NULL, NULL without a sidecar (not computed)."""
+    if sidecar is None:
+        return None, None
+    if key not in sidecar:
+        raise ValueError(f"{file}: {key} {name!r} is not in {alias_payload.ALIAS_SIDECAR}: emit computes every "
+                         "produced variety's alias_rows and codes")
+    entry = sidecar[key]
+    return json.dumps(entry["alias_rows"], ensure_ascii=False), json.dumps(entry["codes"], ensure_ascii=False)
 
 
 def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:
@@ -295,20 +314,56 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
 
 
 def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
-    """Withdraw this source's products that Medusa never received (not db.in_medusa_sql, waiting to be served) and
-    that this run no longer produces: dropped by the supplier, held this run, or found not to be a product
-    (a void slab). Left waiting, the next pull would create them with stale data and stock. A product
-    already in Medusa (the delist owns it) or in flight ('syncing') is untouched; a withdrawn product that
-    comes back is simply written again. Returns how many were withdrawn."""
+    """Withdraw the unsent change of this source's products waiting to be served (pending or dirty) that this run no
+    longer produces: dropped by the supplier, held this run, or found not to be a product (a void slab). Left waiting,
+    the next pull would serve stale data and stock, and photos the photos side has since removed (publish drops the
+    photos of a listing that left the sheet).
+    - Never received by Medusa (not db.in_medusa_sql): the row and its stock are deleted; one that comes back is written
+      again as new.
+    - Held by Medusa: only the unsent change is withdrawn. The row stays and the delist owns it (stock 0 through
+      populate_discontinued, design 5A; never the removed lane, which deletes from Medusa): state synced, its failure
+      bookkeeping cleared, payload_hash blank, since the ledger no longer holds the content Medusa acked, so a later
+      return to the emit always differs and re-serves as dirty.
+    A product in flight ('syncing') is untouched. Returns how many were withdrawn."""
     produced = {_sku(r, cfg) for r in rows}
-    stale = [r["sku"] for r in ledger.execute(
-        f"SELECT p.sku FROM product p WHERE p.source = ? AND NOT {in_medusa_sql('p')} "
-        "AND p.state IN ('pending', 'dirty')",
-        (cfg.source_code,)) if r["sku"] not in produced]
-    for sku in stale:
-        ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
-        ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
+    stale = [(r["sku"], r["held"]) for r in ledger.execute(
+        f"SELECT p.sku, {in_medusa_sql('p')} AS held FROM product p "
+        "WHERE p.source = ? AND p.state IN ('pending', 'dirty')", (cfg.source_code,)) if r["sku"] not in produced]
+    now = now_iso()
+    for sku, held in stale:
+        if held:
+            ledger.execute("UPDATE product SET state = 'synced', sync_attempts = 0, sync_error = NULL, "
+                           "retry_after = NULL, payload_hash = '', updated_at = ? WHERE sku = ?", (now, sku))
+        else:
+            ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
+            ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
     return len(stale)
+
+
+def _linked_standard(row) -> set[str]:
+    """The object keys of the standardised files a product row links (thumbnail, gallery, oriented faces, 3D)."""
+    urls = [row["thumbnail_key"], row["model_3d_key"], *json.loads(row["product_image_keys"] or "[]"),
+            *json.loads(row["oriented_image_keys"] or "[]")]
+    return {key for url in urls if url and (key := imagestore.standard_object_key(url))}
+
+
+def mark_unpublished_photos(ledger: Ledger, published: frozenset[str], cfg: SourceConfig) -> list[str]:
+    """Record, for every product of this source (emitted this run or not), the standardised files it links that are not
+    in `published` (images.published_keys: the folders the photos publish keeps), as photo_unpublished: a sorted JSON
+    array, null when every one is published. A product with any is never served (sync._ELIGIBLE_PRODUCT): the produce
+    never lets a product serve a photo the photos side has not published. Scraped and improved photos are out of scope.
+    Writes only a value that changes (no sync state, no updated_at: it is a content fact, not a sync step). Returns the
+    SKUs that have any, sorted."""
+    marked = []
+    for row in ledger.execute("SELECT sku, thumbnail_key, product_image_keys, oriented_image_keys, model_3d_key, "
+                              "photo_unpublished FROM product WHERE source = ?", (cfg.source_code,)).fetchall():
+        missing = sorted(_linked_standard(row) - published)
+        value = json.dumps(missing) if missing else None
+        if value != row["photo_unpublished"]:
+            ledger.execute("UPDATE product SET photo_unpublished = ? WHERE sku = ?", (value, row["sku"]))
+        if missing:
+            marked.append(row["sku"])
+    return sorted(marked)
 
 
 def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
