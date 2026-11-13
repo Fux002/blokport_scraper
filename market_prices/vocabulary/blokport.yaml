@@ -1,0 +1,4 @@
+# BlokPort's scope vocabulary (W4b, Mas 13 Nov): its runs keep every listing their collector reads; each register
+# site's own query already scopes what the collector reads. Declared here so every brand's scope is a visible file.
+brand: blokport
+scope: all

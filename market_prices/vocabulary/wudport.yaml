@@ -1,0 +1,114 @@
+# WudPort's scope vocabulary (W4, Mas 13 Nov): its runs keep the sheet-material listings the owner's research covered,
+# in the sellers' own words, per language of his sites' markets (owner-inputs/wudport-wood-sites-13nov.md).
+# A listing is kept when its text holds a word of a category in its market's languages; text and words compare after
+# match_key (case, accents and punctuation do not count) and a word may sit inside a compound. Matching a listing to a
+# WudPort price group is the consumer's (689 B2), never this file's.
+# An empty list is a stated gap: a seller's word not confirmed yet. The W6 site pilots check each against real listing
+# titles before it is added.
+brand: wudport
+scope: words
+languages_by_market:
+  GB: [en]
+  DE: [de]
+  FR: [fr]
+  NL: [nl]
+  BE: [nl, fr]
+  PL: [pl]
+  SE: [sv]
+categories:
+  - category: plywood
+    words:
+      en: [plywood]
+      de: [Sperrholz, Multiplex]
+      fr: [contreplaqué]
+      nl: [multiplex, triplex]
+      pl: [sklejka]
+      sv: [plywood]
+  - category: film_faced_plywood
+    words:
+      en: [film faced plywood, shuttering plywood]
+      de: [Siebdruckplatte, Schalungsplatte]
+      fr: [contreplaqué filmé]
+      nl: [betonplex]
+      pl: [sklejka foliowana]
+      sv: [filmbelagd plywood]
+  - category: packing_plywood
+    words:
+      en: [packing plywood]
+      de: []
+      fr: []
+      nl: []
+      pl: []
+      sv: []
+  - category: mdf
+    words:
+      en: [MDF]
+      de: [MDF]
+      fr: [MDF]
+      nl: [MDF]
+      pl: [MDF]
+      sv: [MDF]
+  - category: osb
+    words:
+      en: [OSB]
+      de: [OSB, Grobspanplatte]
+      fr: [OSB]
+      nl: [OSB]
+      pl: [OSB]
+      sv: [OSB]
+  - category: chipboard
+    words:
+      en: [chipboard, particleboard, particle board]
+      de: [Spanplatte]
+      fr: [aggloméré, panneau de particules]
+      nl: [spaanplaat]
+      pl: [płyta wiórowa]
+      sv: [spånskiva]
+  - category: hollow_core_chipboard
+    words:
+      en: [hollow core chipboard, tubular chipboard]
+      de: [Röhrenspanplatte]
+      fr: [aggloméré tubulaire]
+      nl: [buisspaanplaat]
+      pl: [płyta wiórowa otworowa]
+      sv: [rörspånskiva]
+  - category: lvl
+    words:
+      en: [LVL]
+      de: [LVL, Furnierschichtholz]
+      fr: [LVL, lamibois]
+      nl: [LVL]
+      pl: [LVL]
+      sv: [LVL]
+  - category: veneer
+    words:
+      en: [veneer]
+      de: [Furnier]
+      fr: [placage]
+      nl: [fineer]
+      pl: [fornir]
+      sv: [faner]
+  - category: core_veneer
+    words:
+      en: [core veneer, rotary veneer, peeled veneer]
+      de: [Schälfurnier]
+      fr: [placage déroulé]
+      nl: [schilfineer]
+      pl: [fornir łuszczony]
+      sv: []
+  - category: hdf_door_skin
+    words:
+      en: [HDF, door skin]
+      de: [HDF]
+      fr: [HDF]
+      nl: [HDF]
+      pl: [HDF]
+      sv: [HDF]
+  - category: hardboard
+    words:
+      en: [hardboard]
+      de: [Hartfaserplatte]
+      fr: [isorel, panneau de fibres dur]
+      nl: [hardboard]
+      pl: [płyta pilśniowa]
+      sv: [masonit]
