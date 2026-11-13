@@ -34,8 +34,8 @@ FIRST = "2026-11-01T00:00:00Z"
 
 def _variation(ledger, key="marble__v_1"):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "type": "", "name": "x", "aliases": "[]", "medusa_id": "V",
-                                "in_full": 1, "payload_hash": "", "state": "synced", "first_seen": now,
+    ledger.upsert("variation", {"key": key, "type": "", "name": "x", "alias_rows": "[]", "codes": "[]",
+                                "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
 
 
