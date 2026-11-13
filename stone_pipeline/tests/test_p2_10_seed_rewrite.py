@@ -1,8 +1,9 @@
 """P2-10: the committed seed rewritten ONCE, so the backbone is the whole seed store (stone_pipeline.aliases.seed_rewrite).
 Reds (a), (b) and (d) of the manager's brief (11-12); (c), the seed fixed point and seed.verify, stays pinned by
-test_cold_start_idempotence and test_committed_names_fixed_point. Exclusions are only the two NAMED lists in
-catalog_source/seed_alias_differences.csv: `removed` (exactly the shared C1 judgement, cleanup.seed_refusal) and
-`no_post` (the base-only Keys, the manager's ruling). No em dashes."""
+test_cold_start_idempotence and test_committed_names_fixed_point. Exclusions are only the NAMED lists in
+catalog_source/seed_alias_differences.csv: `removed` (exactly the shared C1 judgement, cleanup.seed_refusal),
+`no_post` (the base-only Keys, the manager's ruling) and `fixed` (the source fixes table, test_seed_alias_fixes.py).
+No em dashes."""
 from __future__ import annotations
 
 import csv
@@ -95,6 +96,8 @@ def test_the_rewrite_never_merges_a_non_latin_alias_into_another(tmp_path):
     post = {"key": "granite__alpha_1", "variant": "Alpha", "stone_type": "Granite", "aliases": ["Wratza"],
             "codes": [], "merged_from": []}
     (tmp_path / seed_rewrite.BACKBONE).write_text(json.dumps({"posts": [post]}), encoding="utf-8")
+    # the source fixes table is a required input (an absent one fails loud): none here, so the header only
+    (tmp_path / seed_rewrite.FIXES).write_text(",".join(seed_rewrite.FIX_COLUMNS) + "\n", encoding="utf-8")
     doc = json.loads(seed_rewrite.render(tmp_path)[seed_rewrite.BACKBONE])
     # each value is its own alias: none collapsed to "" or merged into "Wratza" (joined in alias_key order)
     assert doc["posts"][0]["aliases"] == ["Wratza", *_SCRIPTS.split("|")]
@@ -109,11 +112,11 @@ def test_the_live_snapshot_is_pinned_and_committed():
 # --- (a) every committed base alias is on its Key's post, or on a named list ---------------------------------------
 def test_every_committed_base_alias_is_on_its_key_s_post_or_named():
     posts = {k: {match_key(v) for v in [*p.get("aliases", []), *p.get("codes", [])]} for k, p in _posts().items()}
-    removed = {(r["Key"], match_key(r["Value"])) for r in _differences("removed")}
+    named = {(r["Key"], match_key(r["Value"])) for cls in ("removed", "fixed") for r in _differences(cls)}
     no_post = {r["Key"] for r in _differences("no_post")}
     missing = [f"{env} {r['Key']} {a!r}" for env, r in _base_rows() for a in (r["Aliases"] or "").split("|")
                if a and match_key(a) not in posts.get(r["Key"], set())
-               and (r["Key"], match_key(a)) not in removed and r["Key"] not in no_post]
+               and (r["Key"], match_key(a)) not in named and r["Key"] not in no_post]
     assert not missing, f"{len(missing)} base alias(es) on no post and no named list:\n" + "\n".join(missing[:50])
 
 
@@ -146,7 +149,8 @@ def test_the_removed_list_is_exactly_the_shared_c1_judgement():
     assert listed, "no removed list"
     wrong = [(r["Key"], r["Value"], r["Reason"]) for r in listed if refusal(r["Key"], r["Value"]) != r["Reason"]]
     assert not wrong, wrong[:20]
-    keys = {(r["Key"], match_key(r["Value"])) for r in listed}
+    # a source-fixed value is replaced before the judgement, so it is never judged (listed `fixed` instead)
+    keys = {(r["Key"], match_key(r["Value"])) for r in [*listed, *_differences("fixed")]}
     unlisted = [(r["Key"], a) for _, r in _base_rows() for a in (r["Aliases"] or "").split("|")
                 if a and refusal(r["Key"], a) and (r["Key"], match_key(a)) not in keys]
     assert not unlisted, unlisted[:20]
