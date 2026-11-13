@@ -531,6 +531,17 @@ def test_a_view_no_longer_chosen_is_removed_and_that_is_a_change():
     assert out["removed"] == 1 and imagestore.standard_key("sentas", B, "main") not in s3.objects
 
 
+def test_publish_keeps_exactly_the_folders_published_prefixes_names(monkeypatch):
+    # one notion of "published": the folders publish keeps are imagestore.published_prefixes, the set the produce checks
+    # every product's linked standardised files against (populate.mark_unpublished_photos)
+    s3 = _published_bucket()
+    real, extra = imagestore.published_prefixes, imagestore.standard_prefix("extra")
+    s3._store(f"{extra}sentas/{B}.jpg", b"old")
+    monkeypatch.setattr(imagestore, "published_prefixes", lambda: (*real(), extra))
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held=frozenset())
+    assert out["removed"] == 1 and f"{extra}sentas/{B}.jpg" not in s3.objects
+
+
 def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
     s3 = _published_bucket()
     s3._store(f"{RUN}{A}.slab.png", b"png")
