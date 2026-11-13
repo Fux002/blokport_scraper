@@ -22,7 +22,7 @@ import yaml
 
 _DOMAINS_DIR = Path(__file__).parent / "domains"
 _DEFAULT_PACK = "stone"
-_REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories", "backbone_file",
+_REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
              "ambiguous_type_words", "generic_descriptors", "generic_material_word",
              "default_finishes", "fallback_color",
              "last_resort_finishes", "last_resort_quality", "block_finish",
@@ -52,8 +52,9 @@ class DomainPack:
     # the category model: one dict per category (name/plural/label/base_image/flags/finish set/...).
     # settings.py maps these to Category objects (the pack stays agnostic to that dataclass); pcat is env.
     categories: tuple[dict, ...]
-    # the ONE variety backbone every category reads (spec rev 8 section 3), under the pack's catalog_source
-    backbone_file: str
+    # the ONE variety backbone every category reads (spec rev 8 section 3), under the pack's catalog_source. A pack that
+    # names one must ship it (an absent file fails loud where it is read); a pack naming none (None) has no seed.
+    backbone_file: str | None
     ambiguous_type_words: frozenset[str]
     # words that, as the ONLY difference between two variety names, signal an alias not a distinct variety
     # (base + descriptor: 'Bardiglio Nuvolato' ~ '... Marble'). Per-domain: each pack supplies its own.
@@ -158,6 +159,10 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
 
     if not data["attributes"]:
         bad("'attributes' is empty")
+    # a bare file name only: it is joined under catalog_source, so a path would read outside it or a sub-folder
+    if "backbone_file" in data and not (isinstance(data["backbone_file"], str) and data["backbone_file"].strip()
+                                        and Path(data["backbone_file"]).name == data["backbone_file"] != ".."):
+        bad(f"backbone_file must be a file name, got {data['backbone_file']!r}; leave it out for a pack with no seed")
     if not isinstance(data["last_resort_finishes"], dict):
         bad("'last_resort_finishes' must be a mapping of branch -> finish")
     for i, cat in enumerate(data["categories"]):
@@ -314,7 +319,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         disambiguator=data["disambiguator"],
         leaf_attributes=tuple(data["leaf_attributes"]),
         categories=tuple(data["categories"]),
-        backbone_file=data["backbone_file"],
+        backbone_file=data.get("backbone_file"),
         ambiguous_type_words=frozenset(data["ambiguous_type_words"]),
         generic_descriptors=frozenset(data["generic_descriptors"]),
         generic_material_word=data["generic_material_word"],

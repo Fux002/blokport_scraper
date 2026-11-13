@@ -96,16 +96,16 @@ def _pack_handles() -> frozenset[str]:
 
 def _seed_types() -> frozenset[str]:
     """norm of every type a variety of the pack's committed seed carries (its backbone, read live through the one
-    backbone reader). A pack that ships no seed (the wood and lime packs) holds no seed variety, so rule (ii) adds no
-    type and its types are its combinations' alone; a pack whose run needs its seed still fails loud at the backbone's
-    own reader (load_backbone). Parsed once per file version (path, size, mtime), as C3's seed cache does: the config
-    server loads the vocabulary per request, and the backbone is 12,156 posts."""
+    backbone reader). The pack's yaml decides: a pack naming no backbone_file (lime) holds no seed variety, so rule (ii)
+    adds no type and its types are its combinations' alone; a pack that names one must ship it, and an absent file
+    raises FileNotFoundError naming it (never read as "no seed types", which would quietly shrink the vocabulary).
+    Parsed once per file version (path, size, mtime), as C3's seed cache does: the config server loads the vocabulary
+    per request, and the backbone is 12,156 posts."""
     from stone_pipeline.reference.loaders import backbone
-    path = Path(env().SETTINGS.paths.backbone_json)
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
+    if active_pack().backbone_file is None:
         return frozenset()
+    path = Path(env().SETTINGS.paths.backbone_json)
+    stat = path.stat()
     version = (str(path), stat.st_size, stat.st_mtime_ns)
     with _SEED_TYPES_LOCK:
         if version not in _SEED_TYPES:
