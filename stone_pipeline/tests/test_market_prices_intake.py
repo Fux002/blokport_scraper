@@ -787,3 +787,100 @@ def test_a_row_naming_a_competitor_without_a_price_column_refuses_the_file():
     layouts = _layouts(_two_lists(price_by_competitor={"stonecorp_gb": "List"}))
     with pytest.raises(FileRefused, match="rocca_it"):
         _absorb(TWO_LISTS, layouts, key=f"{PREFIX}/intake/two_lists.csv")
+
+
+# --- the owner's competitor price sheets (W7: M22/P4's mapping, the owner's answers of 13 Nov via Mas) ---------------
+# Each tab of the owner's workbook All_Competitor_Stone_Prices.xlsx (2026-11-11) arrives as its own file, the tab
+# copied unchanged; these are its exact header rows. Every row names its competitor by the source document it was
+# transcribed from ('Source file'), which is what tells Cereser's main list from its Listino Carrara.
+_PRICE_M2 = "(EUR/m² ex VAT)"
+_OWNER_TABS = {
+    "Brachot Prices": [
+        "Material", "Grade / selection", "Brachot product name", "Stone type", "Origin", "Origin code",
+        "Thickness (cm)", "Finish", "Treatment / calibration", "Dimensions", f"Price {_PRICE_M2}",
+        f"Base list price {_PRICE_M2}", "Adjustment (%)", "Original pricing conditions", "Brachot price category",
+        "Catalog page", "PDF page", "Price status", "Catalog section", "Catalog edition / effective date", "Notes",
+        "Source file", "Sales terms"],
+    "Tuytelaers Prices": [
+        "Material", "Grade / selection", "Tuytelaers product name", "Stone type", "Origin", "Origin code",
+        "Thickness (cm)", "Finish", "Dimensions", f"Price {_PRICE_M2}", f"Base list price {_PRICE_M2}",
+        "Adjustment (%)", "Original pricing conditions", "Catalog section", "Catalog page", "PDF page", "Price status",
+        "New in 2026 catalog", "Notes", "Catalog edition / effective date", "Source file", "Sales terms"],
+    "Cereser Prices": [
+        "Material", "Grade / selection", "Cereser product name (source)", "Stone type", "Source category", "Origin",
+        "Origin (source)", "Thickness (cm)", "Finish", "Dimensions", "Block / lot", "Slab selection / pricing basis",
+        "List price (EUR/m²)", "Price -20% (EUR/m²)", "Carrara net price (EUR/m²)",
+        "Price used in master (EUR/m²)", "Discount (%)", "Price status", "Source file", "Source row", "List date",
+        "Lot date / source note", "Vendor notes"],
+}
+
+
+def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
+    """The committed blokport layouts reading one owner tab holding `rows`, by listing_key."""
+    headers = _OWNER_TABS[tab]
+    data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
+    key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), "bucket", "blokport")
+    return {row.listing_key: row for row in result.observations}
+
+
+def test_the_owner_competitors_are_declared_from_the_owners_answers():
+    competitors = load_layouts("blokport").competitors
+    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value, c.supplier_key)
+            for c in competitors} == {
+        "brachot": ("brachot.com", "BE", "EU", "wholesaler", None),
+        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler", None),
+        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+    }
+
+
+def test_a_brachot_row_is_its_own_sizes_price_per_m2_ex_vat_with_identity_kept():
+    rows = _owner_rows("Brachot Prices", {
+        "Material": "Belgische Blauwe Hardsteen", "Brachot product name": "Belgische Blauwe Hardsteen Courant",
+        "Stone type": "blauwe hardsteen", "Thickness (cm)": 2, "Finish": "Gezaagd", "Dimensions": "Standard sizes",
+        f"Price {_PRICE_M2}": 76.9, f"Base list price {_PRICE_M2}": 70, "Adjustment (%)": 10, "Catalog page": 10,
+        "PDF page": 6, "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"})
+    row = rows["Belgische Blauwe Hardsteen Courant|2|Gezaagd|Standard sizes|10"]
+    assert (row.site_id, row.seller_name, row.listing_text) == ("brachot", "Brachot",
+                                                                "Belgische Blauwe Hardsteen Courant")
+    assert (row.price_amount, row.currency, row.unit_text, row.vat_basis.value) == ("76.9", "EUR", "m²", "excl")
+    kept = ("Thickness (cm)", "Finish", "Dimensions", "Stone type", f"Base list price {_PRICE_M2}", "Catalog page",
+            "PDF page", "Source file")
+    assert {key: row.stated_specs[key] for key in kept} == {
+        "Thickness (cm)": "2", "Finish": "Gezaagd", "Dimensions": "Standard sizes", "Stone type": "blauwe hardsteen",
+        f"Base list price {_PRICE_M2}": "70", "Catalog page": "10", "PDF page": "6",
+        "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"}
+    assert f"Price {_PRICE_M2}" not in row.stated_specs
+
+
+def test_a_tuytelaers_row_keys_on_its_catalog_section():
+    # one stone, thickness and finish listed in two sections at two prices: two listings, never one
+    same = {"Tuytelaers product name": "Star Galaxy", "Thickness (cm)": 3, "Finish": "gepolijst",
+            "Dimensions": "Not specified / standard", "Source file": "prijslijst-platen-2026(3).pdf"}
+    rows = _owner_rows("Tuytelaers Prices", {**same, "Catalog section": "Natuursteen", f"Price {_PRICE_M2}": 140},
+                       {**same, "Catalog section": "Blokzaag", f"Price {_PRICE_M2}": 187})
+    stem = "Star Galaxy|3|gepolijst|Not specified / standard"
+    assert {key: (row.site_id, row.price_amount) for key, row in rows.items()} == {
+        f"{stem}|Natuursteen": ("tuytelaers", "140"), f"{stem}|Blokzaag": ("tuytelaers", "187")}
+
+
+def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
+    rows = _owner_rows(
+        "Cereser Prices",
+        {"Cereser product name (source)": "BLACK ANTIQUE *", "Thickness (cm)": 2, "List price (EUR/m²)": 88.5,
+         "Price -20% (EUR/m²)": 70.8, "Price used in master (EUR/m²)": 70.8,
+         "Source file": "Italian supplier list(1).xlsx", "Source row": 2},
+        {"Cereser product name (source)": "BIANCO CARRARA C", "Thickness (cm)": 2, "Finish": "Lucido",
+         "Carrara net price (EUR/m²)": 60, "Price used in master (EUR/m²)": 60,
+         "Source file": "LISTINO CARRARA -(2).xlsx", "Source row": 7},
+        {"Cereser product name (source)": "AZUL MACAUBAS", "Thickness (cm)": 3, "Price status": "Unpriced",
+         "Source file": "Italian supplier list(1).xlsx", "Source row": 9})
+    main, carrara, unpriced = rows["BLACK ANTIQUE *|2|2"], rows["BIANCO CARRARA C|2|7"], rows["AZUL MACAUBAS|3|9"]
+    assert (main.site_id, main.price_amount, main.vat_basis.value) == ("cereser", "88.5", "excl")
+    assert (carrara.site_id, carrara.price_amount, carrara.vat_basis.value) == ("cereser_carrara", "60", "excl")
+    assert (main.stated_specs["Price -20% (EUR/m²)"], main.stated_specs["Source file"]) == (
+        "70.8", "Italian supplier list(1).xlsx")
+    assert carrara.stated_specs["Finish"] == "Lucido"
+    # an unpriced row is kept as stated, never priced from another column
+    assert (unpriced.price_amount, unpriced.price_status) == (None, PriceStatus.none)
