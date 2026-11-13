@@ -229,7 +229,8 @@ def test_the_name_from_a_column_names_each_row():
     assert [(row.site_id, row.listing_key) for row in result.observations] == [("rocca_it", "R1"),
                                                                              ("stonecorp_gb", "S1")]
     assert [status.site_id for status in result.statuses] == ["rocca_it", "stonecorp_gb"]
-    assert "Supplier" not in result.observations[0].stated_specs
+    # identity columns stay in stated_specs as written (the manager, 13 Nov): the naming column too
+    assert result.observations[0].stated_specs["Supplier"] == "Rocca"
 
 
 def test_the_name_from_the_file_name():
@@ -304,7 +305,7 @@ def test_a_known_layout_gives_the_exact_rows():
         "contract_version": "2", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
         "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
-        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Finish": "Polished"}, "grade_text": None,
+        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"}, "grade_text": None,
         "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",
         "min_qty_text": None, "availability_text": None,
@@ -757,7 +758,8 @@ def test_each_row_takes_its_own_competitors_stated_price_column():
     rows = {row.site_id: row for row in result.observations}
     assert (rows["stonecorp_gb"].price_amount, rows["rocca_it"].price_amount) == ("100.00", "55.50")
     # every other stated column rides in stated_specs as written, another competitor's price column included
-    assert rows["stonecorp_gb"].stated_specs == {"List -20%": "80.00", "Net": "77.00"}
+    assert rows["stonecorp_gb"].stated_specs == {"Code": "SC-1", "List -20%": "80.00", "Net": "77.00",
+                                                 "Source": "StoneCorp Ltd"}
     assert "Net" not in rows["rocca_it"].stated_specs
 
 
@@ -770,6 +772,15 @@ def test_each_row_takes_its_own_competitors_stated_price_column():
 def test_a_layout_names_one_price_column_per_competitor_or_is_refused(layout, message):
     with pytest.raises(ValueError, match=message):
         _layouts(layout)
+
+
+def test_the_identity_columns_stay_in_stated_specs_as_written():
+    # the naming column and every listing_key part are identity, not observation fields (the manager, 13 Nov): kept
+    # as written, so a consumer reads thickness or finish from stated_specs and never parses listing_key
+    result = _absorb(TWO_LISTS, _layouts(_two_lists()), key=f"{PREFIX}/intake/two_lists.csv")
+    rows = {row.site_id: row for row in result.observations}
+    assert (rows["stonecorp_gb"].stated_specs["Source"], rows["rocca_it"].stated_specs["Source"]) == (
+        "StoneCorp Ltd", "Rocca")
 
 
 def test_a_row_naming_a_competitor_without_a_price_column_refuses_the_file():
