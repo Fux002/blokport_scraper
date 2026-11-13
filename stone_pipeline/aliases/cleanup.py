@@ -3,7 +3,8 @@
 (lifecycle.alias_classification).
 
 The backend's phase 2 fill reads it to give every scraper alias row on Medusa its owner. It names every served Key and
-every pending variation tombstone with its CURRENT ACKED set (the ledger keeps no history), one row per
+every pending variation tombstone with its CURRENT ACKED set (the ledger keeps no history; from ledger v18, P2-10 C4,
+the served set is a row's alias_rows values and its codes), one row per
 (Key, alias_key(Value)), each value in ONE class, the first that applies:
 - `code`: the brand's code pattern accepts it (C1's code test, inside alias_refusal);
 - `operator`: a GLOBAL `is` statement renamed onto the variety (vendor bindings stay match-only);
@@ -13,8 +14,8 @@ every pending variation tombstone with its CURRENT ACKED set (the ledger keeps n
 - `learned`: an ACTIVE learned_alias row (C2);
 and a Key holding no value is the one row `Key,,none`.
 
-It is written only when every variation is synced (or retiring with its pending tombstone): otherwise it refuses,
-naming the Keys. A served value no store owns, a value with an empty key, and a pending tombstone whose row is gone
+It is written only when every variation is synced (or retiring with its pending tombstone) and its served set is
+computed (alias_rows and codes not NULL): otherwise it refuses, naming the Keys. A served value no store owns, a value with an empty key, and a pending tombstone whose row is gone
 refuse too, so the file is whole or absent. Deterministic: the same ledger and stores give the same bytes (sorted
 everywhere, no set order reaches the output), and a run writes nothing to the ledger or config.db.
 """
@@ -61,11 +62,19 @@ ADMIN_ALIASES_COLUMN = "AdminAliases"      # the live export's admin rows (P2-7'
 
 class NotAllSynced(RuntimeError):
     """A variation is not synced: the file would not describe Medusa. `keys` names every one."""
+    STATE, NEXT = "not synced", "run a draining Publish first"
 
     def __init__(self, keys: list[str]):
         self.keys = keys
         shown = ", ".join(keys[:KEYS_SHOWN]) + (f" and {len(keys) - KEYS_SHOWN} more" if len(keys) > KEYS_SHOWN else "")
-        super().__init__(f"{len(keys)} variation(s) not synced: {shown}; run a draining Publish first")
+        super().__init__(f"{len(keys)} variation(s) {self.STATE}: {shown}; {self.NEXT}")
+
+
+class NotAllComputed(NotAllSynced):
+    """A variation's served set is not computed yet (ledger v18: alias_rows or codes NULL until a produce computes
+    them): the file would not describe Medusa either, so it refuses as an unsynced row does (the same 409 naming the
+    Keys). `keys` names every one."""
+    STATE, NEXT = "with no computed alias_rows/codes", "run a produce first"
 
 
 class Unclassifiable(RuntimeError):
@@ -103,12 +112,22 @@ def unsynced_keys(ledger) -> list[str]:
         (SYNCED, RETIRING))]
 
 
+def uncomputed_keys(ledger) -> list[str]:
+    """Every variation whose served set is not computed yet (alias_rows or codes NULL), sorted."""
+    return [r["key"] for r in ledger.execute(
+        "SELECT key FROM variation WHERE alias_rows IS NULL OR codes IS NULL ORDER BY key")]
+
+
 def classify(ledger, stores: Stores) -> Classification:
-    """The file's rows from the ledger's variation rows and pending variation tombstones. Raises NotAllSynced before
-    reading any value; every other problem is a `refused` difference (require_whole raises on them)."""
+    """The file's rows from the ledger's variation rows and pending variation tombstones. Raises NotAllSynced (or
+    NotAllComputed) before reading any value; every other problem is a `refused` difference (require_whole raises on
+    them)."""
     if keys := unsynced_keys(ledger):
         raise NotAllSynced(keys)
-    variations = [dict(r) for r in ledger.execute("SELECT key, type, name, aliases, state, in_full FROM variation")]
+    if keys := uncomputed_keys(ledger):
+        raise NotAllComputed(keys)
+    variations = [dict(r) for r in ledger.execute(
+        "SELECT key, type, name, alias_rows, codes, state, in_full FROM variation")]
     contexts = alias_contexts(variations)
     rows: list[tuple[str, str, str]] = []
     differences: list[tuple[str, str, str, str]] = []
@@ -148,10 +167,16 @@ def seed_refusal(value: str, context: AliasContext, is_code: Callable[[str], boo
     return None if refusal == "is_code" else refusal
 
 
+def served_values(v: dict) -> list[str]:
+    """The values Medusa holds for a variety from the scraper (ledger v18): its alias_rows values, then its codes.
+    Their method does not class them: the stores do (operator over seed over learned, a code whoever owns it)."""
+    return [row["value"] for row in json.loads(v["alias_rows"])] + list(json.loads(v["codes"]))
+
+
 def _classify_variety(v: dict, stores: Stores, context: AliasContext, rows: list, differences: list) -> None:
     key = v["key"]
     name_key, type_key = match_key(v["name"]), match_key(v["type"])
-    values = json.loads(v["aliases"] or "[]")
+    values = served_values(v)
     if not values:
         rows.append((key, "", "none"))
         return
