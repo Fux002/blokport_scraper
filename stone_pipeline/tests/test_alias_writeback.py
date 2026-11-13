@@ -1,4 +1,4 @@
-"""The run's learned guesses (state/writeback.py) become learned-alias PROPOSALS (P2-10 C2), and the old
+"""The run's learned guesses (stages.match_variation.WriteBack) become learned-alias PROPOSALS (P2-10 C2), and the old
 alias_writeback.csv stays readable (aliases.migrate_learned) for the phase 1 store migration and the one-time move.
 
 Self-contained (tmp stores, no pipeline data). B1 still holds: a learned guess carries its learning METHOD (and now
@@ -11,7 +11,7 @@ import sqlite3
 from contextlib import closing
 
 from stone_pipeline.aliases import migrate_learned
-from stone_pipeline.state import writeback as wb
+from stone_pipeline.stages.match_variation import WriteBack
 
 
 def _rows(path):
@@ -25,11 +25,11 @@ def test_a_run_s_guesses_are_proposed_once_with_their_provenance(tmp_path, monke
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
     store.seed_from_yaml()                    # the config server's store: a proposal never creates it
-    w = wb.WriteBack()
+    w = WriteBack()
     w.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi", score=88.0)
     w.add_alias("granite__a_1", "some scraped spelling", method="phonetic", source="sentas")   # the run's dup
     assert w.flush() == 1
-    again = wb.WriteBack()
+    again = WriteBack()
     again.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi")
     assert again.flush() == 0                                       # a later run's repeat adds nothing
     assert _rows(path) == [("granite__a_1", "Some Scraped Spelling", "fuzzy", "zucchi", "proposed", 88.0)]
@@ -38,7 +38,7 @@ def test_a_run_s_guesses_are_proposed_once_with_their_provenance(tmp_path, monke
 def test_an_empty_run_proposes_nothing_and_creates_no_store(tmp_path, monkeypatch):
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
-    assert wb.WriteBack().flush() == 0 and not path.exists()
+    assert WriteBack().flush() == 0 and not path.exists()
 
 
 def test_the_old_file_reads_as_its_records_and_absent_as_none(tmp_path):
