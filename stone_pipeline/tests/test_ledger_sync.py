@@ -22,7 +22,7 @@ def _variation(ledger, key, state, medusa_id=None, type_="Marble", icon=True, in
     """A variation row; with `icon`, its slab icon too (the product gate needs an icon in the product's category)."""
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": type_, "name": "x",
-                                "aliases": "[]", "medusa_id": medusa_id,
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": medusa_id,
                                 "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
@@ -43,7 +43,7 @@ def _seed(ledger: Ledger) -> None:
                   pk=("category", "value"))
     for key, state in [("marble__a_1", "synced"), ("marble__b_2", "pending")]:
         ledger.upsert("variation", {"key": key, "type": "", "name": "x",
-                                    "aliases": "[]", "medusa_id": None,
+                                    "alias_rows": "[]", "codes": "[]", "medusa_id": None,
                                     "in_full": 1, "payload_hash": "", "state": state,
                                     "first_seen": now, "last_synced": None,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -268,7 +268,7 @@ def test_serve_isolates_a_row_with_corrupt_json(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "marble__good", state="pending")
         _variation(ledger, "marble__bad", state="pending")
-        ledger.execute("UPDATE variation SET aliases = '{corrupt' WHERE key = 'marble__bad'")
+        ledger.execute("UPDATE variation SET alias_rows = '{corrupt' WHERE key = 'marble__bad'")
         served = ready_variations(ledger)                       # must NOT raise
         keys = {v["external_id"] for v in served}
         assert "marble__good" in keys and "marble__bad" not in keys   # good served, bad dropped
@@ -284,7 +284,7 @@ def test_variation_payload_is_type_name_aliases_and_icons(tmp_path):
         _variation(ledger, "marble__v", state="pending")
         payload = ready_variations(ledger)[0]["payload"]
     assert "volume" not in payload
-    assert set(payload) == {"type", "name", "aliases", "category_images"}
+    assert set(payload) == {"type", "name", "alias_rows", "codes", "category_images"}
 
 
 def test_serve_in_flight_detects_a_lease(tmp_path):
@@ -723,7 +723,7 @@ def test_product_payload_empty_ports_is_empty_list_not_missing(tmp_path):
 def _named_variation(ledger, key, name, in_full=1, medusa_id=None):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": variety_key_type(key).title(), "name": name,
-                                "aliases": "[]", "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "",
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "",
                                 "state": "pending", "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
 

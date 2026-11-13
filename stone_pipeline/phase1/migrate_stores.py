@@ -8,8 +8,8 @@ the repo's ledger schema) applies these decisions to the step-1 snapshot copies 
 Rules, each from the spec:
 - A variety's copies collapse to ONE row under its new Key: the copy whose own `medusa_id` is the survivor id, set
   dirty so it re-serves once (C4, D2). That is the survivor's record, not necessarily the slab copy C4 names (D2 makes
-  the survivor per env). Its aliases are every copy's, unioned case-insensitively with the slab copy's casing first;
-  its in_full is the max over the copies. An identity the backend has no record of (an unpulled mint) keeps its first
+  the survivor per env). Its alias_rows and codes are NULL, not computed until the first produce computes them from
+  the alias stores (P2-10 C4); its in_full is the max over the copies. An identity the backend has no record of (an unpulled mint) keeps its first
   copy by category rank as one pending row (G8).
 - A copy in `retiring` or `gap_held`, or with `abandoned_at`, aborts (section 3); so does a Key outside the key map.
 - Products point at their variety's new Key.
@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 # --- config ---------------------------------------------------------------------------------------------------------
 KEY_MAP_COLUMNS = ("old_key", "new_key", "category_rank", "type_name")
+RETIRED_KEYS_COLUMNS = ("old_key", "step")    # the env's committed retired-Keys file
 UNSAFE_STATES = ("retiring", "gap_held")        # section 3, C4: a copy in these states is never collapsed
 SURVIVOR_STATE = "dirty"                        # C4: the surviving row re-serves once
 PENDING_STATE = "pending"                       # G8: a variety with no Medusa record is pulled after the roll
@@ -70,6 +71,30 @@ def read_key_map(data: bytes, sha256: str) -> KeyMap:
     if tuple(reader.fieldnames or ()) != KEY_MAP_COLUMNS:
         raise MigrationRefused(f"key map: columns {reader.fieldnames} are not {list(KEY_MAP_COLUMNS)}")
     return KeyMap({r["old_key"]: (r["new_key"], int(r["category_rank"]), r["type_name"]) for r in reader})
+
+
+def read_retired_keys(data: bytes, sha256: str, key_map: KeyMap) -> dict[str, str]:
+    """old Key -> the step that retired it, from the env's committed retired-Keys file, read only at its pinned digest:
+    the Keys retired before phase 1 that no store records (a ledger variation tombstone is the other record). Every
+    line names a Key outside the key map and cites its step; anything else refuses, so a mapping fault is never
+    recorded as a retirement."""
+    _digest_checked(data, sha256, "retired keys")
+    reader = csv.DictReader(io.StringIO(data.decode("utf-8")))
+    if tuple(reader.fieldnames or ()) != RETIRED_KEYS_COLUMNS:
+        raise MigrationRefused(f"retired keys: columns {reader.fieldnames} are not {list(RETIRED_KEYS_COLUMNS)}")
+    out: dict[str, str] = {}
+    for row in reader:
+        key, step = (row["old_key"] or "").strip(), (row["step"] or "").strip()
+        if not key:
+            raise MigrationRefused(f"retired keys: a line with no Key ({row})")
+        if key in out:
+            raise MigrationRefused(f"retired keys: {key} is listed twice")
+        if not step:
+            raise MigrationRefused(f"retired keys: {key} cites no step that retired it")
+        if key_map.new_key(key) is not None:
+            raise MigrationRefused(f"retired keys: {key} is in the key map, so it is a live Key, not a retired one")
+        out[key] = step
+    return out
 
 
 def read_survivor_map(data: bytes, sha256: str, key_map_sha256: str) -> dict[str, str]:
@@ -131,23 +156,14 @@ def plan_variations(rows: list[dict], key_map: KeyMap, survivors: dict[str, str]
                 _abort(plan.aborts, "no_survivor_but_synced", new)
                 continue
             kept, state = copies[0], PENDING_STATE
-        plan.rows[new] = {**kept, "key": new, "state": state, "aliases": _alias_union(copies, kept),
+        # alias_rows and codes NULL: not computed yet, so held until the first produce computes them from the alias
+        # stores (P2-10 C4). The copies' old unowned aliases are not carried: a loser name reaches the seed by the
+        # backbone merge (rewrite_committed._merged_post)
+        plan.rows[new] = {**kept, "key": new, "state": state, "alias_rows": None, "codes": None,
                           "in_full": max(int(r.get("in_full") or 0) for r in copies)}
         plan.collapsed[new] = [r["key"] for r in copies]
     plan.aborts = _sorted_aborts(plan.aborts)
     return plan
-
-
-def _alias_union(copies: list[dict], kept: dict):
-    """The copies' aliases (JSON arrays), case-insensitively unioned in category-rank order, so the slab copy's casing
-    wins (spec section 3, Aliases); the kept row's own value when no copy has any."""
-    seen, out = set(), []
-    for row in copies:
-        for alias in json.loads(row["aliases"]) if row.get("aliases") else []:
-            if alias.casefold() not in seen:
-                seen.add(alias.casefold())
-                out.append(alias)
-    return json.dumps(out) if out else kept.get("aliases")
 
 
 def remap_products(products: list[dict], key_map: KeyMap) -> tuple[list[dict], dict]:

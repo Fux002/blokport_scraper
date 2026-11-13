@@ -44,7 +44,7 @@ def test_matcher_collision_holds_with_the_owners_it_named(monkeypatch):
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("exact_collision", "Amazon Blue, Amazonia, Verde Ubatuba")], ref)
-    assert not res.alias_additions, "must not alias onto the first same-type owner"
+    assert not res.learned_proposals, "must not alias onto the first same-type owner"
     assert not _minted(res), "must not mint a duplicate"
     card = _card(res)
     assert card and "Matches several existing varieties" in card["reason"]
@@ -59,7 +59,7 @@ def test_a_typed_gap_with_several_same_type_owners_and_no_canonical_also_holds(m
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("no_candidate", None)], ref)
-    assert not res.alias_additions and not _minted(res)
+    assert not res.learned_proposals and not _minted(res)
     card = _card(res)
     assert card and "Matches several existing varieties" in card["reason"] and "Amazonia" in card["reason"]
 
@@ -71,7 +71,7 @@ def test_a_single_same_type_owner_still_aliases(monkeypatch):
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("no_candidate", None)], ref)
-    assert [a["Key"] for a in res.alias_additions] == ["granite__amazon_blue_A"]
+    assert [a["identity_key"] for a in res.learned_proposals] == ["granite__amazon_blue_A"]
     assert _card(res) is None
 
 
@@ -114,7 +114,7 @@ def test_a_matcher_collision_is_never_narrowed_away_by_the_cleaned_surface(monke
     row = CanonicalRow(src_site="marenostone", surrogate_key="S/08/18", variety_match_key="Absolute Black Marble",
                        raw_type="Marble", variation_method="exact_collision", tree_gaps=[g])
     res = curate.build_curation([row], ref)
-    assert not res.alias_additions and not _minted(res)
+    assert not res.learned_proposals and not _minted(res)
     card = next((p for p in res.pending_confirm if p["variant"].lower().startswith("absolute black")), None)
     assert card and "Matches several existing varieties" in card["reason"], res.pending_confirm
     assert "Toros Black" in card["reason"] and "Alaska White" in card["reason"]

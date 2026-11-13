@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
 # image also carries its pin tag (prod-<sha12> / prod-gpu-<sha12>), which the ECR lifecycle keeps (DEPLOY.md).
-prod_image_tag     = "c11507910ec28039d3acd55a4b3c115157320da6"     # full review wave A (#530-#548: sync lanes/acks/manifest, control plane, matcher type-first, photos click/isolation, infra pins/rolls), D7 base deliverable (#545), VE2 archived/internal dormant (#549-#553)
+prod_image_tag     = "eea91c517a8bd6b8ade261376ca8024c2b995782"     # the PROD CANDIDATE (#614 merge): #604 #605 #606 #608 #611 #612 #614 #616 on the old Keys; PROD_3D_RUN_PLAN_v2
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
@@ -49,6 +49,9 @@ prod_image_upgrade_batch = 1000
 # passed 2 h on 2026-09-14 and was killed as wedged.
 run_timeout_seconds = 14400
 
+# Dev off (owner 2026-11-10: no dev GPU spend, dev proves logic on tests and a few rows; Mas 2026-11-11): a dev produce
+# never submits the texture GPU job. Prod keeps its own.
+dev_auto_texture  = false
 prod_auto_texture = true
 
 # A product without a standardised photo is hidden (qty 0, reason no_photo) and kept for review. Prod has it by the
@@ -58,12 +61,13 @@ dev_require_standard_photo = true
 # The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image each env's standardise jobs run, built by
 # deploy/build_standardise_image.sh as standardise-pin-<sha12> of the commit it holds. A job definition is applied
 # before its env's svc runs the matching code (the release order, STANDARDISE_PROCESS.md).
-# AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
+# AUTO: on in prod: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run).
+# Off in dev (owner 2026-11-10: no dev GPU spend; Mas 2026-11-11), so a dev produce never starts the photo GPU jobs. The
 # month's budget, hosted calls and GPU together, is the owner's: prod 400 USD for November's combined pass, dev 100 USD
 # (2026-11-05).
 dev_standardise_image_tag  = "standardise-pin-809b0b3e2806"
-prod_standardise_image_tag = "standardise-pin-423d02f59c1d"
-dev_standardise_auto       = true
+prod_standardise_image_tag = "standardise-pin-eea91c517a8b"
+dev_standardise_auto       = false
 prod_standardise_auto      = true
 # The automatic clean-up of marks (FAL) stays off in both until the owner switches it on (owner 2026-11-02); a photo the
 # owner clicks is cleaned either way, within the cleaning cap below (owner 2026-11-05). Prod ran it ON once for the
@@ -71,13 +75,18 @@ prod_standardise_auto      = true
 dev_standardise_clean       = false
 prod_standardise_clean      = false
 dev_standardise_budget_usd  = "100"
-prod_standardise_budget_usd = "400"
+prod_standardise_budget_usd = "409.08" # 3D run: Nov spend to date 209.081352 (5 runs, prod_spend_to_date.sh 9046a9e3, 11-10) + 200
 # The clean-up edits' own monthly cap (owner 2026-11-05: $30 prod, $10 dev), apart from the budget above. It pays for the
 # owner's clicks always, and for the automatic marks only while dev_/prod_standardise_clean is on.
 dev_standardise_clean_budget_usd  = "10"
-prod_standardise_clean_budget_usd = "30"
+prod_standardise_clean_budget_usd = "35" # 3D run: Nov clean spend to date 0 (no clean-spend file, the same read) + 35
 dev_standardise_gpu_vcpus         = 32
 prod_standardise_gpu_vcpus        = 128
+# A scoped photos run (a scope file plus its own cap, select.RunCap): unset, every photos run works all new and changed
+# photos within the monthly budgets above. The prod 3D run (PROD_3D_RUN_PLAN_v2, scope 52fd255b, cap 235) ran on
+# 2026-11-11 and was unscoped afterwards (owner: "back to normal").
+prod_standardise_scope_key   = ""
+prod_standardise_run_cap_usd = ""
 # The overnight photos run (deploy.start_photos_run, infra/modules/sync_service/photos_nightly.tf): the schedule exists
 # in both environments and is off until the owner switches it on; on or off is one apply that never rolls the service.
 dev_photos_nightly  = false

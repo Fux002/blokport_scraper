@@ -71,7 +71,7 @@ class ConfigStoreError(RuntimeError):
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 12    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+SCHEMA_VERSION = 13    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
 #                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
 #                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
 #                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted);
@@ -80,20 +80,26 @@ SCHEMA_VERSION = 12    # 4: the decision `statement` table + its one-time migrat
 #                            tables are unchanged, so the version alone tells a migrated store from an old one:
 #                            ONLY the phase 1 store migration (phase1.migrate_stores) stamps 12, and a store at
 #                            1 to 11 is refused here (report 18 N3).
+#                        13: P2-10 C2: the learned_alias table (additive, so a phase 1 store opens in place).
+# The version the phase 1 store migration writes (phase1/store_writer.py). It stays 12 whatever SCHEMA_VERSION
+# becomes: that migration copies an old store without running _migrate, so stamping the current version would mark
+# a store that lacks every later table as complete. The first open then upgrades it in place.
+PHASE1_SCHEMA_VERSION = 12
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
     """Per-connection setup: row access + pragmas every time, the schema work ONCE per database. A brand-new database
     (version 0) gets the base DDL and every step, then the stamp; a stamped one runs nothing but the pragmas (the admin
     API connects per request, decisions_store per call). A database from before phase 1 (1 to 11) is REFUSED: its Keys
-    are old Keys, and only the phase 1 store migration may turn them into new ones."""
+    are old Keys, and only the phase 1 store migration may turn them into new ones. A phase 1 database (12 up to the
+    current version) is upgraded in place: every later step is additive."""
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
     conn.execute("PRAGMA busy_timeout=5000")  # ThreadingHTTPServer: two concurrent admin writes wait, not 500
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if 0 < version < SCHEMA_VERSION:
-        raise ConfigStoreError(f"config.db schema {version} predates phase 1 ({SCHEMA_VERSION}): run the store "
-                               "migration (RUN_MODE=phase1-migrate), never open it in place")
+    if 0 < version < PHASE1_SCHEMA_VERSION:
+        raise ConfigStoreError(f"config.db schema {version} predates phase 1 ({PHASE1_SCHEMA_VERSION}): run the "
+                               "store migration (RUN_MODE=phase1-migrate), never open it in place")
     if version < SCHEMA_VERSION:
         conn.executescript(_SCHEMA)
         _migrate(conn)
@@ -284,6 +290,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "source TEXT NOT NULL, run_id TEXT NOT NULL, at TEXT NOT NULL, "
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
+    # Learned aliases (P2-10 C2; shape frozen by the scraper manager 11-12): a spelling the pipeline GUESSED for a
+    # variety, keyed by its identity Key and norm = core.text.match_key(value). The matcher and curate write
+    # 'proposed'; only an 'active' row is a matcher input; a 'rejected' norm is never proposed again for that Key
+    # (the primary key holds it). `method` is how it was learned, `source` the vendor whose listing proposed it,
+    # `score` the proposing arm's own score on 0..100 for the review card (PHASE-2-SPEC:176), NULL where the arm has
+    # none and for a migrated row. No reset clears it: only a review decision changes a row.
+    conn.execute("CREATE TABLE IF NOT EXISTS learned_alias ("
+                 "identity_key TEXT NOT NULL, value TEXT NOT NULL, norm TEXT NOT NULL, method TEXT NOT NULL, "
+                 "source TEXT NOT NULL, "
+                 "status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'rejected')), "
+                 "first_seen TEXT NOT NULL, decided_by TEXT, decided_at TEXT, score REAL, "
+                 "PRIMARY KEY (identity_key, norm))")
     conn.commit()
 
 

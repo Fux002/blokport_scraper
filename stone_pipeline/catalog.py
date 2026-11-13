@@ -131,11 +131,13 @@ def run(outputs_root: Path | None = None) -> Path:
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
+    aliases_dropped = emit_catalog.alias_collisions_dropped()   # -> review list; the summary states the count
     inventory = collect_inventory(outputs_root)   # -> to_upload/4_inventory_update.csv (existing stock only)
     discontinued = collect_discontinued(outputs_root)  # -> review/4 delete-loop report (stock-0'd in inventory)
     collect_lot_cards(outputs_root)                    # -> the "which slabs are sold?" review queue
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
-                         products=products, inventory=inventory, discontinued=discontinued)
+                         products=products, inventory=inventory, discontinued=discontinued,
+                         aliases_dropped=aliases_dropped)
     images_queued = prepare_variant_images.queue_new_textures()   # new variants -> the texture job (auto)
     # Give each colour-less variety a real colour read from its REAL PRODUCT IMAGE (the hosted
     # product photo, keyed by variation_key), then propagate to mirrors, so a no-colour source like
@@ -165,7 +167,7 @@ def run(outputs_root: Path | None = None) -> Path:
     log.info("catalog consolidated", extra={"extra_fields": {
         "sources": sorted(set(sources)), **result.counts,
         "products": sum(products.values()), "inventory": inventory,
-        "discontinued": discontinued, "pruned_stale_runs": pruned,
+        "discontinued": discontinued, "aliases_dropped": aliases_dropped, "pruned_stale_runs": pruned,
         "images_queued": images_queued, "variant_colors": color_stats,
         "variants_dropped_deleted": dropped, "variants_to_delete": to_delete,
         "retyped_images_migrated": migrated}})

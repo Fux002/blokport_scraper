@@ -3,7 +3,9 @@ v14 DDL, an old config.db, the flat icons and the best-model marker, and a versi
 
 The writer turns a variety's copies into ONE v15 row on its new Key (the survivor's copy, dirty) with its icons, moves
 products to the new Key and their category to its handle, drops and lists variation tombstones, moves retired and
-protected Keys, copies each flat icon to its pair add-only, and writes nothing when anything aborts. The run reads
+protected Keys, copies each flat icon to its pair add-only, turns the best-model marker's old Keys into pair ids
+(dropping and listing only a Key the ledger tombstoned or the env's committed retired-Keys file names; any other
+unmapped Key aborts), and writes nothing when anything aborts. The run reads
 every store by its step-1 VersionId, refuses a store that moved on with other content, writes only on MIGRATE_WRITE=1
 with the dry run's digests, and never writes an old store key.
 """
@@ -21,7 +23,7 @@ from stone_pipeline.config import store
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX
 from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.phase1 import migrate_run, store_writer
-from stone_pipeline.phase1.migrate_stores import MigrationRefused, read_key_map
+from stone_pipeline.phase1.migrate_stores import MigrationRefused, read_key_map, read_retired_keys
 from stone_pipeline.phase1.variety_key import new_key
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -83,12 +85,12 @@ def test_a_variety_s_copies_become_one_dirty_v15_row_with_its_icons(tmp_path):
     report = store_writer.build_ledger(_old_ledger(tmp_path / "old.db"), new_db, _key_map(), SURVIVORS, set(), PAIRS)
     assert report.aborts == {}
     with Ledger.open(new_db, env="development") as lg:            # the v15 DAL opens it: the env guard holds
-        rows = [dict(r) for r in lg.execute("SELECT key, type, name, aliases, medusa_id, state FROM variation")]
+        rows = [dict(r) for r in lg.execute("SELECT key, type, name, alias_rows, codes, medusa_id, state FROM variation")]
         icons = [tuple(r) for r in lg.execute("SELECT category_handle, s3_key, etag FROM variation_category_image")]
         product = lg.get("product", "sku", "SEN-1")
         removed = [r["external_id"] for r in lg.execute("SELECT external_id FROM removed")]
         assert lg.get("inventory", "sku", "SEN-1")["qty"] == 3
-    assert rows == [{"key": NEW, "type": "Marble", "name": "Carrara", "aliases": '["Carrara C", "Bianco"]',
+    assert rows == [{"key": NEW, "type": "Marble", "name": "Carrara", "alias_rows": None, "codes": None,
                      "medusa_id": "V-SLAB", "state": "dirty"}]
     assert icons == [("blocks", f"{VARIATIONS_PREFIX}{NEW}/block.png", "e-b"),
                      ("slabs", f"{VARIATIONS_PREFIX}{NEW}/slab.png", "e-s")]
@@ -155,10 +157,70 @@ def test_two_old_icons_on_one_pair_abort():
     assert store_writer.plan_icon_copies(listing, key_map).report.aborts["icon_pair_collision"] == sorted(listing)
 
 
+TOMBSTONED, FILED = "slab_marble_old_5", "slab_carrara_7"     # retired by the ledger / by the retired-Keys file
+
+
+def _retired_bytes(*lines):
+    return ("old_key,step\n" + "".join(f"{k},{s}\n" for k, s in lines)).encode()
+
+
+def _retired(*lines):
+    data = _retired_bytes(*lines)
+    return read_retired_keys(data, hashlib.sha256(data).hexdigest(), _key_map())
+
+
 def test_the_marker_s_old_keys_become_pair_ids():
-    pairs, report = store_writer.remap_marker([OLD_TILE, OLD_SLAB], _key_map())
+    pairs, report = store_writer.remap_marker([OLD_TILE, OLD_SLAB], _key_map(), {}, {})
     assert pairs == [f"{NEW}/slab", f"{NEW}/tile"] and report.aborts == {}
-    assert "marker_unmapped_key" in store_writer.remap_marker(["slab_marble_nope_1"], _key_map())[1].aborts
+
+
+def test_a_retired_unmapped_marker_key_is_dropped_and_listed_with_its_reason_or_step():
+    pairs, report = store_writer.remap_marker([OLD_SLAB, TOMBSTONED, FILED], _key_map(),
+                                              {TOMBSTONED: "reseed_dedup"}, _retired((FILED, "#109 9a661d4")))
+    assert pairs == [f"{NEW}/slab"] and report.aborts == {}
+    assert report.listed["marker_dropped_unmapped"] == [
+        {"key": FILED, "retired_by": "retired_keys", "reason": "#109 9a661d4"},
+        {"key": TOMBSTONED, "retired_by": "ledger_removed", "reason": "reseed_dedup"}]
+    assert report.counts["marker_pairs"] == 1 and report.counts["marker_dropped"] == 2
+
+
+def test_an_unmapped_marker_key_in_neither_record_aborts():
+    _, report = store_writer.remap_marker([OLD_SLAB, "slab_marble_nope_1", FILED], _key_map(),
+                                          {TOMBSTONED: "reseed_dedup"}, {})
+    assert report.aborts == {"marker_unmapped_key": [FILED, "slab_marble_nope_1"]}
+
+
+def test_a_retired_keys_line_on_a_key_in_the_map_refuses():
+    with pytest.raises(MigrationRefused, match="in the key map"):
+        _retired((OLD_TILE, "#1 abc1234"))
+
+
+@pytest.mark.parametrize("step", ["", "   "])
+def test_a_retired_keys_line_without_a_step_refuses(step):
+    with pytest.raises(MigrationRefused, match="step"):
+        _retired((FILED, step))
+
+
+@pytest.mark.parametrize("data", [b"key,step\nslab_x_1,#1 abc\n", b"old_key,step\nslab_x_1,#1 abc\nslab_x_1,#2 def\n",
+                                  b"old_key,step\n,#1 abc\n"])
+def test_a_malformed_retired_keys_file_refuses(data):
+    with pytest.raises(MigrationRefused, match="retired keys"):
+        read_retired_keys(data, hashlib.sha256(data).hexdigest(), _key_map())
+
+
+def test_a_retired_keys_file_is_read_only_at_its_pinned_digest():
+    with pytest.raises(MigrationRefused, match="sha256"):
+        read_retired_keys(_retired_bytes((FILED, "#1 abc")), "0" * 64, _key_map())
+
+
+def test_dev_s_committed_retired_keys_file_holds_the_one_type_less_key_retired_by_109():
+    data = (migrate_run.RETIRED_KEYS_DIR / "development.csv").read_bytes()
+    assert read_retired_keys(data, hashlib.sha256(data).hexdigest(), _key_map()) == {
+        "slab_alpine_luxe_b1d2b915-341d-5c79-8591-0d7bb923ed11": "#109 9a661d4"}
+
+
+def test_the_ledger_s_variation_tombstones_are_read_with_their_reason(tmp_path):
+    assert store_writer.ledger_variation_tombstones(_old_ledger(tmp_path / "old.db")) == {TOMBSTONED: "reseed_dedup"}
 
 
 # --- config.db ------------------------------------------------------------------------------------------------------
@@ -247,20 +309,23 @@ def _spec(s3, key, data):
     return {"key": key, "version_id": s3.add(key, data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def _stack(tmp_path):
-    """A dev stack at step 1: its stores, the maps, the new export, the flat icons and the marker."""
+def _stack(tmp_path, marker=(OLD_SLAB,)):
+    """A dev stack at step 1: its stores, the maps, the new export, the flat icons and the marker; the retired-Keys
+    input is dev's committed file at its digest."""
     s3 = _FakeS3()
     km = _key_map_bytes()
     sv = json.dumps({"keyMapSha256": hashlib.sha256(km).hexdigest(),
                      "survivors": [{"oldKey": k, "survivorId": v} for k, v in SURVIVORS.items()]}).encode()
-    export = f"Id,Key,Name,Aliases,status,Type,owner\nV-SLAB,{NEW},Carrara,,active,Marble,scraper\n".encode()
+    export = ("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"
+              f"V-SLAB,{NEW},Carrara,,,active,Marble,scraper\n").encode()
     inputs = {"key_map": _spec(s3, "release-input/km.csv", km), "survivor_map": _spec(s3, "release-input/sv.json", sv),
-              "export": _spec(s3, "dev/scraper/from_medusa/variants_export.csv", export), "stores": {}}
+              "export": _spec(s3, "dev/scraper/from_medusa/variants_export.csv", export), "stores": {},
+              "retired_keys": {"sha256": hashlib.sha256(migrate_run.RETIRED_KEYS_PATH.read_bytes()).hexdigest()}}
     base = f"Key,Name,Type,Aliases\n{NEW},Carrara,Marble,\n".encode()
     files = {"ledger": _old_ledger(tmp_path / "old.db").read_bytes(),
              "config": _old_config(tmp_path / "oldc.db").read_bytes(),
              "writeback": b"variation_id,alias,method\nV-BLOCK,Carara,fuzzy\n",
-             "refreshed": json.dumps([OLD_SLAB]).encode(), "base_from_medusa": base, "base_to_upload": base,
+             "refreshed": json.dumps(list(marker)).encode(), "base_from_medusa": base, "base_to_upload": base,
              "outputs": b"tar"}
     for name, data in files.items():
         inputs["stores"][name] = {"version_id": s3.add(migrate_run.STORES[name][0], data)}
@@ -322,3 +387,63 @@ def test_a_same_content_re_upload_since_step_1_passes(tmp_path):
     key = migrate_run.STORES["writeback"][0]
     s3.add(key, s3.objects[key][-1][1])
     assert migrate_run.run(s3, inputs, write=False)["aborts"] == {}
+
+
+ALPINE = "slab_alpine_luxe_b1d2b915-341d-5c79-8591-0d7bb923ed11"      # dev's one retired-Keys line
+
+
+def test_the_run_drops_the_marker_s_retired_keys_and_lists_them(tmp_path):
+    s3, inputs = _stack(tmp_path, marker=(OLD_SLAB, TOMBSTONED, ALPINE))
+    result = migrate_run.run(s3, inputs, write=False)
+    assert result["aborts"] == {} and result["counts"]["marker_dropped"] == 2
+    assert result["listed"]["marker_dropped_unmapped"] == [
+        {"key": ALPINE, "retired_by": "retired_keys", "reason": "#109 9a661d4"},
+        {"key": TOMBSTONED, "retired_by": "ledger_removed", "reason": "reseed_dedup"}]
+
+
+def test_the_run_still_aborts_on_an_unmapped_marker_key_in_neither_record(tmp_path):
+    s3, inputs = _stack(tmp_path, marker=(OLD_SLAB, "slab_marble_nope_1"))
+    assert migrate_run.run(s3, inputs, write=False)["aborts"] == {"marker_unmapped_key": ["slab_marble_nope_1"]}
+
+
+def test_the_run_refuses_a_retired_keys_file_not_at_its_pinned_digest(tmp_path):
+    s3, inputs = _stack(tmp_path)
+    inputs["retired_keys"]["sha256"] = "0" * 64
+    with pytest.raises(MigrationRefused, match="retired keys"):
+        migrate_run.run(s3, inputs, write=False)
+
+
+def test_the_run_refuses_an_env_with_no_committed_retired_keys_file(tmp_path, monkeypatch):
+    # prod's case until its own file is built from prod's measurement: the run refuses; it never reads "no file" as
+    # "no retired Keys"
+    s3, inputs = _stack(tmp_path)
+    monkeypatch.setattr(migrate_run, "RETIRED_KEYS_PATH", tmp_path / "production.csv")
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="retired keys: .*production.csv is not committed"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []                       # refused before any store or map is read
+
+
+def test_the_run_refuses_a_retired_keys_file_off_its_pin_before_reading_a_store(tmp_path):
+    s3, inputs = _stack(tmp_path)
+    inputs["retired_keys"]["sha256"] = "0" * 64
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="retired keys: sha256 .* is not the expected"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"sha256": ""}, "1fe1"])
+def test_the_run_refuses_inputs_without_the_retired_keys_pin_before_reading_a_store(tmp_path, entry):
+    s3, inputs = _stack(tmp_path)
+    if entry is None:
+        del inputs["retired_keys"]
+    else:
+        inputs["retired_keys"] = entry
+    read = []
+    s3.get_object = lambda **kw: read.append(kw["Key"])
+    with pytest.raises(MigrationRefused, match="MIGRATE_INPUTS has no retired_keys"):
+        migrate_run.run(s3, inputs, write=False)
+    assert read == []

@@ -541,7 +541,7 @@ def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key
 
     def _var(ledger, key, name):
         ledger.upsert("variation", {"key": key, "type": "Granite", "name": name,
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "V", "in_full": 1,
                                     "payload_hash": "", "state": "synced", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))

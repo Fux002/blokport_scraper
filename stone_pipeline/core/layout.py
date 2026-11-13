@@ -93,7 +93,7 @@ def write_steps_md(layout: RunLayout, *, source: str, run_id: str, health: str,
 
 
 def write_sync_md(*, counts: dict, sources: list[str], products: dict[str, int],
-                  inventory: int = 0, discontinued: int = 0) -> Path:
+                  inventory: int = 0, discontinued: int = 0, aliases_dropped: int = 0) -> Path:
     """The upload checklist, written to to_upload/<env>/SYNC_STEPS.md (next to the files
     it describes). Says what to push to that env's Medusa, in order."""
     g = counts.get
@@ -107,10 +107,13 @@ def write_sync_md(*, counts: dict, sources: list[str], products: dict[str, int],
         "",
         "## 1. Variants  (upload ONE - Medusa upserts on Key, so either is safe)",
         "- `1_variants_full.csv`    the COMPLETE list (first import / full refresh).",
-        f"- `1_variants_update.csv`  only the {g('new_variants', 0)} new + {g('confirmed_alias_additions', 0)} "
-        "confirmed alias updates (incremental - no need to re-send the full list).",
-        f"  ({g('alias_additions', 0) - g('confirmed_alias_additions', 0)} more aliases need a look first - "
-        f"`review/{ENV_NAME}/alias_candidates.csv`, NOT in the update file.)",
+        f"- `1_variants_update.csv`  only the {g('new_variants', 0)} new varieties "
+        "(incremental - no need to re-send the full list).",
+        f"  ({g('learned_proposals', 0)} learned alias(es) proposed this run wait for a review in config.db "
+        "`learned_alias`, NOT in either file: a guess reaches no variety until it is approved.)",
+        f"  ({aliases_dropped} alias(es) dropped at emit, each the name of another variety of the same type: "
+        f"`review/{ENV_NAME}/alias_collisions_dropped.csv`, NOT in either file; every run's list stays in "
+        f"`review/{ENV_NAME}/alias_collisions_dropped_runs/`.)",
         f"Then DOWNLOAD Medusa's variant export and SAVE it as  `from_medusa/{ENV_NAME}/variants_export.csv`",
         "(the catalog reads it as the 'existing' set on the next run).",
         "",

@@ -33,9 +33,9 @@ def ref(tmp_path, monkeypatch):
     """A curation world on the new Keys: an export of two same-named varieties of two types, no alias model,
     nothing retired. Returns the reference data curate reads (the attribute vocabulary)."""
     export = tmp_path / "variants_export.csv"
-    export.write_text("Id,Key,Name,Aliases,status,Type,owner\n"
-                      f"v1,{GRANITE_ALPINE},Alpine,Alpine White,active,Granite,scraper\n"
-                      f"v2,{MARBLE_ALPINE},Alpine,,active,Marble,scraper\n", encoding="utf-8")
+    export.write_text("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"     # Medusa's export (P2-7)
+                      f"v1,{GRANITE_ALPINE},Alpine,Alpine White,,active,Granite,scraper\n"
+                      f"v2,{MARBLE_ALPINE},Alpine,,,active,Marble,scraper\n", encoding="utf-8")
     monkeypatch.setattr(existing_index, "existing_varieties_file", lambda: export)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_retired", set)
@@ -99,9 +99,9 @@ def test_a_learned_alias_lands_on_the_one_row_of_the_matched_type(ref):
                        variation_key=GRANITE_ALPINE, variation_name="Alpine", variation_method="fuzzy",
                        format_value="tile")
     result = curate.build_curation([row], ref, Decisions.empty())
-    assert result.alias_additions == [{
-        "Key": GRANITE_ALPINE, "Name": "Alpine", "Type": "Granite", "Aliases": "Alpine White|Alpine Qx9",
-        "_added": "Alpine Qx9", "_status": "confirmed",
+    assert result.learned_proposals == [{
+        "identity_key": GRANITE_ALPINE, "value": "Alpine Qx9", "method": "curate_confirmed", "source": "polonine",
+        "score": None,
     }]
 
 
@@ -140,7 +140,7 @@ def test_the_junk_list_names_a_mistyped_variety_s_type_from_its_key(tmp_path, mo
     from stone_pipeline import catalog
     export = tmp_path / "variants_export.csv"
     key = variety_key.new_key("Onyx", "Azul White Quartzite")
-    export.write_text(f"Id,Key,Name,Type,Aliases,status\nv1,{key},Azul White Quartzite,Onyx,,active\n",
+    export.write_text(f"Id,Key,Name,AdminAliases,AdminCodes,Type,status\nv1,{key},Azul White Quartzite,,,Onyx,active\n",
                       encoding="utf-8")
     monkeypatch.setattr(catalog, "SETTINGS", types.SimpleNamespace(
         paths=types.SimpleNamespace(export_file=export, review_dir=tmp_path / "review")))

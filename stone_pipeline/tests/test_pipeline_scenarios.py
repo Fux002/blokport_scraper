@@ -24,7 +24,7 @@ def _variety(lg: Ledger, key: str, medusa_id: str, state: str = "synced") -> Non
     now = now_iso()
     lg.upsert("variation", {
         "key": key, "type": "Marble", "name": key.rsplit("_", 1)[0],
-        "aliases": "[]",
+        "alias_rows": "[]", "codes": "[]",
         "medusa_id": medusa_id, "in_full": 1, "payload_hash": key, "state": state,
         "first_seen": now, "last_synced": None, "created_at": now, "updated_at": now}, pk=("key",))
     add_icon(lg, key)

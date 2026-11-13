@@ -18,6 +18,7 @@ class BackboneVariety:
     finishes: list[str]
     qualities: list[str]
     aliases: list[str]
+    codes: list[str] = field(default_factory=list)   # the brand's code names of the variety ('G603'), P2-10
 
 
 @dataclass
@@ -30,6 +31,9 @@ class Backbone:
     # phase 1: every post carries its variety's Key, so a variety's own post is found by Key, never by a name
     # another post may also carry as an alias
     by_key: dict[str, BackboneVariety] = field(default_factory=dict)
+    # the file this backbone was parsed from, as (path, size, mtime): what a cache of a value derived from the parse
+    # compares (aliases.stores' seed); None for a backbone built in memory
+    version: tuple | None = None
 
     def variety_of(self, key: str | None, name: str, stone_type: str | None = None) -> Optional[BackboneVariety]:
         """The variety's own post: the one carrying its Key; the name (then alias) lookup only for a variety with no
@@ -152,7 +156,8 @@ def load_backbone(path: Path | None = None) -> Backbone:
             f"backbone file {path} is missing for domain pack {active_pack().name!r}. Each pack ships its own "
             "catalog_source/<pack>/ backbone JSON; a non-stone pack never falls back to stone's data. Add the "
             "pack's backbone file before running it.")
-    backbone = Backbone()
+    stat = path.stat()
+    backbone = Backbone(version=(str(path), stat.st_size, stat.st_mtime_ns))
     for post in read_posts(path):
         variant_name = (post.get("variant") or "").strip()
         if not variant_name:
@@ -165,6 +170,7 @@ def load_backbone(path: Path | None = None) -> Backbone:
             qualities=[q for q in (post.get("qualities") or []) if q],
             # one alias per entry, as the writers' alias rule committed it (clean_alias_list)
             aliases=list(post.get("aliases") or []),
+            codes=list(post.get("codes") or []),
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
         if key := (post.get("key") or "").strip():

@@ -55,7 +55,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile on the declared floor
-        run: python -m compileall -q stone_pipeline scrapers deploy
+        run: python -m compileall -q stone_pipeline scrapers deploy market_prices
 
   terraform:
     # The infra is code too: formatting drift and a configuration that no longer validates (a removed

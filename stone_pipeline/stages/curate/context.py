@@ -19,7 +19,7 @@ from stone_pipeline.stages.curate.existing import ImportFile, alias_list
 @dataclass
 class CurationResult:
     # one entry per (type, name) variety: a variety is one record whatever category its products sit in
-    alias_additions: list[dict] = field(default_factory=list)  # an existing variety's row gaining aliases
+    learned_proposals: list[dict] = field(default_factory=list)  # {identity_key, value, method, source, score}
     new_variants: list[dict] = field(default_factory=list)     # a new variety's row
     backbone_new: list[dict] = field(default_factory=list)     # a new variety's backbone post
     backbone_updates: list[dict] = field(default_factory=list)            # leaf-gap suggestions
@@ -45,6 +45,7 @@ class Curation:
     ref: ReferenceData
     existing: ImportFile
     existing_surface: dict          # norm(surface) -> {(owner norm-name, owner norm-type)}
+    existing_codes: dict            # compact(code) -> {(owner norm-name, owner norm-type)} (surface_owners)
     generic_words: set
     retired_keys: set
     decisions: Decisions            # every operator decision, ONE object; each phase asks it one question
@@ -54,8 +55,8 @@ class Curation:
     type_names: dict                # norm(type) -> its canonical Medusa type NAME
     valid_type_norms: set
     last_resort_quality: str
-    alias_new: dict = field(default_factory=dict)          # (name, type) owner -> {spellings} (confirmed)
-    review_candidates: dict = field(default_factory=dict)  # norm name -> {spellings} (needs review)
+    alias_new: dict = field(default_factory=dict)          # (name, type) owner -> {spelling: (vendor, score)}
+    review_candidates: dict = field(default_factory=dict)  # norm name -> {spelling: (vendor, score)} (needs review)
     pending_confirm: list = field(default_factory=list)
     new_variant_rows: list = field(default_factory=list)
     suspicious: list = field(default_factory=list)
@@ -63,6 +64,32 @@ class Curation:
     minted_display: set = field(default_factory=set)       # (norm type, norm display name) minted THIS run
     variety_categories: dict = field(default_factory=dict)  # norm(clean) -> categories a product was seen in
     variety_images: dict = field(default_factory=dict)     # norm(clean) -> first evidence image
+
+
+def existing_surfaces(existing: ImportFile, retired: set) -> tuple[dict, dict]:
+    """Every known SURFACE of an existing variety -> the set of (name, TYPE) owners that carry it: its canonical name
+    and each alias by norm, each code by its compact key, the matcher's exact-tier key (CandidateIndex.by_code), so
+    'G-603' finds the 'G603' variety. A scrape whose cleaned name is already a surface must NEVER mint a duplicate
+    (the alias-aware existence check); unambiguous -> confirm the spelling as an alias, ambiguous -> review.
+    Owners are (name, TYPE) so 'Aqua Blue' resolves to FOUR distinct owners (one per type), not one entry. A retired
+    variety (E7) is no surface, or a scrape of its spelling would resolve onto a retired Key and never serve."""
+    surface: dict[str, set[tuple[str, str]]] = {}
+    codes: dict[str, set[tuple[str, str]]] = {}
+    for v in existing.varieties:
+        if v.get("Key") in retired:
+            continue
+        owner = (proj.norm(v["Name"]), v["type"])
+        surface.setdefault(owner[0], set()).add(owner)
+        for al in alias_list(v.get("Aliases", "")):
+            surface.setdefault(proj.norm(al), set()).add(owner)
+        for code in alias_list(v.get("Codes", "")):
+            codes.setdefault(proj.compact(code), set()).add(owner)
+    return surface, codes
+
+
+def surface_owners(c, text: str) -> set[tuple[str, str]]:
+    """The owners of `text` as a known surface: a name or alias by its norm, a code by its compact key."""
+    return set(c.existing_surface.get(proj.norm(text), set())) | set(c.existing_codes.get(proj.compact(text), set()))
 
 
 def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisions | None = None) -> Curation:
@@ -77,18 +104,7 @@ def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisio
     # variation_key and silently never serve. Excluding it means such a scrape mints/holds for review.
     from stone_pipeline.stages import decisions
     retired_keys = decisions.load_retired()
-    # every known SURFACE (canonical name + each alias) of an existing variety -> the set of canonical
-    # varieties that carry it. A scrape whose cleaned name is already a surface must NEVER mint a duplicate
-    # (the alias-aware existence check); unambiguous -> confirm the spelling as an alias, ambiguous -> review.
-    # Owners are (name, TYPE) so 'Aqua Blue' resolves to FOUR distinct owners (one per type), not one entry.
-    existing_surface: dict[str, set[tuple[str, str]]] = {}
-    for v in existing.varieties:
-        if v.get("Key") in retired_keys:
-            continue
-        owner = (proj.norm(v["Name"]), v["type"])
-        existing_surface.setdefault(owner[0], set()).add(owner)
-        for al in alias_list(v.get("Aliases", "")):
-            existing_surface.setdefault(proj.norm(al), set()).add(owner)
+    existing_surface, existing_codes = existing_surfaces(existing, retired_keys)
     # vocabulary of pure colour + stone-type words. A name made ONLY of these (e.g. 'Cream Quartzite',
     # 'Black Granite') is an unbranded GENERIC trade name -- its own underdog variety, never to be aliased
     # UP into a premium quarry-specific stone (the backbone lists such generics as aliases of the premium,
@@ -102,7 +118,8 @@ def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisio
     # review instead. The mint identity gates on it, and a minted row carries the canonical NAME.
     type_names = {proj.norm(t): t for t in ref.attributes.canonical_names("type")}
     return Curation(
-        rows=rows, ref=ref, existing=existing, existing_surface=existing_surface, generic_words=generic_words,
+        rows=rows, ref=ref, existing=existing, existing_surface=existing_surface, existing_codes=existing_codes,
+        generic_words=generic_words,
         retired_keys=retired_keys,
         # the operator's decisions (the durable decision ledger, incl. the reject memory), ONE object: the
         # stage entry passes the one it loaded for the whole produce; a direct caller loads it here

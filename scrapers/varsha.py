@@ -25,6 +25,7 @@ Run:  python scrapers/varsha.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import json
 from typing import Any, Iterable, Optional
 
@@ -68,6 +69,7 @@ def build_image_urls(bundle_id, filename):
 
 class VarshaScraper(ScraperBase):
     source = "varsha"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     # NO category fallback: varsha sets a PER-ROW format from the thickness field (MULTI => block, a gauge
     # => slab, ABSENT => ""). An empty format is a genuine "unknown", and classify_format leaves it for the
     # pipeline's signal-based format resolver (slab_count/area/depth) to settle, flagged. A `category="slab"`
