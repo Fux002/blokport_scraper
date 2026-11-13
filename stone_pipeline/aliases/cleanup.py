@@ -9,7 +9,7 @@ the served set is a row's alias_rows values and its codes), one row per
 - `code`: the brand's code pattern accepts it (C1's code test, inside alias_refusal);
 - `operator`: a GLOBAL `is` statement renamed onto the variety (vendor bindings stay match-only);
 - `removed`: a seed or learned value C1's alias refusal fails (the cleanup drops it; an operator's row is never
-  changed);
+  changed), or a value the v18 carry superseded on a row the produce has since left out (in_full=0);
 - `seed`: the env's base `Aliases` or a phase 1 backbone post's `aliases`;
 - `learned`: an ACTIVE learned_alias row (C2);
 and a Key holding no value is the one row `Key,,none`.
@@ -55,6 +55,9 @@ KEYS_SHOWN = 20                            # how many Keys a refusal's message n
 NO_OWNER = "no owner store"
 EMPTY_KEY = "empty key"
 ORPHAN_TOMBSTONE = "pending tombstone with no ledger row (no last set to name)"
+# A value the v18 carry superseded (no store owned it; its row was in the produced set): Medusa still holds it once
+# the produce left that row out (in_full=0), so the file names it removed (aliases.carry, Mas 13 Nov).
+SUPERSEDED = "superseded at the v18 carry (no owner store), its row left the produced set"
 # The classes whose values are aliases served as such (not a code, not removed): a digit in one is an open item.
 ALIAS_CLASSES = ("seed", "operator", "learned")
 ADMIN_ALIASES_COLUMN = "AdminAliases"      # the live export's admin rows (P2-7's E1), read by header
@@ -133,6 +136,13 @@ def classify(ledger, stores: Stores) -> Classification:
     differences: list[tuple[str, str, str, str]] = []
     for v in variations:
         _classify_variety(v, stores, contexts[v["key"]], rows, differences)
+    out_of_set = {v["key"] for v in variations if not v["in_full"]}
+    named = {(row[0], alias_key(row[1])) for row in (*rows, *differences)}
+    for r in ledger.execute("SELECT key, value FROM variation_alias_superseded ORDER BY key, value"):
+        # a value the Key serves again (a store came to own it before the row left the set) is classed by its set
+        if r["key"] in out_of_set and (r["key"], alias_key(r["value"])) not in named:
+            rows.append((r["key"], r["value"], "removed"))
+            differences.append((r["key"], r["value"], "removed", SUPERSEDED))
     held = {v["key"] for v in variations}
     for r in ledger.execute("SELECT external_id FROM removed WHERE kind = 'variation' ORDER BY external_id"):
         if r["external_id"] not in held:
@@ -173,9 +183,24 @@ def served_values(v: dict) -> list[str]:
     return [row["value"] for row in json.loads(v["alias_rows"])] + list(json.loads(v["codes"]))
 
 
+def owner_of(stores: Stores, key: str, name: str, stone_type: str, value: str) -> Optional[str]:
+    """THE owner of one value on one variety, the first store that holds its alias_key: 'operator' (a global rename onto
+    the variety's (name, type), or onto its name with no type), then 'seed', then 'learned'; None when no store holds
+    it. The classification and the v18 carry (aliases.carry) both ask here, so they never disagree."""
+    norm = alias_key(value)
+    name_key = match_key(name)
+    operator = stores.operator
+    if norm in operator.get((name_key, match_key(stone_type)), ()) or norm in operator.get((name_key, ""), ()):
+        return "operator"
+    if norm in stores.seed.get(key, ()):
+        return "seed"
+    if norm in stores.learned.get(key, ()):
+        return "learned"
+    return None
+
+
 def _classify_variety(v: dict, stores: Stores, context: AliasContext, rows: list, differences: list) -> None:
     key = v["key"]
-    name_key, type_key = match_key(v["name"]), match_key(v["type"])
     values = served_values(v)
     if not values:
         rows.append((key, "", "none"))
@@ -183,23 +208,21 @@ def _classify_variety(v: dict, stores: Stores, context: AliasContext, rows: list
     by_norm: dict[str, list[str]] = {}
     for value in values:
         by_norm.setdefault(alias_key(value), []).append(value)
-    operator = stores.operator.get((name_key, type_key), frozenset()) | stores.operator.get((name_key, ""), frozenset())
     for norm, spellings in by_norm.items():
         value = min(spellings)                          # one row per (Key, norm): the least spelling, deterministic
         if not norm:
             differences.append((key, value, "refused", EMPTY_KEY))
             continue
-        seed, learned = norm in stores.seed.get(key, ()), norm in stores.learned.get(key, ())
-        refusal = seed_refusal(value, context, stores.is_code)
+        owner = owner_of(stores, key, v["name"], v["type"], value)
         if stores.is_code(value):
             rows.append((key, value, "code"))
-        elif norm in operator:
+        elif owner == "operator":
             rows.append((key, value, "operator"))
-        elif (seed or learned) and refusal:
+        elif owner and (refusal := seed_refusal(value, context, stores.is_code)):
             rows.append((key, value, "removed"))
             differences.append((key, value, "removed", refusal))
-        elif seed or learned:
-            rows.append((key, value, "seed" if seed else "learned"))
+        elif owner:
+            rows.append((key, value, owner))
         else:
             differences.append((key, value, "refused", NO_OWNER))
 

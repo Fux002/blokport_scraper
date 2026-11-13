@@ -29,7 +29,7 @@ from stone_pipeline.core.schema import CanonicalRow, OutputMode
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import sync, writethrough
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger
-from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
 from stone_pipeline.stages import images
 
 _OLD = "2026-11-04T12:12:47+00:00"
@@ -52,7 +52,6 @@ def _open(path) -> Ledger:
             "VALUES (?, 'Marble', 'Abadeh Amvaj', '[]', '[]', 1, '', 'synced', 'V', ?, ?, ?, ?)",
             (_VARIATION, _OLD, _OLD, _OLD, _OLD))
         add_icon(ledger, _VARIATION)                 # phase 1: a product serves once its variety has its category's icon
-        seed_slab_category(ledger)
     return ledger
 
 
@@ -81,6 +80,11 @@ def _emitted(surrogate, photos="standard"):
                         thumbnail_key=urls[0], product_image_keys=urls, image_keys=urls,
                         model_3d_key=_BASE + _CUTOUT if photos == "standard" else None,
                         standard_version="etag-1", standard_photo=True, category_pcat_id=SLAB_PCAT)
+
+
+@pytest.fixture(autouse=True)
+def _slab_pcat(slab_category_pcat):
+    """The Slabs category on SLAB_PCAT for every test here (table 577: the category registry, main SC #678)."""
 
 
 @pytest.fixture
@@ -144,7 +148,8 @@ def test_an_unreadable_published_set_raises(monkeypatch):
         images.published_keys(SimpleNamespace(mode="s3"))
 
 
-def test_an_unreadable_published_set_fails_the_source_run_and_records_nothing(tmp_path, monkeypatch, scrape_data_dir):
+def test_an_unreadable_published_set_fails_the_source_run_and_records_nothing(tmp_path, monkeypatch, scrape_data_dir,
+                                                                             seeded_config_store):
     from stone_pipeline.run import run_source
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
