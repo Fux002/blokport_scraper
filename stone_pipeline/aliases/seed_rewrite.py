@@ -8,6 +8,10 @@ sha256 checked) and committed, so `render` reads committed files only and CI rep
 with the VersionId and sha256 bumped, so dev's changes since are in.
 
 Per backbone post, in this order (C1's judgement, the SAME one C5 classes `removed` by, cleanup.seed_refusal):
+- FIRST, the source fixes (Mas, 13 Nov; FIXES): a seed value the table names, wherever it is (the post's own, a
+  base's, a live addition's), is replaced by the table's terms, or dropped when it names none, and listed `fixed`
+  with the table's reason, so no base or live addition brings it back; a fix that names no seed value (and was
+  not listed `fixed` before) refuses (StaleFix);
 - a variant that is a coded form of its base Name ('Rosal B' for 'Rosal') takes the base Name, listed `renamed`
   (the manager, 11-12): emit's coded-name fold, which C4 deletes, made the base Name the variety's name;
 - every value the post already holds (its `aliases`, then its `codes`) is judged: a code goes to `codes`, a value C1
@@ -70,6 +74,11 @@ NO_POST_VALUE = "base-only Key, no backbone post (SC-3): the value leaves the se
 NO_POST_EMPTY = "base-only Key, no backbone post (SC-3): no value to keep"
 RENAMED = "renamed"
 RENAMED_REASON = "post variant was a coded form of the base Name; renamed to {name!r}, the Key unchanged"
+# The source fixes (Mas, 13 Nov): a sentence fragment, a concatenation or mojibake in the seed and what it becomes.
+FIXES = Path("catalog_source/seed_alias_fixes.csv")
+FIX_COLUMNS = ("Key", "Value", "Fix", "Reason")
+FIX_SEPARATOR = "|"                                       # the alias separator, so a term can never hold one
+FIXED = "fixed"
 
 
 class BasesDisagree(ValueError):
@@ -78,6 +87,14 @@ class BasesDisagree(ValueError):
 
 class WrongVocabulary(RuntimeError):
     """The vocabulary would not be development's committed attributes.csv (the stated basis)."""
+
+
+class BadFix(ValueError):
+    """A row of the fixes table is malformed or repeats a (Key, value) another row already fixes."""
+
+
+class StaleFix(ValueError):
+    """A fix names a value no seed store holds: the table no longer describes the seed."""
 
 
 class LiveBaseMismatch(RuntimeError):
@@ -95,14 +112,19 @@ def render(root: Path = REPO_ROOT) -> dict[Path, bytes]:
     others = {key: name_type for key, name_type in identities.items() if key not in committed}
     others.update({post["key"]: (post.get("variant") or "", post.get("stone_type") or "")
                    for post in doc["posts"] if post.get("key") and post["key"] not in identities})
-    judge = _Judge(identities, _contexts(committed, others), code_matcher(active_pack().name_code_pattern))
+    fixes = _read_fixes(root / FIXES)
+    judge = _Judge(identities, _contexts(committed, others), code_matcher(active_pack().name_code_pattern), fixes)
     differences = _read_differences(root / DIFFERENCES)
+    listed_fixed = {(key, norm) for key, norm, cls in differences if cls == FIXED}
     base_values = _base_values(root)
     posted = {post["key"] for post in doc["posts"] if post.get("key")}
     doc["posts"] = [judge.post(post, base_values.get(post.get("key") or "", []), differences)
                     if post.get("key") else post for post in doc["posts"]]
     for key in sorted(set(base_values) - posted):
         judge.no_post(key, base_values[key], differences)
+    if stale := sorted(set(fixes) - judge.used - listed_fixed):
+        raise StaleFix(f"{FIXES}: {len(stale)} fix(es) name no seed value: "
+                       + "; ".join(f"{key} {fixes[(key, norm)][0]!r}" for key, norm in stale))
     return {BACKBONE: (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),
             DIFFERENCES: _differences_bytes(differences)}
 
@@ -122,19 +144,40 @@ def _contexts(committed: dict[str, tuple[str, str]],
 
 
 class _Judge:
-    def __init__(self, identities: dict[str, tuple[str, str]], contexts: dict[str, AliasContext], is_code):
-        self.identities, self.contexts, self.is_code = identities, contexts, is_code
+    def __init__(self, identities: dict[str, tuple[str, str]], contexts: dict[str, AliasContext], is_code,
+                 fixes: dict[tuple[str, str], tuple[str, tuple[str, ...], str]]):
+        self.identities, self.contexts, self.is_code, self.fixes = identities, contexts, is_code, fixes
+        self.used: set[tuple[str, str]] = set()
+
+    def _fixed(self, key: str, values: list[str], differences: dict) -> list[str]:
+        """`values` with each fixed one replaced in place by its terms (none for a drop), each fix used listed `fixed`.
+        A term joins only when no other value or earlier term has its alias_key; every other value is unchanged."""
+        seen = {alias_key(value) for value in values if (key, alias_key(value)) not in self.fixes}
+        out: list[str] = []
+        for value in values:
+            fix = self.fixes.get((key, alias_key(value)))
+            if fix is None:
+                out.append(value)
+                continue
+            self.used.add((key, alias_key(value)))
+            _, terms, reason = fix
+            _note(differences, key, value, FIXED, f"{reason} (replaced by {' | '.join(terms)})" if terms else reason)
+            for term in terms:
+                if alias_key(term) not in seen:
+                    seen.add(alias_key(term))
+                    out.append(term)
+        return out
 
     def post(self, post: dict, base_values: list[str], differences: dict) -> dict:
-        """The post with its values judged and the base's missing values joined; `codes` written right after
+        """The post with its values fixed and judged and the base's missing values joined; `codes` written right after
         `aliases`."""
         key = post["key"]
         post = self._named(post, differences)
         context = self.contexts[key]
-        held = [*(post.get("aliases") or []), *(post.get("codes") or [])]
+        held = self._fixed(key, [*(post.get("aliases") or []), *(post.get("codes") or [])], differences)
         held_keys = {alias_key(value) for value in held}
         joining: dict[str, str] = {}                    # one value per alias_key: its least spelling
-        for value in sorted(base_values, key=lambda v: (alias_key(v), v)):
+        for value in sorted(self._fixed(key, base_values, differences), key=lambda v: (alias_key(v), v)):
             if alias_key(value) not in held_keys:
                 joining.setdefault(alias_key(value), value)
         aliases: list[str] = []
@@ -171,7 +214,7 @@ class _Judge:
     def no_post(self, key: str, values: list[str], differences: dict) -> None:
         context = self.contexts[key]
         kept = False
-        for value in sorted(set(values), key=lambda v: (alias_key(v), v)):
+        for value in sorted(set(self._fixed(key, values, differences)), key=lambda v: (alias_key(v), v)):
             if why := seed_refusal(value, context, self.is_code):
                 _note(differences, key, value, REMOVED, why)
             else:
@@ -249,6 +292,25 @@ def _require_vocabulary_basis() -> None:
     if Path(SETTINGS.paths.attributes_csv).resolve() != (REPO_ROOT / ATTRIBUTES).resolve():
         raise WrongVocabulary(f"the vocabulary would come from {SETTINGS.paths.attributes_csv}, not "
                               f"{REPO_ROOT / ATTRIBUTES}; run with SCRAPER_ENV=development")
+
+
+def _read_fixes(path: Path) -> dict[tuple[str, str], tuple[str, tuple[str, ...], str]]:
+    """(Key, alias_key(Value)) -> (Value, the replacement terms, Reason). Refuses (BadFix) a file whose columns are not
+    FIX_COLUMNS, a row missing its Key, Value or Reason, an empty term, or a second row for one (Key, value)."""
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if tuple(reader.fieldnames or ()) != FIX_COLUMNS:
+            raise BadFix(f"{path}: columns {reader.fieldnames}, expected {list(FIX_COLUMNS)}")
+        fixes: dict[tuple[str, str], tuple[str, tuple[str, ...], str]] = {}
+        for row in reader:
+            key, value, fix, reason = (row[c] for c in FIX_COLUMNS)
+            terms = tuple(term.strip() for term in fix.split(FIX_SEPARATOR)) if fix else ()
+            if not (key and alias_key(value) and reason) or any(not alias_key(term) for term in terms):
+                raise BadFix(f"{path}: row {row!r} needs a Key, a Value, a Reason and no empty term")
+            if (key, alias_key(value)) in fixes:
+                raise BadFix(f"{path}: {key} {value!r} is fixed twice")
+            fixes[(key, alias_key(value))] = (value, terms, reason)
+    return fixes
 
 
 def _read_differences(path: Path) -> dict[tuple[str, str, str], tuple[str, str, str, str]]:
