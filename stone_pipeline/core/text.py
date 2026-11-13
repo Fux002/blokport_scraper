@@ -300,6 +300,12 @@ def _is_latin(c: str) -> bool:
     return any(lo <= cp <= hi for lo, hi in _LATIN_RANGES)
 
 
+def keeps_script(text: str) -> bool:
+    """True when the RAW value has a letter outside the Latin script: its alias_key keeps the script (the second
+    path) instead of folding to match_key."""
+    return any(_is_letter(c) and not _is_latin(c) for c in text or "")
+
+
 def _alias_key_char(c: str) -> bool:
     category = unicodedata.category(c)
     return category[0] in "LM" or category == "Nd"
@@ -313,7 +319,7 @@ def alias_key(text: str) -> str:
     JS lacks: a final sigma stays), every character that is not a letter, a mark or a decimal digit (any script) a
     space, whitespace collapsed. '' when nothing is left: the callers refuse it. Pure; never raises."""
     text = text or ""
-    if not any(_is_letter(c) and not _is_latin(c) for c in text):
+    if not keeps_script(text):
         return match_key(text)
     visible = "".join(c for c in text if unicodedata.category(c) != "Cf")
     lowered = unicodedata.normalize("NFKC", visible).lower()
