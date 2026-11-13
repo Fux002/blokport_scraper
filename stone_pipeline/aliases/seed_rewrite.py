@@ -12,8 +12,10 @@ Per backbone post, in this order (C1's judgement, the SAME one C5 classes `remov
   (the manager, 11-12): emit's coded-name fold, which C4 deletes, made the base Name the variety's name;
 - every value the post already holds (its `aliases`, then its `codes`) is judged: a code goes to `codes`, a value C1
   refuses goes to the difference list as `removed`, anything else stays an alias, in its place;
-- every value on the Key's committed base rows (development, then production) whose match_key the post does not
-  already hold is judged the same way and joins, sorted by (match_key, value).
+- every value on the Key's committed base rows (development, then production) whose alias_key the post does not
+  already hold is judged the same way and joins, sorted by (alias_key, value).
+An alias VALUE keys by core.text.alias_key (SC #717's rule, the manager 13 Nov: match_key for an all-Latin value, the
+script kept otherwise, so a CJK alias is never "" and "Wratza 维纳多" is never "Wratza"); a NAME keys by match_key.
 A base Key with no post (base-only, SC-3: it gets none) keeps no seed value: each value C1 refuses is `removed`, each
 other is listed `no_post` (it leaves the seed when C4 derives the base), and a Key with no such value gets one
 `no_post` row with an empty Value, so every one is named (the manager's ruling, 11-12).
@@ -26,7 +28,7 @@ the live names of development's committed attributes.csv.
 
 The difference list (`seed_alias_differences.csv`) is the owner's list and an INPUT as well as the output: a value
 removed from a post exists nowhere else afterwards, so its row is kept from the previous list and only new
-(Key, match_key) rows join. That makes a second run change nothing, and the output is a pure function of the
+(Key, alias_key) rows join. That makes a second run change nothing, and the output is a pure function of the
 committed files (sorted, no set order reaches it), so two PYTHONHASHSEED values give the same bytes. The bases are
 read, never written (C4 derives their Aliases). No em dashes.
 """
@@ -42,7 +44,7 @@ from pathlib import Path
 from stone_pipeline.aliases.cleanup import seed_refusal
 from stone_pipeline.aliases.context import build_contexts
 from stone_pipeline.core.alias_problem import AliasContext, code_matcher
-from stone_pipeline.core.text import clean_variety_name, match_key
+from stone_pipeline.core.text import alias_key, clean_variety_name, match_key
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, ExportVariation, read_variants_export
 
 # --- config ----------------------------------------------------------------------------------------------------------
@@ -130,11 +132,11 @@ class _Judge:
         post = self._named(post, differences)
         context = self.contexts[key]
         held = [*(post.get("aliases") or []), *(post.get("codes") or [])]
-        held_keys = {match_key(value) for value in held}
-        joining: dict[str, str] = {}                    # one value per match_key: its least spelling
-        for value in sorted(base_values, key=lambda v: (match_key(v), v)):
-            if match_key(value) not in held_keys:
-                joining.setdefault(match_key(value), value)
+        held_keys = {alias_key(value) for value in held}
+        joining: dict[str, str] = {}                    # one value per alias_key: its least spelling
+        for value in sorted(base_values, key=lambda v: (alias_key(v), v)):
+            if alias_key(value) not in held_keys:
+                joining.setdefault(alias_key(value), value)
         aliases: list[str] = []
         codes: list[str] = []
         for value in [*held, *joining.values()]:
@@ -169,7 +171,7 @@ class _Judge:
     def no_post(self, key: str, values: list[str], differences: dict) -> None:
         context = self.contexts[key]
         kept = False
-        for value in sorted(set(values), key=lambda v: (match_key(v), v)):
+        for value in sorted(set(values), key=lambda v: (alias_key(v), v)):
             if why := seed_refusal(value, context, self.is_code):
                 _note(differences, key, value, REMOVED, why)
             else:
@@ -180,8 +182,8 @@ class _Judge:
 
 
 def _note(differences: dict, key: str, value: str, cls: str, reason: str) -> None:
-    """One row per (Key, match_key(Value), Class); a row already listed (a previous run's) is kept as it is."""
-    differences.setdefault((key, match_key(value), cls), (key, value, cls, reason))
+    """One row per (Key, alias_key(Value), Class); a row already listed (a previous run's) is kept as it is."""
+    differences.setdefault((key, alias_key(value), cls), (key, value, cls, reason))
 
 
 # --- the committed files ---------------------------------------------------------------------------------------------
@@ -208,12 +210,12 @@ def _base_values(root: Path) -> dict[str, list[str]]:
 # --- dev's live base -------------------------------------------------------------------------------------------------
 def live_additions(live_text: str, committed: list[ExportVariation]) -> str:
     """What a live base adds to the committed rows, in the base's columns, sorted by Key: a Key the committed rows
-    lack, whole; a committed Key, with only the aliases whose match_key it does not already hold (left out when there
+    lack, whole; a committed Key, with only the aliases whose alias_key it does not already hold (left out when there
     is none). A live row that names or types a committed Key differently refuses (BasesDisagree)."""
     identities = {row.key: (row.name, row.type) for row in committed}
     held: dict[str, set[str]] = {}
     for row in committed:
-        held.setdefault(row.key, set()).update(match_key(a) for a in row.aliases)
+        held.setdefault(row.key, set()).update(alias_key(a) for a in row.aliases)
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
     writer.writerow(VARIETY_FILE_COLUMNS)
@@ -222,10 +224,10 @@ def live_additions(live_text: str, committed: list[ExportVariation]) -> str:
         if have != (row.name, row.type):
             raise BasesDisagree(f"{LIVE_BASE_KEY}: Key {row.key!r} is {(row.name, row.type)!r}, committed {have!r}")
         new = held.get(row.key)
-        adds = [a for a in row.aliases if new is None or match_key(a) not in new]
+        adds = [a for a in row.aliases if new is None or alias_key(a) not in new]
         if new is None or adds:
             writer.writerow([row.key, row.name, row.type, "|".join(adds)])
-        held.setdefault(row.key, set()).update(match_key(a) for a in row.aliases)
+        held.setdefault(row.key, set()).update(alias_key(a) for a in row.aliases)
     return out.getvalue()
 
 
@@ -253,7 +255,7 @@ def _read_differences(path: Path) -> dict[tuple[str, str, str], tuple[str, str, 
     if not path.exists():
         return {}
     with path.open(encoding="utf-8", newline="") as handle:
-        return {(r["Key"], match_key(r["Value"]), r["Class"]): (r["Key"], r["Value"], r["Class"], r["Reason"])
+        return {(r["Key"], alias_key(r["Value"]), r["Class"]): (r["Key"], r["Value"], r["Class"], r["Reason"])
                 for r in csv.DictReader(handle)}
 
 
