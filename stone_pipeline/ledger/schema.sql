@@ -340,6 +340,18 @@ CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, exte
 CREATE INDEX IF NOT EXISTS idx_removed_serve_kind ON removed (state, kind, created_at, external_id);
 
 -- ---------------------------------------------------------------------------
+-- variation_deleted (v20, table 575 / G5): every variety Medusa acked deleted ('done' on its variation
+-- tombstone, which deletes both the tombstone and the variation row). Emit's live-export union skips these Keys,
+-- so a stale export cannot re-create a deleted variety. A Key that re-enters from the base or curate's delta (a real
+-- re-mint) loses its row in populate (E5). Never served.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS variation_deleted (
+    key        TEXT PRIMARY KEY,                        -- the deleted variation Key
+    reason     TEXT,                                    -- the tombstone's reason
+    deleted_at TEXT NOT NULL                            -- when Medusa's 'done' ack landed
+);
+
+-- ---------------------------------------------------------------------------
 -- sync_run: the audit ledger, one row per reconcile pass. `counts` is a JSON blob
 -- of per-type / per-state tallies for GET /sync/status and the run summary.
 -- ---------------------------------------------------------------------------
