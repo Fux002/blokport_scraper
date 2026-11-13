@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 from urllib.parse import urlparse
 
-import yaml
-from pydantic import (
-    BaseModel, BeforeValidator, ConfigDict, StringConstraints, ValidationError, field_validator, model_validator,
-)
+from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator, model_validator
 
 from market_prices import config
+from market_prices.brand import SLUG, load_brand_document
 from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 from market_prices.text import same_host, site_host
-
-SLUG = re.compile(r"[a-z0-9_]+")
-
 
 def _refuse_number(value: object) -> object:
     if isinstance(value, (int, float)):
@@ -78,6 +72,7 @@ class Site(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    brand: str      # brand_required: the register's own brand, on every row (Register checks it)
     site_id: str
     seller_name: Words
     seller_type: SellerType
@@ -94,6 +89,8 @@ class Site(BaseModel):
     grade_labels: tuple[Words, ...] = ()
     # The product scraper's source id when this seller is also one of the owner's suppliers (check_suppliers).
     supplier_key: Optional[Words] = None
+    # one_register_per_site: the other brands this same site is registered for; both rows must name each other
+    shared_with: tuple[str, ...] = ()
 
     @field_validator("site_id")
     @classmethod
@@ -147,12 +144,27 @@ class Register(BaseModel):
 
     brand: str
     sites: tuple[Site, ...]
+    # The dev pilot's one site (market_prices/pilot.py): a site of this register, run only once it is approved.
+    pilot_site: Optional[str] = None
 
     @model_validator(mode="after")
     def _site_ids_unique(self) -> "Register":
         ids = [site.site_id for site in self.sites]
         if duplicates := sorted({site_id for site_id in ids if ids.count(site_id) > 1}):
             raise ValueError(f"duplicate site_id: {duplicates}")
+        return self
+
+    @model_validator(mode="after")
+    def _every_row_is_this_brands(self) -> "Register":
+        if foreign := sorted(f"{site.site_id} (brand {site.brand!r})" for site in self.sites
+                             if site.brand != self.brand):
+            raise ValueError(f"rows not of the register's brand {self.brand!r}: {foreign}")
+        return self
+
+    @model_validator(mode="after")
+    def _pilot_site_is_a_site(self) -> "Register":
+        if self.pilot_site is not None and self.pilot_site not in {site.site_id for site in self.sites}:
+            raise ValueError(f"pilot_site {self.pilot_site!r} is not a site of this register")
         return self
 
 
@@ -187,22 +199,34 @@ def supplier_keys() -> dict[str, str]:
     return supplier_domains()
 
 
+def _read_register(sites_dir: Path, brand: str) -> Register:
+    return load_brand_document(sites_dir, brand, Register, RegisterError, "site register")
+
+
+def check_one_register_per_site(register: Register, sites_dir: Path) -> None:
+    """one_register_per_site: a site_id or host of this register is in no other brand's register, unless both rows
+    name each other in shared_with. Every other register in `sites_dir` is read, and one that does not validate stops
+    this one too: the rule cannot be checked against a register that cannot be read."""
+    for path in sorted(sites_dir.glob("*.yaml")):
+        if path.stem == register.brand:
+            continue
+        other = _read_register(sites_dir, path.stem)
+        for mine in register.sites:
+            for theirs in other.sites:
+                host = site_host(mine.base_url)
+                if mine.site_id != theirs.site_id and not same_host(host, site_host(theirs.base_url)):
+                    continue
+                if other.brand in mine.shared_with and register.brand in theirs.shared_with:
+                    continue
+                raise RegisterError(
+                    f"site {mine.site_id} ({host}) is also in the {other.brand} register as {theirs.site_id} "
+                    f"({site_host(theirs.base_url)}); a site belongs to one brand unless both rows name each other in "
+                    f"shared_with")
+
+
 def load_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
     """The validated register of one brand. Any problem raises, so no site runs on a half-read register."""
-    if not SLUG.fullmatch(brand):
-        raise RegisterError(f"brand {brand!r} must match {SLUG.pattern}")
-    path = sites_dir / f"{brand}.yaml"
-    try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise RegisterError(f"no site register for brand {brand!r} at {path}") from exc
-    except yaml.YAMLError as exc:
-        raise RegisterError(f"{path} is not valid YAML: {exc}") from exc
-    try:
-        register = Register.model_validate(document)
-    except ValidationError as exc:
-        raise RegisterError(f"{path} does not validate: {exc}") from exc
-    if register.brand != brand:
-        raise RegisterError(f"{path} declares brand {register.brand!r}")
+    register = _read_register(sites_dir, brand)
+    check_one_register_per_site(register, sites_dir)
     check_suppliers(register, supplier_keys())
     return register

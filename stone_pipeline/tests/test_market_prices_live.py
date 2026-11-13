@@ -10,7 +10,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-import yaml
 
 from market_prices import config, pilot, run
 from market_prices.fetching import Response, TransportError, UnexpectedResponse
@@ -260,33 +259,7 @@ class _Context:
         return None
 
 
-# --- the dev pilot -----------------------------------------------------------------------------------------------------
-def _write_register(tmp_path: Path, *sites: dict) -> Path:
-    (tmp_path / "blokport.yaml").write_text(yaml.safe_dump({"brand": "blokport", "sites": list(sites)}),
-                                            encoding="utf-8")
-    return tmp_path
-
-
-def test_the_pilot_runs_only_the_named_site(tmp_path):
-    sites_dir = _write_register(tmp_path, _site("shop"), _site("other", base_url="https://other.example"))
-    register = pilot.pilot_register("blokport", "shop", sites_dir)
-    assert [site.site_id for site in register.sites] == ["shop"]
-
-
-@pytest.mark.parametrize("site_id,why", [("absent", "no site 'absent'"), ("waiting", "decision is pending")])
-def test_the_pilot_refuses_a_site_that_is_not_approved_before_any_request(tmp_path, site_id, why):
-    sites_dir = _write_register(tmp_path, _site("waiting", decision="pending"))
-    with pytest.raises(RegisterError, match=why):
-        pilot.pilot_register("blokport", site_id, sites_dir)
-
-
-def test_the_pilot_refuses_another_brands_deployment(monkeypatch):
-    # a pilot of blokport's sites in wudport's deployment would write blokport prices into wudport's bucket
-    monkeypatch.setattr(pilot, "BRAND", "wudport")
-    monkeypatch.setattr(pilot, "pilot_register", lambda *args: pytest.fail("the register was read"))
-    with pytest.raises(SystemExit, match="wudport"):
-        pilot.main()
-
+# --- the dev pilot (its site choice: tests/test_market_prices_brand.py, the register's pilot_site) ---------------------
 
 def test_the_pilot_refuses_to_run_outside_development(monkeypatch):
     monkeypatch.setattr(pilot, "IS_PRODUCTION", True)
