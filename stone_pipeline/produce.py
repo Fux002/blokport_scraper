@@ -41,10 +41,15 @@ def _fetch_inputs() -> None:
     stops the produce in EVERY environment (fetch_inputs raises SystemExit, which this does not catch): left out,
     it would run as a cold start and publish empty valid combinations. An exception is a real S3 / credential
     failure: in production it aborts the produce (matching against a stale or absent export would hold every
-    variety and exit 0); in development (a laptop without S3) it logs and continues."""
+    variety and exit 0); in development (a laptop without S3) it logs and continues. A REFUSED attributes.csv (thin or
+    malformed: Medusa mid-reset) is no outage and stops the produce in every environment: a produce never runs on a
+    vocabulary it knows is stale (G10's attributes half)."""
+    from stone_pipeline.io import medusa_inputs
     try:
-        from stone_pipeline.io import medusa_inputs
         medusa_inputs.fetch_all()
+    except medusa_inputs.AttributesUnavailable:
+        log.exception("attributes.csv refused; a produce never runs on a stale vocabulary")
+        raise SystemExit(2)
     except Exception:
         if IS_PRODUCTION:
             log.exception("fetch_inputs FAILED in production; refusing to produce against a stale or absent export")

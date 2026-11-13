@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from stone_pipeline.aliases import migrate_learned
 from stone_pipeline.ledger import snapshot
 
 ENV = "development"
@@ -44,7 +45,7 @@ def _stores(tmp_path):
          f"{ENV}/scraper/ledger/{ENV}.v2.db", f"{ENV}/scraper/ledger/{ENV}.db"),
         ("config", lambda: snapshot.restore_config(tmp_path / "config.db", ENV, required=True),
          f"{ENV}/scraper/config/config.v2.db", f"{ENV}/scraper/config/config.db"),
-        ("writeback", lambda: snapshot.restore(wb, ENV, key=snapshot.state_writeback_key(ENV)),
+        ("writeback", lambda: snapshot.restore(wb, ENV, key=migrate_learned.writeback_key(ENV)),
          f"{ENV}/scraper/state/alias_writeback.v2.csv", f"{ENV}/scraper/state/alias_writeback.csv"),
     ]
 
@@ -52,7 +53,7 @@ def _stores(tmp_path):
 def test_the_phase_1_stores_live_under_new_keys():
     assert snapshot.snapshot_key(ENV) == f"{ENV}/scraper/ledger/{ENV}.v2.db"
     assert snapshot.config_key(ENV) == f"{ENV}/scraper/config/config.v2.db"
-    assert snapshot.state_writeback_key(ENV) == f"{ENV}/scraper/state/alias_writeback.v2.csv"
+    assert migrate_learned.writeback_key(ENV) == f"{ENV}/scraper/state/alias_writeback.v2.csv"
 
 
 @pytest.mark.parametrize("store", ["ledger", "config", "writeback"])

@@ -11,7 +11,7 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 from stone_pipeline.aliases.surfaces import OperatorAlias, Stores
 from stone_pipeline.core.alias_problem import code_matcher
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key, match_key
 
 log = logging.getLogger("stone_pipeline.aliases")
 
@@ -52,7 +52,7 @@ def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
         name, spelling = (r.get("name") or "").strip(), (r.get("spelling") or r.get("spelling_norm") or "").strip()
         if (r.get("source") or "").strip() or r.get("verdict") != "is" or not name or not spelling:
             continue
-        if match_key(name) != match_key(spelling):
+        if match_key(name) != alias_key(spelling):   # a name keys by match_key, an alias value by alias_key
             out.append(OperatorAlias(name, (r.get("stone_type") or "").strip(), spelling))
     return out
 

@@ -19,6 +19,7 @@ Hermetic: tmp stores, a hand-built index, the committed vocabulary. No em dashes
 from __future__ import annotations
 
 import csv
+import io
 import sqlite3
 from contextlib import closing
 from types import SimpleNamespace
@@ -44,8 +45,11 @@ COLUMNS = READ_COLUMNS + ["score"]
 
 @pytest.fixture
 def config_db(tmp_path, monkeypatch):
+    """An isolated config.db the config server's boot would leave: present and seeded from sources.yaml (a learned-alias
+    write never creates the store)."""
     path = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
     return path
 
 
@@ -70,7 +74,7 @@ def test_the_learned_alias_table_has_the_frozen_shape(config_db):
                                                                                                       "norm"]
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO learned_alias VALUES ('k', 'v', 'v', 'fuzzy', '', 'maybe', 't', NULL, NULL, NULL)")
-    assert store.SCHEMA_VERSION == 13 and store.PHASE1_SCHEMA_VERSION == 12
+    assert store.SCHEMA_VERSION == 14 and store.PHASE1_SCHEMA_VERSION == 12
 
 
 def test_a_phase_1_store_opens_in_place_as_v13_with_an_empty_learned_alias(config_db):
@@ -80,7 +84,7 @@ def test_a_phase_1_store_opens_in_place_as_v13_with_an_empty_learned_alias(confi
         conn.execute(f"PRAGMA user_version = {store.PHASE1_SCHEMA_VERSION}")
         conn.commit()
     with closing(store.open_store()) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
         assert conn.execute("SELECT COUNT(*) FROM learned_alias").fetchone()[0] == 0
         assert [r[0] for r in conn.execute("SELECT key FROM retired_variation")] == ["marble__gone_1"]
 
@@ -195,7 +199,9 @@ def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, tmp_path)
 def test_the_matcher_no_longer_reads_the_alias_writeback_csv(config_db, monkeypatch, tmp_path):
     def refuse(*a, **k):
         raise AssertionError("the matcher read alias_writeback.csv")
-    monkeypatch.setattr(wb, "load_alias_writeback_records", refuse)
+    from stone_pipeline.aliases import migrate_learned
+    monkeypatch.setattr(migrate_learned, "load_alias_writeback_records", refuse)
+    monkeypatch.setattr(migrate_learned, "stored_records", refuse)
     _built_stage(monkeypatch)
 
 
@@ -273,18 +279,55 @@ def _ledger(path):
     return path
 
 
-def _writeback(path, rows):
-    with path.open("w", encoding="utf-8", newline="") as h:
-        w = csv.writer(h)
-        w.writerow(["variation_id", "alias", "method"])
-        w.writerows(rows)
-    return path
+# --- the migration owns its input (manager ruling 11-12): the csv is read from its .v2 key on S3, only while the marker
+# is absent; absence is the only error that reads as "nothing to migrate" ---------------------------------------------
+
+WB_NEW = "development/scraper/state/alias_writeback.v2.csv"     # phase 1's copy, the migration's input
+WB_OLD = "development/scraper/state/alias_writeback.csv"        # the pre-phase-1 key
 
 
-def _migrate(tmp_path, records):
+class _S3:
+    """In-memory S3 for the migration's read: `objects` by key; `errors` by key raise that S3 error code."""
+
+    def __init__(self, objects=None, errors=None):
+        self.objects, self.errors = dict(objects or {}), dict(errors or {})
+
+    def _raise(self, key, absent_code):
+        code = self.errors.get(key) or (absent_code if key not in self.objects else None)
+        if code:
+            exc = Exception(code)
+            exc.response = {"Error": {"Code": code}}
+            raise exc
+
+    def get_object(self, Bucket, Key):
+        self._raise(Key, "NoSuchKey")
+        return {"Body": SimpleNamespace(read=lambda: self.objects[Key])}
+
+    def head_object(self, Bucket, Key):
+        self._raise(Key, "404")
+        return {}
+
+
+def _migrate_from(tmp_path, monkeypatch, s3, ledger_path=None):
     from stone_pipeline.aliases import migrate_learned
-    return migrate_learned.run_once(writeback_path=_writeback(tmp_path / "alias_writeback.csv", records),
-                                    ledger_path=_ledger(tmp_path / "ledger.db"), review_dir=tmp_path / "review")
+    from stone_pipeline.ledger import snapshot
+    monkeypatch.setattr(migrate_learned, "_s3", lambda: s3)
+    monkeypatch.setattr(snapshot, "_s3", lambda: s3)
+    return migrate_learned.run_once(ledger_path=ledger_path or _ledger(tmp_path / "ledger.db"),
+                                    review_dir=tmp_path / "review")
+
+
+def _csv(records) -> bytes:
+    out = io.StringIO(newline="")
+    w = csv.writer(out)
+    w.writerow(["variation_id", "alias", "method"])
+    w.writerows(records)
+    return out.getvalue().encode("utf-8")
+
+
+def _migrate(tmp_path, monkeypatch, records):
+    """The migration of these records, stored at the .v2 key."""
+    return _migrate_from(tmp_path, monkeypatch, _S3({WB_NEW: _csv(records)}))
 
 
 def _dropped(tmp_path) -> list[dict]:
@@ -293,8 +336,8 @@ def _dropped(tmp_path) -> list[dict]:
         return list(csv.DictReader(h))
 
 
-def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary(config_db, tmp_path):
-    report = _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic"),        # by the ledger's medusa_id
+def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary(config_db, tmp_path, monkeypatch):
+    report = _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic"),        # by the ledger's medusa_id
                                  (OTHER, "China White", "fuzzy")])                 # already a new Key
     assert report == {"active": 2, "dropped": 0}
     assert [r["score"] for r in _rows(config_db)] == [None, None]          # a migrated row carries no score
@@ -304,8 +347,8 @@ def test_the_migration_activates_each_row_on_a_live_key_that_passes_the_boundary
         (OTHER, "China White", "fuzzy", "active", "migration", "")]
 
 
-def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db, tmp_path):
-    report = _migrate(tmp_path, [
+def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db, tmp_path, monkeypatch):
+    report = _migrate(tmp_path, monkeypatch, [
         ("01NOWHERE", "Some Name", "fuzzy"),            # resolves to no Key
         ("01GONE", "Old Spelling", "fuzzy"),            # a retiring Key is not live
         ("01PATAGONIA", "Patagonia White", "fuzzy"),    # its own name (C1 boundary)
@@ -327,26 +370,61 @@ def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db
     ]
 
 
-def test_a_second_produce_s_migration_is_a_no_op(config_db, tmp_path):
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) == {"active": 1, "dropped": 0}
+def test_a_second_produce_s_migration_is_a_no_op(config_db, tmp_path, monkeypatch):
+    assert _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic")]) == {"active": 1, "dropped": 0}
     before = _rows(config_db)
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic"), (OTHER, "China White", "fuzzy")]) is None
+    assert _migrate(tmp_path, monkeypatch, [("01PATAGONIA", "PATAGONIA", "phonetic"), (OTHER, "China White", "fuzzy")]) is None
     assert _rows(config_db) == before
 
 
-def test_a_store_holding_the_migration_marker_never_reads_the_csv(config_db, tmp_path, monkeypatch):
+def test_a_brand_new_environment_records_an_empty_migration(config_db, tmp_path, monkeypatch):
+    # Scraper's L2 on SC #650: no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
+    # the ledger is read only to resolve records, and there are none
     from stone_pipeline.aliases import migrate_learned
-    _migrate(tmp_path, [])
-    monkeypatch.setattr(migrate_learned, "load_alias_writeback_records",
-                        lambda path: (_ for _ in ()).throw(AssertionError("the csv was read again")))
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) is None
+    assert _migrate_from(tmp_path, monkeypatch, _S3(), ledger_path=tmp_path / "no-ledger.db") == {"active": 0,
+                                                                                                  "dropped": 0}
+    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
 
 
-def test_an_absent_csv_migrates_nothing_and_still_marks_the_store(config_db, tmp_path):
+def test_records_with_no_ledger_to_resolve_them_fail_loud(config_db, tmp_path, monkeypatch):
     from stone_pipeline.aliases import migrate_learned
-    assert migrate_learned.run_once(writeback_path=tmp_path / "absent.csv", ledger_path=_ledger(tmp_path / "l.db"),
-                                    review_dir=tmp_path / "review") == {"active": 0, "dropped": 0}
-    assert _migrate(tmp_path, [("01PATAGONIA", "PATAGONIA", "phonetic")]) is None
+    with pytest.raises(FileNotFoundError, match="no ledger"):
+        _migrate_from(tmp_path, monkeypatch, _S3({WB_NEW: _csv([("01PATAGONIA", "PATAGONIA", "phonetic")])}),
+                      ledger_path=tmp_path / "no-ledger.db")
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_the_migration_reads_its_records_from_the_v2_key(config_db, tmp_path, monkeypatch):
+    s3 = _S3({WB_NEW: b"variation_id,alias,method\n01PATAGONIA,PATAGONIA,phonetic\n"})
+    assert _migrate_from(tmp_path, monkeypatch, s3) == {"active": 1, "dropped": 0}
+    assert [(r["identity_key"], r["value"]) for r in decisions_store.active_learned_aliases()] == [(LIVE, "PATAGONIA")]
+
+
+@pytest.mark.parametrize("code", ["SlowDown", "AccessDenied", "InternalError"])
+def test_an_s3_error_but_absence_raises_and_leaves_no_marker(config_db, tmp_path, monkeypatch, code):
+    from stone_pipeline.aliases import migrate_learned
+    with pytest.raises(Exception, match=code):
+        _migrate_from(tmp_path, monkeypatch, _S3(errors={WB_NEW: code}))
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_the_old_csv_without_its_v2_copy_refuses_and_leaves_no_marker(config_db, tmp_path, monkeypatch):
+    from stone_pipeline.aliases import migrate_learned
+    from stone_pipeline.ledger import snapshot
+    with pytest.raises(snapshot.MigrationPending, match="phase1-migrate"):
+        _migrate_from(tmp_path, monkeypatch, _S3({WB_OLD: b"variation_id,alias,method\n01PATAGONIA,PATAGONIA,phonetic\n"}))
+    assert not decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_a_new_environment_with_neither_key_records_an_empty_migration(config_db, tmp_path, monkeypatch):
+    from stone_pipeline.aliases import migrate_learned
+    assert _migrate_from(tmp_path, monkeypatch, _S3()) == {"active": 0, "dropped": 0}
+    assert decisions_store.learned_migration_done(migrate_learned.MIGRATION)
+
+
+def test_a_marked_store_never_reads_s3(config_db, tmp_path, monkeypatch):
+    _migrate_from(tmp_path, monkeypatch, _S3())
+    assert _migrate_from(tmp_path, monkeypatch, _S3(errors={WB_NEW: "AccessDenied", WB_OLD: "AccessDenied"})) is None
 
 
 def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch):
@@ -363,3 +441,76 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
     produce.run(None, "inventory")
     assert calls == ["fetch", "migrate", "build"]
+
+
+# --- a proposal never leaves a store that hides sources.yaml (CI's `certify all`, 12 Nov) ------------------------------
+
+def test_a_proposal_with_no_config_db_refuses_and_creates_no_file(tmp_path, monkeypatch):
+    # the store is created only by the config server's boot (restore from S3, then seed); a write that created it
+    # would hide sources.yaml from load_sources (CI's certify found no sources) and, on the service, make the boot skip
+    # its restore
+    path = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    with pytest.raises(store.ConfigStoreError, match="config.db absent"):
+        decisions_store.propose_learned_aliases([_proposal("Kashmir Goldx")])
+    with pytest.raises(store.ConfigStoreError, match="config.db absent"):
+        decisions_store.record_learned_migration("m", [])
+    assert not path.exists()
+
+
+@pytest.fixture(scope="module")
+def module_config_db():
+    import os
+    return os.environ.get("BLOKPORT_CONFIG_DB")
+
+
+def test_a_module_scoped_fixture_sees_an_isolated_config_store(module_config_db):
+    # a module-scoped fixture runs before the function-scoped isolation; it must not reach the checkout's config.db
+    from pathlib import Path
+    from stone_pipeline.config.settings import SETTINGS
+    assert module_config_db and Path(module_config_db) != SETTINGS.paths.workspace_root / "config.db"
+    assert not Path(module_config_db).exists()
+
+
+# --- config.db v14: norms rekeyed to alias_key (Mas, 13 Nov) ---------------------------------------------------------
+
+_REKEY = getattr(store, "learned_norms_to_rekey", None)
+_INSERT = ("INSERT INTO learned_alias (identity_key, value, norm, method, source, status, first_seen) "
+           "VALUES (?, ?, ?, 'fuzzy', '', 'active', 't')")
+
+
+def _as_v13(path, rows):
+    """The store as a v13 open left it: `rows` (Key, value, norm) stored, the rekey not yet recorded."""
+    with closing(sqlite3.connect(str(path))) as conn:
+        conn.executemany(_INSERT, rows)
+        conn.execute("DELETE FROM migration WHERE name = 'learned_norm_alias_key_v1'")
+        conn.execute("PRAGMA user_version = 13")
+        conn.commit()
+
+
+def test_the_rekey_moves_a_non_latin_norm_once_and_leaves_every_latin_norm(config_db):
+    assert _REKEY is not None, "config.store has no learned_norms_to_rekey (the alias_key rekey)"
+    _as_v13(config_db, [(KEY, "Wratza 维纳多", match_key("Wratza 维纳多")),
+                        (KEY, "Kashmir Gold", match_key("Kashmir Gold"))])
+    with closing(store.open_store()) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert _REKEY(conn) == []                                    # a re-run would move 0 rows
+    assert [(r["value"], r["norm"]) for r in _rows(config_db)] == [
+        ("Kashmir Gold", "kashmir gold"), ("Wratza 维纳多", "wratza 维纳多")]
+
+
+def test_a_rekey_onto_a_held_norm_refuses_the_open_and_changes_nothing(config_db):
+    assert _REKEY is not None, "config.store has no learned_norms_to_rekey (the alias_key rekey)"
+    rows = [(KEY, "Wratza 维纳多", "wratza"), (KEY, "WRATZA 维纳多", "wratza 维纳多")]
+    _as_v13(config_db, rows)
+    with pytest.raises(store.ConfigStoreError, match="rekey"):
+        store.open_store()
+    assert sorted((r["identity_key"], r["value"], r["norm"]) for r in _rows(config_db)) == sorted(rows)
+    with closing(sqlite3.connect(str(config_db))) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 13
+
+
+def test_a_non_latin_learned_alias_is_proposed_under_its_own_key(config_db):
+    # match_key reads a pure-CJK value as empty (refused); its alias_key keeps the script
+    assert decisions_store.propose_learned_aliases([_proposal("巴比伦金")]) == 1
+    assert [(r["value"], r["norm"]) for r in _rows(config_db)] == [("巴比伦金", "巴比伦金")]

@@ -219,6 +219,21 @@ def test_dev_s_committed_retired_keys_file_holds_the_one_type_less_key_retired_b
         "slab_alpine_luxe_b1d2b915-341d-5c79-8591-0d7bb923ed11": "#109 9a661d4"}
 
 
+def test_prod_s_committed_retired_keys_file_holds_the_seven_keys_prod_s_marker_needs():
+    # B1's prod read (13 Nov, b1_F1.out 6ee1f805): 7 marker Keys outside prod's F1 map (1d842f88) and not tombstoned.
+    # Alpine Luxe is dev's type-less Key (#109); the 6 dolomite_marble slabs left both bases at #293 (the Dolomite
+    # Marble type collapse: 5 re-keyed to slab_dolomite_*, Super White folded into Super White Dolomite).
+    data = (migrate_run.RETIRED_KEYS_DIR / "production.csv").read_bytes()
+    assert read_retired_keys(data, hashlib.sha256(data).hexdigest(), _key_map()) == {
+        "slab_alpine_luxe_b1d2b915-341d-5c79-8591-0d7bb923ed11": "#109 9a661d4",
+        "slab_dolomite_marble_angelus_dolomitico_0c31b815-59cb-5b84-bef3-39f59e400a37": "#293 d9a8715",
+        "slab_dolomite_marble_arabescatto_extra_ad1fc41e-3944-5b60-a077-7e326c88f539": "#293 d9a8715",
+        "slab_dolomite_marble_calacatta_gold_c7ef4ff9-3011-534f-99d9-d61e42b6c288": "#293 d9a8715",
+        "slab_dolomite_marble_calacatta_white_silk_fb540622-7937-5378-bcdc-6f73454ee110": "#293 d9a8715",
+        "slab_dolomite_marble_callacata_nuvolatto_a4d443c4-de71-5748-acde-172342477de1": "#293 d9a8715",
+        "slab_dolomite_marble_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6": "#293 d9a8715"}
+
+
 def test_the_ledger_s_variation_tombstones_are_read_with_their_reason(tmp_path):
     assert store_writer.ledger_variation_tombstones(_old_ledger(tmp_path / "old.db")) == {TOMBSTONED: "reseed_dedup"}
 

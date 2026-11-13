@@ -28,14 +28,14 @@ log = logfmt.get_logger("deploy.fetch_inputs")
 
 # A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
 # local file, or the run silently starts from the wrong base:
-#   - attributes.csv is the committed vocab seed; a thin copy wipes it and NOTHING resolves.
 #   - variants_export.csv is the live matching reference; a thin copy makes the matcher treat the whole
 #     ~24.7k catalog as new -- mass re-mint / mass gap (the ledger-gap failure mode).
 #   - variants_export_base.csv is the committed full seed of truth (base == full).
 #   - ports.csv carries the env's Medusa port ids; a thin copy loses port-of-origin resolution for the
 #     whole run (every product ships no port), and in prod there is no dev fallback to catch it.
-# These keep the local copy unless the S3 copy is at least THIN_COPY_MIN_FRACTION as complete.
-_PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
+# These keep the local copy unless the S3 copy is at least THIN_COPY_MIN_FRACTION as complete. attributes.csv is not
+# kept: a thin copy of the vocabulary is REFUSED by every fetch (_take_attributes), never run on as if fresh.
+_PROTECTED_BASE = {"variants_export.csv", "variants_export_base.csv", "ports.csv"}
 # A protected file with no local copy is measured against the committed file that lists the same rows: the live
 # export is gitignored, so after every roll it is absent while the committed base (the same scraper-owned variants,
 # Id-free) is in the image. Without this the guard never ran on a fresh task.
@@ -46,12 +46,16 @@ _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
 OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
+# The reason of the last refused attributes.csv fetch, kept beside the file until a fetch succeeds (require_attributes).
+ATTRIBUTES_UNAVAILABLE_SUFFIX = ".unavailable"
 # Medusa's downloads, checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv
 # at import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
 # file once S3 is fixed.
 _READERS = {
-    "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED),
+    # table 569: a download without category_handles is refused HERE, so it never replaces the local file
+    "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED,
+                                                   require_category_handles=True),
     "variants_export.csv": lambda path: read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED),
 }
 
@@ -130,39 +134,88 @@ def _incoming(target: Path) -> Path:
     return Path(name)
 
 
-def fetch_attributes(client=None, target=None) -> bool:
-    """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, honoring the same
-    thin-copy floor as the full fetch. The config server calls this on BOOT so the review-decision endpoint
-    validates colours/types against Medusa's CURRENT set from container start. Without it a fresh container
-    (every deploy reverts the on-disk file to the committed baseline, which lags Medusa's newer colours)
-    rejects a just-added colour at mint until the next full produce re-fetches it. An S3 failure (no object, no
-    credentials, no endpoint, a transfer whose retries ran out) is logged as an error and keeps the committed copy,
-    returning False: a fresh or offline host still validates against a real seed, and one network blip at boot is no
-    restart loop. Any other error raises. Returns True iff a fresher copy was
-    written. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults
-    to the live attributes_csv path)."""
+class AttributesUnavailable(RuntimeError):
+    """attributes.csv could not be taken from S3 (an S3 error, a thin copy or a malformed one): the reason is recorded
+    beside the file, so the config server's vocabulary routes answer 503 naming it until a fetch succeeds."""
+
+    def __init__(self, reason: str):
+        super().__init__(f"attributes.csv unavailable: {reason}")
+        self.reason = reason
+
+
+def _unavailable_record(target: Path) -> Path:
+    """Where the last refused attributes fetch's reason is kept: beside the file, on the disk the config server and its
+    produce share, so a fetch in either process records or clears it."""
+    return target.with_name(target.name + ATTRIBUTES_UNAVAILABLE_SUFFIX)
+
+
+def _refuse_attributes(target: Path, reason: str) -> AttributesUnavailable:
+    """Record `reason` (written whole, then swapped in, so a request thread never reads half of it) and return the
+    refusal for the caller to raise."""
+    record = _unavailable_record(target)
+    tmp = _incoming(record)
+    try:
+        tmp.write_text(reason, encoding="utf-8")
+        os.replace(tmp, record)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return AttributesUnavailable(reason)
+
+
+def _replace_attributes(tmp: Path, target: Path) -> None:
+    """Swap a checked download in; the file is fresh, so any recorded refusal is cleared."""
+    os.replace(tmp, target)
+    _unavailable_record(target).unlink(missing_ok=True)
+
+
+def require_attributes() -> None:
+    """Raise AttributesUnavailable, with the recorded reason, when the last attributes fetch was refused (the config
+    server's boot records instead of crash-looping): the vocabulary on disk is not Medusa's current one."""
+    record = _unavailable_record(Path(SETTINGS.paths.attributes_csv))
+    try:
+        reason = record.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    raise AttributesUnavailable(reason)
+
+
+def fetch_attributes(client=None, target=None) -> None:
+    """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, by the produce fetch's own
+    checks: the thin-copy floor and check_readable (table 569's category_handles column included). Callers: the config
+    server's boot (the review-decision endpoint validates against Medusa's CURRENT set from container start), the
+    photos run and the hidden-photos page. ONE refusing path (34's rev 2, F vs G10): an S3 failure, a thin copy and a
+    malformed copy each RAISE AttributesUnavailable, naming the file, and the local file is left as it was; it is never
+    kept and served as if it were the fresh vocab. The refusal is recorded (require_attributes) and a later success
+    clears it. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults to
+    the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = _incoming(target)
     try:
         client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
-        client.download_file(S3_BUCKET, key, str(tmp))
-        # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
-        if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
-            return False
         try:
-            check_readable("attributes.csv", tmp)
-        except ValueError as exc:
-            log.error(f"kept the local attributes.csv: the S3 copy is malformed ({exc})")
-            return False
-        os.replace(tmp, target)
-        return True
-    except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
-        log.error(f"could not fetch s3://{S3_BUCKET}/{key}; keeping the committed attributes.csv: {exc}")
-        return False
+            client.download_file(S3_BUCKET, key, str(tmp))
+        except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
+            raise _refuse_attributes(target, f"could not fetch s3://{S3_BUCKET}/{key}: {exc}") from exc
+        _take_attributes(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _take_attributes(tmp: Path, target: Path) -> None:
+    """Swap the downloaded attributes.csv `tmp` in over `target`, by the ONE rule both fetches (fetch_attributes and the
+    produce's fetch_all) follow: a thin copy (Medusa mid-reset) and a malformed one (a missing category_handles column
+    included) each raise AttributesUnavailable with the local file left as it was, never kept quietly as if it were the
+    fresh vocab (G10's attributes half)."""
+    if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
+        raise _refuse_attributes(target, f"the S3 copy looks thin ({incoming} lines against {current} in the local "
+                                         "copy); Medusa's export looks partial (mid-reset?). Re-export it.")
+    try:
+        check_readable("attributes.csv", tmp)
+    except ValueError as exc:
+        raise _refuse_attributes(target, f"the S3 copy is malformed: {exc}") from exc
+    _replace_attributes(tmp, target)
 
 
 # fetched and validated only by fetch_field_kinds, so the map has one fetch path (skipped by the bulk fetch_all)
@@ -246,15 +299,19 @@ def fetch_all() -> int:
             tmp = _incoming(target)
             try:
                 client.download_file(S3_BUCKET, key, str(tmp))
-                # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
-                dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
-                if name in _PROTECTED_BASE:
-                    incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
-                    if _would_clobber(incoming, current):
-                        _refuse_thin(name, incoming, current, basis)
-                        continue
-                check_readable(name, tmp)       # malformed: raise, the produce stops loud with the local file kept
-                os.replace(tmp, target)
+                if name == "attributes.csv":
+                    _take_attributes(tmp, target)       # the vocabulary's one rule: thin or malformed raises
+                    dropped = 0
+                else:
+                    # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
+                    dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
+                    if name in _PROTECTED_BASE:
+                        incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
+                        if _would_clobber(incoming, current):
+                            _refuse_thin(name, incoming, current, basis)
+                            continue
+                    check_readable(name, tmp)   # malformed: raise, the produce stops loud with the local file kept
+                    os.replace(tmp, target)
             finally:
                 tmp.unlink(missing_ok=True)
             if dropped:

@@ -6,10 +6,11 @@ Both fixtures are PAIRED files, byte-identical copies of the backend's:
   (sha256 a9bd8c37b8113b0c14bfec06d384548ca39656af3c90336e5f99c34504f21d89), P2-3a, table 175 S1: the backend's
   nameSlug is the scraper's slugify step for step. Written ASCII-escaped, like the name-key vectors
   (gen_name_key_vectors.py), so no literal em dash reaches the repo's em-dash gate;
-- `fixtures/alias_problem_vectors.json` = `src/model/catalog/__tests__/alias-problem.vectors.json` at backend 184e8a9e
-  (`feat/phase2-alias`), P2-2, table 171: aliasProblem's seven checks in order, and codeMatcher over nameKey's tokens.
-A change to either side is a paired PR. The key is core.text.match_key, the backend nameKey's paired twin
-(test_name_key_vectors.py).
+- `fixtures/alias_problem_vectors.json` = `src/model/catalog/__tests__/alias-problem.vectors.json` at backend 673040f1d
+  (`feat/p2-alias-key`, sha256 4dea47b785bc0fb0287ab43be2640d4db3a9fc7136612c41546819a8656b28dc), P2-2, table 171:
+  aliasProblem's seven checks in order (too_short on an all-Latin value only), and codeMatcher over aliasKey's tokens.
+A change to either side is a paired PR. A value's key is core.text.alias_key, the backend aliasKey's paired twin
+(test_name_key_vectors.py, the `alias_key` column).
 """
 
 from __future__ import annotations

@@ -36,7 +36,7 @@ def _fixture_doc():
 def test_the_fixture_lists_every_required_field_with_a_known_kind():
     doc = _fixture_doc()
     assert set(doc["fields"]) == fk.REQUIRED
-    assert set(doc["fields"].values()) <= {fk.NAME, fk.IDENTIFIER}
+    assert set(doc["fields"].values()) <= set(fk._CLEAN)          # the reader's own kinds, never a literal list
 
 
 @pytest.mark.parametrize("breakage, reason", [
@@ -76,6 +76,13 @@ def test_clean_and_display_follow_the_field_kind(map_path):
     assert fk.display(fk.VARIATION_NAME, "ROSA porriño") == "Rosa Porrino"   # name: cleaned, title-cased
     assert fk.clean(fk.VARIATION_ALIAS_VALUE, "Black & Gold") == "Black and Gold"
     assert fk.clean(fk.PRODUCT_TITLE, "Black & Gold Polished") == "Black & Gold Polished"
+
+
+def test_the_committed_map_publishes_owned_aliases_as_the_alias_kind():
+    # Mas, 13 Nov: every committed field-kinds copy says what BE publishes, variation_alias.value = "alias" (names
+    # keep "name"), so the committed seed is judged by the rule its writer uses
+    assert fk.kind(fk.VARIATION_ALIAS_VALUE) == getattr(fk, "ALIAS", "alias")
+    assert fk.kind(fk.VARIATION_NAME) == fk.NAME
 
 
 def test_an_unknown_field_fails_at_once(map_path):
