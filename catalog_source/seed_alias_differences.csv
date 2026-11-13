@@ -77,7 +77,6 @@ basalt__kimberley_black_f24c2621-c49a-5b5a-9b9c-95e75f9146aa,Kimberley Black Bas
 basalt__kimberley_ea74b7ce-2dde-5540-9f2e-d95fe8bc79bf,Kimberley Basalt,removed,own_name_type_word
 basalt__laguna_902a281f-4910-5705-9b4e-b05032ecdb30,Laguna Basalt,removed,own_name_type_word
 basalt__lead_4b9116f5-832a-5043-b548-a34d0b215001,Lead Basalt,removed,own_name_type_word
-basalt__menggu_black_917cdd2a-c0b2-5bb7-9645-bace40583fdb,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 basalt__menggu_black_917cdd2a-c0b2-5bb7-9645-bace40583fdb,Menggu Black Basalt,removed,own_name_type_word
 basalt__mongolian_black_68d043da-75d3-5dfe-b92f-b535e96af716,Mongolian Black Basalt,removed,own_name_type_word
 basalt__mucarta_7beaf70f-92ca-5075-ad6c-9a0d0b33e22f,Mucarta Andesite,removed,own_name_type_word
@@ -382,8 +381,6 @@ granite__baoxing_ice_black_ed6ecc65-a717-559a-ab45-b7be3a5c5c96,Baoxing Ice Blac
 granite__baoxing_rape_flower_yellow_3a733051-35fc-56b4-8adb-28ea01d3d86c,Baoxing Rape Flower Yellow Granite,removed,own_name_type_word
 granite__baoxing_red_d4589a15-464c-5ad9-8c8d-d802e9a99138,Baoxing Red Granite,removed,own_name_type_word
 granite__baoxing_watermelon_green_83c1971c-20b6-5e45-b39d-3c84bca3159d,Baoxing Watermelon Green Granite,removed,own_name_type_word
-granite__barbara_white_4a649260-074b-50ab-a8d8-1ab679692edd,In China Local Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-granite__barbara_white_4a649260-074b-50ab-a8d8-1ab679692edd,In China Local Stone Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__barbarella_4f94c6ba-75ae-5c82-b1be-104312869dd8,Barbarella Granite,removed,own_name_type_word
 granite__barents_red_949428fb-0f69-55ab-aa44-be5f557e4df1,Barents Red Granite,removed,own_name_type_word
 granite__bariloche_33a2d39b-fbda-56a1-8ff9-b1923247a0b2,Bariloche Granite,removed,own_name_type_word
@@ -517,7 +514,6 @@ granite__bristol_black_a42146ea-3987-56b2-9c91-1b88f6c6b4eb,Bristol Black Granit
 granite__bronze_falcon_2304dd21-4400-5ce5-8f5b-8bb652e68296,Bronze,removed,bare_vocabulary_word
 granite__bronzite_b93c7da5-05c4-5a58-94c1-1150f448d79f,Bronzite Quartzite,removed,own_name_type_word
 granite__brown_bear_66f06860-df95-5d17-a42b-6ab57a2b4f32,Brown Bear Granite,removed,own_name_type_word
-granite__brown_bear_66f06860-df95-5d17-a42b-6ab57a2b4f32,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__brown_beauty_84d63be1-2260-56c0-85fd-85ec9a8b74ed,Brown Beauty Granite,removed,own_name_type_word
 granite__brown_canyon_6da029eb-179d-5e5f-9974-9a976ccda77e,Brown Canyon Granite,removed,own_name_type_word
 granite__brown_dunes_f2a172ea-1583-5a9a-9d7f-fe1f62a8eb95,Brown Dunes Granite,removed,own_name_type_word
@@ -842,7 +838,6 @@ granite__g861_8a3eacea-f479-5009-aaa3-90039173ff91,G861 Granite,removed,own_name
 granite__g869_567397d4-6c76-5c48-89a2-f785c2d5f6cb,G869 Granite,removed,own_name_type_word
 granite__g896_f6f09de3-6fdb-59e5-97d9-54ce64ed907e,G896 Granite,removed,own_name_type_word
 granite__gabbro_drugoreckoe_be251c1b-ca07-56f3-b3aa-002b87b00fa2,Gabbro Drugoreckoe Granite,removed,own_name_type_word
-granite__gabbro_drugoreckoe_be251c1b-ca07-56f3-b3aa-002b87b00fa2,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__galactica_00c13d71-0051-519a-a450-bc1403439d0b,Galactica Granite,removed,own_name_type_word
 granite__galaxia_blue_9c369328-cfd1-5d19-9e15-b57008a0b97c,Galaxia Blue Granite,removed,own_name_type_word
 granite__galaxus_023f75d6-292a-5b16-ba64-e1f537fa5a06,Galaxus Granite,removed,own_name_type_word
@@ -929,7 +924,6 @@ granite__gondomar_512a0949-0771-54d6-93b9-cece79a78b8a,No,removed,too_short
 granite__gora_tokimovka_6c5b85bc-1fe5-5624-acdb-af33b87ce281,Gora Tokimovka Granite,removed,own_name_type_word
 granite__grace_grey_2c538703-dc6c-5630-bcab-e2d5a87dbf83,Grace Grey Granite,removed,own_name_type_word
 granite__graffiti_287f3d93-04cf-588f-9e0a-10df58e1bd71,Graffiti Granite,removed,own_name_type_word
-granite__grain_beige_0d312302-a58d-52d1-92ed-cb567a5d3937,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__grain_multicolor_a76ef0e0-08d8-50b0-9d72-53880f9bb69d,Grain Multicolor Granite,removed,own_name_type_word
 granite__grand_canyon_2280c39c-cd57-5a51-9c05-846b95a8589f,Grand Canyon Granite,removed,own_name_type_word
 granite__grassland_green_55e4e02a-5207-5246-9948-b03e1ef5ef5b,Grassland Green Granite,removed,own_name_type_word
@@ -949,7 +943,6 @@ granite__green_jadeite_4e23dd8a-2a00-5f8e-baa6-bbac002a5982,Green Jadeite Granit
 granite__green_peacock_335d4877-8db4-5ea8-892d-27a6f83ef66f,Green Peacock Granite,removed,own_name_type_word
 granite__green_raniah_076a9fbd-ef90-5f1e-aab5-f3b9bf0af100,Green Raniah Granite,removed,own_name_type_word
 granite__green_ray_6ddfccf1-d665-5c60-9f33-e00892c30c83,Green Ray Granite,removed,own_name_type_word
-granite__green_ray_6ddfccf1-d665-5c60-9f33-e00892c30c83,In Russia,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__green_river_fa2889af-aa88-5576-aaeb-62b12525d99b,Green River Quartzite,removed,own_name_type_word
 granite__green_river_fa2889af-aa88-5576-aaeb-62b12525d99b,Green River Serpentine,removed,own_name_type_word
 granite__green_sand_neimenggu_c9959a83-bd24-574d-8804-fc79f2b65a68,Green Sand Neimenggu Granite,removed,own_name_type_word
@@ -1067,8 +1060,6 @@ granite__ivory_cream_091a063b-8562-5b64-8979-e562ea150900,Ivory,removed,bare_voc
 granite__ivory_cream_gold_f2ccb7e4-8a6a-520e-823d-53fac6e1b60f,Ivory,removed,bare_vocabulary_word
 granite__ivory_pink_7ed43e78-b25e-5cbf-99ae-c06ce4a4bc10,Ivory,removed,bare_vocabulary_word
 granite__izerski_784edb2c-3a47-5cd3-aaa2-c65781142eb2,Izerski Granite,removed,own_name_type_word
-granite__jacaranda_9b43f98d-2670-5451-8059-9fd229bb1ec4,In China Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-granite__jacaranda_9b43f98d-2670-5451-8059-9fd229bb1ec4,In China Stone Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__jade_blue_405d7a0e-62db-5de2-a794-894634e11a14,Jade Blue Granite,removed,own_name_type_word
 granite__jade_green_192d2076-efb1-51d1-9b8d-3d4231f89bdc,Jade Green Granite,removed,own_name_type_word
 granite__jade_grey_54b6d6ea-d60f-5b47-a53a-70b1c2762285,Jade Grey Granite,removed,own_name_type_word
@@ -1147,7 +1138,6 @@ granite__kangayam_gold_8225af46-c69e-57cb-9320-8f7198b02482,Kangayam Gold Granit
 granite__kangmei_black_95392976-d862-5f23-82b1-edbf268bd86a,Kangmei Black Granite,removed,own_name_type_word
 granite__karamay_green_7d58f11e-4f2e-5c8b-99e1-9b2e1d2c4838,Karamay Green Granite,removed,own_name_type_word
 granite__karelia_beige_cfd36a78-ac9e-5dcc-8b8d-2b3733f72844,Karelia Beige Granite,removed,own_name_type_word
-granite__karelia_black_147f1209-51e3-53d8-93b2-0d5271d59296,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__karelia_black_147f1209-51e3-53d8-93b2-0d5271d59296,Karelia Black Granite,removed,own_name_type_word
 granite__karelia_mystik_748c788d-07ec-502a-a435-9aea54ac8686,Karelia Mystik Granite,removed,own_name_type_word
 granite__karelia_red_b44f04cf-93b2-5b82-bd9d-e8d8b129ca8c,Karelia Red Granite,removed,own_name_type_word
@@ -1155,7 +1145,6 @@ granite__karelian_green_873c4b8e-5f48-5b07-a700-125d994f7c25,Karelian Green Gran
 granite__karen_2fcd1558-c92d-5eae-925d-ad059b32e526,St,removed,too_short
 granite__karoo_gold_4dbe7b6f-7a52-5333-bd54-8f8d2e7cdb8f,Karoo Gold Granite,removed,own_name_type_word
 granite__karoo_ice_cf75d787-1605-58a2-9aaf-06379346bfc0,Karoo Ice Granite,removed,own_name_type_word
-granite__kashina_gora_58ceec0a-4a30-58bc-98aa-1cf8ad61159c,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__kashina_gora_58ceec0a-4a30-58bc-98aa-1cf8ad61159c,Kashina Gora Granite,removed,own_name_type_word
 granite__kashmir_gold_29fe5fcc-7ee1-53fd-9ede-2438649de428,Kashmir Gold Granite,removed,own_name_type_word
 granite__kashmir_lapidus_437238fa-e63e-59b3-ad6f-e77e934e6c2a,Kashmir Lapidus Granite,removed,own_name_type_word
@@ -1185,7 +1174,6 @@ granite__kosmin_2e59ff68-a700-59c0-bbb1-c44adfc1f405,Kosmin Granite,removed,own_
 granite__krokstrand_0e6571c8-4b08-533d-b662-8f4d1dbdecfc,Krokstrand Granite,removed,own_name_type_word
 granite__kronreuth_fc22b7c9-7fd4-5697-9cb9-f9a27df126b2,Kronreuth Granite,removed,own_name_type_word
 granite__kurasie_pink_bde1586b-0df1-5e11-bb67-9361af9d8415,Kurasie Pink Granite,removed,own_name_type_word
-granite__kurtinskiy_af3164e8-6f12-51f8-b1de-7b03f9a10c01,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__kuru_hazelnut_9a633b71-f1b2-504b-b4ff-a0b1122df3ac,Kuru Hazelnut Granite,removed,own_name_type_word
 granite__kuru_red_82e8794f-43b3-557a-af47-4268ad878db5,Kuru Red Granite,removed,own_name_type_word
 granite__kuru_red_brown_d63cb95e-c769-5716-9792-8d25660ed60d,Kuru Red Brown Granite,removed,own_name_type_word
@@ -1222,7 +1210,6 @@ granite__lilac_purple_ningde_cf57d5a1-ff48-536a-856a-d633c3d33f26,Lilac Purple N
 granite__lillet_4d377df5-6613-5a9a-8335-1db3db299a18,Lillet Granite,removed,own_name_type_word
 granite__lingshan_red_5b1468ae-5596-5f6b-ac8d-04df5ad30275,Lingshan Red Granite,removed,own_name_type_word
 granite__lithosporic_421f4aff-264d-50b4-8f50-7e4b8b7fcb98,Lithosporic Granite,removed,own_name_type_word
-granite__little_green_star_407bb3b4-221f-5484-8c83-7da3f35e6c1b,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__liubu_red_447bf847-c077-5aff-95dd-841720f49c21,Liubu Red Granite,removed,own_name_type_word
 granite__lokoja_red_6179c77a-aa9b-58a7-9204-1adff09cf93e,Lokoja Red Granite,removed,own_name_type_word
 granite__london_smoke_7d96ab56-fdbd-565f-95a6-bd5d8afc114e,London Smoke Quartzite,removed,own_name_type_word
@@ -1263,7 +1250,6 @@ granite__magnum_gold_c4c20f7d-c824-5b16-bdbd-75fbcddab504,Magnum Gold Granite,re
 granite__magnum_red_96cb9df8-2db5-5407-93ad-268ea7476e12,Magnum Red Granite,removed,own_name_type_word
 granite__mahe_brown_a30880cc-612f-5baa-9d64-5854788c663c,Mahe Brown Granite,removed,own_name_type_word
 granite__malaysia_brown_4702a70b-0b0f-5680-ab5c-817f18bad50c,Malaysia Brown Granite,removed,own_name_type_word
-granite__mansurovsky_af6db601-2fe8-5644-a1ef-bb59734e4fc6,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__maple_red_02b4370c-af50-5733-87ca-ca0d0d752a56,Maple Red Granite,removed,own_name_type_word
 granite__maple_red_fujian_fa65604d-b11c-5a23-95a3-7e7a4c09037c,Maple Red Fujian Granite,removed,own_name_type_word
 granite__maracana_302c6f6c-cc99-5802-8d10-61a1953b62ba,Maracana Granite,removed,own_name_type_word
@@ -1382,7 +1368,6 @@ granite__night_snow_liaoning_e3c6108a-af50-5f8d-b58f-fb2030361b94,Night Snow Lia
 granite__nilo_river_3f8d04c9-5995-524f-8133-ad4cd90dfe12,Nilo River Granite,removed,own_name_type_word
 granite__ningde_lilac_pink_a76bab60-880d-5f8d-8eb9-0fd6d0e79d35,Ningde Lilac Pink Granite,removed,own_name_type_word
 granite__niveous_3177c237-2a6b-51a0-ac80-45a19c93c8c2,Niveous Granite,removed,own_name_type_word
-granite__nordic_sunset_560227aa-3ae6-5c4a-8a85-3a893a804453,In Russian Nigrozero,fixed,"a language label before the real name: the name kept, already held, so this row goes (Mas, 13 Nov) (replaced by Nigrozero)"
 granite__nordic_sunset_560227aa-3ae6-5c4a-8a85-3a893a804453,Nordic Sunset Granite,removed,own_name_type_word
 granite__normandy_d491d7b6-dc65-5603-b6a4-e02d8ec136f2,Normandy Granite,removed,own_name_type_word
 granite__nummular_brown_grain_633aeb2d-0e0c-5dd9-9ab3-ef9f572edba8,Nummular Brown Grain Granite,removed,own_name_type_word
@@ -1583,8 +1568,6 @@ granite__red_yongjin_d927e8fd-82b5-5031-b381-a91421c2920b,Red Yongjin Granite,re
 granite__reddish_grain_shijing_19ff398c-cf20-5fa6-b5a1-9b7b1da3c648,Reddish Grain Shijing Granite,removed,own_name_type_word
 granite__reddish_grain_zhangpu_66606792-3549-578e-86e1-e9fb6e9f9224,Reddish Grain Zhangpu Granite,removed,own_name_type_word
 granite__renhe_island_red_9e169904-cb3f-54bc-85ed-1f49132daa87,Renhe Island Red Granite,removed,own_name_type_word
-granite__rich_red_0f07497d-a56c-5613-91ff-6a592236ac06,In China Market Calling,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-granite__rich_red_0f07497d-a56c-5613-91ff-6a592236ac06,In China Stone Market Calling,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__rich_red_0f07497d-a56c-5613-91ff-6a592236ac06,Rich Red Granite,removed,own_name_type_word
 granite__rio_fresco_785fd855-0cab-5683-b6c1-b5b3371b3873,Rio Fresco Granite,removed,own_name_type_word
 granite__rio_preto_d64dd4f0-117a-5ae8-ae07-18a5300f19c4,Rio Preto Granito,removed,own_name_type_word
@@ -1727,10 +1710,6 @@ granite__shiyang_sesame_white_be408743-0d83-5750-9911-40a372431c46,Shiyang Sesam
 granite__shrouk_green_c81afcc5-b56c-5f2e-a600-28d50f689293,Shrouk Green Marble,removed,own_name_type_word
 granite__shrouk_green_c81afcc5-b56c-5f2e-a600-28d50f689293,Shrouk Green Quartzite,removed,own_name_type_word
 granite__siena_river_7dd64323-8da5-5c94-849d-4a2406b0f55f,Siena River Granite,removed,own_name_type_word
-granite__siena_river_7dd64323-8da5-5c94-849d-4a2406b0f55f,Tropical Siena Bordeaux Granite White River Granite,fixed,"two names run together, each ending in its type word Granite: split into both (Mas, 13 Nov: concatenations are split at the source) (replaced by Tropical Siena Bordeaux Granite | White River Granite)"
-granite__siena_river_7dd64323-8da5-5c94-849d-4a2406b0f55f,Tropical Siena Bordeaux White River,fixed,"the same two names with the type word stripped: split into both, as their typed form (Mas, 13 Nov) (replaced by Tropical Siena Bordeaux | White River)"
-granite__siena_white_24f3553a-eab9-57b0-b07c-3f179226ca96,Cotton White Graniteo White Siena Granite,fixed,"two names joined by 'o' (Portuguese/Spanish 'or'), each ending in its type word Granite: split into both (Mas, 13 Nov) (replaced by Cotton White Granite | White Siena Granite)"
-granite__siena_white_24f3553a-eab9-57b0-b07c-3f179226ca96,Cotton White O White Siena,fixed,"the same two names joined by 'o' ('or'), the type word stripped: split into both (Mas, 13 Nov) (replaced by Cotton White | White Siena)"
 granite__sienito_val_cervo_69ff5a5a-9b90-55b4-9ced-9710d9291f1f,Sienito Val Cervo Granite,removed,own_name_type_word
 granite__sienna_cream_60ae4f3c-024e-568d-ac6c-ce4cad444e51,Sienna Cream Granite,removed,own_name_type_word
 granite__silver_blue_5a114d44-8b53-512b-814a-6b3f5e43622d,Blue,removed,bare_vocabulary_word
@@ -1860,7 +1839,6 @@ granite__tiger_eyes_fdd1396e-8b5d-5ebd-b5c2-1457c6e724aa,Tiger Eyes Granite,remo
 granite__tiger_grey_c7a67f26-0936-519e-821f-15f439b9a176,Tiger Grey Granite,removed,own_name_type_word
 granite__tiger_rose_c0f5ac7c-a1b0-58c7-b46f-6edca9235071,Tiger Rose Granite,removed,own_name_type_word
 granite__tiger_skin_c483509c-fa16-517c-a211-71e51487948c,Tiger Skin Granite,removed,own_name_type_word
-granite__tiger_skin_yellow_057e7300-77fd-53d0-8ed2-e96e96b144fc,In China Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 granite__tiger_skin_yellow_057e7300-77fd-53d0-8ed2-e96e96b144fc,Tiger Skin Yellow Granite,removed,own_name_type_word
 granite__tiger_wood_778f8f15-dfaf-525a-8cc2-7a212760f4e1,Tiger Wood Granite,removed,own_name_type_word
 granite__titanium_gold_9e4798bd-ccfa-5482-8a79-26a73cefd93f,Titanium Gold Granite,removed,own_name_type_word
@@ -2051,7 +2029,6 @@ granite__yulan_white_8b9c0f47-4d11-57a5-b9a3-c4c1cab6ef65,Yulan White Granite,re
 granite__yulong_white_38ee4151-448b-5927-af58-1f2b983e78f6,Yulong White Granite,removed,own_name_type_word
 granite__yunsima_eb5f7818-9a9c-5ce0-9742-c6664988c517,Yunsima Granite,removed,own_name_type_word
 granite__yunsong_green_90a9bb59-7403-5420-bb76-5976e28f4fa1,Yunsong Green Granite,removed,own_name_type_word
-granite__yuzhno_sultayevskiy_698091c5-12b5-5d6a-ad7c-a10ff5e64789,In Russian,fixed,"a framing fragment (a language label), no stone name in it: dropped (Mas, 13 Nov)"
 granite__yuzhno_sultayevskiy_698091c5-12b5-5d6a-ad7c-a10ff5e64789,Yuzhno-sultayevskiy Granite,removed,own_name_type_word
 granite__zahedan_balooch_a9d80438-6eca-5f5a-a249-5f2c7a95a74c,Zahedan Balooch Granite,removed,own_name_type_word
 granite__zarabag_dc3bda66-2faa-5500-ae58-40b578f7c7fb,Zarabag Granite,removed,own_name_type_word
@@ -2241,8 +2218,6 @@ limestone__creme_oriente_b3a53b31-96b2-5701-8b4c-2ee4a5b696a1,Creme Oriente Lime
 limestone__creta_41099d82-82a4-5edd-8379-0597edc89d2f,Creta Limestone,removed,own_name_type_word
 limestone__creta_coral_956d66b4-c7ee-583f-aaac-626c082926e9,Creta Coral Limestone,removed,own_name_type_word
 limestone__cuddapah_black_476a4d27-1453-549e-beb5-f239408030bc,Cuddapah Black Limestone,removed,own_name_type_word
-limestone__cypress_9784225e-1425-5c64-9977-8b62c678abe4,In China Marlet,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-limestone__cypress_9784225e-1425-5c64-9977-8b62c678abe4,In China Stone Marlet,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 limestone__debnik_f4d678e9-83b1-550f-b3ea-bb4f7f1a2cae,Debnik Limestone,removed,own_name_type_word
 limestone__decanska_breca_3613e3d9-c06b-5d34-9dec-6f49fd9bba16,Decanska Breca Limestone,removed,own_name_type_word
 limestone__demati_esperia_73f5b58d-a7df-54a8-bc6c-c928c14a6d53,Demati Esperia Limestone,removed,own_name_type_word
@@ -2973,8 +2948,6 @@ marble__black_illusion_844ac427-254f-56b2-b84d-be9d1ad440e8,Black Illusion Marbl
 marble__black_iris_0f1a147c-5ad7-51b8-ac44-e7c390e6a6ab,Black Iris Marble,removed,own_name_type_word
 marble__black_jacob_db4ec63c-2489-5f20-8354-82141ff2abfa,Black Jacob Marble,removed,own_name_type_word
 marble__black_marble_0439b021-de02-5a26-b4b1-097dd2e19471,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
-marble__black_night_9e80cff6-52e9-5327-ad9b-4aeaba11e760,In China Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-marble__black_night_9e80cff6-52e9-5327-ad9b-4aeaba11e760,In China Stone Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__black_ocean_5500fcb1-6221-5dee-9c9f-ba03803d29b6,Black Ocean Marble,removed,own_name_type_word
 marble__black_paint_039ae803-4a4c-57f4-b64c-06e48198ed30,Black Paint Marble,removed,own_name_type_word
 marble__black_queen_99de2253-7de8-568b-9f88-262692f5cb6f,Black Queen Marble,removed,own_name_type_word
@@ -2988,7 +2961,6 @@ marble__blanco_marfil_dd4a6fb6-1033-5580-a8f6-ba37d8f07095,Blanco Marfil Limesto
 marble__blanco_mina_real_db3c5177-550b-535c-b982-91f10fa938bc,Blanco Mina Real Marmol,removed,own_name_type_word
 marble__blue_arch_arial_b1da99a2-1e1f-5642-a363-aeb432a9349b,Blue Arch Arial Marble,removed,own_name_type_word
 marble__blue_bahia_cf52a979-6ace-5388-9d3a-d437b26d5ff7,Blue Bahia Marble,removed,own_name_type_word
-marble__blue_coast_92272076-a92a-5721-80a6-7daca3f0665d,C Te D,fixed,"UNDETERMINABLE, for the owner: mojibake (raw 'C?te D', a 'Cote d...' name with the rest lost): dropped (Mas, 13 Nov)"
 marble__blue_coral_873d7a92-ecf1-5eda-9218-0e0f74b9fdd1,Blue Coral Marble,removed,own_name_type_word
 marble__blue_dream_1a6b4bb8-02c5-5e8f-9904-1303733cfc17,Blue Dream Marble,removed,own_name_type_word
 marble__blue_dreams_3d3e3fee-5218-583b-b949-f04b6bd73b40,Blue Dreams Marble,removed,own_name_type_word
@@ -3176,9 +3148,6 @@ marble__cincinnati_diamond_b52d96a8-e0b4-5afe-8584-b6850238cd94,Cincinnati Diamo
 marble__cipollino_0b772b5d-91ca-5bdc-954a-aaa2946d8565,Cipollino Marble,removed,own_name_type_word
 marble__cipollino_nero_73d5074a-5143-5a6f-b60a-eaa91a044076,Cipollino Nero Marble,removed,own_name_type_word
 marble__cipollino_ondulato_rosso_76f643b3-e57d-5ba7-b76c-1fd61aa0bd42,Cipollino Ondulato Rosso Marble,removed,own_name_type_word
-marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a,China Cipollino In China Market,fixed,"the framing words ('In China ... Market') dropped, the real name kept (Mas, 13 Nov) (replaced by China Cipollino)"
-marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a,China Cipollino In China Stone Market,fixed,"the framing words ('In China ... Market') dropped, the real name kept (Mas, 13 Nov) (replaced by China Cipollino)"
-marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a,China Cipollino Marble In China Stone Market,fixed,"the framing words ('In China ... Market') dropped, the real name kept (Mas, 13 Nov) (replaced by China Cipollino Marble)"
 marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a,Cipollino Renoir Dolomite,removed,own_name_type_word
 marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a,Cipollino Renoir Marble,removed,own_name_type_word
 marble__classic_veined_white_4f1103a2-ebed-5f7f-b750-1156fb03cf28,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
@@ -3227,7 +3196,6 @@ marble__cotton_beige_6c902fd1-9d45-568c-b373-ad148f292d3d,Cotton Beige Marble,re
 marble__covelano_white_a537f5d7-3dc1-5246-87e5-64cd981aadae,Covelano White Marble,removed,own_name_type_word
 marble__crape_myrtle_27518c87-c07e-572f-b3e3-1f8d688abec5,Crape Myrtle Marble,removed,own_name_type_word
 marble__cream_arc_2b0e9eb9-09d3-59d8-94a3-c6667f82d05e,Cream Arc Marble,removed,own_name_type_word
-marble__cream_ivory_20deee04-d96f-5778-a285-ef9f1cc63fd0,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__cream_marble_98a91c88-97db-5a49-b47e-3f0edd81b609,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 marble__cream_ole_1765acc4-6a69-5853-a157-4978136a34bd,Cream Ole Marble,removed,own_name_type_word
 marble__cream_rose_52713faa-86e6-54e3-bf61-4e76697b74f8,Cream Rose Marble,removed,own_name_type_word
@@ -3240,7 +3208,6 @@ marble__crema_chora_18611a03-9cde-51a1-906e-1849f17ddca0,Crema Chora Marble,remo
 marble__crema_cordoba_081630ce-3f91-52d3-bc00-0123698b9f02,Crema Cordoba Marble,removed,own_name_type_word
 marble__crema_dare_81e0e714-896d-54e4-8e5e-ecf98aa6b3d0,Crema Dare Marble,removed,own_name_type_word
 marble__crema_dolomit_2b4a0981-bc6b-5faa-b562-c75ca7123858,Dolomite,removed,bare_vocabulary_word
-marble__crema_dolomit_2b4a0981-bc6b-5faa-b562-c75ca7123858,Dolomite Marble,fixed,"former type name, collapsed into Dolomite by #293; not a variety name"
 marble__crema_dorlion_d024f07e-760b-521c-a614-74d441b01577,Crema Dorlion Marble,removed,own_name_type_word
 marble__crema_eva_119e9c37-1a40-5562-a163-d89e9010f355,Crema Eva Marble,removed,own_name_type_word
 marble__crema_iberico_0be37320-2a93-5e80-aa14-b0f5bcf41e30,Crema Iberico Marmol,removed,own_name_type_word
@@ -3387,7 +3354,6 @@ marble__erzurum_white_6a39d803-8527-5a6f-9d40-512878f63bb9,Erzurum White Limesto
 marble__escato_800a0382-dc0d-5907-99b2-e51ac1530e73,Escato Marble,removed,own_name_type_word
 marble__eskipazar_beige_981494b6-029b-5c6f-9f0e-65e7766f7510,Eskipazar Beige Marble,removed,own_name_type_word
 marble__eskisehir_beige_29ce50e2-e948-5e73-ad6c-2374d879ef32,Eskisehir Beige Marble,removed,own_name_type_word
-marble__espresso_macchiato_ad5031f7-054b-51e0-9a6b-13477dc75633,In China Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__esserando_4403c67f-8968-5503-b9c8-381a3f5704ff,Esserando Marble,removed,own_name_type_word
 marble__estremoz_crema_con_vergada_84f01028-a0ba-5526-bb8d-2a939d7f14cb,Estremoz Crema Con Vergada Marble,removed,own_name_type_word
 marble__estremoz_creme_603d762d-61bb-540e-87f4-65db67f847ed,Estremoz Creme Marble,removed,own_name_type_word
@@ -3420,7 +3386,6 @@ marble__fethiye_dark_emperador_c5658728-9415-58ca-a857-46f3f4eca35f,Fethiye Dark
 marble__fethiye_light_emperador_547d3a2e-7cdf-5991-b7df-80bf56e9d247,Fethiye Light Emperador Marble,removed,own_name_type_word
 marble__filettato_america_b6b8bf96-963f-5387-9cc3-4e7298d1c61a,Filettato America Limestone,removed,own_name_type_word
 marble__filettato_america_b6b8bf96-963f-5387-9cc3-4e7298d1c61a,Filettato America Marble,removed,own_name_type_word
-marble__fine_lines_snow_white_a4a68a4b-1176-52cc-943f-ef2cfd95dda7,In China Stonemarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__fiona_beige_1f726cc7-bad7-5eb3-a2ab-559f505066cd,Fiona Beige Marble,removed,own_name_type_word
 marble__fior_di_pesco_88ec0274-5037-5ba2-99a9-f794dc7456cb,Fior di Pesco Marble,removed,own_name_type_word
 marble__fior_di_rosa_d9890fe2-6e9f-5609-92ea-12a2d147d9cc,Fior di Rosa Limestone,removed,own_name_type_word
@@ -3526,7 +3491,6 @@ marble__grigio_boden_b0e85c9e-e4ec-5b6d-a958-cb12d19dad8e,Grigio Boden Marble,re
 marble__grigio_bottarga_604b9bb8-9867-50c5-a8ef-7f131cb5b341,Grigio Bottarga Limestone,removed,own_name_type_word
 marble__grigio_capri_fd333e9d-ea7b-51df-80a4-9d27e01b67f3,Grigio Capri Marble,removed,own_name_type_word
 marble__grigio_fiorito_9c9394bf-ebb0-5f54-bcf8-222f1f8339f3,Grigio Fiorito Marble,removed,own_name_type_word
-marble__grigio_fiorito_9c9394bf-ebb0-5f54-bcf8-222f1f8339f3,Name In China Stone Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__grigio_fumo_14baf2e3-6fc7-56da-9001-9bb4c5d71a42,Grigio Fumo Limestone,removed,own_name_type_word
 marble__grigio_italia_81e1ff91-aa58-58fe-b2ad-f313ba600634,45,removed,too_short
 marble__grigio_linosa_55b283f8-86ce-5530-9b60-318e1cce902a,Grigio Linosa Marble,removed,own_name_type_word
@@ -3865,8 +3829,6 @@ marble__nerinea_e4afea41-35a5-5e46-9238-e000485c8116,Nerinea Marmol,removed,own_
 marble__nero_colonnata_sky_14d36799-2615-5d12-9086-10f1a69b8214,Nero Colonnata Sky Marble,removed,own_name_type_word
 marble__nero_exotico_528100d1-51ab-562c-a50c-c4da316212b9,Nero Exotico Quartzite,removed,own_name_type_word
 marble__nero_marquina_108a45b4-8e24-5e25-b7ad-a0bcb47fa859,Nero Marquina Marble,removed,own_name_type_word
-marble__nero_picasso_67b0c554-9dac-58a1-afd7-e795c5bbbe66,K R Ehir Nero Picasso,fixed,"mojibake: the Turkish place name Kirsehir lost its dotless i and s-cedilla (raw 'K?r?ehir'); the real spelling restored (Mas, 13 Nov) (replaced by Kırşehir Nero Picasso)"
-marble__nero_picasso_67b0c554-9dac-58a1-afd7-e795c5bbbe66,K R Ehir Nero Picasso Marble,fixed,"mojibake: the Turkish place name Kirsehir lost its dotless i and s-cedilla (raw 'K?r?ehir'); the real spelling restored (Mas, 13 Nov) (replaced by Kırşehir Nero Picasso Marble)"
 marble__nero_port_laurent_036a41f9-e08c-5a10-8a86-01b571948a72,Nero Port Laurent Marble,removed,own_name_type_word
 marble__nero_portoro_bianco_fe07bdc6-76db-5a8e-8b38-c3ebdff9faf3,Nero Portoro Bianco Marble,removed,own_name_type_word
 marble__nero_vecchio_3be6a463-a984-562e-a91a-92f13213f654,Nero Vecchio Marmol,removed,own_name_type_word
@@ -3878,7 +3840,6 @@ marble__net_grey_fa57e178-b6d9-5488-a7a4-f51ba412e958,Net Grey Marble,removed,ow
 marble__nevra_beige_b83ea0d6-e61c-510b-82d5-3ae54980ad9d,Nevra Beige Marble,removed,own_name_type_word
 marble__nevruz_grey_565cfc67-137b-52d5-a3ce-a7eb7426b1d1,Nevruz Grey Marble,removed,own_name_type_word
 marble__new_clouds_gray_3ab8150b-823c-5d55-8eb3-22ad9dc5da79,New Clouds Gray Marble,removed,own_name_type_word
-marble__new_elegant_beige_45f5974e-c1c9-5d2b-9668-2df5ce76154f,In China Stonemarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__new_grey_cbd07ea2-11bc-5fba-ba6a-122a852662b6,New Grey Marble,removed,own_name_type_word
 marble__new_olive_marin_9febdefe-c133-52e6-b2a2-73bd12d0c7eb,New Olive Marin Marble,removed,own_name_type_word
 marble__new_perlato_85d56fb6-91d6-579a-9668-d46eeb2f927c,New Perlato Limestone,removed,own_name_type_word
@@ -4004,7 +3965,6 @@ marble__pearl_29f6c61a-43d1-5dc4-b337-1a04b19c719a,Pearl Dolomite,removed,own_na
 marble__pearly_beige_0320376b-9c8a-52f6-89ee-a7d5130714b9,Pearly Beige Marble,removed,own_name_type_word
 marble__pegasus_white_4cf973f2-9a27-5a2d-88bd-fc6988d8a569,Pegasus White Quartzite,removed,own_name_type_word
 marble__pelagey_black_kuzbas_c8886fbb-20c7-5a39-8e90-c1ae81ce95b3,Pelagey Black Kuzbas Marble,removed,own_name_type_word
-marble__pena_dark_blue_bc13fdb8-178c-5244-8a0c-e9c89bb5407f,Name In China Stone Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__penaros_a5461090-0bb7-5160-94ef-6161e02e0cba,Penaros Marble,removed,own_name_type_word
 marble__pentelikon_white_04f3b5ca-e120-5f19-a5d3-4516c956da4c,Pentelikon White Marble,removed,own_name_type_word
 marble__perak_white_7a599f4e-0d05-5eed-9420-f247b90f85a2,Perak White Marble,removed,own_name_type_word
@@ -4098,7 +4058,6 @@ marble__rauris_hell_0c306e0c-60ac-57c5-8256-4125f546ed72,Rauris Hell Marble,remo
 marble__raymond_blue_dfbcd2fb-e0b8-5e78-812a-924062737a80,Raymond Blue Marble,removed,own_name_type_word
 marble__rayna_rosa_4da696ef-cc24-5171-80c7-f188321797f3,Rayna Rosa Marble,removed,own_name_type_word
 marble__real_silver_262e810b-cc59-51dd-90cb-164dbbbb9e73,Real Silver Marble,removed,own_name_type_word
-marble__red_cherry_be904da5-2c83-533d-a42b-b22477b059dc,In China,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__red_dreams_7314a317-4d6b-5335-adc5-2abf03f91bc1,Red Dreams Marble,removed,own_name_type_word
 marble__red_grey_b59e30e6-e2ab-5b47-8479-03172f06bbc8,Red Grey Marble,removed,own_name_type_word
 marble__red_impala_1200263f-7857-5342-bd73-889a670d281c,Red Impala Marble,removed,own_name_type_word
@@ -4132,7 +4091,6 @@ marble__rojo_marroqui_b5eef602-a6a0-5585-adc3-c0e688d83eab,Rojo Marroqui Marble,
 marble__roma_grey_01376322-0fbf-5679-a336-945cdb9accb4,Roma Grey Marble,removed,own_name_type_word
 marble__roman_beige_17cee335-03f2-5b5a-836b-b40727d52ae8,Roman Beige Limestone,removed,own_name_type_word
 marble__roman_impression_4413367d-e896-5c09-9a85-5685ab4f6be4,Roman Impression Marble,removed,own_name_type_word
-marble__romantic_grey_c674d2fd-3583-59a0-b94e-3356e489b1f3,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__romantic_grey_c674d2fd-3583-59a0-b94e-3356e489b1f3,Romantic Grey Marble,removed,own_name_type_word
 marble__rosa_atlantide_15e8f1e6-ee72-5a11-942d-f0737dafdccd,Rosa Atlantide Limestone,removed,own_name_type_word
 marble__rosa_aurora_0048f371-78ac-591a-a9e2-8179ce41df16,Rosa Aurora Marble,removed,own_name_type_word
@@ -4343,8 +4301,6 @@ marble__sona_beige_65d1cc57-c608-5149-bded-dec2e4097598,Sona Beige Marble,remove
 marble__sonal_white_306aa179-b3b6-5c07-9f09-29d35314cfa1,Sonal White Marble,removed,own_name_type_word
 marble__soren_black_4ab93719-2cba-53ae-b5de-db721cff7511,Soren Black Marble,removed,own_name_type_word
 marble__soul_beige_bc66a7bb-3c10-5527-a09c-71b7b97d49e8,Soul Beige Marble,removed,own_name_type_word
-marble__spanish_gold_87b4213c-cb83-58d8-9db8-7da8bc2fc92c,In China Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-marble__spanish_gold_87b4213c-cb83-58d8-9db8-7da8bc2fc92c,In China Stone Market Called,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__spanish_gold_87b4213c-cb83-58d8-9db8-7da8bc2fc92c,Spanish Gold Marble,removed,own_name_type_word
 marble__sparkling_calacatta_7bf9c1a2-4794-54b4-b75c-266009d57bfa,Sparkling Calacatta Marble,removed,own_name_type_word
 marble__spartan_beige_6a96c9f5-af88-5c32-a8ca-77d7065bb3ff,Spartan Beige Marble,removed,own_name_type_word
@@ -4467,8 +4423,6 @@ marble__turtle_venato_271533c6-464d-5941-9012-75d13278358f,Turtle Venato Marble,
 marble__twilight_pink_1661c587-f9d0-53cc-b381-32f0ab1284f4,Twilight Pink Marble,removed,own_name_type_word
 marble__tynada_galaxy_b887ae29-b999-599d-bf1c-d81071fb0f5d,Tynada Galaxy Marble,removed,own_name_type_word
 marble__uige_grey_1c0c4fdb-d81d-5191-b9bb-48e117cd13fa,Uige Grey Marble,removed,own_name_type_word
-marble__ultraman_beige_afbb6a5d-2aed-55a3-a3a9-c3b6530dabc2,In Chinese Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
-marble__ultraman_beige_afbb6a5d-2aed-55a3-a3a9-c3b6530dabc2,In Chinese Stone Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__ultraman_beige_afbb6a5d-2aed-55a3-a3a9-c3b6530dabc2,Ultraman Beige Marble,removed,own_name_type_word
 marble__umo_beige_2e0ecb2e-6602-5842-aa27-a30569bfa829,Umo Beige Marble,removed,own_name_type_word
 marble__una_crven_721604cd-0af5-5867-873c-032251657d98,Una Crven Limestone,removed,own_name_type_word
@@ -4525,7 +4479,6 @@ marble__vica_f0a1f093-d299-5ac6-bf4d-4eb26edabf66,Vica Marble,removed,own_name_t
 marble__vicentte_beige_76791936-0950-5147-8018-2cf2b5aaf29d,Vicentte Beige Marble,removed,own_name_type_word
 marble__victoria_beige_338783ea-4a7b-5a81-813a-38c303a8de9c,Victoria Beige Marble,removed,own_name_type_word
 marble__victory_beige_6898ada0-5d27-5188-ba4e-d28ed5dde8a3,Victory Beige Marble,removed,own_name_type_word
-marble__vienna_golden_2dec6a92-8229-53a0-9ff0-023c5e836727,In China Ston Emarket,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__vietnam_beige_d4e7936a-e63d-576f-86cb-88fe9db1c326,Vietnam Beige Marble,removed,own_name_type_word
 marble__vietnam_cream_e15b6690-49b9-5c86-a6b2-c5e401231518,Vietnam Cream Marble,removed,own_name_type_word
 marble__violett_leopard_08d8a3fe-5d3f-5f47-9646-7ad9513f845a,Violett Leopard Marble,removed,own_name_type_word
@@ -4571,7 +4524,6 @@ marble__winter_mist_9bb547dd-116e-58dc-9b7d-7d7daa15a06e,Winter Mist Marble,remo
 marble__wooden_black_1355548d-8764-529e-85b7-9de41007c82d,Wooden Black Marble,removed,own_name_type_word
 marble__xinyashi_white_bc9b75a8-c501-5fc3-8657-72936eedd39b,Xinyashi White Marble,removed,own_name_type_word
 marble__xishi_red_926453b9-b2a7-55fb-9c91-1c21a10dea20,Xishi Red Limestone,removed,own_name_type_word
-marble__ya_beige_ef9021c3-5570-5100-9de6-5ac561fb4002,In China Market,fixed,"a framing fragment (where it is sold), no stone name in it: dropped (Mas, 13 Nov: sentences are fixed at the source)"
 marble__yabo_white_ba5d3dd5-11e5-5f93-b061-0e8a630a05ce,Yabo White Marble,removed,own_name_type_word
 marble__yadeen_beige_b17d2848-5569-5c03-a998-5ef833a65716,Yadeen Beige Marble,removed,own_name_type_word
 marble__yellow_breccia_ba9d07d0-2cd6-5994-b4c4-88714876c02f,Yellow Breccia Marble,removed,own_name_type_word
