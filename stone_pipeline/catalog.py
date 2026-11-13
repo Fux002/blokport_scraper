@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from stone_pipeline import prepare_variant_images
+from stone_pipeline.aliases.cleanup import FILE_NAME as ALIAS_CLASSIFICATION_FILE
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.adapters.tokens import explicit_type_word
@@ -139,6 +140,7 @@ def run(outputs_root: Path | None = None) -> Path:
             product_images[r.variation_key] = r.image_keys[0]
     color_stats = variety_color.fill_colors(backbone_paths=_additions, reference_paths=_merged,
                                             product_images=product_images)
+    write_types_outside_pack()                     # table 569: the types left out of the pack's vocabulary, listed
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
     dropped = drop_deleted_variants()              # drop to-delete junk; imageless NEW records are KEPT now
@@ -298,6 +300,9 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
     for old in to_upload.glob("3_products_*.csv"):
         old.unlink()
     (to_upload / STANDARDISE.PHOTOS_FILE).unlink(missing_ok=True)
+    # the alias classification describes the ledger at the moment it was written (aliases.cleanup): a produce moves
+    # the ledger on, so the next publish must not carry it (the backend refuses a missing file, never a stale one)
+    (to_upload / ALIAS_CLASSIFICATION_FILE).unlink(missing_ok=True)
     (to_upload / STANDARDISE.DEFAULTED_FILE).unlink(missing_ok=True)
     header: list[str] | None = None
     all_rows: list[list[str]] = []
@@ -428,6 +433,19 @@ def collect_discontinued(outputs_root: Path) -> int:
     csvio.write_rows(review / "products_discontinued.csv", emit.DISCONTINUED_COLUMNS,
                      [[csvio.safe_cell(c) for c in r] for r in by_sku.values()])
     return len(by_sku)
+
+
+def write_types_outside_pack() -> int:
+    """List every type the pack's vocabulary leaves out (table 569, Mas's clause: never guessed in) to
+    review/<env>/types_outside_pack.csv: its handles and why (no stone-category combination yet, or only other
+    categories). Always written, header-only when none, so a type that has entered the pack drops off. Returns the count."""
+    excluded = loaders.types_outside_pack(SETTINGS.paths.attributes_csv)
+    out = SETTINGS.paths.review_dir / "types_outside_pack.csv"
+    csvio.write_dicts(out, ["type", "category_handles", "reason"], excluded, sanitize=True)
+    if excluded:
+        log.warning("types left out of the pack's vocabulary (no stone-category combination)", extra={"extra_fields": {
+            "count": len(excluded), "file": str(out), "types": [t["type"] for t in excluded]}})
+    return len(excluded)
 
 
 def write_variants_to_delete() -> int:

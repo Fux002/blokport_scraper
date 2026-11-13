@@ -13,7 +13,7 @@ from stone_pipeline.tests import _decision_views as views
 
 
 @pytest.fixture
-def seeded_queue():
+def seeded_queue(seeded_config_store):
     """A produce has surfaced one uncertain variety + one new attribute value."""
     decisions.write_confirm_file([
         {"confirm": "", "variant": "Zucchi Blue X", "stone_type": "granite", "color": "blue",
@@ -33,7 +33,7 @@ def test_get_pending_variants_and_attributes(seeded_queue):
     assert code == 200 and [a["value"] for a in body["attributes"]] == ["Leathered"]
 
 
-def test_pending_variant_carries_src_url_to_the_endpoint():
+def test_pending_variant_carries_src_url_to_the_endpoint(seeded_config_store):
     # Regression (Blokport proof): the review-variant item must emit src_url end-to-end, not just src (the
     # source code). It was dropped because src_url was absent from CONFIRM_COLUMNS -> the payload allowlist.
     decisions.write_confirm_file([
@@ -110,7 +110,7 @@ def test_put_reject_stores_and_reflects(seeded_queue):
     assert v["current_action"] == "reject"
 
 
-def test_put_reject_with_percent_encoded_name_keys_on_the_real_name():
+def test_put_reject_with_percent_encoded_name_keys_on_the_real_name(seeded_config_store):
     decisions.write_confirm_file([{"confirm": "", "variant": "Alpine Luxe", "stone_type": "", "color": ""}])
     code, body = server.dispatch("PUT", ["review", "variants", "Alpine%20Luxe"], {"action": "reject"})
     assert code == 200 and body["variant"] == "Alpine Luxe"

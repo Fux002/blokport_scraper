@@ -37,6 +37,7 @@ import base64
 import csv
 import hashlib
 import json
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -124,6 +125,12 @@ def _publish_file(client, bucket: str, key: str, path: Path, entry: dict, prior:
     return True
 
 
+def _put_manifest(client, bucket: str, key: str, manifest: dict) -> None:
+    """The one serialisation of a manifest, so a merge re-writes a carried entry in exactly the bytes it was read in."""
+    client.put_object(Bucket=bucket, Key=key, ContentType="application/json",
+                      Body=json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
+
+
 def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None,
                          only: set[str] | None = None) -> dict:
     """Upload the changed deliverables and side files under `local`, then write the manifest. `only` restricts the
@@ -155,9 +162,49 @@ def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: 
     manifest = {"contract": MANIFEST_CONTRACT, "env": ENV_NAME, "run_id": run_id,
                 "produced_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                 **sections}
-    client.put_object(Bucket=bucket, Key=manifest_key, ContentType="application/json",
-                      Body=json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
+    _put_manifest(client, bucket, manifest_key, manifest)
     return {"uploaded": uploaded, "unchanged": unchanged, "side": side, "manifest": manifest}
+
+
+class PublishedManifestAbsent(RuntimeError):
+    """No manifest is published under the prefix: a merge has nothing to add to (never a manifest of one file)."""
+
+
+class PublishedManifestUnreadable(RuntimeError):
+    """The published manifest is not this contract's JSON: a merge would re-write what it cannot read."""
+
+
+def _manifest_to_merge(client, bucket: str, key: str) -> dict:
+    """The published manifest a merge adds to; refuses, naming it, when it is absent or not a manifest."""
+    try:
+        manifest = published_manifest(client, bucket, key)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise PublishedManifestUnreadable(f"s3://{bucket}/{key} is not JSON: {exc}") from exc
+    if manifest == {}:
+        raise PublishedManifestAbsent(f"no manifest is published at s3://{bucket}/{key}: run a produce first")
+    if not (isinstance(manifest, dict) and manifest.get("contract") == MANIFEST_CONTRACT
+            and isinstance(manifest.get("files"), dict)):
+        raise PublishedManifestUnreadable(f"s3://{bucket}/{key} is not a {MANIFEST_CONTRACT} manifest with a files map")
+    return manifest
+
+
+def merge_into_published(client, bucket: str, prefix: str, name: str, body: bytes, field: str, value) -> dict:
+    """Add or replace ONE deliverable `name` (its bytes `body`) and ONE top-level field in the manifest a produce
+    published, carrying every other entry, field, run_id and produced_at as published. It reads no local folder: the
+    sync service's to_upload is empty after a roll until the next produce, and publishing it would drop every
+    produce deliverable. The file is uploaded only when it changed (as publish_deliverables). An absent or unreadable
+    published manifest refuses before anything is written. Returns the file's manifest entry."""
+    manifest_key = f"{prefix}/{MANIFEST_NAME}"
+    manifest = _manifest_to_merge(client, bucket, manifest_key)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / name
+        path.write_bytes(body)
+        entry = file_entry(path)
+        _publish_file(client, bucket, f"{prefix}/{name}", path, entry, manifest["files"].get(name, {}))
+    manifest["files"][name] = entry
+    manifest[field] = value
+    _put_manifest(client, bucket, manifest_key, manifest)
+    return entry
 
 
 def _upload_dir(client, bucket: str, local: Path, prefix: str) -> int:

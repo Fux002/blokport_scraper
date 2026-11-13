@@ -18,8 +18,9 @@ run both fixture sources; the lot scenario runs the lot source:
 The scenarios that make a guard or the lot replacement fire also assert it fired, so a scenario that silently stops
 reaching its path fails by name rather than only as a changed digest.
 Every output is digested: each file under the outputs and state folders (a parquet by its decoded rows and schema, so a
-polars upgrade cannot fail it), every ledger table (rows sorted, wall-clock timestamps masked), the magnitude baselines
-and the returned manifests. The only volatile bytes are wall-clock timestamps (ledger columns and the two baselines'
+polars upgrade cannot fail it), every ledger table (rows sorted, wall-clock timestamps masked), the learned aliases the
+runs proposed (config.db learned_alias, P2-10 C2; each scenario has its own store seeded from sources.yaml, as the
+config server seeds it at boot), the magnitude baselines and the returned manifests. The only volatile bytes are wall-clock timestamps (ledger columns and the two baselines'
 updated_at); everything else is deterministic. The digests are compared with GOLDEN, written from the code before the
 C2 split of run_source; a mismatch names every output that changed.
 
@@ -43,7 +44,7 @@ import polars as pl
 import pytest
 
 from stone_pipeline import run as run_module
-from stone_pipeline.config import contracts
+from stone_pipeline.config import contracts, store
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.run import OutputMode, run_source
@@ -83,6 +84,15 @@ def _file_digest(path: Path) -> str:
     if path.name in ("scrape_baselines.json", "magnitude_baselines.json"):   # their updated_at is wall-clock
         data = _TIMESTAMP.sub(b"<ts>", data)
     return _sha(data)
+
+
+def _learned_alias_digest(config_db: Path) -> str:
+    con = sqlite3.connect(config_db)
+    try:
+        return _sha(_TIMESTAMP.sub(b"<ts>", "\n".join(
+            sorted(repr(r) for r in con.execute("SELECT * FROM learned_alias"))).encode()))
+    finally:
+        con.close()
 
 
 def _ledger_digests(ledger_path: Path) -> dict[str, str]:
@@ -205,6 +215,9 @@ def _assert_lot_replaced(base: Path) -> None:
 def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
     """Run `run(source, out)` for each source into base/out with write-through on base's own ledger; digest it all."""
     base.mkdir(parents=True)
+    config_db = base / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(config_db))
+    store.seed_from_yaml()
     ledger_path = base / "scenario.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
@@ -217,6 +230,7 @@ def _scenario(base: Path, monkeypatch, run, sources=SOURCES) -> dict[str, str]:
     for path in sorted(p for p in out.rglob("*") if p.is_file()):
         digests[str(path.relative_to(out))] = _file_digest(path)
     digests.update(_ledger_digests(ledger_path))
+    digests["CONFIG:learned_alias"] = _learned_alias_digest(config_db)
     digests["magnitude_baselines"] = _file_digest(magnitude_drift._path())
     return digests
 

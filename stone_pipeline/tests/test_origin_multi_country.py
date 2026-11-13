@@ -89,7 +89,7 @@ def test_multi_picks_supplier_home_in(base_ref):
 
 
 # --- rule d: multi, supplier home NOT a candidate -> held for confirmation ---
-def test_multi_home_absent_is_held_for_confirmation(base_ref):
+def test_multi_home_absent_is_held_for_confirmation(base_ref, seeded_config_store):
     ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN")))
     row = _row(src_site="turco", variation_name="Patagonia")
     derive.derive_origin(row, ref, _cfg("TR"))          # Turkish trader; TR not in {BR,IN}
@@ -104,7 +104,7 @@ def test_multi_home_absent_is_held_for_confirmation(base_ref):
         ("turco", "Patagonia", "BR,IN", "TR")
 
 
-def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base_ref):
+def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base_ref, seeded_config_store):
     # the supplier's HOME is not a declared own country and is by definition not a documented origin, so the
     # card says where the supplier is based and leaves the origin for the operator to choose
     from stone_pipeline.config.control import server
@@ -118,7 +118,7 @@ def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base
     assert card["origin"] == ""
 
 
-def test_the_vendor_mismatch_card_keeps_the_declared_country_prefill(base_ref):
+def test_the_vendor_mismatch_card_keeps_the_declared_country_prefill(base_ref, seeded_config_store):
     from stone_pipeline.config.control import server
     ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN")))
     row = _row(src_site="turco", variation_name="Patagonia")

@@ -3,7 +3,6 @@ honour is a `decision_gap` card. Two-pass is not a gap; a decision with no listi
 
 from __future__ import annotations
 
-from stone_pipeline.config import store
 from stone_pipeline.config.control import server
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.config.decisions_model import Decisions
@@ -58,8 +57,7 @@ def test_origin_is_a_gap_when_a_bound_product_does_not_carry_it_at_the_operator_
     assert decision_audit.audit([], EXISTING, set(), Decisions.from_legacy({}, {}, origins), set()) == []      # no product bound yet
 
 
-def test_gaps_surface_in_the_one_list_and_clear_when_applied(tmp_path, monkeypatch):
-    monkeypatch.setattr(store, "config_db_path", lambda: tmp_path / "config.db")
+def test_gaps_surface_in_the_one_list_and_clear_when_applied(seeded_config_store):
     n = decisions.write_decision_gaps([{"kind": "decision_gap", "decision": "mint", "source": "marenostone",
                                         "scraped": "Bianco White Marble", "name": "Bianco White",
                                         "stone_type": "Marble", "origin": "IR", "reason": "Mint not applied"}])

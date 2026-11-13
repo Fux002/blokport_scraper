@@ -85,7 +85,7 @@ def test_a_leaf_decision_on_a_name_with_no_usable_key_is_refused():
         set_backbone_leaf_decision("Black Galaxy", "Granite", "color", "黑", "approve")
 
 
-def test_minted_membership_skips_a_name_with_no_usable_key():
+def test_minted_membership_skips_a_name_with_no_usable_key(seeded_config_store):
     from stone_pipeline.config.decisions_store import backbone_leaf_overlay, record_minted_membership
     written = record_minted_membership([("黑金砂", "Granite", "color", "Black"),
                                         ("Black Galaxy", "Granite", "color", "Black")])

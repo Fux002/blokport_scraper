@@ -10,11 +10,12 @@ the settings module at call time, as they were when this lived there."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Iterable
 
 from stone_pipeline.config import settings
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.core import env
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import CATEGORY_KIND, AttributeValue, read_attributes
 
 
 @dataclass(frozen=True)
@@ -62,25 +63,50 @@ class Category:
 # value. Read it from from_medusa/<env>/attributes.csv (the same file the reference loads) so a
 # prod run uses prod pcats and a dev run uses dev pcats -- the ids can never cross. The literals
 # below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
+class CategoryHandleError(ValueError):
+    """A T1 category row breaks the exact-handle rule (D11): named, never folded or skipped."""
+
+
+def category_pcats(values: Iterable[AttributeValue]) -> dict[str, str]:
+    """{handle: pcat} for every pack category among T1's category rows, keyed by the EXACT handle (table 577): the
+    one reader of those rows. The label in `value` is never a key, so a renamed label changes nothing. A handle that
+    differs from a pack handle only in case is refused by name (it would otherwise silently deactivate the
+    category), and so is a second row on one handle; a handle no pack category has is another brand's, not ours."""
+    pack = {c["plural"] for c in active_pack().categories}
+    by_fold = {h.casefold(): h for h in pack}
+    out: dict[str, str] = {}
+    for a in values:
+        if a.category != CATEGORY_KIND or not a.sourceid:
+            continue
+        if a.handle not in pack:
+            if (exact := by_fold.get(a.handle.casefold())) is not None:
+                raise CategoryHandleError(f"category {a.value!r} has handle {a.handle!r}; the pack's handle is "
+                                          f"{exact!r} (an exact lowercase handle, D11)")
+            continue
+        if a.handle in out and out[a.handle] != a.sourceid:
+            raise CategoryHandleError(f"two category rows carry handle {a.handle!r}: {out[a.handle]} and {a.sourceid}")
+        out[a.handle] = a.sourceid
+    return out
+
+
 def _env_category_pcats() -> dict[str, str]:
     path = settings._FROM_MEDUSA / "attributes.csv"
     if not path.exists():
         return {}
-    return {a.value: a.sourceid for a in read_attributes(path, require_status=settings.ATTRIBUTES_STATUS_REQUIRED)
-            if a.category == "category" and a.sourceid}
+    return category_pcats(read_attributes(path, require_status=settings.ATTRIBUTES_STATUS_REQUIRED))
 
 
-_ENV_PCATS = _env_category_pcats()  # {'Slabs': pcat, 'Blocks': pcat, 'Tiles': pcat} for THIS env
+_ENV_PCATS = _env_category_pcats()  # {'slabs': pcat, 'blocks': pcat, 'tiles': pcat} for THIS env
 
 
-def _pcat(label: str, env_var: str | None = None) -> str:
-    """A category's Medusa pcat for THIS env, sourced ONLY from the env's Medusa export
+def _pcat(handle: str, env_var: str | None = None) -> str:
+    """A category's Medusa pcat for THIS env, by its handle, sourced ONLY from the env's Medusa export
     (from_medusa/<env>/attributes.csv) -- never hardcoded. An explicit env-var override is allowed.
     A category absent from the export stays "" (inactive, emits nothing), so dev and prod ids can
     never cross and no stale literal can leak."""
     if env_var and env.getenv(env_var):
         return env.getenv(env_var)
-    return _ENV_PCATS.get(label, "")
+    return _ENV_PCATS.get(handle, "")
 
 # The category list is declared by the active product-domain pack (config/domains/<pack>.yaml). Adding a
 # category = ADD AN ENTRY THERE; every category-derived constant in the pipeline recomputes from this tuple
@@ -92,7 +118,7 @@ def _build_categories() -> "tuple[Category, ...]":
     return tuple(
         Category(
             c["name"], c["plural"], c["label"],
-            _pcat(c["label"], c.get("pcat_env_var")), c["base_image"],
+            _pcat(c["plural"], c.get("pcat_env_var")), c["base_image"],
             shares_variety_vocab=c["shares_variety_vocab"], fan_out=c["fan_out"],
             volume_per_kg=c.get("volume_per_kg", ""),
             pcat_env_var=c.get("pcat_env_var"),
@@ -119,6 +145,12 @@ def category(name: str) -> "Category | None":
 def category_by_handle(handle: str) -> "Category | None":
     """The category whose handle (D11) is exactly `handle`, or None."""
     return next((c for c in _BY_NAME.values() if c.handle == handle), None)
+
+
+def category_by_pcat(pcat_id: str) -> "Category | None":
+    """The ACTIVE category whose pcat id (this env's, from the registry) is exactly `pcat_id`, or None. The one way a
+    stored pcat id goes back to its category (table 577): never through a label or the ledger."""
+    return next((c for c in _BY_NAME.values() if pcat_id and c.pcat_id == pcat_id), None)
 
 
 def default_form_name() -> str:
@@ -159,6 +191,6 @@ def refresh_category_pcats() -> None:
     not a second code path. Idempotent: a no-op when the export is unchanged."""
     global _ENV_PCATS, _BY_NAME, _BY_LABEL_CF
     _ENV_PCATS = _env_category_pcats()
-    rebuilt = tuple(replace(c, pcat_id=_pcat(c.label, c.pcat_env_var)) for c in _BY_NAME.values())
+    rebuilt = tuple(replace(c, pcat_id=_pcat(c.handle, c.pcat_env_var)) for c in _BY_NAME.values())
     _BY_NAME = {c.name: c for c in rebuilt}
     _BY_LABEL_CF = {c.label.casefold(): c for c in rebuilt}

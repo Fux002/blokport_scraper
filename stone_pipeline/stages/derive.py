@@ -115,7 +115,7 @@ def derive_category(row: CanonicalRow, ref: ReferenceData) -> None:
 
     if not row.format_value:
         resolve_format(row, ref)
-    row.category_pcat_id = category_pcat_for_branch(branch_of(row), ref)
+    row.category_pcat_id = category_pcat_for_branch(branch_of(row))
     row.category_method = f"format:{row.format_method or 'unknown'}"
 
 

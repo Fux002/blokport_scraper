@@ -54,10 +54,55 @@ def _isolate_magnitude_baselines(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(magnitude_drift, "_path", lambda: path)
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_config_store_for_the_session(tmp_path_factory):
+    """The same isolation for a module-scoped fixture, which runs before the per-test one below: a pipeline run there
+    proposes its learned aliases into config.db (P2-10 C2), and must never reach the checkout's own config.db (CI's
+    `certify all` then read that store and found no sources)."""
+    absent = tmp_path_factory.mktemp("noconfig_session") / "absent.db"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("BLOKPORT_CONFIG_DB", str(absent))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _isolate_config_store(monkeypatch, tmp_path_factory):
     absent = tmp_path_factory.mktemp("noconfig") / "absent.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
+
+
+@pytest.fixture
+def seeded_config_store(monkeypatch, tmp_path_factory):
+    """A private config.db seeded from the committed sources.yaml, as the config server seeds it at boot. For a test
+    that runs several sources in one process: a run proposes its learned guesses into config.db (P2-10 C2), and a
+    store first created by that write would hold no sources, so the next source's load_source would find none."""
+    from stone_pipeline.config import store
+    path = tmp_path_factory.mktemp("config") / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    store.seed_from_yaml()
+    return path
+
+
+@pytest.fixture
+def tree_category_pcats(monkeypatch):
+    """The tree-build tests' category pcats on the registry (table 577: a category's pcat is the registry's)."""
+    from stone_pipeline.tests._category_registry import TREE_PCATS, set_category_pcats
+    set_category_pcats(monkeypatch, TREE_PCATS)
+
+
+@pytest.fixture
+def ledger_product_pcats(monkeypatch):
+    """test_ledger_products' synthetic category pcats (PC1 slabs, PC2 blocks) on the registry (table 577)."""
+    from stone_pipeline.tests._category_registry import LEDGER_PRODUCT_PCATS, set_category_pcats
+    set_category_pcats(monkeypatch, LEDGER_PRODUCT_PCATS)
+
+
+@pytest.fixture
+def slab_category_pcat(monkeypatch):
+    """The Slabs category on SLAB_PCAT, so a canonical row on that pcat is stored under `slabs` (table 577)."""
+    from stone_pipeline.tests._category_registry import set_category_pcats
+    from stone_pipeline.tests._ledger_icons import SLAB_PCAT
+    set_category_pcats(monkeypatch, {"slab": SLAB_PCAT})
 
 
 @pytest.fixture(autouse=True)
