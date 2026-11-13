@@ -163,3 +163,25 @@ def test_the_alias_check_keys_a_non_latin_value_by_alias_key():
                            same_type_name_keys=frozenset())
     assert alias_problem("巴比伦金", context) is None
     assert alias_problem("Wratza 维纳多", context) is None
+
+
+def _wratza():
+    from stone_pipeline.core.alias_problem import AliasContext
+    return AliasContext(own_name="Wratza", type_words=frozenset({"granite"}), vocabulary_keys=frozenset(),
+                        same_type_name_keys=frozenset())
+
+
+def test_too_short_applies_to_the_latin_key_only():
+    # 34, 13 Nov: a CJK character carries a word, so a script-preserving key is never too short
+    from stone_pipeline.core.alias_problem import alias_problem
+    assert alias_problem("灰石", _wratza()) is None
+    assert alias_problem("3D灰", _wratza()) is None
+    assert alias_problem("ab", _wratza()) == "too_short"
+
+
+def test_a_code_is_judged_on_every_token_of_its_alias_key():
+    # 34, 13 Nov: codeMatcher tokenises by alias_key, so a non-Latin token never hides inside a code
+    from stone_pipeline.core.alias_problem import code_matcher
+    is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
+    assert is_code("G12") and is_code("g654 G12a")
+    assert not is_code("G12 灰")
