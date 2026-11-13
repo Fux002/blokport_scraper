@@ -34,8 +34,9 @@ SCHEMA_VERSION = 18  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per 
 #                      v16: product.photo_unpublished -- the standardised files a product links that are not
 #                           published (never served while any); null on every existing row until its next produce.
 #                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
-#                      v18: variation.aliases replaced by alias_rows + codes (P2-10 C4), NULL on every existing row:
-#                           not computed yet, so held from the serve until the next produce computes both.
+#                      v18: variation.alias_rows + codes (P2-10 C4), NULL on every existing row: not computed
+#                           yet, so held from the serve. The old `aliases` stays until the produce-start carry
+#                           (aliases.carry) moves each row's acked set into them and drops it, in one transaction.
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -214,8 +215,6 @@ class Ledger:
         if "alias_rows" not in variation_cols:    # v18: NULL = not computed yet (held), never '[]' (the empty channel)
             self.conn.execute("ALTER TABLE variation ADD COLUMN alias_rows TEXT")
             self.conn.execute("ALTER TABLE variation ADD COLUMN codes TEXT")
-        if "aliases" in variation_cols:           # v18: the old unowned set, never served again
-            self.conn.execute("ALTER TABLE variation DROP COLUMN aliases")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

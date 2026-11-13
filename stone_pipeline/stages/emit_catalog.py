@@ -26,15 +26,14 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from stone_pipeline.aliases import derive as alias_derive
 from stone_pipeline.aliases import payload as alias_payload
 from stone_pipeline.aliases import stores as alias_stores
-from stone_pipeline.aliases.surfaces import Stores, Surfaces, Variety, surfaces_by_key
+from stone_pipeline.aliases.surfaces import Stores, Surfaces
 from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
-    alias_key,
     UnfoldableName,
-    clean_alias_list,
     clean_variety_name,
     looks_like_artifact,
     split_bracket_alias,
@@ -67,34 +66,14 @@ def _write_name(row: dict) -> None:
 
 def _alias_rows(rows: list[dict], seed_only: bool) -> tuple[dict[str, list[tuple[str, str]]],
                                                              dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
-    """Each row's aliases (value, method) and codes from the alias stores (aliases.surfaces), the scraper's own
-    methods only: each value written by the alias field's rule (clean_alias_list with the alias display rule: one
-    value can split into pieces, each keeping its method; the Name and repeats dropped), then each piece a code when
-    the brand's code pattern accepts it, else an alias. Returns (aliases by Key, codes by Key,
-    each (value, method), and the (Key, alias) pairs dropped for having no ASCII form). seed_only reads the committed
-    seed alone (the backbone), so the seed projection stays hermetic: no config.db."""
+    """Each row's aliases (value, method) and codes by THE derivation (aliases.derive.alias_sets) over the scraper's
+    stores, written by the alias field's display rule. Returns (aliases by Key, codes by Key, each (value, method),
+    and the (Key, alias) pieces the alias rule dropped). seed_only reads the committed seed alone (the backbone), so
+    the seed projection stays hermetic: no config.db."""
     from stone_pipeline.reference.loaders.backbone import load_backbone
     stores = (Stores(seed=alias_stores.seed_of(load_backbone())) if seed_only else alias_stores.scraper_stores())
-    is_code = alias_stores.is_code()
-    surfaces, unbound = surfaces_by_key([Variety(r["Key"], r["Name"], r["Type"]) for r in rows], stores, is_code)
+    aliases, codes, dropped, unbound = alias_derive.alias_sets(rows, stores, alias_stores.is_code(), _alias_display)
     alias_stores.log_unbound(unbound)
-    aliases: dict[str, list[tuple[str, str]]] = {}
-    codes: dict[str, list[tuple[str, str]]] = {}
-    dropped: list[tuple[str, str]] = []
-    for r in rows:
-        found, seen = surfaces[r["Key"]], set()
-        aliases[r["Key"]], codes[r["Key"]] = [], []
-        # ONE order: every value is cleaned into its pieces first ('Star Galaxy (G603)' -> 'Star Galaxy', 'G603'),
-        # then EVERY piece is split by the code pattern, so a code piece is a code under its method, never an alias
-        for value, method in (*found.aliases, *found.codes):
-            if method not in alias_payload.SENT_METHODS:
-                continue
-            pieces, lost = clean_alias_list(r["Name"], [value], _alias_display)
-            dropped.extend((r["Key"], a) for a in lost)
-            for piece in pieces:
-                if (key := alias_key(piece)) not in seen:     # an alias value's key (main #717)
-                    seen.add(key)
-                    (codes if is_code(piece) else aliases)[r["Key"]].append((piece, method))
     return aliases, codes, dropped
 
 
