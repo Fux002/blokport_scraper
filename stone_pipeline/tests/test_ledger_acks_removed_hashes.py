@@ -322,6 +322,7 @@ def _products(ledger, rows, cfg):
     ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'P-' || sku")
 
 
+@pytest.mark.usefixtures("ledger_product_pcats")   # its rows carry PC1 / PC2 (table 577: the registry's)
 def test_the_product_hash_covers_vendor_and_thumbnail_not_the_sales_channel(tmp_path):
     cfg = load_source("polonine")
     rows = _fixture_rows()
@@ -338,6 +339,7 @@ def test_the_product_hash_covers_vendor_and_thumbnail_not_the_sales_channel(tmp_
         assert ledger.get("product", "sku", sku)["state"] == "dirty"
 
 
+@pytest.mark.usefixtures("ledger_product_pcats")   # its rows carry PC1 / PC2 (table 577: the registry's)
 def test_new_content_clears_an_abandoned_dead_letter(tmp_path):
     cfg = load_source("polonine")
     rows = _fixture_rows()
