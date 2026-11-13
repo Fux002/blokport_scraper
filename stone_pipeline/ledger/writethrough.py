@@ -115,7 +115,8 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
 
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, mode: OutputMode,
-                  replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
+                  published: frozenset[str], replaced: dict[str, str] | None = None,
+                  path: str | Path | None = None) -> bool:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
@@ -127,6 +128,11 @@ def record_source(emit_rows: Sequence[CanonicalRow],
     ledger already holds, and leaves a product new to the ledger (and its stock) to the full run that
     creates it with its images. The delist and the withdrawal of unsent products run the same in both modes.
     The mode is required, so no caller can record a stock-only run as a full one by omission.
+
+    `published` (images.published_keys) is the set of files the photos side keeps. In the same transaction, every
+    product of the source, emitted or not, records which linked standardised files are missing from it
+    (populate.mark_unpublished_photos), so a product never serves a photo the photos side has not published. It is
+    required, so no caller can skip the check by omission.
 
     Inventory is seeded from the FULL emit set (every product's current stock), not a
     pre-computed delta. The ledger tracks `last_synced_qty` per sku, so it derives the
@@ -146,10 +152,15 @@ def record_source(emit_rows: Sequence[CanonicalRow],
             n_stock = populate.populate_inventory(ledger, stock_rows, cfg)
             n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
+            unpublished = populate.mark_unpublished_photos(ledger, published, cfg)
+        if unpublished:
+            log.warning("products link photos the photos side has not published: never served until a produce finds "
+                        "them published", extra={"extra_fields": {"source": cfg.source_code,
+                                                                  "count": len(unpublished), "skus": unpublished}})
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "inventory_only": mode.stock_only, "products": n_products,
             "inventory": n_stock, "left_to_full_run": len(emit_rows) - len(stock_rows),
-            "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
+            "withdrawn_unsent": n_withdrawn, "discontinued": n_gone, "photo_unpublished": len(unpublished)}})
         return True
     except Exception:
         # NOT "shadow only" anymore: the ledger IS the live sync source (Medusa pulls it). A failure here

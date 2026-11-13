@@ -80,6 +80,8 @@ def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scra
     from stone_pipeline.ledger import writethrough
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    from stone_pipeline.stages import images
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
                         lambda *a, **k: (modes.append(k.get("mode")), True)[1])

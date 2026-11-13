@@ -22,6 +22,7 @@ from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.reference.loaders import existing_varieties_file
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.run import run_source
+from stone_pipeline.stages import images
 
 
 
@@ -48,6 +49,7 @@ def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_d
     out = tmp_path / "outputs"
     ledger_path = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
     _seed_ledger_like_the_sync_server(ledger_path, tmp_path)
 
@@ -76,6 +78,7 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_d
 
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
                         lambda *a, **k: (modes.append(k.get("mode")), True)[1])
@@ -91,6 +94,7 @@ def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_pat
     from stone_pipeline.ledger import writethrough
 
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: False)
     out = tmp_path / "fail"
     with pytest.raises(SystemExit):

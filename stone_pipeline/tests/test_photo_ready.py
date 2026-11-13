@@ -63,7 +63,7 @@ def _row(standard_photo, qty="5"):
 
 def _record(path, rows, *, mode=OutputMode.FULL, discontinued=(), replaced=None):
     assert writethrough.record_source(rows, list(discontinued), load_source("polonine"),
-                                      mode=mode, replaced=replaced, path=path)
+                                      mode=mode, published=frozenset(), replaced=replaced, path=path)
 
 
 def _acked(path):
