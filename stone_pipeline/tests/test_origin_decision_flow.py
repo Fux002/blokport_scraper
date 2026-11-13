@@ -76,7 +76,7 @@ def _held(source="marenostone", variety="Crystal White", stype="Granite", map_c=
     return row
 
 
-def test_write_origin_confirm_file_dedupes_and_carries_payload():
+def test_write_origin_confirm_file_dedupes_and_carries_payload(seeded_config_store):
     rows = [_held(), _held(),                                                  # dup (source, variety, type)
             _held(variety="Golden Silver", stype="Travertine", map_c="TR")]
     assert decisions.write_origin_confirm_file(rows) == 2
@@ -88,21 +88,21 @@ def test_write_origin_confirm_file_dedupes_and_carries_payload():
     assert cw["current_country"] is None                                      # not yet decided
 
 
-def test_write_origin_confirm_file_ignores_resolved_rows():
+def test_write_origin_confirm_file_ignores_resolved_rows(seeded_config_store):
     good = CanonicalRow(src_site="marenostone", surrogate_key="2", variation_name="Abadeh", type_name="Marble")
     good.origin_source = "vendor_origin"                                       # resolved, not held
     assert decisions.write_origin_confirm_file([good]) == 0
     assert ds.list_pending("origin") == []
 
 
-def test_decided_country_surfaces_in_queue_listing():
+def test_decided_country_surfaces_in_queue_listing(seeded_config_store):
     decisions.write_origin_confirm_file([_held()])
     _origin("marenostone", "Crystal White", "Granite", "IR")
     item = ds.list_pending("origin")[0]
     assert item["current_country"] == "IR"
 
 
-def test_origin_queue_cleared_by_review_pending_clear():
+def test_origin_queue_cleared_by_review_pending_clear(seeded_config_store):
     decisions.write_origin_confirm_file([_held()])
     assert ds.list_pending("origin")
     ds.clear_review_pending()                                                  # a reset path

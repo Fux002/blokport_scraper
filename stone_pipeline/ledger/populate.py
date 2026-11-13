@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from stone_pipeline.aliases import payload as alias_payload
-from stone_pipeline.config.categories import category
+from stone_pipeline.config.categories import category, category_by_pcat
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
@@ -137,20 +137,15 @@ def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:
     return row["key"] if row else None
 
 
-def _category_handle_for(ledger: Ledger, pcat_id: str | None) -> str | None:
-    """The product's category HANDLE (D11, re-seed safe): the row carries the pcat id, reverse-mapped through the
-    seeded category attribute to its label, whose pack category gives the handle. A label no pack category has
-    raises: a product is never stored under a guessed category."""
+def _category_handle_for(pcat_id: str | None) -> str | None:
+    """The product's category HANDLE (D11): the row carries the pcat id, mapped back through the category registry
+    (table 577: the one source of a category, never the ledger's attribute rows, so a fresh ledger with none still
+    gives every product its handle). A pcat no active category has raises: a product is never stored under a
+    guessed category."""
     if not pcat_id:
         return None
-    row = ledger.execute(
-        "SELECT value FROM attribute WHERE category = 'category' AND medusa_id = ? LIMIT 1",
-        (pcat_id,),
-    ).fetchone()
-    if row is None:
-        return None
-    if (cat := category(row["value"])) is None:
-        raise ValueError(f"category {row['value']!r} (pcat {pcat_id}) is no pack category")
+    if (cat := category_by_pcat(pcat_id)) is None:
+        raise ValueError(f"category pcat {pcat_id} is no active pack category")
     return cat.handle
 
 
@@ -185,7 +180,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # data, bootstrap) still resolves and a re-populate never stomps a good link with NULL.
         variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
             or (prev["variation_key"] if prev else None)
-        category = _category_handle_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
+        category = _category_handle_for(r.category_pcat_id)   # once: used in the record AND the hash
         photo_ready = _photo_ready(r, prev, cfg)
         record = {
             "sku": sku,

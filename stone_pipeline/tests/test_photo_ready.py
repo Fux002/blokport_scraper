@@ -19,7 +19,10 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import populate, writethrough
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ready
-from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
+
+# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's (table 577)
+pytestmark = pytest.mark.usefixtures("slab_category_pcat")
 
 KEY = "marble__carrara_0001"
 SKU = "POL-AAA"
@@ -38,7 +41,6 @@ def ledger_path(tmp_path, monkeypatch):
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
         add_icon(ledger, KEY)
-        seed_slab_category(ledger)
     return path
 
 

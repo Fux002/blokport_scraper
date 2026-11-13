@@ -32,11 +32,11 @@ from stone_pipeline.aliases.surfaces import Stores, Surfaces, Variety, surfaces_
 from stone_pipeline.config.settings import IS_PRODUCTION, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
+    alias_key,
     UnfoldableName,
     clean_alias_list,
     clean_variety_name,
     looks_like_artifact,
-    match_key,
     split_bracket_alias,
 )
 from stone_pipeline.io import storage
@@ -92,7 +92,7 @@ def _alias_rows(rows: list[dict], seed_only: bool) -> tuple[dict[str, list[tuple
             pieces, lost = clean_alias_list(r["Name"], [value], _alias_display)
             dropped.extend((r["Key"], a) for a in lost)
             for piece in pieces:
-                if (key := match_key(piece)) not in seen:
+                if (key := alias_key(piece)) not in seen:     # an alias value's key (main #717)
                     seen.add(key)
                     (codes if is_code(piece) else aliases)[r["Key"]].append((piece, method))
     return aliases, codes, dropped

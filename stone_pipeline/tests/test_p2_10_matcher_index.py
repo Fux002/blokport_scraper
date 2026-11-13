@@ -197,3 +197,11 @@ def test_the_seed_is_parsed_once_per_backbone_file(tmp_path, monkeypatch):
     path.write_text(json.dumps({"posts": [{"key": "granite__x_1", "variant": "X", "stone_type": "Granite",
                                            "aliases": ["Ex", "Ecks"]}]}), encoding="utf-8")
     assert alias_stores.scraper_stores().seed["granite__x_1"][0] == ("Ex", "Ecks") and len(parses) == 2
+
+
+def test_a_value_in_another_script_is_kept_and_an_accent_twin_is_one_value():
+    # an alias value keys by alias_key (main #717/#723: the alias kind keeps every script): a CJK seed alias is kept,
+    # never folded to an empty match_key and skipped; 'Rosé' and 'rose' share one key, the first spelling kept
+    stores = Stores(seed={_GALAXY.key: (["\u7ef4\u7eb3\u591a", "Ros\u00e9", "rose"], [])})
+    got, _ = surfaces_by_key([_GALAXY], stores, _IS_CODE)
+    assert got[_GALAXY.key].aliases == (("\u7ef4\u7eb3\u591a", "seed"), ("Ros\u00e9", "seed"))

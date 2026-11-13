@@ -40,7 +40,7 @@ def test_a_ledger_from_before_phase_1_is_refused_never_opened_in_place(tmp_path)
 def test_a_new_config_db_is_stamped_at_the_current_version(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     with store._connect(tmp_path / "config.db") as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION == 14
 
 
 @pytest.mark.parametrize("version", [1, 11])

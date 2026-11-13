@@ -25,6 +25,13 @@ from stone_pipeline.ledger.populate import (
 )
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
+from stone_pipeline.tests._category_registry import set_category_pcats
+
+
+@pytest.fixture(autouse=True)
+def _category_pcats(monkeypatch):
+    # the synthetic slab pcat, on the registry: a category is never the ledger's (table 577)
+    set_category_pcats(monkeypatch, {"slab": "PC1"})
 
 EXPORT = SETTINGS.paths.variants_export_csv
 FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
@@ -33,8 +40,7 @@ FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 def _seed_ids(ledger: Ledger) -> None:
     now = now_iso()
     for cat, val, mid in [("color", "Black", "C1"), ("finish", "Polished", "F1"),
-                          ("quality", "First", "Q1"), ("type", "Marble", "T1"),
-                          ("category", "Slabs", "PC1")]:
+                          ("quality", "First", "Q1"), ("type", "Marble", "T1")]:
         ledger.upsert("attribute", {"category": cat, "value": val, "medusa_id": mid,
                                     "state": "synced", "created_at": now, "updated_at": now},
                       pk=("category", "value"))
@@ -64,7 +70,7 @@ def test_seed_products_minimal_and_excluded_from_render(tmp_path):
     export = tmp_path / "products_export.csv"
     with export.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["SKU", "Handle", "Inventory"])
+        w.writerow(["Variant Sku", "Product Handle", "Inventory Quantity"])   # BE's header (table 572, T4)
         w.writerow(["POLONINE-OLD1", "old-one", "5"])
         w.writerow(["POLONINE-OLD2", "old-two", "0"])
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:

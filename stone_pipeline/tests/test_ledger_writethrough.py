@@ -45,7 +45,7 @@ def _seed_ledger_like_the_sync_server(ledger_path, tmp_path) -> None:
         bootstrap.seed_variations(ledger, path=export)
 
 
-def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_data_dir):
+def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_data_dir, seeded_config_store):
     out = tmp_path / "outputs"
     ledger_path = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")

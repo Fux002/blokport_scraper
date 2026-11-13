@@ -17,7 +17,12 @@ import dataclasses
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, decisions, tree_build
 from stone_pipeline.stages.curate import CurationResult
+import pytest
+
 from stone_pipeline.tests.test_tree_build import COL, _attrs, _backbone, _export, _for, _post, _products, _prow
+
+# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 
 # --- combinations: (type, name) inheritance ----------------------------------------------------------------
@@ -44,7 +49,7 @@ def test_a_same_name_post_of_another_type_lends_nothing_its_own_type_s_does(tmp_
 
 
 # --- the update delta is always this run's ---------------------------------------------------------------
-def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch):
+def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch, seeded_config_store):
     dirs = {a: tmp_path / a for a in ("to_upload_dir", "catalog_source_dir", "review_dir")}
     for d in dirs.values():
         d.mkdir(parents=True)

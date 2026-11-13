@@ -41,6 +41,13 @@ def test_base_names_and_aliases_are_fixed_points(path):
     assert bad == []
 
 
+def test_each_field_is_judged_by_its_own_kind():
+    # an owned alias keeps its accents and script (the alias kind), a name is folded (the name kind)
+    for alias in ("K\u0131r\u015fehir Nero Picasso", "Hu\u00e1ngji\u0101 H\u01d4p\u00f2", "\u5df4\u6bd4\u4f26\u91d1"):
+        assert _alias(alias) == alias
+    assert fk.display(fk.VARIATION_NAME, "K\u0131r\u015fehir Nero Picasso") == "Kirsehir Nero Picasso"
+
+
 def _posts():
     files = sorted((ROOT / "catalog_source").glob("backbone_*.json")) + sorted(
         (ROOT / "catalog_source" / "backbone_additions").glob("*.json"))

@@ -8,6 +8,7 @@ derive.py. Each is a pack field now, and the three packs declare them; a pack th
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 import sys
 
@@ -73,7 +74,14 @@ def test_malformed_pack_fields_fail_loud_naming_the_field(field, value, needle):
 
 
 @pytest.mark.parametrize("pack", ["stone", "wood", "lime"])
-def test_every_pack_loads_and_drives_the_shared_code_in_a_fresh_process(pack):
+def test_every_pack_loads_and_drives_the_shared_code_in_a_fresh_process(pack, tmp_path):
+    # A pack runs where its data is. Wood names its seed (backbone_file), which a wood deployment ships and this repo
+    # does not, so wood runs in the workspace its smoke run builds (the wood fixture overlaid on a copy of the package);
+    # stone ships its own in the repo, and lime names none.
+    root = "."
+    if pack == "wood":
+        from stone_pipeline.tests.test_wood_smoke_run import build_workspace
+        root = str(build_workspace(tmp_path / "wood"))
     code = (
         "from stone_pipeline.config import domain; p = domain.active_pack(); assert p.name == %r, p.name\n"
         "from stone_pipeline.matching import projections as proj, engine\n"
@@ -81,7 +89,12 @@ def test_every_pack_loads_and_drives_the_shared_code_in_a_fresh_process(pack):
         "from stone_pipeline.stages import derive\n"
         "proj.deprefixed('Sample Name 3cm'); engine._colour_conflict('a b', 'a c'); clean_variety('Sample Name', '')\n"
         "print('ok', p.name, sorted(p.inventory_prefixes), p.color_attribute)\n" % pack)
-    env = {"SCRAPER_DOMAIN_PACK": pack, "PATH": "", "HOME": "/nonexistent", "PYTHONPATH": "."}
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    env = {"SCRAPER_DOMAIN_PACK": pack, "PATH": "", "HOME": "/nonexistent", "PYTHONPATH": root}
+    # The interpreter's own runtime linkage is not part of the environment under test. setup-python's build is a shared
+    # one that finds its libpython through LD_LIBRARY_PATH; without it, on a host that also carries a system
+    # libpython3.12 (the CI boxes), the child binds that one and loses the installed packages (yaml).
+    if os.environ.get("LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=root)
     assert out.returncode == 0, out.stderr[-1500:]
     assert out.stdout.startswith(f"ok {pack}")

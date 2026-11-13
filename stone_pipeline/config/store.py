@@ -24,6 +24,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import alias_key
 
 log = logfmt.get_logger("config.store")
 
@@ -71,7 +72,7 @@ class ConfigStoreError(RuntimeError):
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 13    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+SCHEMA_VERSION = 14    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
 #                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
 #                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
 #                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted);
@@ -81,6 +82,7 @@ SCHEMA_VERSION = 13    # 4: the decision `statement` table + its one-time migrat
 #                            ONLY the phase 1 store migration (phase1.migrate_stores) stamps 12, and a store at
 #                            1 to 11 is refused here (report 18 N3).
 #                        13: P2-10 C2: the learned_alias table (additive, so a phase 1 store opens in place).
+#                        14: learned_alias norms rekeyed to core.text.alias_key, once (LEARNED_NORM_MIGRATION).
 # The version the phase 1 store migration writes (phase1/store_writer.py). It stays 12 whatever SCHEMA_VERSION
 # becomes: that migration copies an old store without running _migrate, so stamping the current version would mark
 # a store that lacks every later table as complete. The first open then upgrades it in place.
@@ -291,7 +293,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
     # Learned aliases (P2-10 C2; shape frozen by the scraper manager 11-12): a spelling the pipeline GUESSED for a
-    # variety, keyed by its identity Key and norm = core.text.match_key(value). The matcher and curate write
+    # variety, keyed by its identity Key and norm = core.text.alias_key(value). The matcher and curate write
     # 'proposed'; only an 'active' row is a matcher input; a 'rejected' norm is never proposed again for that Key
     # (the primary key holds it). `method` is how it was learned, `source` the vendor whose listing proposed it,
     # `score` the proposing arm's own score on 0..100 for the review card (PHASE-2-SPEC:176), NULL where the arm has
@@ -302,10 +304,41 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'rejected')), "
                  "first_seen TEXT NOT NULL, decided_by TEXT, decided_at TEXT, score REAL, "
                  "PRIMARY KEY (identity_key, norm))")
+    if not conn.execute("SELECT 1 FROM migration WHERE name = ?", (LEARNED_NORM_MIGRATION,)).fetchone():
+        _rekey_learned_norms(conn)
     conn.commit()
 
 
 _LEAF_DECIDED_BY_MIGRATION = "leaf_decided_by_v1"
+LEARNED_NORM_MIGRATION = "learned_norm_alias_key_v1"
+
+
+def learned_norms_to_rekey(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """(identity_key, stored norm, alias_key(value)) of every learned row whose stored norm is not its value's
+    alias_key, sorted. Only a value with a letter outside the Latin script can differ (an all-Latin value's
+    alias_key IS its match_key), so this is the before count of the rekey and 0 after it. Read-only."""
+    rows = conn.execute("SELECT identity_key, value, norm FROM learned_alias ORDER BY identity_key, norm").fetchall()
+    return [(r["identity_key"], r["norm"], alias_key(r["value"])) for r in rows if alias_key(r["value"]) != r["norm"]]
+
+
+def _rekey_learned_norms(conn: sqlite3.Connection) -> None:
+    """The alias_key migration (Mas, 13 Nov), ONCE (recorded in `migration`): each learned row's norm becomes its
+    stored value's alias_key, recomputed from the spelling. A target (Key, norm) that another row already holds, or
+    that two rows would share, refuses the open with every clash named (a merge of two decisions is the operator's,
+    never this step's); a refused open rolls back whole (_connect). Idempotent: after it every norm is its alias_key,
+    so a re-run would move 0 rows."""
+    moves = learned_norms_to_rekey(conn)
+    held = {(r["identity_key"], r["norm"]) for r in conn.execute("SELECT identity_key, norm FROM learned_alias")}
+    targets = [(key, new) for key, _, new in moves]
+    clashes = sorted({t for t in targets if t in held or targets.count(t) > 1})
+    if clashes:
+        raise ConfigStoreError(f"learned_alias rekey: {len(clashes)} target (Key, norm) already held or shared: "
+                               f"{clashes}; decide those rows first")
+    for key, old, new in moves:
+        conn.execute("UPDATE learned_alias SET norm = ? WHERE identity_key = ? AND norm = ?", (new, key, old))
+    conn.execute("INSERT INTO migration (name, applied_at) VALUES (?, ?)", (LEARNED_NORM_MIGRATION, _now()))
+    log.info("learned_alias norms rekeyed to alias_key",
+             extra={"extra_fields": {"moved": len(moves), "rows": [list(m) for m in moves]}})
 
 
 def _stamp_produce_membership(conn: sqlite3.Connection) -> None:
@@ -435,8 +468,21 @@ def migration_applied(name: str, path: str | Path | None = None) -> bool:
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
-    """A connection for WRITING (creates the store when absent)."""
+    """A connection for WRITING (creates the store when absent): the config server's boot (restore, then seed) and
+    its admin writes. A produce-path writer uses open_existing_store instead."""
     return _connect(Path(path or config_db_path()))
+
+
+def open_existing_store(path: str | Path | None = None) -> sqlite3.Connection:
+    """THE produce-side opener: a connection for WRITING to a config.db that must already exist. The store is created
+    only by the config server's boot (restore from S3, then seed from sources.yaml), never by a produce write: a store
+    a write created would be EMPTY of sources, hiding sources.yaml from load_sources, and on the service a present
+    local file makes the boot skip its restore (a stale store). Absent raises ConfigStoreError and creates nothing."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        raise ConfigStoreError(f"config.db absent at {p}: a produce writes only into an existing store (the config "
+                               "server creates it: restore, then seed)")
+    return _connect(p)
 
 
 def read_store(path: str | Path | None = None) -> sqlite3.Connection:

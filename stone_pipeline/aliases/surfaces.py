@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Mapping, Sequence
 
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key, match_key
 
 METHODS = ("operator", "seed", "learned", "admin")      # the precedence order, first wins
 
@@ -88,13 +88,15 @@ def surfaces_by_key(varieties: Iterable[Variety], stores: Stores,
 
 
 def _split(per_method: dict[str, list[tuple[str, str]]], is_code: Callable[[str], bool]) -> Surfaces:
-    """The values in METHODS order, once per match_key, each a code when the pattern accepts it, else an alias."""
+    """The values in METHODS order, once per alias_key (main #717: the key of an alias value; match_key for an all-Latin
+    value, so a value in another script is kept, never folded to nothing), each a code when the pattern accepts it,
+    else an alias."""
     seen: set[str] = set()
     aliases: list[tuple[str, str]] = []
     codes: list[tuple[str, str]] = []
     for method in METHODS:
         for value, _ in per_method[method]:
-            if not (key := match_key(value)) or key in seen:
+            if not (key := alias_key(value)) or key in seen:
                 continue
             seen.add(key)
             (codes if is_code(value) else aliases).append((value, method))

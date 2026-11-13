@@ -13,9 +13,15 @@ from __future__ import annotations
 import csv
 import json
 
+import pytest
+
 from stone_pipeline.config.categories import category
 from stone_pipeline.core.text import match_key
 from stone_pipeline.stages import tree_build
+from stone_pipeline.tests._category_registry import with_handle
+
+# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 _PCOLS = ["Product Category 1", "STN Type Id", "STN Variation Id",
           "STN Finish Id", "STN Color Id", "STN Quality Id"]
@@ -36,8 +42,8 @@ def _attrs(tmp_path):
     rows += [("finish", f, _FINISH_IDS.get(f, f"f_{match_key(f)}")) for f in sorted(finishes)]
     with p.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid"])
-        w.writerows(rows)
+        w.writerow(["category", "value", "sourceid", "handle"])
+        w.writerows(with_handle(r) for r in rows)
     return p
 
 
@@ -233,7 +239,7 @@ def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
     export = tmp_path / "variants_export.csv"
     export.write_text("Id\n", encoding="utf-8")
     attrs = tmp_path / "attributes.csv"
-    attrs.write_text("category,value,sourceid\n", encoding="utf-8")
+    attrs.write_text("category,value,sourceid,handle\n", encoding="utf-8")
     to_upload, review = tmp_path / "to_upload", tmp_path / "review"
     to_upload.mkdir(); review.mkdir()
     tree_build.write_combinations({("c", "t", "old", "f", "k", "q")}, to_upload / "2_valid_combinations.csv")
