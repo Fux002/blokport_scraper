@@ -148,7 +148,8 @@ def test_an_unreadable_published_set_raises(monkeypatch):
         images.published_keys(SimpleNamespace(mode="s3"))
 
 
-def test_an_unreadable_published_set_fails_the_source_run_and_records_nothing(tmp_path, monkeypatch, scrape_data_dir):
+def test_an_unreadable_published_set_fails_the_source_run_and_records_nothing(tmp_path, monkeypatch, scrape_data_dir,
+                                                                             seeded_config_store):
     from stone_pipeline.run import run_source
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
