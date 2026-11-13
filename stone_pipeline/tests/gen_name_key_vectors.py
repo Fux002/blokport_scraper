@@ -15,7 +15,8 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from stone_pipeline.core.text import _TRANSLIT, UnfoldableName, clean_identifier, clean_name, match_key
+from stone_pipeline.core.text import (_TRANSLIT, AliasRefused, UnfoldableName, alias_key, clean_alias,
+                                      clean_identifier, clean_name, match_key)
 
 OUT = Path(__file__).parent / "fixtures" / "name_key_vectors.json"
 FLOOR = "14.0.0"
@@ -34,6 +35,14 @@ def _cleaned(clean, s):
         return None
 
 
+def _alias(s):
+    # the alias display (clean_alias, case kept), or None when it is refused (mojibake) or nothing is left
+    try:
+        return clean_alias(s) or None
+    except AliasRefused:
+        return None
+
+
 def build():
     cases, seen = [], set()
 
@@ -43,7 +52,7 @@ def build():
         assert assigned_by_floor(s), f"unassigned code point in {s!r}"
         seen.add(s)
         cases.append({"group": group, "input": s, "expected": match_key(s), "display": _cleaned(clean_name, s),
-                      "identifier": _cleaned(clean_identifier, s)})
+                      "identifier": _cleaned(clean_identifier, s), "alias": _alias(s), "alias_key": alias_key(s)})
 
     for ch in sorted({chr(k) for k in _TRANSLIT}):
         add("translit", ch); add("translit", f"Stone {ch}x {ch.lower()}{ch}")
@@ -95,6 +104,21 @@ def build():
               "Tan Brown", "Kashmir White", "Juparana Colombo", "Blue Pearl GT", "Emperador Dark", "Calacatta Oro",
               "Crema Marfil Coto", "Verde Ubatuba", "Giallo Veneziano", "Labrador Antique"]:
         add("names", s)
+    # the alias kind (34's OWNED-NAMES-CLEAN row, 13 Nov): refused (mojibake only, Mas), kept and cleaned cases
+    for s in ["C?te D", "K?r?ehir Nero Picasso", "K?r?ehir Nero Picasso Marble", "C\ufffdte", "C\u00f4te d'Azur",
+              "Hu\u00e1ngji\u0101 H\u01d4p\u00f2", "\u5df4\u6bd4\u4f26\u91d1", "3D\u7070", "Giallo D`istria",
+              "Celestial Splendor\u200b", "Cel\u200bestial", "Black & White", "Bianco Carrara C/d", "China St.laurent",
+              "In Russian:nigrozero", "Who? Me", "Picass?", "Cafe\u0301", "x\u1dc0y", "x\u0331y", "\u00b4Nero\u00b4",
+              "Verde \u2013 Lapponia", "Kir\u015fehir Nero Picasso", "Bianco (Carrara) #1/2", "Bian\u200bco",
+              "x\u0331'y", "Kir\u015fehir's", "'Nero' Marquina", "D''Oro", "\u5df4'\u91d1", "1'2", "a' b",
+              # the paired alias key (Mas, 13 Nov): pure CJK; mixed (never its Latin part's key); "3D\u7070" never
+              # "3D"'s; Greek with a final sigma (lower(), not casefold); a Common-script letter (U+210C, the second
+              # path); Devanagari vowel signs (marks kept in the key); Arabic-Indic digits (Nd); German sharp s on
+              # the second path; dev's mixed value; a dash alone (an empty key)
+              "Wratza \u7ef4\u7eb3\u591a", "Wratza", "3D", "\u039c\u0391\u03a1\u039c\u0391\u03a1\u039f\u03a3",
+              "\u210c", "\u0928\u093f\u0930\u094d\u092e\u0932", "\u0663\u0664 \u0645", "Stra\u00dfe \u7ef4",
+              "\u767d\u73ab\u7470 - B\u00e1i M\u00e9igu\u012b", "\u2014"]:
+        add("alias", s)
     return cases
 
 
@@ -124,7 +148,25 @@ def main():
         "character outside [A-Za-z0-9 '-] to a space; apostrophe runs to one; an apostrophe not between two "
         "letters or digits to a space; hyphen runs and spaces around a hyphen collapse to one hyphen; whitespace "
         "collapsed; leading and trailing hyphens and spaces stripped. IDENTIFIER (`identifier`, clean_identifier): "
-        "printable ASCII kept, whitespace collapsed and trimmed. Case is kept. UNICODE: every input uses only code "
+        "printable ASCII kept, whitespace collapsed and trimmed. Case is kept. ALIAS (`alias`, clean_alias; 34's "
+        "OWNED-NAMES-CLEAN row, 13 Nov; Mas: mojibake is the ONLY refusal, no length bound): REFUSED (null) first if "
+        "the RAW value holds '?' or U+FFFD with a letter (any script, L*) on both sides (mojibake: 'K?r?ehir'; 'Who? "
+        "Me' and 'Picass?' are not). Otherwise, in order: (1) every format (Cf) character removed (a zero-width "
+        "space goes, never a space); (2) the alias typographic table (the backtick, the acute accent, the curly "
+        "single quotes and the modifier apostrophe to ', curly double quotes to \\\", the minus sign to -) and every "
+        "dash (Pd) to -; (3) NFC (accents kept, never folded; no script dropped); (4) '&' to ' and '; (5) every "
+        "character that is not a letter (L*), a combining mark in U+0300-U+036F, an ASCII digit, a space, an "
+        "apostrophe or a hyphen to a space; (6) apostrophe runs to one; an apostrophe is kept only when a letter "
+        "(L*), a combining mark in U+0300-U+036F or an ASCII digit is before it AND a letter (L*) or an ASCII digit "
+        "is after it, else it becomes a space; hyphen runs and spaces around a hyphen collapse to one hyphen; "
+        "whitespace collapsed; leading and trailing hyphens and spaces stripped; nothing left is REFUSED (null). "
+        "Case is kept. The database class it equals: ^[[:alpha:]\\u0300-\\u036f0-9 '-]+$. ALIAS KEY (`alias_key`, "
+        "alias_key; Mas, 13 Nov): the key of an alias value. If the RAW value has no letter (L*) outside the Latin "
+        "script (Scripts.txt sc=Latn, JS \\p{Script=Latin}; a letter of script Common is outside), it is the "
+        "matching key (`expected`). Otherwise: every format (Cf) character removed; NFKC; the default lowercase "
+        "mapping (Python str.lower, JS toLowerCase; NOT casefold, so a final sigma stays); every character that is "
+        "not a letter (L*), a mark (M*) or a decimal digit (Nd, any script) to a space; whitespace collapsed and "
+        "trimmed. An empty key is refused by the callers. UNICODE: every input uses only code "
         "points assigned in Unicode " + FLOOR + ", the floor across the runtimes in use (SC deploy and CI: Python "
         "3.12 = Unicode 15.0.0; SC CI syntax floor: Python 3.11 = 14.0.0). Both repos must agree on every case; "
         "each repo's test asserts its runtime Unicode version is at least " + FLOOR + "."),

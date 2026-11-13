@@ -24,9 +24,15 @@ def test_a_name_with_no_ascii_form_stops_emit_naming_the_key():
 
 
 def test_aliases_are_split_cleaned_and_their_drops_reported():
+    # the alias kind (Mas, 13 Nov) keeps every script and accent: the CJK half is an alias, nothing is dropped, and
+    # an accent twin collapses onto the first spelling
     row = _row("Wratza", "Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a|Ros\u00e9|rose")
-    assert emit_catalog._write_names(row) == ["\u7ef4\u7eb3\u591a"]
-    assert row["Aliases"] == "Wratza Limestone|Rose"
+    assert emit_catalog._write_names(row) == []
+    assert row["Aliases"] == "Wratza Limestone|\u7ef4\u7eb3\u591a|Ros\u00e9"
+    # a refused alias (mojibake) is still dropped and reported
+    row = _row("Nero Picasso", "K?r?ehir Nero Picasso|Black Picasso")
+    assert emit_catalog._write_names(row) == ["K?r?ehir Nero Picasso"]
+    assert row["Aliases"] == "Black Picasso"
 
 
 def test_a_bracketed_alternative_moves_from_the_name_into_the_aliases():

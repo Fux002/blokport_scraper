@@ -14,7 +14,7 @@ Key facts (verified against fal.ai docs):
 
 Designed for a 3000-image run:
   - Resumable:   skips any output that already exists, so re-running continues.
-  - Retries:     each image retried with exponential backoff.
+  - Retries:     the paid FAL call never; its download and save, with exponential backoff.
   - Concurrent:  ThreadPoolExecutor — much faster than sequential.
   - Logged:      failures written to failures.jsonl for easy re-runs.
 
@@ -96,11 +96,11 @@ OUTPUT_FORMAT = "png"                  # REQUIRED png: the de-background step + 
 
 # Throughput / reliability.
 MAX_WORKERS = 12                        # raise to 8-12 if your fal plan allows it
-MAX_RETRIES = 4
+MAX_RETRIES = 4                        # attempts at downloading + saving ONE paid result (never the FAL call)
 BASE_BACKOFF = 3                       # seconds; doubles each retry
 HEARTBEAT_SECONDS = 20                 # how often to print "still alive" status
 # Bound each FAL call so a single hung request can't stall the whole run (and, in the build, the whole
-# Fargate task) forever. A timeout raises -> caught by the retry loop -> eventually a recorded failure.
+# Fargate task) forever. A timeout raises -> the item is a recorded failure (the paid call is never retried).
 GEN_START_TIMEOUT = 180                # max wait for the job to leave the FAL queue
 GEN_CLIENT_TIMEOUT = 300              # max total wait for a single generation result
 
@@ -359,45 +359,42 @@ def generate_one(item: dict, base_sizes: dict) -> bool:
         record_failure(item, str(exc))
         return False
     arguments = build_arguments(prompt, base_url, base_sizes.get(base_url), category)
-    endpoint = MODELS[MODEL]["endpoint"]
 
+    # The paid call is made ONCE: a retry of it buys the image again (dev job 8ea6ac51 paid 4 times for one icon
+    # whose save failed). A failed call fails the item; the next produce re-queues it, since its icon never landed.
+    try:
+        img_url = request_image(arguments)
+    except Exception as e:      # any FAL / network error: this item fails loud, the rest of the batch carries on
+        log(f"❌ {name}: the FAL call failed (not retried, each call is paid): {e}")
+        record_failure(item, str(e))
+        return False
+
+    # Only the free half retries, on the same result: its download and the local save.
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            result = fal_client.subscribe(endpoint, arguments=arguments,
-                                          start_timeout=GEN_START_TIMEOUT, client_timeout=GEN_CLIENT_TIMEOUT)
-            images = result.get("images") or []
-            if not images:
-                raise ValueError(f"no images in response: {list(result.keys())}")
-
-            img_url = images[0]["url"] if isinstance(images[0], dict) else images[0]
             resp = requests.get(img_url, timeout=60)
             resp.raise_for_status()
             save_image(resp.content, out_path)
             return True
-
-        except Exception as e:
-            msg = str(e)
-            # Validation / bad-request errors are deterministic — retrying wastes
-            # time and money. Fail immediately so you see the real problem.
-            # Specific, deterministic parameter rejections only. A bare 'validation' substring was too
-            # broad -- a transient gateway/proxy error whose body merely mentions 'validation' would be
-            # permanently failed without a retry.
-            non_retryable = (
-                "less_than_equal" in msg or "greater_than_equal" in msg
-                or "unprocessable" in msg.lower() or "422" in msg
-            )
-            if non_retryable:
-                log(f"❌ {name}: parameter rejected by {MODEL} — {msg}")
-                record_failure(item, msg)
-                return False
+        except Exception as e:  # a download or disk error: retried on the one paid result, then the item fails loud
             if attempt == MAX_RETRIES:
-                log(f"❌ {name}: failed after {MAX_RETRIES} attempts — {e}")
-                record_failure(item, msg)
+                log(f"❌ {name}: the generated image was not saved after {MAX_RETRIES} attempts: {e}")
+                record_failure(item, str(e))
                 return False
             wait = BASE_BACKOFF * (2 ** (attempt - 1))
-            log(f"⚠️  {name}: attempt {attempt} failed ({e}); retrying in {wait}s")
+            log(f"⚠️  {name}: saving attempt {attempt} failed ({e}); retrying in {wait}s")
             time.sleep(wait)
     return False
+
+
+def request_image(arguments: dict) -> str:
+    """ONE paid FAL edit: the URL of the image it generated. Raises when the call fails or returns no image."""
+    result = fal_client.subscribe(MODELS[MODEL]["endpoint"], arguments=arguments,
+                                  start_timeout=GEN_START_TIMEOUT, client_timeout=GEN_CLIENT_TIMEOUT)
+    images = result.get("images") or []
+    if not images:
+        raise ValueError(f"no images in response: {list(result.keys())}")
+    return images[0]["url"] if isinstance(images[0], dict) else images[0]
 
 
 def main() -> int:

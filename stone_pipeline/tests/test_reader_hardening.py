@@ -56,7 +56,7 @@ def test_load_attributes_tolerates_a_missing_column(tmp_path):
     from stone_pipeline.stages.tree_build import _load_attributes
     csv_path = tmp_path / "attributes.csv"
     # a header missing 'sourceid' + a blank-value row: both are skipped, the good row still loads (no KeyError)
-    csv_path.write_text("category,value,sourceid\n"
+    csv_path.write_text("category,value,sourceid,handle\n"
                         "color,Black,col_1\n"
                         "color,,col_2\n", encoding="utf-8")
     attr = _load_attributes(csv_path)

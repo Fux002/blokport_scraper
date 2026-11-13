@@ -363,17 +363,10 @@ def wipe_artifacts(env: str = ENV_NAME, outputs_dir=None, data_dir=None) -> dict
 # MUST regenerate fresh on a cold task (a restored stale baseline could fail emit after a dims/schema change),
 # so it is deliberately not snapshotted. A restored alias whose variant no longer exists is harmless: the
 # matcher applies a learned alias only for a cid present in the current index (index.add_surface_alias guards).
-def state_writeback_key(env: str = ENV_NAME) -> str:
-    """S3 key for the learned-alias write-back, under the DURABLE-state prefix (ENV_NAME) beside the ledger
-    and config.db, NOT the regenerable data plane."""
-    from stone_pipeline.state.writeback import ALIAS_WRITEBACK
-    stem, suffix = ALIAS_WRITEBACK.rsplit(".", 1)
-    return f"{env}/scraper/state/{stem}{STORE_GENERATION}.{suffix}"
-
-
+# The key is the learned-alias migration's (aliases.migrate_learned.writeback_key), which reads it from S3 itself.
 def _writeback_path(env: str = ENV_NAME) -> Path:
+    from stone_pipeline.aliases.migrate_learned import ALIAS_WRITEBACK
     from stone_pipeline.config.settings import SETTINGS
-    from stone_pipeline.state.writeback import ALIAS_WRITEBACK
     return Path(SETTINGS.paths.state_dir) / ALIAS_WRITEBACK
 
 
@@ -381,10 +374,11 @@ def save_state(env: str = ENV_NAME) -> bool:
     """Snapshot the learned-alias write-back after a produce, so a cold task restores accumulated matcher
     consistency instead of re-learning it. Best-effort plain-file upload (a CSV, NOT the sqlite backup
     path). No-op when the file does not exist yet. Mirrors save_artifacts."""
+    from stone_pipeline.aliases.migrate_learned import writeback_key
     path = _writeback_path(env)
     if not path.exists():
         return False
-    key = state_writeback_key(env)
+    key = writeback_key(env)
     try:
         _s3().upload_file(str(path), S3_BUCKET, key)
         log.info("state snapshot uploaded", extra={"extra_fields": {"key": key, "bytes": path.stat().st_size}})
@@ -398,7 +392,8 @@ def restore_state(env: str = ENV_NAME) -> bool:
     """Restore the learned-alias write-back onto a cold task BEFORE any produce (mirrors restore_artifacts).
     No-op when a local write-back already exists (a warm task's is fresher) or nothing has been snapshotted
     yet. Best-effort: a learned alias is self-regenerating, so a lost restore only costs one run's re-learn."""
-    return restore(_writeback_path(env), env, key=state_writeback_key(env))
+    from stone_pipeline.aliases.migrate_learned import writeback_key
+    return restore(_writeback_path(env), env, key=writeback_key(env))
 
 
 class PeriodicSnapshot(threading.Event):
