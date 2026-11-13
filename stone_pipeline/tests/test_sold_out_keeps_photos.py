@@ -33,8 +33,9 @@ URL = f"https://bucket.s3.eu-west-1.amazonaws.com/{ENV_SEGMENT}/products"
 
 def _product(ledger, sku, *, qty=0, reason=None, gone_at=None, thumb=None, product_images=(), oriented=()):
     now = now_iso()
-    ledger.upsert("variation", {"key": "marble__v_1", "type": "", "name": "x", "aliases": "[]", "medusa_id": "V",
-                                "in_full": 1, "payload_hash": "", "state": "synced", "first_seen": now,
+    ledger.upsert("variation", {"key": "marble__v_1", "type": "", "name": "x", "alias_rows": "[]", "codes": "[]",
+                                "medusa_id": "V", "in_full": 1, "payload_hash": "", "state": "synced",
+                                "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
     ledger.upsert("product", {"sku": sku, "source": "sen", "variation_key": "marble__v_1", "state": "synced",
                               "medusa_id": "P", "thumbnail_key": thumb,
