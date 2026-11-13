@@ -3,8 +3,8 @@ fixed): with the rule on, a product the image stage found without one goes out a
 (Blokport hides it; always stock 0, since Blokport reads an unknown reason above 0 as a plain quantity) and comes back on the first produce after its photo is published. A run that cannot tell (the photo
 pool unreadable, or the stock-only refresh, which skips the image stage) never changes whether a product is hidden, and a
 pool that is empty or unreadable (local mode, nothing published, a failed read) means "cannot tell". Hiding and showing
-again are served to Blokport even when the stock stays 0; the dead-stock purge never deletes a hidden product, and a
-bundle never redirects to a lot whose pieces are all hidden."""
+again are served to Blokport even when the stock stays 0; the dead-stock purge never deletes a hidden product, a hidden
+product its supplier drops stays hidden (table 505), and a bundle never redirects to a lot whose pieces are all hidden."""
 from __future__ import annotations
 
 import dataclasses
@@ -89,22 +89,23 @@ def test_hiding_a_product_already_at_stock_0_is_still_served_to_blokport(tmp_pat
         assert [r["payload"].get("reason") for r in ready(ledger, "inventory")] == ["no_photo"]
 
 
-def test_a_hidden_product_its_supplier_drops_becomes_plain_dead_stock(tmp_path, rule_on):
+def test_a_hidden_product_its_supplier_drops_stays_hidden_and_is_never_purged(tmp_path, rule_on):
     cfg = load_source("sentas")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         _stocked(ledger, [_row("x", False)], cfg)
         sku = emit._sku(_row("x", False), cfg)
         populate_discontinued(ledger, [(sku, "h")])
-        assert ledger.get("inventory", "sku", sku)["reason"] is None and purge_discontinued(ledger)["external_ids"] == [sku]
+        stock = ledger.get("inventory", "sku", sku)
+        assert stock["reason"] == "no_photo" and stock["gone_at"] and purge_discontinued(ledger)["external_ids"] == []
 
 
-def test_the_dead_stock_purge_keeps_a_hidden_product_and_the_vendor_removal_still_removes_it(tmp_path, rule_on):
+def test_the_dead_stock_purge_keeps_a_hidden_product_and_a_sold_out_one(tmp_path, rule_on):
     cfg = load_source("sentas")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         _stocked(ledger, [_row("hidden", False), _row("live", True)], cfg)
         populate_discontinued(ledger, [("SEN-GONE", "h")])
-        assert purge_discontinued(ledger)["external_ids"] == ["SEN-GONE"]           # dead stock only
-        assert purge_discontinued(ledger, reason="vendor_removed")["external_ids"] == [emit._sku(_row("hidden", False), cfg)]
+        assert ledger.get("inventory", "sku", "SEN-GONE")["reason"] == "sold_out"
+        assert purge_discontinued(ledger)["external_ids"] == []
 
 
 def test_a_photo_hidden_product_always_goes_out_at_stock_0(tmp_path, rule_on):

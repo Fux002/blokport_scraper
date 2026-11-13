@@ -580,13 +580,12 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
 
 def remove_source(name: str) -> tuple[dict, int]:
     """Stage 2 vendor removal (Remove permanently): guarded 409 while the source still has live (qty>0)
-    products (take it offline first), then purge its qty-0 products (tombstoned) and delete its config
-    row. Returns {removed_source, config_removed, purged, external_ids}.
+    products (take it offline first), then unpublish EVERY one of its products, sold-out ones included (reason
+    'delisted': hidden on Blokport, records, photos and textures kept, no tombstone; table 505) and delete its config
+    row. Returns {removed_source, config_removed, unpublished, external_ids}.
 
-    ISS-4: removal tombstones the products; to bring the source BACK, re-add it AND run a `reset` (soft)
-    before the next produce. A plain re-run + re-pull does NOT rebuild -- the removed products are already
-    acked/synced, so nothing re-serves until a reset re-marks them dirty. The re-serve happens via reset,
-    never automatically off a re-scrape."""
+    To bring the source BACK, re-add it: its next scrape restocks the products it still sells (a normal stock write
+    clears 'delisted'), under the same records."""
     from stone_pipeline.config import store
     # ISS-5: resolve via the ONE store-based _resolve (same as reset/purge/delist), so a config-only
     # source (no coded adapter) is removable. Every store row carries a source_code (SourceConfig
@@ -599,8 +598,8 @@ def remove_source(name: str) -> tuple[dict, int]:
         live = sync.live_products(lg, source_codes=codes)
         if live:
             raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")
-        out = sync.purge_discontinued(lg, source_codes=codes, reason="vendor_removed")
-        # the config row goes INSIDE the slot: a produce starting between the purge and this delete would
+        out = sync.unpublish_source(lg, source_codes=codes)
+        # the config row goes INSIDE the slot: a produce starting between the unpublish and this delete would
         # still list the source and re-scrape it
         out["config_removed"] = store.delete_source(name)
         return out
@@ -609,11 +608,11 @@ def remove_source(name: str) -> tuple[dict, int]:
     if code != 200:
         return result, code
     config_removed = result.pop("config_removed")
-    log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
-        "source": name, "purged": result["product"], "config_removed": config_removed}})
+    log.warning("source REMOVED (unpublish + delete config)", extra={"extra_fields": {
+        "source": name, "unpublished": result["unpublished"], "config_removed": config_removed}})
     snapshot_config()
     return {"removed_source": name, "config_removed": config_removed,
-            "purged": result["product"], "external_ids": result["external_ids"]}, 200
+            "unpublished": result["unpublished"], "external_ids": result["external_ids"]}, 200
 
 
 # -- variation verbs: retire / un-retire (explicit operator removal of a variety) ---
@@ -630,7 +629,10 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
         live = sync.variation_live_products(lg, key)
         if live and not force:
             raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
-        out = sync.retire_variation(lg, key, force=force)
+        try:
+            out = sync.retire_variation(lg, key, force=force)
+        except sync.KeptListingsShowVariety as exc:
+            raise _Busy(str(exc)) from exc
         # exclusion memory (never re-mint a retired variety, E8/E10), written INSIDE the slot: a produce
         # starting between the ledger op and this write would read the old memory and re-mint the Key.
         from stone_pipeline.stages import decisions
@@ -687,6 +689,12 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
                 out["skipped"].append({"key": k, "code": 409, "error": (
                     f"variety {siblings[0][1]!r} has {live} live product(s); delist or move them first "
                     f"(or force)")})
+                continue
+            # a kept record (gone or delisted) is never deleted (table 505): checked for the whole variety first
+            if kept := [sku for sk, _ in siblings for sku in sync.variation_kept_listings(lg, sk)]:
+                out["skipped"].append({"key": k, "code": 409, "error": (
+                    f"variety {siblings[0][1]!r} is shown by gone or delisted listing(s) {', '.join(kept)}: their "
+                    "records stay; move them to another variety first")})
                 continue
             targets.append(siblings)
         # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.

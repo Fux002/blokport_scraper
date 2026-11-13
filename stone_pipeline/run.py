@@ -314,6 +314,7 @@ class Delist:
     changed: list[CanonicalRow]
     discontinued: list[tuple[str, str]]
     replaced: dict[str, tuple[str, int]]
+    newly_gone: list[tuple[str, str]]      # the discontinued products this run takes off sale (the report's)
 
     @property
     def replaced_codes(self) -> dict[str, str]:
@@ -651,7 +652,9 @@ def decide_delist(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
     ctx.manifest.totals["products_discontinued"] = len(discontinued)
     ctx.manifest.totals["bundles_replaced_by_lots"] = len(replaced)
-    return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced)
+    newly = product_state.newly_gone(discontinued, source_cfg, known) if known else []
+    return Delist(existing_rows=existing_rows, changed=changed, discontinued=discontinued, replaced=replaced,
+                  newly_gone=newly)
 
 
 def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
@@ -663,7 +666,7 @@ def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validat
     if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
         emit.write_inventory_csv(delist.changed, source_cfg, layout.products_import / "inventory_update.csv",
                                  discontinued=tuple(delist.discontinued))
-        emit.write_discontinued_csv(delist.discontinued, layout.review / "products_discontinued.csv",
+        emit.write_discontinued_csv(delist.newly_gone, layout.review / "products_discontinued.csv",
                                     replaced=delist.replaced_codes)
         emit.write_lot_replacements_csv(delist.discontinued, delist.replaced, layout.review / "lot_replacements.csv")
     emit.write_lot_cards(lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
