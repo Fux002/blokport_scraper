@@ -42,7 +42,7 @@ def _full(tmp_path, sidecar: dict | None):
 
 
 # --- the migration ---------------------------------------------------------------------------------------------------
-def test_a_v17_ledger_gains_null_alias_rows_and_codes_and_loses_aliases(tmp_path):
+def test_a_v17_ledger_gains_null_alias_rows_and_codes_and_keeps_aliases_for_the_carry(tmp_path):
     p = tmp_path / "mig.ledger"
     with Ledger.open(p, env="development") as lg:
         _variation(lg, CASA, "Casa Blue", "Marble", alias_rows=[], codes=[])
@@ -59,7 +59,7 @@ def test_a_v17_ledger_gains_null_alias_rows_and_codes_and_loses_aliases(tmp_path
         with Ledger.open(p, env="development") as lg:
             assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 18
             cols = {r["name"] for r in lg.conn.execute("PRAGMA table_info(variation)")}
-            assert {"alias_rows", "codes"} <= cols and "aliases" not in cols
+            assert {"alias_rows", "codes", "aliases"} <= cols      # the produce-start carry drops it (aliases.carry)
             row = lg.get("variation", "key", CASA)
             assert (row["alias_rows"], row["codes"], row["name"]) == (None, None, "Casa Blue")
 
