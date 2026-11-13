@@ -6,6 +6,7 @@ CONTRACT_VERSION = "2"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
+VOCABULARY_DIR = Path(__file__).resolve().parent / "vocabulary"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
