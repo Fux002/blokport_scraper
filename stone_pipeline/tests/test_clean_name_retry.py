@@ -22,7 +22,7 @@ from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
 from stone_pipeline.state.overrides import Overrides
-from stone_pipeline.state.writeback import WriteBack
+from stone_pipeline.stages.match_variation import WriteBack
 
 
 def _stage(seed_types=None):

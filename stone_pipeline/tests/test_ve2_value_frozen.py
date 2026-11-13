@@ -263,7 +263,7 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
     from stone_pipeline.matching.engine import VariationEngine
     from stone_pipeline.matching.index import CandidateIndex
     from stone_pipeline.stages import match_variation
-    from stone_pipeline.state import writeback as wb
+    from stone_pipeline.stages.match_variation import WriteBack
     from stone_pipeline.tests.test_origin_aware_matching import _stage
 
     idx = CandidateIndex()
@@ -271,7 +271,7 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(_stage().ref), "variants": {"slab": SimpleNamespace(
             by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1", archived=True)})}}),
-        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=wb.WriteBack(),
+        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Goldx",
                        raw_type="Granite", raw_format="Slab")

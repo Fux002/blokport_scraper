@@ -22,7 +22,7 @@ from stone_pipeline.reference.loaders.backbone import load_backbone
 from stone_pipeline.reference.loaders.identity import type_slug_from_key
 from stone_pipeline.reference.loaders.origins import load_origin_map
 from stone_pipeline.reference.loaders.variants import load_variants
-from stone_pipeline.state.writeback import is_learned
+from stone_pipeline.aliases.learned import is_learned
 from stone_pipeline.tests.test_seed_alias_ownership import ROOT
 
 T = SETTINGS.thresholds
