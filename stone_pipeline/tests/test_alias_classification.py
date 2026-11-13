@@ -31,9 +31,20 @@ KASH = "granite__kashmir_white_7f3c0b6e-2222-5222-8333-944455556666"
 CARR = "marble__carrara_7f3c0b6e-3333-5222-8333-944455556666"
 
 
-def _variation(ledger, key, name, type_, aliases=(), state="synced", abandoned=False):
+def _served(aliases, computed=True):
+    """The v18 served set (P2-10 C4) of `aliases`: a code-shaped value in `codes`, every other one an alias_rows row
+    (its method does not class it: the stores do). Both NULL when not computed yet."""
+    if not computed:
+        return None, None
+    is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
+    return (json.dumps([{"value": v, "method": "seed"} for v in aliases if not is_code(v)], ensure_ascii=False),
+            json.dumps([v for v in aliases if is_code(v)], ensure_ascii=False))
+
+
+def _variation(ledger, key, name, type_, aliases=(), state="synced", abandoned=False, computed=True):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "type": type_, "name": name, "aliases": json.dumps(list(aliases)),
+    alias_rows, codes = _served(aliases, computed)
+    ledger.upsert("variation", {"key": key, "type": type_, "name": name, "alias_rows": alias_rows, "codes": codes,
                                 "medusa_id": "V-" + key[:6], "in_full": 1, "payload_hash": "h", "state": state,
                                 "abandoned_at": now if abandoned else None, "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))
@@ -82,6 +93,28 @@ def test_the_file_is_refused_unless_every_variation_is_synced_naming_the_keys(le
     with pytest.raises(cleanup.NotAllSynced) as refused:
         cleanup.classify(ledger, _stores())
     assert refused.value.keys == [KASH] and KASH in str(refused.value)
+
+
+def test_the_file_is_refused_while_a_served_set_is_not_computed_naming_the_keys(ledger):
+    # P2-10 C4 (ledger v18): a row's alias_rows/codes are NULL until a produce computes them; the file would not
+    # describe Medusa, so it refuses as it does for an unsynced row (the same 409 naming the Keys)
+    _variation(ledger, ABS, "Absolute Black", "Granite", aliases=["Nero Assoluto"])
+    _variation(ledger, KASH, "Kashmir White", "Granite", computed=False)
+    with pytest.raises(cleanup.NotAllComputed, match=KASH) as raised:
+        cleanup.classify(ledger, _stores(seed={ABS: ["Nero Assoluto"]}))
+    assert raised.value.keys == [KASH] and isinstance(raised.value, cleanup.NotAllSynced)
+
+
+def test_the_v18_served_set_gives_the_pre_c4_file_bytes(ledger):
+    # the 249 rev 3 contract is unchanged by C4: the same served values, read from alias_rows + codes instead of the
+    # dropped aliases column, give the same bytes the pre-C4 ledger gave (SC #642's expectations, kept verbatim)
+    _variation(ledger, KASH, "Kashmir White", "Granite", aliases=["Kashmir, Bianco"])
+    _variation(ledger, ABS, "Absolute Black", "Granite", aliases=["G654", "Shanxi Black", "Nero Assoluto"])
+    _variation(ledger, CARR, "Carrara", "Marble")
+    stores = _stores(seed={ABS: ["Shanxi Black", "Nero Assoluto"], KASH: ["Kashmir, Bianco"]})
+    assert cleanup.csv_bytes(cleanup.classify(ledger, stores)) == (
+        f"Key,Value,Class\n{ABS},G654,code\n{ABS},Nero Assoluto,seed\n{ABS},Shanxi Black,seed\n"
+        f'{KASH},"Kashmir, Bianco",seed\n{CARR},,none\n').encode("utf-8")
 
 
 # --- the classes -------------------------------------------------------------------------------------------------------
