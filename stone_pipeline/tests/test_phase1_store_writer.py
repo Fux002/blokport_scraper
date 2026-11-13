@@ -331,7 +331,8 @@ def _stack(tmp_path, marker=(OLD_SLAB,)):
     km = _key_map_bytes()
     sv = json.dumps({"keyMapSha256": hashlib.sha256(km).hexdigest(),
                      "survivors": [{"oldKey": k, "survivorId": v} for k, v in SURVIVORS.items()]}).encode()
-    export = f"Id,Key,Name,Aliases,status,Type,owner\nV-SLAB,{NEW},Carrara,,active,Marble,scraper\n".encode()
+    export = ("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"
+              f"V-SLAB,{NEW},Carrara,,,active,Marble,scraper\n").encode()
     inputs = {"key_map": _spec(s3, "release-input/km.csv", km), "survivor_map": _spec(s3, "release-input/sv.json", sv),
               "export": _spec(s3, "dev/scraper/from_medusa/variants_export.csv", export), "stores": {},
               "retired_keys": {"sha256": hashlib.sha256(migrate_run.RETIRED_KEYS_PATH.read_bytes()).hexdigest()}}
