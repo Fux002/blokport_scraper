@@ -1,5 +1,88 @@
 # The competitor price sheets the intake reads for blokport (market_prices/layouts.py, market_prices/CONTRACT.md).
-# One layout per competitor sheet layout, written from the owner's sample sheet; none yet.
+# One layout per competitor sheet layout. The first three are the tabs of the owner's workbook
+# All_Competitor_Stone_Prices.xlsx (2026-11-11, sha256 606a25da...), each tab arriving as its own file, copied unchanged
+# (Mas's ruling, 13 Nov); the workbook's aggregate tabs are never read. Mapping: M22/P4 (W7).
 brand: blokport
-competitors: []
-layouts: []
+
+# Competitor fields are the owner's answers (13 Nov, via Mas): served_market EU, "They deliver across Europe by truck
+# international even"; seller_type wholesaler, "Wholesaler showroom to other smaller sellers and direct to projects".
+# A row names its competitor by the source document it was transcribed from (the tab's 'Source file' column), so each
+# competitor's names hold that document's file name; names[0] is the seller name written on every row.
+competitors:
+  - competitor_id: brachot
+    names: ["Brachot", "Platentarief_050825_BE_NL_spreads(7).pdf"]
+    seller_type: wholesaler
+    seller_country: BE
+    served_market: EU
+    site_domain: brachot.com
+  - competitor_id: tuytelaers
+    names: ["Tuytelaers", "prijslijst-platen-2026(3).pdf"]
+    seller_type: wholesaler
+    seller_country: BE
+    served_market: EU
+    site_domain: tuytelaers.be
+  # Cereser's main list and its Listino Carrara are two lists in one tab, each priced in its own column: two ids.
+  - competitor_id: cereser
+    names: ["Cereser", "Italian supplier list(1).xlsx"]
+    seller_type: wholesaler
+    seller_country: IT
+    served_market: EU
+    site_domain: ceresermarmi.com
+  - competitor_id: cereser_carrara
+    names: ["Cereser Listino Carrara", "LISTINO CARRARA -(2).xlsx"]
+    seller_type: wholesaler
+    seller_country: IT
+    served_market: EU
+    site_domain: ceresermarmi.com
+
+# listing_key: always-filled columns only (an empty key part makes the row malformed), measured unique on the workbook.
+layouts:
+  - layout_id: owner_brachot_tab
+    sheet: Brachot Prices
+    header_row: 1
+    headers: ["Material", "Grade / selection", "Brachot product name", "Stone type", "Origin", "Origin code",
+              "Thickness (cm)", "Finish", "Treatment / calibration", "Dimensions", "Price (EUR/m² ex VAT)",
+              "Base list price (EUR/m² ex VAT)", "Adjustment (%)", "Original pricing conditions",
+              "Brachot price category", "Catalog page", "PDF page", "Price status", "Catalog section",
+              "Catalog edition / effective date", "Notes", "Source file", "Sales terms"]
+    competitor: {column: "Source file"}
+    listing_key: ["Brachot product name", "Thickness (cm)", "Finish", "Dimensions", "Catalog page"]
+    listing_text: ["Brachot product name"]
+    price: "Price (EUR/m² ex VAT)"          # each size row's own price, its adjustment already applied
+    number: {decimal: ".", thousands: ""}
+    statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
+
+  - layout_id: owner_tuytelaers_tab
+    sheet: Tuytelaers Prices
+    header_row: 1
+    headers: ["Material", "Grade / selection", "Tuytelaers product name", "Stone type", "Origin", "Origin code",
+              "Thickness (cm)", "Finish", "Dimensions", "Price (EUR/m² ex VAT)", "Base list price (EUR/m² ex VAT)",
+              "Adjustment (%)", "Original pricing conditions", "Catalog section", "Catalog page", "PDF page",
+              "Price status", "New in 2026 catalog", "Notes", "Catalog edition / effective date", "Source file",
+              "Sales terms"]
+    competitor: {column: "Source file"}
+    # 'Catalog section' tells the Natuursteen and Blokzaag listings of one stone, thickness and finish apart
+    listing_key: ["Tuytelaers product name", "Thickness (cm)", "Finish", "Dimensions", "Catalog section"]
+    listing_text: ["Tuytelaers product name"]
+    price: "Price (EUR/m² ex VAT)"
+    number: {decimal: ".", thousands: ""}
+    statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
+
+  - layout_id: owner_cereser_tab
+    sheet: Cereser Prices
+    header_row: 1
+    headers: ["Material", "Grade / selection", "Cereser product name (source)", "Stone type", "Source category",
+              "Origin", "Origin (source)", "Thickness (cm)", "Finish", "Dimensions", "Block / lot",
+              "Slab selection / pricing basis", "List price (EUR/m²)", "Price -20% (EUR/m²)",
+              "Carrara net price (EUR/m²)", "Price used in master (EUR/m²)", "Discount (%)", "Price status",
+              "Source file", "Source row", "List date", "Lot date / source note", "Vendor notes"]
+    competitor: {column: "Source file"}
+    # Finish and Dimensions are often empty here, so the key is the source row; both ride in stated_specs
+    listing_key: ["Cereser product name (source)", "Thickness (cm)", "Source row"]
+    listing_text: ["Cereser product name (source)"]
+    price_by_competitor:
+      cereser: "List price (EUR/m²)"
+      cereser_carrara: "Carrara net price (EUR/m²)"
+    number: {decimal: ".", thousands: ""}
+    # VAT excluded on the owner's word (13 Nov)
+    statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
