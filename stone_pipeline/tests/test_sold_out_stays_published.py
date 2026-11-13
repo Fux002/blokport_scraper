@@ -322,6 +322,25 @@ def test_a_v17_ledger_gains_gone_at_in_place_and_keeps_its_data(tmp_path):
             assert _stock(lg, "SEN-1") == (0, None, None)
 
 
+def test_gone_at_is_the_step_after_c4_s_v18(tmp_path):
+    # ledger order (scraper manager, 13 Nov): P2-10 C4's v18 (variation.alias_rows + codes) comes first in the window,
+    # so the sold-out column is v19; a v18 ledger gains gone_at in place, and a second open is a no-op
+    p = tmp_path / "v18.ledger"
+    with Ledger.open(p, env="development") as lg:
+        _prod(lg, "SEN-1", qty=0)
+    raw = sqlite3.connect(p)                                         # simulate a v18 ledger
+    raw.execute("ALTER TABLE inventory DROP COLUMN gone_at")
+    raw.execute("PRAGMA user_version = 18")
+    raw.execute("UPDATE ledger_meta SET schema_version = 18")
+    raw.commit()
+    raw.close()
+    for _ in range(2):
+        with Ledger.open(p, env="development") as lg:
+            assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 19
+            assert "gone_at" in {r["name"] for r in lg.conn.execute("PRAGMA table_info(inventory)")}
+            assert _stock(lg, "SEN-1") == (0, None, None)
+
+
 def test_the_contract_states_sold_out_gone_at_and_the_purge_scope():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
