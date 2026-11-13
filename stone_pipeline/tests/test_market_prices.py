@@ -766,6 +766,16 @@ def test_a_site_with_no_listing_in_scope_is_read_whole_and_delivers_none():
     assert "listings out of scope x1" in status.detail
 
 
+def test_a_site_in_a_market_the_vocabulary_does_not_declare_stops_the_run_before_any_fetch():
+    # WudPort's vocabulary declares GB DE FR NL BE PL SE; a collectable site serving US is a setup error, named
+    from market_prices.vocabulary import VocabularyError
+    sites = _shop(_page([_listing(1, name="Birch plywood 18mm")]))
+    register = Register.model_validate({"brand": "wudport", "sites": [_site(served_market="US")]})
+    with pytest.raises(VocabularyError, match="shop"):
+        _run(sites, register)
+    assert sites.requested == []
+
+
 def test_a_scope_all_brand_delivers_every_listing_as_before():
     result = _run(_shop(_page([_listing(1), _listing(2, name="Paint roller 9 inch")])))
     assert [row.listing_key for row in result.observations] == ["1", "2"]
