@@ -357,7 +357,8 @@ def test_a_backbone_file_the_pack_names_must_be_a_file_name(tmp_path, monkeypatc
     pack = _valid_pack_dict()
     pack["backbone_file"] = ""
     _write_pack(tmp_path, pack)
-    with pytest.raises(ValueError, match="backbone_file"):
+    # the exact refusal: the tmp folder's own name holds "backbone_file", so a looser match passes on any error
+    with pytest.raises(ValueError, match="backbone_file must be a file name, got ''"):
         domain.load_pack("bad")
 
 
