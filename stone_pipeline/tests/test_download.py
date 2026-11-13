@@ -12,7 +12,7 @@ import httpx
 import pytest
 from PIL import Image
 
-from stone_pipeline.io import download
+from stone_pipeline.io import download, ssrf
 
 # The exact body a supplier's nginx served for a WudPort photo (170 bytes), which reached the catalog as a
 # product image labelled image/jpeg on 9 listings.
@@ -32,7 +32,8 @@ JPEG = _image("JPEG")
 
 @pytest.fixture
 def mock_httpx(monkeypatch):
-    monkeypatch.setattr(download, "url_allowed", lambda u: True)
+    # every test host is public except one named internal: the SSRF check runs, without DNS
+    monkeypatch.setattr(ssrf, "url_allowed", lambda u: "internal" not in u)   # the one hop check
     real_client = httpx.Client
 
     def install(handler):
@@ -130,3 +131,46 @@ def test_redirect_is_followed_and_revalidated(mock_httpx):
     mock_httpx(h)
     fetch = download.httpx_fetcher(retries=1, backoff=0.0)
     assert fetch("https://host/a.jpg") == JPEG
+
+
+# --- redirects: every hop checked, a bad redirect is a permanent miss (never retried) ---------------------------------
+def _recording(handler):
+    seen: list[str] = []
+
+    def h(request):
+        seen.append(str(request.url))
+        return handler(request)
+    return h, seen
+
+
+def test_a_redirect_to_a_non_public_host_is_never_requested_nor_retried(mock_httpx):
+    h, seen = _recording(lambda r: httpx.Response(302, headers={"location": "http://internal.example/meta"}))
+    mock_httpx(h)
+    assert download.httpx_fetcher(retries=3, backoff=0.0)("https://host/a.jpg") is None
+    assert seen == ["https://host/a.jpg"]
+
+
+def test_a_redirect_without_a_location_is_a_miss_not_retried(mock_httpx):
+    h, seen = _recording(lambda r: httpx.Response(302))
+    mock_httpx(h)
+    assert download.httpx_fetcher(retries=3, backoff=0.0)("https://host/a.jpg") is None
+    assert seen == ["https://host/a.jpg"]
+
+
+def test_a_redirect_loop_stops_at_the_cap_and_is_not_retried(mock_httpx, caplog):
+    h, seen = _recording(lambda r: httpx.Response(301, headers={"location": "/a.jpg"}))
+    mock_httpx(h)
+    assert download.httpx_fetcher(retries=3, backoff=0.0)("https://host/a.jpg") is None
+    assert len(seen) == 6                                     # the entry and five redirect hops, one attempt
+    assert any("too many redirects" in r.getMessage() for r in caplog.records)
+
+
+def test_a_relative_redirect_resolves_against_its_hop(mock_httpx):
+    def h(request):
+        if request.url.path == "/img/a.jpg":
+            return httpx.Response(302, headers={"location": "b.jpg"})
+        return httpx.Response(200, content=JPEG)
+    h, seen = _recording(h)
+    mock_httpx(h)
+    assert download.httpx_fetcher(retries=1, backoff=0.0)("https://host/img/a.jpg") == JPEG
+    assert seen == ["https://host/img/a.jpg", "https://host/img/b.jpg"]

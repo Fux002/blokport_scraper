@@ -1,0 +1,5 @@
+# The competitor price sheets the intake reads for blokport (market_prices/layouts.py, market_prices/CONTRACT.md).
+# One layout per competitor sheet layout, written from the owner's sample sheet; none yet.
+brand: blokport
+competitors: []
+layouts: []

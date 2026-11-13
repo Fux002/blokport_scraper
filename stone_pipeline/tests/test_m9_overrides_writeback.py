@@ -1,6 +1,6 @@
 """M9 DoD: a previously gapped row emits after the variant is added, untouched
-rows are byte-identical. Plus inbound overrides win, and alias write-back
-persists and is re-applied on the next run.
+rows are byte-identical. Plus inbound overrides win. (The learned-alias write-back is
+test_alias_writeback.py and test_learned_alias.py since P2-10 C2.)
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import derive, match_variation, normalize, reconcile_tree
-from stone_pipeline.state import writeback as wb
 from stone_pipeline.state.overrides import Overrides
 
 
@@ -51,21 +50,6 @@ def test_override_bundle_and_origin(ref):
     derive.run([row], ref, cfg)
     assert row.bundle_size == 12 and row.bundle_size_method == "override"
     assert row.origin_country_code == "BR" and row.origin_source == "override"
-
-
-def test_alias_writeback_persists_and_reapplies(tmp_path, monkeypatch):
-    path = tmp_path / "alias_writeback.csv"
-    monkeypatch.setattr(wb, "_writeback_path", lambda name: path)
-    writeback = wb.WriteBack()
-    writeback.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
-    writeback.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")  # dup ignored
-    assert writeback.flush() == 1
-    # second flush of the same content writes nothing (append-only, idempotent)
-    again = wb.WriteBack()
-    again.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
-    assert again.flush() == 0
-    loaded = wb.load_alias_writeback(path)
-    assert loaded == [("vid-1", "Some Scraped Spelling")]
 
 
 def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):

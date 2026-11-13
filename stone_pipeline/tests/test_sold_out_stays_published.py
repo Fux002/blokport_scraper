@@ -6,7 +6,7 @@
 - It reappears: normal stock, no reason, no `gone_at`, the same SKU and product row.
 - Nothing deletes a gone listing's record: the dead-stock purge deletes only bundles replaced by their lot, a vendor
   removal unpublishes (reason 'delisted', no tombstone), and a hard or factory reset and a seed drop spare it.
-- The inventory delta carries `gone_at`; the ledger gains the column in place (v18).
+- The inventory delta carries `gone_at`; the ledger gains the column in place (v19, after P2-10 C4's v18).
 Fixtures only."""
 
 from __future__ import annotations

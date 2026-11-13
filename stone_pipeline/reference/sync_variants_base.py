@@ -1,8 +1,9 @@
 """variants_export_base.csv = the full variant list. There is ONE list, not three:
 
   * 1_variants_full.csv      the complete, gated, S3-imaged, Id-free variant set built each run
-  * variants_export_base.csv THE SAME set, persisted as the committed seed of truth (base == full); its
-                             settled bytes are also published as a deliverable (to_upload/, see write_deliverable)
+  * variants_export_base.csv THE SAME set, persisted as the committed seed of truth (base == full); the settled
+                             base without its Aliases column is also published as a deliverable (to_upload/, see
+                             write_deliverable)
   * 1_variants_update.csv     just the NEW slice of that set (a subset of full), for incremental load
   * variants_export.csv       the live Medusa state WITH ids (matching + round-trip)
 
@@ -17,13 +18,10 @@ second, diverging list. Re-runnable standalone:
 from __future__ import annotations
 
 import csv
-import os
-import shutil
-import uuid
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS, THIN_COPY_MIN_FRACTION
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.io import storage
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS
 
@@ -102,27 +100,27 @@ def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, pub
 
 
 def write_deliverable(base_path: Path | None = None, deliverable_path: Path | None = None) -> None:
-    """Copy the base this produce settled into to_upload/ byte for byte, so the manifest lists it (sha256, rows)
-    like every deliverable and an importer verifying it against the manifest reads exactly the base the produce
-    used. Called once the base is settled (after sync, whose guard may keep the fetched base). A raw file copy to a
-    temp beside the target, made durable, then os.replace: the deliverable is never partial and never re-encoded.
-    An absent base fails loud and first drops the previous produce's copy, so no publish can list a base that is
-    not this produce's."""
+    """The base this produce settled, WITHOUT its Aliases column, written to to_upload/ so the manifest lists it
+    (sha256, rows) like every deliverable: the backend restores varieties from it, and a variety's aliases reach the
+    backend only as the variations lane's alias_rows (P2-10 C4). The internal base keeps the column, the scraper's
+    own record. Every other column and row as the base has them, written atomically (csvio), so the deliverable is
+    never partial. Called once the base is settled (after sync, whose guard may keep the fetched base). An absent or
+    unreadable base fails loud and first drops the previous produce's copy, so no publish can list a base that is not
+    this produce's."""
     base = Path(base_path or BASE)
     deliverable = Path(deliverable_path or DELIVERABLE)
     if not base.exists():
         deliverable.unlink(missing_ok=True)
         raise FileNotFoundError(f"no settled {base.name} at {base}: the catalog cannot publish the variety base")
-    deliverable.parent.mkdir(parents=True, exist_ok=True)
-    # unique per writer (pid + random), as csvio.atomic_write: overlapping processes never share a temp
-    tmp = deliverable.with_name(f"{deliverable.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
-        shutil.copyfile(base, tmp)
-        with tmp.open("rb") as h:
-            os.fsync(h.fileno())                    # durable before the rename
-        os.replace(tmp, deliverable)
-    finally:
-        tmp.unlink(missing_ok=True)
+        with base.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            fields = [name for name in reader.fieldnames or [] if name != "Aliases"]
+            rows = list(reader)
+    except (UnicodeDecodeError, csv.Error):
+        deliverable.unlink(missing_ok=True)
+        raise
+    csvio.write_dicts(deliverable, fields, rows, sanitize=False)
 
 
 if __name__ == "__main__":

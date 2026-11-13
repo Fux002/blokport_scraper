@@ -1,71 +1,52 @@
-"""Alias write-back state (state/writeback.py): persistence, provenance, and the undo path.
+"""The run's learned guesses (state/writeback.py) become learned-alias PROPOSALS (P2-10 C2), and the old
+alias_writeback.csv stays readable for the phase 1 store migration and the one-time move into learned_alias.
 
-Self-contained (tmp_path + monkeypatch, no pipeline data), so it runs in CI unlike the data-dependent
-match tests. B1: a learned fuzzy/phonetic alias is persisted as an exact alias for the next run, which
-made a wrong high-scoring guess permanent and invisible. It now carries its learning METHOD as provenance
-and can be reversed with forget_alias -- while the matcher's (variation_id, alias) view is unchanged.
+Self-contained (tmp stores, no pipeline data). B1 still holds: a learned guess carries its learning METHOD (and now
+its vendor) as provenance; it is a proposal, so a wrong high-scoring guess never binds until a review approves it.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
+
 from stone_pipeline.state import writeback as wb
 
 
-def _path(tmp_path, monkeypatch):
-    path = tmp_path / "alias_writeback.csv"
-    monkeypatch.setattr(wb, "_writeback_path", lambda name: path)
-    return path
+def _rows(path):
+    with closing(sqlite3.connect(str(path))) as conn:
+        return conn.execute("SELECT identity_key, value, method, source, status, score FROM learned_alias "
+                            "ORDER BY identity_key, norm").fetchall()
 
 
-def test_persists_and_is_idempotent(tmp_path, monkeypatch):
-    path = _path(tmp_path, monkeypatch)
+def test_a_run_s_guesses_are_proposed_once_with_their_provenance(tmp_path, monkeypatch):
+    path = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
     w = wb.WriteBack()
-    w.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
-    w.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")   # dup ignored
+    w.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi", score=88.0)
+    w.add_alias("granite__a_1", "some scraped spelling", method="phonetic", source="sentas")   # the run's dup
     assert w.flush() == 1
     again = wb.WriteBack()
-    again.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
-    assert again.flush() == 0                                        # nothing new -> file untouched
-    assert wb.load_alias_writeback(path) == [("vid-1", "Some Scraped Spelling")]
+    again.add_alias("granite__a_1", "Some Scraped Spelling", method="fuzzy", source="zucchi")
+    assert again.flush() == 0                                       # a later run's repeat adds nothing
+    assert _rows(path) == [("granite__a_1", "Some Scraped Spelling", "fuzzy", "zucchi", "proposed", 88.0)]
 
 
-def test_records_the_learning_method_as_provenance(tmp_path, monkeypatch):
-    path = _path(tmp_path, monkeypatch)
-    w = wb.WriteBack()
-    w.add_alias("vid-9", "Fuzzy Learned Name", method="fuzzy")
-    assert w.flush() == 1
+def test_an_empty_run_proposes_nothing_and_creates_no_store(tmp_path, monkeypatch):
+    path = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(path))
+    assert wb.WriteBack().flush() == 0 and not path.exists()
+
+
+def test_the_old_file_reads_as_its_records_and_absent_as_none(tmp_path):
+    path = tmp_path / "alias_writeback.csv"
+    assert wb.load_alias_writeback_records(path) == []
+    path.write_text("variation_id,alias,method\nvid-9,Fuzzy Learned Name,fuzzy\n", encoding="utf-8")
     assert wb.load_alias_writeback_records(path) == [("vid-9", "Fuzzy Learned Name", "fuzzy")]
-    assert wb.load_alias_writeback(path) == [("vid-9", "Fuzzy Learned Name")]   # matcher view unchanged
 
 
-def test_forget_alias_reverses_a_wrong_learn(tmp_path, monkeypatch):
-    path = _path(tmp_path, monkeypatch)
-    w = wb.WriteBack()
-    w.add_alias("vid-1", "Keep This", method="phonetic")
-    w.add_alias("vid-2", "Wrong Guess", method="fuzzy")
-    w.flush()
-
-    assert wb.forget_alias("vid-2", "wrong guess", path) is True      # case-insensitive on the alias
-    assert wb.load_alias_writeback(path) == [("vid-1", "Keep This")]   # only the wrong one is gone
-    assert wb.forget_alias("vid-2", "Wrong Guess", path) is False      # already gone -> no-op
-
-
-def test_forget_on_absent_file_is_a_no_op(tmp_path, monkeypatch):
-    path = _path(tmp_path, monkeypatch)
-    assert wb.forget_alias("vid-x", "anything", path) is False
-    assert not path.exists()
-
-
-def test_flush_upgrades_a_legacy_two_column_file(tmp_path, monkeypatch):
-    # a pre-existing 2-column file (variation_id, alias) still reads; its rows carry no learning method, so
-    # they are not provably guesses: not applied, and dropped when a new learning rewrites the file under the
-    # current 3-column schema.
-    path = _path(tmp_path, monkeypatch)
+def test_a_legacy_two_column_file_reads_with_no_method(tmp_path):
+    # its rows carry no learning method, so they are not provably guesses: the migration drops them (not_learned)
+    path = tmp_path / "alias_writeback.csv"
     path.write_text("variation_id,alias\nvid-old,Legacy Name\n", encoding="utf-8")
     assert wb.load_alias_writeback_records(path) == [("vid-old", "Legacy Name", "")]
-    assert wb.load_alias_writeback(path) == []
-
-    w = wb.WriteBack()
-    w.add_alias("vid-new", "New Name", method="phonetic")
-    assert w.flush() == 1
-    assert wb.load_alias_writeback_records(path) == [("vid-new", "New Name", "phonetic")]

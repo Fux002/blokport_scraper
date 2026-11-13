@@ -61,6 +61,9 @@ def _add_size_suffix(url: str, suffix: str) -> str:
 
 class DeveliScraper(ScraperBase):
     source = "develi"
+    # The supplier's public site, typed once: the data comes from Google Sheets, and the site is the one the
+    # module docstring names (scrapers/develi.py:3, https://www.marbleslabs.tr/slabs/).
+    site_domain = "marbleslabs.tr"
     category = "slab"        # the /slabs/ gallery is slab inventory (item 3)
     id_field = "bundle_code"  # images named develi_<bundle_code>_<idx>
     columns = SOURCE_COLUMNS + ['image_url_hires']

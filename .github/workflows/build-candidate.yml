@@ -1,0 +1,147 @@
+# BUILD-ONLY: the scraper `core` image of ONE commit, pushed to the shared ECR repo as :<sha> and nothing else, so a
+# prod candidate can be built from a commit that is not main's head (a candidate branch) and its digest named in a
+# promotion ask. It never deploys: no ECS update, no terraform, no task definition, and it NEVER pushes :core or any
+# prod- tag (only the explicit "$REPO:$SHA" ref is pushed). A tag that already exists is refused, never rebuilt, as
+# deploy/build_standardise_image.sh refuses one (the repository's tags are mutable, so a rebuild would replace an image
+# a promotion may already name).
+#
+# Dispatched FROM main: AWS_DEPLOY_ROLE_ARN trusts refs/heads/main only, so a run on any other ref is refused before
+# credentials are asked for. The input reaches a step only through env, never interpolated into a script.
+#
+# Every ECR read is `aws ecr batch-get-image` (ecr:BatchGetImage), because the deploy role's policy allows that and NOT
+# ecr:DescribeImages (run 43155861223 refused there with AccessDenied; infra/main.tf's EcrPushPull statement).
+name: Build candidate image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "The full 40-character commit sha to build the core image from (pushed as :<sha> only)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+concurrency:
+  group: build-candidate
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: blokport-scraper
+  # The entrypoint smoke is deploy.yml's own import line, read from the BUILT commit, so the candidate passes exactly
+  # the smoke its own code would pass on a main deploy, and the module list has one home.
+  SMOKE_ANCHOR: '--entrypoint python "$REPO:core" -c "import '
+  # The manifest types `docker build` + `docker push` store. Without the schema-1 type, ECR returns the stored manifest
+  # itself, so the digest read back is the one the push named, never a converted manifest's.
+  ACCEPTED_MEDIA_TYPES: "application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash   # -eo pipefail: a failed read fails the run, never a silent green
+    steps:
+      - name: Check the ref and the dispatching branch
+        env:
+          SHA: ${{ inputs.ref }}
+          RUN_REF: ${{ github.ref }}
+        run: |
+          [[ "${SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::refused: ref must be 40 lowercase hex characters, got '${SHA:-}'"; exit 1; }
+          [ "$RUN_REF" = refs/heads/main ] || { echo "::error::refused: dispatch from main (the deploy role trusts refs/heads/main), not $RUN_REF"; exit 1; }
+          echo "building $SHA"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Check the checkout is that commit
+        env:
+          SHA: ${{ inputs.ref }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          [ "$HEAD_SHA" = "$SHA" ] || { echo "::error::refused: checked out $HEAD_SHA, not $SHA"; exit 1; }
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+
+      # FREE only when the answer is no image and exactly one failure, ImageNotFound, for this exact tag. An image, any
+      # other failure code, a failed call (AccessDenied, throttling, network) or an answer that does not parse refuses:
+      # none of them may read as "absent", or a push would replace an existing image under the same tag.
+      - name: Refuse a tag that already exists
+        env:
+          SHA: ${{ inputs.ref }}
+        run: |
+          # shellcheck disable=SC2086 # ACCEPTED_MEDIA_TYPES is a space-separated list, split on purpose
+          if ! answer=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" \
+              --accepted-media-types $ACCEPTED_MEDIA_TYPES --output json 2>&1); then
+            echo "::error::refused: could not check whether $ECR_REPOSITORY:$SHA exists: $answer"
+            exit 1
+          fi
+          state=$(jq -r --arg tag "$SHA" '
+            if (.images | length) > 0 then "exists"
+            elif (.failures | length) == 1 and .failures[0].failureCode == "ImageNotFound"
+                 and .failures[0].imageId.imageTag == $tag then "free"
+            else "unknown" end' <<<"$answer") || { echo "::error::refused: the answer does not parse: $answer"; exit 1; }
+          case "$state" in
+            free) echo "$ECR_REPOSITORY:$SHA is free" ;;
+            exists) echo "::error::refused: $ECR_REPOSITORY:$SHA already exists; a candidate image is never rebuilt"; exit 1 ;;
+            *) echo "::error::refused: could not tell whether $ECR_REPOSITORY:$SHA exists: $answer"; exit 1 ;;
+          esac
+
+      - name: Build the core image and smoke-import its entrypoints
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ inputs.ref }}
+        run: |
+          REPO="$REGISTRY/$ECR_REPOSITORY"
+          COUNT=$(grep -c -F -- "$SMOKE_ANCHOR" .github/workflows/deploy.yml || true)
+          [ "$COUNT" = 1 ] || { echo "::error::refused: deploy.yml at $SHA has $COUNT smoke-import lines, not 1"; exit 1; }
+          MODULES=$(grep -F -- "$SMOKE_ANCHOR" .github/workflows/deploy.yml | sed -n 's/.*-c "import \(.*\)"[[:space:]]*$/\1/p')
+          [[ "$MODULES" =~ ^[A-Za-z0-9_.]+(,[[:space:]]*[A-Za-z0-9_.]+)*$ ]] || { echo "::error::refused: the smoke-import module list reads '$MODULES'"; exit 1; }
+          docker build --target core -t "$REPO:$SHA" .
+          docker run --rm --entrypoint python "$REPO:$SHA" -c "import $MODULES"
+          echo "Entrypoint imports OK in $REPO:$SHA"
+
+      # The one push: the explicit :<sha> ref. The image carries no other local tag, so nothing else can be pushed.
+      - name: Push :<sha>
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ inputs.ref }}
+        run: |
+          REPO="$REGISTRY/$ECR_REPOSITORY"
+          PUSHED=$(docker push "$REPO:$SHA" | tee /dev/stderr | sed -n "s/^$SHA: digest: \(sha256:[0-9a-f]\{64\}\) size: [0-9]*$/\1/p")
+          [ -n "$PUSHED" ] || { echo "::error::refused: docker push named no digest for $REPO:$SHA"; exit 1; }
+          echo "digest=$PUSHED" >> "$GITHUB_OUTPUT"
+
+      # The digest is printed only when ECR's own answer for the tag (exactly one image, no failure) names the digest
+      # the push named.
+      - name: Read the digest back and print it
+        env:
+          SHA: ${{ inputs.ref }}
+          PUSHED: ${{ steps.push.outputs.digest }}
+        run: |
+          # shellcheck disable=SC2086 # ACCEPTED_MEDIA_TYPES is a space-separated list, split on purpose
+          if ! answer=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$SHA" \
+              --accepted-media-types $ACCEPTED_MEDIA_TYPES --output json 2>&1); then
+            echo "::error::refused: could not read $ECR_REPOSITORY:$SHA back: $answer"
+            exit 1
+          fi
+          READ=$(jq -r 'if (.images | length) == 1 and (.failures | length) == 0 then .images[0].imageId.imageDigest else "" end' \
+            <<<"$answer") || { echo "::error::refused: the answer does not parse: $answer"; exit 1; }
+          [ -n "$READ" ] && [ "$READ" = "$PUSHED" ] || { echo "::error::refused: ECR answers $answer for :$SHA, the push said $PUSHED"; exit 1; }
+          echo "pushed $ECR_REPOSITORY:$SHA ($PUSHED)"
+          echo "### $ECR_REPOSITORY:$SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest \`$PUSHED\` (push and ECR read-back agree); :core and prod tags untouched" >> "$GITHUB_STEP_SUMMARY"

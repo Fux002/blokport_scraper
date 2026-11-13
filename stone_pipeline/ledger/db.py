@@ -27,16 +27,18 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 18  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 19  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
 #                      v16: product.photo_unpublished -- the standardised files a product links that are not
 #                           published (never served while any); null on every existing row until its next produce.
 #                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
-#                      v18: inventory.gone_at -- when a listing was first missing at its supplier (table 505: it stays
+#                      v18: variation.aliases replaced by alias_rows + codes (P2-10 C4), NULL on every existing row:
+#                           not computed yet, so held from the serve until the next produce computes both.
+#                      v19: inventory.gone_at -- when a listing was first missing at its supplier (table 505: it stays
 #                           published as sold out); null on every existing row until a run finds it gone, so a
-#                           listing gone before v18 gets the first v18 run's date.
+#                           listing gone before v19 gets the first v19 run's date.
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -222,8 +224,13 @@ class Ledger:
         variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
         if "reserved_at" not in variation_cols:   # v17: NULL = no reserve waiting for a lease
             self.conn.execute("ALTER TABLE variation ADD COLUMN reserved_at TEXT")
+        if "alias_rows" not in variation_cols:    # v18: NULL = not computed yet (held), never '[]' (the empty channel)
+            self.conn.execute("ALTER TABLE variation ADD COLUMN alias_rows TEXT")
+            self.conn.execute("ALTER TABLE variation ADD COLUMN codes TEXT")
+        if "aliases" in variation_cols:           # v18: the old unowned set, never served again
+            self.conn.execute("ALTER TABLE variation DROP COLUMN aliases")
         inventory_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
-        if "gone_at" not in inventory_cols:       # v18: no backfill, the next run that finds a listing gone stamps it
+        if "gone_at" not in inventory_cols:       # v19: no backfill, the next run that finds a listing gone stamps it
             self.conn.execute("ALTER TABLE inventory ADD COLUMN gone_at TEXT")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:

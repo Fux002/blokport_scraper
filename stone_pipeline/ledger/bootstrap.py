@@ -12,7 +12,6 @@ No em dashes (design principle 2).
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
@@ -70,7 +69,7 @@ def restore_attribute_ids(ledger: Ledger, path: str | Path | None = None) -> int
 
 
 def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
-    """Load variants_export.csv (Id, Key, Name, Type, Aliases) into the `variation`
+    """Load variants_export.csv (Id, Key, Name, Type) into the `variation`
     table, each `synced` with its Medusa Id (the variation half of the bootstrap full
     load). A Key the one parser refuses raises. The export carries no icons: the first
     produce writes them from the S3 listing, which re-serves a variety once with its
@@ -87,15 +86,17 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
             continue
         if (problem := variety_key_problem(v.key)) is not None:
             raise ValueError(f"{path.name}: {v.key!r} is not a variety Key ({problem})")
-        aliases = json.dumps(list(v.aliases))
         ledger.upsert("variation", {
             "key": v.key,
             "type": v.type,
             "name": v.name,
-            "aliases": aliases,
+            # not computed yet (NULL, held from the serve): the export carries only the backend's hand rows (P2-7),
+            # and the scraper's own alias_rows and codes come from its stores at the next produce
+            "alias_rows": None,
+            "codes": None,
             "medusa_id": v.id or None,
             # the one hash of populate_variations_full (payloads.variation_hash), with no icons yet (above)
-            "payload_hash": variation_hash({"type": v.type, "name": v.name, "aliases": aliases}, []),
+            "payload_hash": variation_hash({"type": v.type, "name": v.name, "alias_rows": None, "codes": None}, []),
             "state": "synced",
             "first_seen": now,
             "last_synced": now,

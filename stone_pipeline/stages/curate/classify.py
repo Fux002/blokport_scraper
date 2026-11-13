@@ -15,7 +15,7 @@ from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
 from stone_pipeline.stages.curate.aliasing import collision_owners
 from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
-                                                  variety_identity)
+                                                  variety_identity, surface_owners)
 from stone_pipeline.stages.curate.minting import mint
 from stone_pipeline.stages.curate.review import (hold_archived_variety, hold_code, hold_collision,
                                                  hold_for_type, hold_new, hold_new_type, hold_similar,
@@ -108,7 +108,7 @@ def _reject_or_decide(c: Curation, row, gap, name: str, stone_type: str, clean: 
         btoks = set(bnorm.split())
         owners = c.existing_surface.get(bnorm)
         if owners and len(owners) == 1 and btoks and not (btoks <= c.generic_words):
-            c.alias_new.setdefault(next(iter(owners)), set()).add(name)   # auto-alias to the real variety
+            c.alias_new.setdefault(next(iter(owners)), {}).setdefault(name, (row.src_site, None))   # the real variety
             return True
     if code_why:
         hold_code(c, clean, code_why, base, stone_type, row)
@@ -142,7 +142,7 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
     # never lose to them. Consulting them only when the cleaned surface had none let a narrower surface (the
     # type-stripped spelling owned by ONE of two same-type varieties) turn an explicit collision into an alias
     # that already existed: no card, no mint, the row held on every produce with nothing to decide.
-    owners = set(c.existing_surface.get(proj.norm(clean), set())) | collision_owners(c, row, gap)
+    owners = surface_owners(c, clean) | collision_owners(c, row, gap)
     if not owners:
         return False
     st = proj.norm(stone_type)
@@ -151,7 +151,7 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
         named = next((o for o in same_type if o[0] == proj.norm(clean)), None)
         if named or len({o[0] for o in same_type}) == 1:
             owner = named or same_type[0]
-            c.alias_new.setdefault(owner, set()).add(name)
+            c.alias_new.setdefault(owner, {}).setdefault(name, (row.src_site, None))
             if (vname := _archived_owner_name(c, owner)):   # VE2: alias still recorded; surface the hold
                 hold_archived_variety(c, clean, vname, owner[1], row)
         else:
@@ -195,7 +195,8 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
         # Otherwise the confirmation would pick the row's type from whichever same-name variety the fuzzy
         # tier happened to rank first, so it is held for the operator to state the variety instead.
         if d.verdict == "alias" and nt and (stone_type or len(_canonical_types(c, nn)) == 1):
-            c.alias_new.setdefault((nn, nt), set()).add(name)
+            # the judge's probability, on the score scale (0..100) every learned alias is scored on
+            c.alias_new.setdefault((nn, nt), {}).setdefault(name, (row.src_site, round(d.prob * 100, 2)))
             if (vname := _archived_owner_name(c, (nn, nt))):   # VE2: fuzzy-confirmed alias onto archived
                 hold_archived_variety(c, clean, vname, nt, row)
             return True
@@ -204,6 +205,6 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
             return True
         return False                                # verdict "mint" -> a new variety
     if (gap.nearest_score or 0) >= c.alias_floor or is_token_subset(clean, nearest):
-        c.review_candidates.setdefault(proj.norm(nearest), set()).add(name)
+        c.review_candidates.setdefault(proj.norm(nearest), {}).setdefault(name, (row.src_site, gap.nearest_score))
         return True
     return False

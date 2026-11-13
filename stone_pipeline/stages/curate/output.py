@@ -7,10 +7,10 @@ import csv
 import json
 from pathlib import Path
 
+from stone_pipeline.config import decisions_store
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.medusa_files import VARIETY_FILE_COLUMNS, read_variants_export
 from stone_pipeline.stages.curate.context import CurationResult
 
@@ -26,15 +26,28 @@ def _write_csv(path: Path, cols: list[str], rows: list[dict], sanitize: bool = T
 
 
 def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
+    """Record curate's learned-alias proposals in config.db (P2-10 C2: a guess is a proposal, never an import row),
+    then write the curation files."""
+    result.counts["learned_proposed"] = decisions_store.propose_learned_aliases(result.learned_proposals)
+    _write_files(result, rows)
+
+
+def new_variety_rows(rows: list[dict], export_keys: set[str]) -> list[dict]:
+    """The delta's genuine rows: varieties the export does not hold yet. A row whose Key the export holds is upsert
+    noise (the mint guard can miss a duplicate-name generic); its aliases are not the delta's to carry, since curate
+    proposes them to learned_alias (P2-10 C2) and emit derives every variety's aliases from the stores (C4)."""
+    return [r for r in rows if r["Key"] not in export_keys]
+
+
+def _write_files(result: CurationResult, rows: list[CanonicalRow]) -> None:
     """Write the catalog curation outputs to the fixed top-level folders:
-      outputs/<env>/curate_delta.csv       the new + alias-update DELTA, raw (emit publishes it cleaned)
+      outputs/<env>/curate_delta.csv       the new-variety DELTA, raw (emit publishes it cleaned)
       catalog_source/backbone_additions/   new varieties to append to the backbones
       review/                              the human-decision aids (never uploaded)
     Both upload files (to_upload/1_variants_full.csv and 1_variants_update.csv) are produced by emit_catalog."""
     p = SETTINGS.paths
     additions = p.backbone_additions_dir
-    upload_rows = [r for r in result.alias_additions if r.get("_status") == "confirmed"] + result.new_variants
-    needs_review = [r for r in result.alias_additions if r.get("_status") != "confirmed"]
+    upload_rows = list(result.new_variants)
     # the backbone delta: this run's new varieties, one post each. ALWAYS (over)written, an empty list
     # included, so a variety that is no longer minted this run (resolved, held, or now code-detected like
     # 'Mgt Onyx') can never PERSIST as a stale addition from a prior run (which would keep feeding the image
@@ -42,22 +55,9 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     p.backbone_additions_file.parent.mkdir(parents=True, exist_ok=True)
     p.backbone_additions_file.write_text(json.dumps(result.backbone_new, indent=2, ensure_ascii=False),
                                          encoding="utf-8")
-    # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias is just upsert
-    # noise (the mint guard can miss a duplicate-name generic). Keep the update file to the genuine delta: new
-    # variants and real alias changes only (a variety file carries no image since SC-4 2b).
-    exp_idx: dict[str, set] = {}
     ef = SETTINGS.paths.export_file
-    if ef.exists():
-        for r in read_variants_export(ef, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
-            if r.key:
-                exp_idx[r.key] = {proj.norm(a) for a in r.aliases}
-
-    def _is_real_delta(row: dict) -> bool:
-        e = exp_idx.get(row["Key"])
-        if e is None:
-            return True                                    # genuinely new variant (key not in export)
-        cur = {proj.norm(a) for a in (row.get("Aliases") or "").split("|") if a.strip()}
-        return bool(cur - e)                                # a new alias
+    export_keys = ({r.key for r in read_variants_export(ef, require_status=VARIANTS_EXPORT_STATUS_REQUIRED) if r.key}
+                   if ef.exists() else set())
 
     # never offer a variant that is flagged for deletion (mis-typed/junk) for (re)loading
     _del = SETTINGS.paths.review_dir / "variants_to_delete.csv"
@@ -66,7 +66,7 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
         with _del.open(encoding="utf-8-sig") as _handle:   # close the handle (was leaked in a comprehension)
             _delete_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(_handle)}
     before = len(upload_rows)
-    upload_rows = [r for r in upload_rows if _is_real_delta(r) and r["Key"] not in _delete_keys]
+    upload_rows = [r for r in new_variety_rows(upload_rows, export_keys) if r["Key"] not in _delete_keys]
     if before != len(upload_rows):
         log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
     # ALWAYS written, header-only when empty: emit_catalog reads this RAW delta as THIS run's delta and
@@ -93,6 +93,5 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     # per-run (the texture queue reads them for new-this-run varieties); durability lives in the overlay,
     # which reconcile's apply_leaf_overlay turns into a record -- closing the base<->backbone drift.
     decisions.write_minted_membership(result.backbone_new)
-    result.counts["uncertain_aliases"] = len(needs_review)
     result.counts["suspicious_names_skipped"] = len(result.suspicious_names)
     log.info("curation written", extra={"extra_fields": result.counts})

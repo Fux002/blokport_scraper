@@ -233,7 +233,7 @@ GET `/sync/v1/inventory` item payloads:
     // reappeared: a plain stock, no reason, no gone_at
 ```
 - `gone_at` is the first trusted scrape the listing was missing from, unchanged while it stays gone (a listing already
-  gone before ledger v18 gets the first v18 run's date). It is absent on a
+  gone before ledger v19 gets the first v19 run's date). It is absent on a
   listing that is not gone. Blokport v1 accepts it and does not store it, so it rides the listing's next served stock:
   a hidden listing whose reason does not change is not served again for `gone_at` alone.
 - Hide reasons: `no_photo`, `delisted`, `held` (#632, stock unknown). Any other reason at stock 0 is shown (sold out) once the

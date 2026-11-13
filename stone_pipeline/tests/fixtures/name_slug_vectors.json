@@ -1,0 +1,290 @@
+{
+  "_header": "BACKEND-OWNED, THE ONE SLUG RULE (P2-3a, its R8 table 175 S1 and its delta; PHASE-2-SPEC WP2.1). nameSlug(text) is the scraper's slugify step for step: the words of the name's KEY (nameKey, the scraper's match_key: marks dropped, every non-alphanumeric run a space, '&' read as 'and' per the owner's D1 of 2026-11-04, ASCII-folded, case-folded) joined by '-'. So a slug, a Key and the match key read a name one way: '&' and 'and' give one slug. Every `expected` was produced by the scraper's own slugify (SC stone_pipeline/core/text.py), so a backend change that disagrees fails here. P6-4's import handles read this file too (the coordinator, 9 Nov).",
+  "generator": {
+    "source": "SC stone_pipeline/core/text.py slugify",
+    "scraper_rev": "98648b3",
+    "python_unicode": "16.0.0"
+  },
+  "cases": [
+    {
+      "group": "ascii",
+      "input": "Blue Pearl",
+      "expected": "blue-pearl"
+    },
+    {
+      "group": "ascii",
+      "input": "St. Laurent",
+      "expected": "st-laurent"
+    },
+    {
+      "group": "ascii",
+      "input": "G682",
+      "expected": "g682"
+    },
+    {
+      "group": "ascii",
+      "input": "  --Rosa--Beta--  ",
+      "expected": "rosa-beta"
+    },
+    {
+      "group": "ascii",
+      "input": "under_score",
+      "expected": "under-score"
+    },
+    {
+      "group": "ascii",
+      "input": "_",
+      "expected": ""
+    },
+    {
+      "group": "ascii",
+      "input": "",
+      "expected": ""
+    },
+    {
+      "group": "ampersand",
+      "input": "A & B",
+      "expected": "a-and-b"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black&White",
+      "expected": "black-and-white"
+    },
+    {
+      "group": "accent",
+      "input": "Rosa Porri\u00f1o",
+      "expected": "rosa-porrino"
+    },
+    {
+      "group": "accent",
+      "input": "S\u00e3o Gabriel",
+      "expected": "sao-gabriel"
+    },
+    {
+      "group": "accent",
+      "input": "Cr\u00e8me Br\u00fbl\u00e9e",
+      "expected": "creme-brulee"
+    },
+    {
+      "group": "accent",
+      "input": "\u0141\u00f3d\u017a",
+      "expected": "lodz"
+    },
+    {
+      "group": "transliterated",
+      "input": "\u00d8lstykke",
+      "expected": "olstykke"
+    },
+    {
+      "group": "transliterated",
+      "input": "Stra\u00dfe",
+      "expected": "strasse"
+    },
+    {
+      "group": "transliterated",
+      "input": "\u00c6gean Blue",
+      "expected": "aegean-blue"
+    },
+    {
+      "group": "transliterated",
+      "input": "\u0152uvre",
+      "expected": "oeuvre"
+    },
+    {
+      "group": "transliterated",
+      "input": "\u01e2",
+      "expected": "ae"
+    },
+    {
+      "group": "transliterated",
+      "input": "\u01fe",
+      "expected": "o"
+    },
+    {
+      "group": "compatibility",
+      "input": "\ufb01ne",
+      "expected": "fine"
+    },
+    {
+      "group": "compatibility",
+      "input": "\uff32\uff4f\uff53\uff41",
+      "expected": "rosa"
+    },
+    {
+      "group": "compatibility",
+      "input": "\u216b",
+      "expected": "xii"
+    },
+    {
+      "group": "non-latin",
+      "input": "\u5927\u7406\u77f3",
+      "expected": ""
+    },
+    {
+      "group": "non-latin",
+      "input": "\u041c\u0440\u0430\u043c\u043e\u0440",
+      "expected": ""
+    },
+    {
+      "group": "non-latin",
+      "input": "Rosa \u5927\u7406\u77f3 Beta",
+      "expected": "rosa-beta"
+    },
+    {
+      "group": "punctuation",
+      "input": "Verde (Ubatuba)",
+      "expected": "verde-ubatuba"
+    },
+    {
+      "group": "punctuation",
+      "input": "Juparana / Colombo",
+      "expected": "juparana-colombo"
+    },
+    {
+      "group": "punctuation",
+      "input": "Kashmir White \u2014 Extra",
+      "expected": "kashmir-white-extra"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00c6",
+      "expected": "ae"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00e6",
+      "expected": "ae"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0152",
+      "expected": "oe"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0153",
+      "expected": "oe"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00d8",
+      "expected": "o"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00f8",
+      "expected": "o"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0141",
+      "expected": "l"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0142",
+      "expected": "l"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0110",
+      "expected": "d"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0111",
+      "expected": "d"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00d0",
+      "expected": "d"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00f0",
+      "expected": "d"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00de",
+      "expected": "th"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00fe",
+      "expected": "th"
+    },
+    {
+      "group": "translit table",
+      "input": "\u00df",
+      "expected": "ss"
+    },
+    {
+      "group": "translit table",
+      "input": "\u1e9e",
+      "expected": "ss"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0126",
+      "expected": "h"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0127",
+      "expected": "h"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0166",
+      "expected": "t"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0167",
+      "expected": "t"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0131",
+      "expected": "i"
+    },
+    {
+      "group": "translit table",
+      "input": "\u0130",
+      "expected": "i"
+    },
+    {
+      "group": "translit table",
+      "input": "\u014a",
+      "expected": "n"
+    },
+    {
+      "group": "translit table",
+      "input": "\u014b",
+      "expected": "n"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black & Gold",
+      "expected": "black-and-gold"
+    },
+    {
+      "group": "ampersand",
+      "input": "a&b",
+      "expected": "a-and-b"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black\uff06Gold",
+      "expected": "black-and-gold"
+    },
+    {
+      "group": "ampersand",
+      "input": "Black\ufe60Gold",
+      "expected": "black-and-gold"
+    }
+  ]
+}

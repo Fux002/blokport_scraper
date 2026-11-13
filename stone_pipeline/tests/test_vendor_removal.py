@@ -22,7 +22,7 @@ def _prod(ledger, sku, source, qty, last):
     already a pending delta), so a later qty change is a clean, observable delta."""
     now = now_iso()
     ledger.upsert("variation", {"key": f"marble__{sku}", "type": "", "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "V", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
@@ -98,7 +98,7 @@ def test_variation_tombstone_lane_orders_before_products_and_deletes_the_row(tmp
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "marble__x_1", "type": "Marble",
-                                    "name": "X", "aliases": "[]",
+                                    "name": "X", "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 0,
                                     "payload_hash": "", "state": "retiring", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
@@ -120,7 +120,7 @@ def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -153,7 +153,7 @@ def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 0, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -177,7 +177,7 @@ def test_retire_never_synced_variety_drops_it_without_a_tombstone(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "NS", "type": "Marble", "name": "Y",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": None, "in_full": 1, "payload_hash": "",
                                     "state": "pending", "first_seen": now, "last_synced": None,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -192,7 +192,7 @@ def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))

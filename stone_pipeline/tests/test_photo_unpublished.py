@@ -47,9 +47,9 @@ def _open(path) -> Ledger:
     ledger = Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint())
     if ledger.get("variation", "key", _VARIATION) is None:
         ledger.execute(
-            "INSERT INTO variation (key, type, name, aliases, in_full, payload_hash, state, "
+            "INSERT INTO variation (key, type, name, alias_rows, codes, in_full, payload_hash, state, "
             "medusa_id, first_seen, last_synced, created_at, updated_at) "
-            "VALUES (?, 'Marble', 'Abadeh Amvaj', '[]', 1, '', 'synced', 'V', ?, ?, ?, ?)",
+            "VALUES (?, 'Marble', 'Abadeh Amvaj', '[]', '[]', 1, '', 'synced', 'V', ?, ?, ?, ?)",
             (_VARIATION, _OLD, _OLD, _OLD, _OLD))
         add_icon(ledger, _VARIATION)                 # phase 1: a product serves once its variety has its category's icon
         seed_slab_category(ledger)

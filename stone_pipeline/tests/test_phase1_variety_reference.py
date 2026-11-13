@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 
+from stone_pipeline.aliases.surfaces import Stores
 import pytest
 
 from stone_pipeline.reference import loaders
@@ -31,7 +32,7 @@ def _base(path, rows):
 def test_every_category_matches_against_the_same_varieties(tmp_path, monkeypatch):
     _isolated(monkeypatch)
     base = _base(tmp_path / "variants_export_base.csv", [[MARBLE_X, "Xanadu", "Marble", ""]])
-    existing = loaders.load_existing_variants(base, ["slab", "block", "tile"])
+    existing = loaders.load_existing_variants(base, ["slab", "block", "tile"], Stores())
     assert set(existing.tables) == {"slab", "block", "tile"}
     assert {k: list(t.by_id) for k, t in existing.tables.items()} == {c: [MARBLE_X] for c in ("slab", "block", "tile")}
 
@@ -40,7 +41,7 @@ def test_one_name_under_two_types_stays_two_varieties(tmp_path, monkeypatch):
     _isolated(monkeypatch)
     base = _base(tmp_path / "variants_export_base.csv",
                  [[MARBLE_X, "Xanadu", "Marble", ""], [GRANITE_X, "Xanadu", "Granite", ""]])
-    table = loaders.load_variants(base)
+    table = loaders.load_variants(base, Stores())
     assert sorted(v.key for v in table.by_id.values()) == sorted([MARBLE_X, GRANITE_X])
 
 
@@ -48,7 +49,7 @@ def test_an_old_prefixed_key_is_refused(tmp_path, monkeypatch):
     _isolated(monkeypatch)
     base = _base(tmp_path / "variants_export_base.csv", [["slab_marble_xanadu_1a2b", "Xanadu", "Marble", ""]])
     with pytest.raises(ValueError, match="variety Key"):
-        loaders.load_variants(base)
+        loaders.load_variants(base, Stores())
 
 
 @pytest.mark.parametrize("name", ["Mgt", "Xanadu"])   # a bare-code name, and a retired row (below)
@@ -57,4 +58,4 @@ def test_a_prefixed_key_is_refused_on_every_row_even_one_the_matcher_skips(tmp_p
     monkeypatch.setattr("stone_pipeline.stages.decisions.load_retired", lambda: {"slab_marble_xanadu_1a2b"})
     base = _base(tmp_path / "variants_export_base.csv", [["slab_marble_xanadu_1a2b", name, "Marble", ""]])
     with pytest.raises(ValueError, match="variety Key"):
-        loaders.load_variants(base)
+        loaders.load_variants(base, Stores())
