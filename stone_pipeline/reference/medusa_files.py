@@ -94,6 +94,10 @@ class ExportVariation:
     type: str                 # the canonical stone-type NAME (Medusa's attribute value), never the Key's slug
     aliases: tuple[str, ...]
     status: str               # "active" | "archived"
+    # the backend's hand rows (P2-7 E1: AdminAliases, AdminCodes), the export's only alias columns after phase 2;
+    # empty in the scraper's own files, which never carry them
+    admin_aliases: tuple[str, ...] = ()
+    admin_codes: tuple[str, ...] = ()
 
     @property
     def archived(self) -> bool:
@@ -103,7 +107,9 @@ class ExportVariation:
 def read_variants_export(src: Path | str, *, require_status: bool,
                          name: str = "variants_export.csv") -> list[ExportVariation]:
     """A variants export -> its rows, in file order. `src` is the file's Path, or a str holding the file's TEXT
-    (a str is never taken as a path; `name` is the file an error names then, since the text form also reads a base). Cells are stripped and Aliases is split on '|' into its non-empty names.
+    (a str is never taken as a path; `name` is the file an error names then, since the text form also reads a
+    base). Cells are stripped and Aliases, AdminAliases and AdminCodes are split on '|' into their non-empty values
+    (an absent column reads empty).
     Only a blank row (every cell empty) is skipped: what a row without Key, Name or Id means differs per caller
     (the base has no Id; tree_build counts a half row as malformed), so each caller keeps its own rule. Without
     a status column every row is active, unless `require_status`, which makes the absent column an error."""
@@ -116,9 +122,13 @@ def read_variants_export(src: Path | str, *, require_status: bool,
             continue
         out.append(ExportVariation(
             cell["Key"], cell["Name"], cell.get("Id", ""), cell["Type"],
-            tuple(a.strip() for a in cell.get("Aliases", "").split("|") if a.strip()),
-            _status(row, fields, label, line)))
+            _split(cell.get("Aliases", "")), _status(row, fields, label, line),
+            _split(cell.get("AdminAliases", "")), _split(cell.get("AdminCodes", ""))))
     return out
+
+
+def _split(cell: str) -> tuple[str, ...]:
+    return tuple(v.strip() for v in cell.split("|") if v.strip())
 
 
 def append_attributes(path: Path, values: Iterable[AttributeValue]) -> None:

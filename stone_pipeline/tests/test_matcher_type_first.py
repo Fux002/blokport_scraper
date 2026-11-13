@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+from stone_pipeline.aliases.stores import seed_of
+from stone_pipeline.aliases.surfaces import Stores
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex, build_variation_index
@@ -69,8 +71,9 @@ def test_identity_beats_alias_among_same_type_candidates():
 
 @pytest.fixture(scope="module")
 def slab_engine():
-    table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv")
-    index = build_variation_index(table, load_backbone(), load_origin_map())
+    backbone = load_backbone()
+    table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv", Stores(seed=seed_of(backbone)))
+    index = build_variation_index(table, backbone, load_origin_map())
     return _engine(index), table
 
 
