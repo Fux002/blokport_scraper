@@ -58,8 +58,9 @@ def _isolate_curate(monkeypatch, confirm: dict, seed_names: dict, seed_colors: d
     monkeypatch.setattr(curate, "load_existing", _empty_imports)
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     # the legacy per-aspect maps, folded into the one decisions object exactly as production builds it
+    # the stored statement keeps the spelling as scraped (its display): these spellings are title case
     actions = {k: {"action": "mint" if v == "yes" else "reject", "seed_name": seed_names.get(k),
-                   "seed_color": (seed_colors or {}).get(k)} for k, v in confirm.items()}
+                   "seed_color": (seed_colors or {}).get(k), "spelling": k[1].title()} for k, v in confirm.items()}
     monkeypatch.setattr(decisions, "load_decisions", lambda: Decisions.from_legacy(actions))
 
 

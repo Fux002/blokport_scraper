@@ -144,7 +144,8 @@ def test_alias_target_and_the_matcher_agree_on_every_store(tmp_path, monkeypatch
     ledger = tmp_path / "dev.ledger"
     with Ledger.open(ledger, env=writethrough.ENV_NAME) as lg:
         for key, name, typ in ((casa, "Casa Blue", "Marble"), (galaxy, "Black Galaxy", "Granite")):
-            lg.upsert("variation", {"key": key, "type": typ, "name": name, "aliases": "[]", "medusa_id": None,
+            lg.upsert("variation", {"key": key, "type": typ, "name": name, "alias_rows": "[]", "codes": "[]",
+                                    "medusa_id": None,
                                     "payload_hash": "", "state": "pending", "first_seen": "t", "last_synced": None,
                                     "created_at": "t", "updated_at": "t"}, pk=("key",))
     scraper = Stores(seed={casa: (["Azul Casa"], [])},

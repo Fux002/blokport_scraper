@@ -45,7 +45,7 @@ def _seed_ids(ledger: Ledger) -> None:
                                     "state": "synced", "created_at": now, "updated_at": now},
                       pk=("category", "value"))
     ledger.upsert("variation", {"key": "marble__x_0001", "type": "Marble",
-                                "name": "X", "aliases": "[]",
+                                "name": "X", "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "V1",
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now},
@@ -135,8 +135,10 @@ def test_variants_verify_set_equal_after_bootstrap(tmp_path):
 def test_reset_re_derives_variety_aliases_from_clean_base(tmp_path):
     # Factory-reset gap (lifecycle S0b): reconcile_variations_to_seed fixes WHICH varieties exist but not
     # their CONTENT, so a seed variety a prior produce decorated with an extra alias spelling keeps it. The
-    # reset now re-derives content from the clean base -- this drops the stale spelling, preserves medusa_id
-    # (Medusa updates, never recreates), and flips the row dirty for the update pull.
+    # reset re-derives content from the clean base, which carries no alias sidecar (P2-10 C4): the stale
+    # alias_rows become NULL, not computed and held until the next produce computes them from the stores, so the
+    # stale spelling is never served again; medusa_id is preserved (Medusa updates, never recreates), and the row
+    # flips dirty for the update pull.
     import csv, json
     from stone_pipeline.ledger.render import VARIANTS_FULL_COLS
     key_c, name_c, type_c, aliases_c = VARIANTS_FULL_COLS
@@ -145,7 +147,9 @@ def test_reset_re_derives_variety_aliases_from_clean_base(tmp_path):
         ledger.upsert("variation", {
             "key": "quartzite__capolavoro_0001", "type": "Quartzite",
             "name": "Capolavoro",
-            "aliases": json.dumps(["Capolavoro Quartzite", "Azul Palomino Quartzite"]),  # STALE mis-bind spelling
+            "alias_rows": json.dumps([{"value": "Capolavoro Quartzite", "method": "seed"},   # STALE mis-bind
+                                      {"value": "Azul Palomino Quartzite", "method": "seed"}]),
+            "codes": "[]",
             "medusa_id": "V9",
             "payload_hash": "OLD", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
@@ -156,8 +160,8 @@ def test_reset_re_derives_variety_aliases_from_clean_base(tmp_path):
             w.writerow({key_c: "quartzite__capolavoro_0001", name_c: "Capolavoro",
                         type_c: "Quartzite", aliases_c: "Capolavoro Quartzite"})   # clean base: no mis-bind
         populate_variations_full(ledger, base)
-        row = ledger.execute("SELECT aliases, medusa_id, state FROM variation WHERE key=?",
+        row = ledger.execute("SELECT alias_rows, codes, medusa_id, state FROM variation WHERE key=?",
                              ("quartzite__capolavoro_0001",)).fetchone()
-        assert json.loads(row["aliases"]) == ["Capolavoro Quartzite"]   # stale spelling dropped
+        assert (row["alias_rows"], row["codes"]) == (None, None)        # stale spelling gone, held until computed
         assert row["medusa_id"] == "V9"                                  # id preserved (update, not recreate)
         assert row["state"] == "dirty"                                   # re-serves on the update pull
