@@ -1,6 +1,8 @@
 """The owner's competitor price sheets, absorbed into delivered runs: `python -m market_prices.intake`
-(RUN_MODE=market-prices-intake on the ad-hoc task). No arguments: the brand, environment, bucket and S3 dry run come
-from settings, every tunable from market_prices/config.py, the layouts from market_prices/sheet_layouts/<brand>.yaml.
+(RUN_MODE=market-prices-intake on the ad-hoc task). No arguments: the brand is the required run input
+SCRAPER_MARKET_PRICES_BRAND (market_prices/run_input.py), never the deployment's own brand; the environment, bucket and
+S3 dry run come from settings, every tunable from market_prices/config.py, the layouts from
+market_prices/sheet_layouts/<brand>.yaml.
 
 Each file in `<env>/market_prices/<brand>/intake/` is read once, by its sha256:
 - a file whose sha is in the brand's `intake_absorbed.csv` is skipped, under any name;
@@ -33,12 +35,13 @@ from market_prices.collect import RunResult, Stamp, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
 from market_prices.publish import publish_run
 from market_prices.register import load_register
+from market_prices.run_input import run_brand
 from market_prices.schema import (
     DeliveryIncluded, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source, VatBasis,
 )
 from market_prices.sheet_files import FileRefused, Table, read_tables
 from market_prices.sheet_values import cell_text, read_currency, read_price
-from stone_pipeline.config.settings import BRAND, ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
 from stone_pipeline.io.deliverables import MANIFEST_NAME, file_entry, published_manifest
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
@@ -390,10 +393,11 @@ def _runs_root() -> Path:
 
 
 def main() -> None:
-    layouts = load_layouts(BRAND)
-    check_ids_apart(layouts, load_register(BRAND))
+    brand = run_brand()
+    layouts = load_layouts(brand)
+    check_ids_apart(layouts, load_register(brand))
     dry_run = _dry_run()
-    outcome = run_intake(_s3_client(), S3_BUCKET, BRAND, layouts, _runs_root(), dry_run)
+    outcome = run_intake(_s3_client(), S3_BUCKET, brand, layouts, _runs_root(), dry_run)
     print(summary(outcome, dry_run))
     if outcome.refused:
         raise SystemExit(1)

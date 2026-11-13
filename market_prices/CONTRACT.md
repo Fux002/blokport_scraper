@@ -71,13 +71,13 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 
 ## Running
 
-- **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for that deployment's brand (`SCRAPER_BRAND`), env and bucket. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
+- **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for the brand named by the required run input `SCRAPER_MARKET_PRICES_BRAND` (set as a container override; never the deployment's own brand, so one deployment's task runs every brand's register), in that deployment's env and bucket, under `<env>/market_prices/<brand>/`. A run without it stops before any request; an unknown brand (no `sites/<brand>.yaml`) is refused the same way. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
 - **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (`PILOT_BRAND`, `PILOT_SITE_ID` in `config.py`) against development's bucket and prints a summary with the first rows. It refuses any other environment, and any site the register has not approved, before a single request.
 
 ## Price sheets (`source` = `file`)
 
-The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3://<bucket>/<env>/market_prices/<brand>/intake/`. RUN_MODE=market-prices-intake reads each file once, by its sha256, and delivers it as its own run folder, published like a crawl run:
+The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3://<bucket>/<env>/market_prices/<brand>/intake/`. RUN_MODE=market-prices-intake, for the brand named by the same required run input `SCRAPER_MARKET_PRICES_BRAND`, reads each file once, by its sha256, and delivers it as its own run folder, published like a crawl run:
 
 - `run_id` and `observed_at` are when S3 received the file (its LastModified), not a price date. A date the sheet states is in `stated_specs` as written.
 - `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the file; its `decision` is `supplied` and `terms_checked_on` is empty.
