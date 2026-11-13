@@ -21,7 +21,8 @@ leaf_attributes: [color, finish, quality]
 
 # PLACEHOLDER category model -- replace with Calcport's REAL lime forms. Exactly one default_form; optionally
 # one bulk_form. base_image "" = real photo; pcat is env-specific (attributes.csv), so pcat_env_var null.
-backbone_file: backbone_varieties.json
+# No backbone_file: lime ships no variety seed yet, so its types are its category combinations' alone. Name the file
+# (backbone_file: backbone_varieties.json) when catalog_source/lime/ ships one; a named seed must exist.
 categories:
   - {name: block, plural: blocks, label: Blocks, shares_variety_vocab: true, fan_out: true, volume_per_kg: "0.0006", pcat_env_var: null, default_form: true, base_image: ""}
   - {name: bag,   plural: bags,   label: Bags,   shares_variety_vocab: true, fan_out: true, finishes: [], volume_per_kg: "0.0006", pcat_env_var: null, bulk_form: true,   base_image: ""}

@@ -71,6 +71,36 @@ def test_a_live_row_that_renames_a_committed_key_refuses():
         seed_rewrite.live_additions("Key,Name,Type,Aliases\nk1,Alfa,Granite,\n", committed)
 
 
+# --- alias VALUES key by alias_key (the manager, 13 Nov; SC #717's rule), names stay on match_key -------------------
+_SCRIPTS = "Wratza 维纳多|巴比伦金|白玫瑰"
+
+
+def test_a_live_addition_keeps_a_non_latin_alias_distinct_from_its_latin_part():
+    # match_key reads a mixed value as its Latin part ("wratza") and every pure-CJK value as "": both would vanish
+    from stone_pipeline.aliases import seed_rewrite
+    from stone_pipeline.reference.medusa_files import read_variants_export
+    committed = read_variants_export("Key,Name,Type,Aliases\nk1,Alpha,Granite,Wratza\n", require_status=False,
+                                     name="committed")
+    live = f"Key,Name,Type,Aliases\nk1,Alpha,Granite,Wratza|{_SCRIPTS}\n"
+    assert seed_rewrite.live_additions(live, committed) == f"Key,Name,Type,Aliases\nk1,Alpha,Granite,{_SCRIPTS}\n"
+
+
+def test_the_rewrite_never_merges_a_non_latin_alias_into_another(tmp_path):
+    from stone_pipeline.aliases import seed_rewrite
+    for path in seed_rewrite.COMMITTED_BASES:
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("Key,Name,Type,Aliases\ngranite__alpha_1,Alpha,Granite,Wratza\n", encoding="utf-8")
+    (tmp_path / seed_rewrite.LIVE_ADDITIONS).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / seed_rewrite.LIVE_ADDITIONS).write_text(
+        f"Key,Name,Type,Aliases\ngranite__alpha_1,Alpha,Granite,{_SCRIPTS}\n", encoding="utf-8")
+    post = {"key": "granite__alpha_1", "variant": "Alpha", "stone_type": "Granite", "aliases": ["Wratza"],
+            "codes": [], "merged_from": []}
+    (tmp_path / seed_rewrite.BACKBONE).write_text(json.dumps({"posts": [post]}), encoding="utf-8")
+    doc = json.loads(seed_rewrite.render(tmp_path)[seed_rewrite.BACKBONE])
+    # each value is its own alias: none collapsed to "" or merged into "Wratza" (joined in alias_key order)
+    assert doc["posts"][0]["aliases"] == ["Wratza", *_SCRIPTS.split("|")]
+
+
 def test_the_live_snapshot_is_pinned_and_committed():
     from stone_pipeline.aliases import seed_rewrite
     assert seed_rewrite.LIVE_BASE_VERSION_ID and len(seed_rewrite.LIVE_BASE_SHA256) == 64

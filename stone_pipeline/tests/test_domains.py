@@ -5,6 +5,8 @@ never silently substituting a default vocabulary.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from stone_pipeline.config import domain
@@ -338,3 +340,51 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
     assert [c["name"] for c in p.categories] == ["shirt", "pants"]   # a different category model
     assert "crystal" not in p.ambiguous_type_words             # no stone vocabulary leaked in
     assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700
+
+
+# -- a pack's seed (the manager's rule, 12 Nov, reviewer 2's LOW on SC #663) -------------------------------------------
+def test_a_pack_that_names_no_backbone_file_loads_with_no_seed(tmp_path, monkeypatch):
+    # the real stone pack less its backbone_file line: a whole, loadable pack (the _valid_pack_dict shape only proves
+    # a malformation, its attributes are not a real vocabulary)
+    text = domain._pack_path("stone").read_text(encoding="utf-8")
+    assert text.count("\nbackbone_file: backbone_varieties.json\n") == 1
+    (tmp_path / "stone.yaml").write_text(text.replace("\nbackbone_file: backbone_varieties.json\n", "\n"),
+                                         encoding="utf-8")
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    assert domain.load_pack("stone").backbone_file is None
+
+
+def test_a_backbone_file_the_pack_names_must_be_a_file_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["backbone_file"] = ""
+    _write_pack(tmp_path, pack)
+    # the exact refusal: the tmp folder's own name holds "backbone_file", so a looser match passes on any error
+    with pytest.raises(ValueError, match="backbone_file must be a file name, got ''"):
+        domain.load_pack("bad")
+
+
+@pytest.mark.parametrize("name", ["../x.json", "sub/x.json"])
+def test_a_backbone_file_the_pack_names_must_be_a_bare_file_name_not_a_path(tmp_path, monkeypatch, name):
+    # the file is joined under catalog_source; a path would read a file outside it or in a sub-folder no pack owns
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["backbone_file"] = name
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match=f"backbone_file must be a file name, got '{re.escape(name)}'"):
+        domain.load_pack("bad")
+
+
+def test_lime_ships_no_seed_while_stone_and_wood_name_theirs():
+    assert domain.load_pack("lime").backbone_file is None
+    assert domain.load_pack("stone").backbone_file == "backbone_varieties.json"
+    assert domain.load_pack("wood").backbone_file == "backbone_varieties.json"
+
+
+def test_a_pack_that_names_no_seed_has_no_backbone_path_to_read(monkeypatch):
+    import dataclasses
+    from stone_pipeline.config import settings
+    seedless = dataclasses.replace(domain.load_pack("stone"), name="seedless", backbone_file=None)
+    monkeypatch.setattr(domain, "active_pack", lambda: seedless)
+    with pytest.raises(FileNotFoundError, match="seedless.*names no backbone_file"):
+        settings.SETTINGS.paths.backbone_json
