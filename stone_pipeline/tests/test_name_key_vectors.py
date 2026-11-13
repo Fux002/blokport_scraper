@@ -8,6 +8,7 @@ import json
 import unicodedata
 from pathlib import Path
 
+from stone_pipeline.core import text as text_mod
 from stone_pipeline.core.text import UnfoldableName, clean_identifier, clean_name, match_key
 
 _VECTORS = json.loads(
@@ -43,3 +44,24 @@ def test_both_display_rules_agree_with_every_shared_vector():
              for field, clean in (("display", clean_name), ("identifier", clean_identifier))
              if _cleaned(clean, c["input"]) != c[field]]
     assert not wrong, f"{len(wrong)} display vectors disagree, first: {wrong[:3]}"
+
+
+def _alias(text: str):
+    try:
+        return text_mod.clean_alias(text) or None
+    except getattr(text_mod, "AliasRefused", ValueError):
+        return None
+
+
+def test_the_alias_rule_agrees_with_every_shared_vector():
+    assert hasattr(text_mod, "clean_alias"), "core.text has no clean_alias (the alias kind)"
+    wrong = [(c["input"], c["alias"], _alias(c["input"]))
+             for c in _VECTORS["cases"] if _alias(c["input"]) != c["alias"]]
+    assert not wrong, f"{len(wrong)} alias vectors disagree, first: {wrong[:3]}"
+
+
+def test_the_alias_key_agrees_with_every_shared_vector():
+    assert hasattr(text_mod, "alias_key"), "core.text has no alias_key (the paired alias key)"
+    wrong = [(c["input"], c["alias_key"], text_mod.alias_key(c["input"]))
+             for c in _VECTORS["cases"] if text_mod.alias_key(c["input"]) != c["alias_key"]]
+    assert not wrong, f"{len(wrong)} alias_key vectors disagree, first: {wrong[:3]}"

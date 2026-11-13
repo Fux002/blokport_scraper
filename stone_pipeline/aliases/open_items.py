@@ -5,7 +5,7 @@ review/<env>/alias_cleanup_open.csv, written on every cleanup run (the header on
 - columns kind,Key,Value,reason; kind is one of OPEN_KINDS:
   - digit_non_code: a served alias holding a digit that the code pattern does not accept (reason DIGIT_REASON);
   - admin_refused: an admin alias (the export's AdminAliases) failing the boundary (reason: the alias_problem code);
-- UTF-8 with no BOM, \\n line ends, minimal quoting, sorted by (kind, Key, match_key(Value), Value).
+- UTF-8 with no BOM, \\n line ends, minimal quoting, sorted by (kind, Key, alias_key(Value), Value).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import io
 from pathlib import Path
 from typing import Iterable, Optional
 
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key
 
 OPEN_FILE = "alias_cleanup_open.csv"
 OPEN_COLUMNS = ("kind", "Key", "Value", "reason")
@@ -35,7 +35,7 @@ def open_items_bytes(rows: Iterable[tuple[str, str, str, str]]) -> bytes:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n", quoting=csv.QUOTE_MINIMAL)
     writer.writerow(OPEN_COLUMNS)
-    writer.writerows(sorted(rows, key=lambda r: (r[0], r[1], match_key(r[2]), r[2])))
+    writer.writerows(sorted(rows, key=lambda r: (r[0], r[1], alias_key(r[2]), r[2])))
     return out.getvalue().encode("utf-8")
 
 

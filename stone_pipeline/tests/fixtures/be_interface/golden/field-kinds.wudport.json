@@ -1,0 +1,19 @@
+{
+  "brand": "wudport",
+  "fields": {
+    "color.name": "identifier",
+    "finish.name": "identifier",
+    "port.name": "name",
+    "port.region_name": "name",
+    "product.collection_city": "name",
+    "product.lot_code": "identifier",
+    "product.origin_city": "name",
+    "product.origin_county": "name",
+    "product.title": "identifier",
+    "product_category.name": "name",
+    "quality.name": "identifier",
+    "type.name": "name",
+    "variation.name": "name",
+    "variation_alias.value": "alias"
+  }
+}
