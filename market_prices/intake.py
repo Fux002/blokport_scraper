@@ -209,9 +209,9 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     listed_currency = column_currency or price.currency
     listed_unit = _cell(cells, header, layout.unit)
     said = layout.statements
-    mapped = {name_key(column) for column in layout.mapped_columns(competitor.competitor_id)}
+    fields = {name_key(column) for column in layout.field_columns(competitor.competitor_id)}
     specs = {layout.headers[position]: value for position, cell in enumerate(cells)
-             if header[position] not in mapped and (value := cell_text(cell))}
+             if header[position] not in fields and (value := cell_text(cell))}
     grade, min_qty = _cell(cells, header, layout.grade), _cell(cells, header, layout.min_qty)
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,

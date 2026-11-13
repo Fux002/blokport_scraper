@@ -82,7 +82,7 @@ The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3:/
 - `run_id` and `observed_at` are when S3 received the file (its LastModified), not a price date. A date the sheet states is in `stated_specs` as written.
 - `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the file; its `decision` is `supplied` and `terms_checked_on` is empty.
 - `source_url` is `s3://<bucket>/<intake key>?versionId=<version>#<sheet>!R<row>` (`#R<row>` for a csv): the exact file version and row.
-- `stated_specs` holds every column the layout does not map, header to cell as written.
+- `stated_specs` holds every column the layout does not read into an observation field, header to cell as written. The identity columns (the column naming the competitor, every `listing_key` part) are kept there too, so thickness, finish or dimensions are read from `stated_specs`, never parsed out of `listing_key`.
 - `provenance` `site_statement` means the sheet's layout states it once for every row (for example its currency or VAT basis).
 - `s3://<bucket>/<env>/market_prices/<brand>/intake_absorbed.csv` records each absorbed file: `sha256`, `key`, `version_id`, `layout_id`, `run_id`, sorted by `sha256`.
 

@@ -157,7 +157,10 @@ class Layout(BaseModel):
             raise ValueError(f"layout {self.layout_id}: price or price_by_competitor, not both")
         if self.price is None and not self.price_by_competitor:
             raise ValueError(f"layout {self.layout_id} names no price column (price or price_by_competitor)")
-        for column in (*self.mapped_columns(), *self.price_by_competitor.values()):
+        named = (self.price, self.unit, self.currency, self.min_qty, self.availability, self.grade,
+                 self.competitor.column)
+        for column in (*self.listing_key, *self.listing_text, *self.price_by_competitor.values(),
+                       *(column for column in named if column is not None)):
             if name_key(column) not in keys:
                 raise ValueError(f"layout {self.layout_id}: column {column!r} is not a header")
         return self
@@ -166,13 +169,13 @@ class Layout(BaseModel):
         """The column a row of this competitor states its price in; None when the layout gives it none."""
         return self.price if self.price is not None else self.price_by_competitor.get(competitor_id)
 
-    def mapped_columns(self, competitor_id: Optional[str] = None) -> tuple[str, ...]:
-        """Every header the layout reads into a named field for a row of `competitor_id` (its own price column);
-        the others, another competitor's price column among them, become stated_specs."""
-        price = self.price_column(competitor_id) if competitor_id is not None else self.price
-        single = (price, self.unit, self.currency, self.min_qty, self.availability, self.grade,
-                  self.competitor.column)
-        return (*self.listing_key, *self.listing_text, *(column for column in single if column is not None))
+    def field_columns(self, competitor_id: str) -> tuple[str, ...]:
+        """Every header read into an observation field for a row of `competitor_id` (its own price column); the
+        others become stated_specs. The identity columns (the competitor's name column, the listing_key parts) are
+        not fields: a consumer reads thickness or finish from stated_specs and never parses listing_key."""
+        single = (self.price_column(competitor_id), self.unit, self.currency, self.min_qty, self.availability,
+                  self.grade)
+        return (*self.listing_text, *(column for column in single if column is not None))
 
     @property
     def signature(self) -> tuple[str, ...]:
