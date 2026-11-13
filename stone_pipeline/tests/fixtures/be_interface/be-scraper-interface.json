@@ -70,7 +70,7 @@
           "fields"
         ],
         "brand": "text",
-        "fields": "object: field name -> enum:name|identifier, keys sorted code-unit"
+        "fields": "object: field name -> enum:name|identifier|alias, keys sorted code-unit"
       }
     },
     "T3": {
@@ -214,8 +214,8 @@
   },
   "goldens_sha256": {
     "be/attributes.csv": "af538ed356e7e6264066fe5275a4bdf192a98ad7e499e5ad0a51d1963ff3d495",
-    "be/field-kinds.blokport.json": "4db3727a08e4283406ea2528152ec3b48254f90643c66ceaeb3f79ad1262afeb",
-    "be/field-kinds.wudport.json": "aa0b7ed1ca942f783444a28c918ce088c58a29a8ddd90afb677b79ec51333da4",
+    "be/field-kinds.blokport.json": "b7ac11ffe483818200cbaab56e024a5e59b263c139c17f994d3ecf3ad0fd03e5",
+    "be/field-kinds.wudport.json": "33decce24010a22c109d0f6f8b64bdedd646fbbbc5267cb9cb91751eea61ca9e",
     "be/ports.csv": "fa78c81f7b530ad87278e8694853679a3981613541ae94e97c6df4d7bc78df20",
     "be/products_export.csv": "6986cdc73f0b140a2628789658196aaad2bb48cc5ebf39c5e4220258e922a8d2",
     "be/variants_export.csv": "ab6b7145c0128c4c7e881200eb4b837488a6984ff59ce460488156f97797c0f1"
