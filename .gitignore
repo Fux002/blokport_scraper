@@ -33,6 +33,8 @@ failures.jsonl
 # The backend's field-kinds.json is fetched at run time only (io/medusa_inputs.py). A committed copy would ship
 # in the image and mask a failed fetch; the test fixture is the one committed copy.
 from_medusa/**/field-kinds.json
+# The reason of a refused attributes.csv fetch (io/medusa_inputs.py), runtime state only.
+from_medusa/**/attributes.csv.unavailable
 
 # Large, environment-specific Medusa download — provide/refresh at deploy time
 # (lives on S3 at <env>/scraper/from_medusa/; fetched into the task at run time).

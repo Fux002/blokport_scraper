@@ -22,6 +22,7 @@ from stone_pipeline.core import csvio
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.bootstrap import attribute_id
 from stone_pipeline.ledger.db import Ledger
+from stone_pipeline.reference.medusa_files import CATEGORY_KIND
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS as VARIANTS_FULL_COLS
 
@@ -72,7 +73,7 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         type_name=p["type"],
         type_id=attribute_id(ledger, "type", p["type"]) if p["type"] else None,
         variation_id=variation_id,
-        category_pcat_id=attribute_id(ledger, "category", _category_label(p["category"])) if p["category"] else None,
+        category_pcat_id=_category_pcat(p["category"]) if p["category"] else None,
         title=p["title"], description=p["description"], handle=p["handle"], slug=p["slug"],
         weight=p["weight"], length=p["length"], width=p["width"], height=p["height"],
         origin_country_code=p["origin_country_code"],
@@ -94,12 +95,13 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
     )
 
 
-def _category_label(handle: str) -> str:
-    """The category attribute value (the label) of a stored category HANDLE (D11). An unknown handle raises: a product
-    is never rendered under a guessed category."""
+def _category_pcat(handle: str) -> str | None:
+    """The pcat of a stored category HANDLE (D11), from the category registry (table 577: the one source of a
+    category; the ledger's attribute table holds no category rows). An unknown handle raises: a product is never
+    rendered under a guessed category."""
     if (cat := category_by_handle(handle)) is None:
         raise ValueError(f"category handle {handle!r} is no pack category")
-    return cat.label
+    return cat.pcat_id or None
 
 
 def _stored_count(p) -> int | None:
@@ -146,7 +148,8 @@ def _dump_attributes(ledger: Ledger, path: Path) -> None:
     attributes.csv per (category, value); a value absent there defaults to active/not-internal. Carrying them
     is what makes build_combinations filter the RENDER'S combinations exactly as the real build does, so
     ledger.verify still matches once a value is archived. Dormant: with no status columns every value reads
-    active/false, so the combination set is byte-identical to today."""
+    active/false, so the combination set is byte-identical to today. Category rows are never written: a category
+    is the registry's (table 577), and any a live ledger still holds from before are inert, so they are skipped."""
     from stone_pipeline.config.settings import SETTINGS
     from stone_pipeline.reference.loaders.common import norm
     from stone_pipeline.reference.medusa_files import read_attributes
@@ -157,10 +160,11 @@ def _dump_attributes(ledger: Ledger, path: Path) -> None:
             status_of[(a.category, norm(a.value))] = (a.status, "true" if a.internal else "false")
     with Path(path).open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["category", "value", "sourceid", "status", "internal"])
-        for r in ledger.execute("SELECT category, value, medusa_id FROM attribute"):
+        w.writerow(["category", "value", "sourceid", "status", "internal", "handle"])
+        for r in ledger.execute("SELECT category, value, medusa_id FROM attribute WHERE category != ?",
+                                (CATEGORY_KIND,)):
             status, internal = status_of.get((r["category"], norm(r["value"])), ("active", "false"))
-            w.writerow([r["category"], r["value"], r["medusa_id"] or "", status, internal])
+            w.writerow([r["category"], r["value"], r["medusa_id"] or "", status, internal, ""])
 
 
 def _dump_variations_export(ledger: Ledger, path: Path) -> None:

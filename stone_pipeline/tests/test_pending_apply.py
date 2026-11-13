@@ -88,7 +88,7 @@ def test_a_statement_made_while_the_applying_produce_ran_is_still_pending():
     assert store.decisions_pending_apply()["changed"] == 1
 
 
-def test_membership_the_produce_writes_is_never_an_operator_decision_pending():
+def test_membership_the_produce_writes_is_never_an_operator_decision_pending(seeded_config_store):
     # a minted variety's colour/finish/quality, recorded by the produce itself (record_minted_membership), is written
     # during the run, after its start: it is the produce's own output, not a decision waiting for one
     assert ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")]) == 1
@@ -99,7 +99,7 @@ def test_membership_the_produce_writes_is_never_an_operator_decision_pending():
     assert store.decisions_pending_apply()["changed"] == 0
 
 
-def test_an_operator_leaf_verdict_counts_and_takes_over_a_produce_written_row():
+def test_an_operator_leaf_verdict_counts_and_takes_over_a_produce_written_row(seeded_config_store):
     ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")])
     ds.set_backbone_leaf_decision("Alpine Luxe", "Granite", "color", "White", "reject")   # the operator revises it
     ds.set_backbone_leaf_decision("Alpine Luxe", "Granite", "quality", "B", "approve")
