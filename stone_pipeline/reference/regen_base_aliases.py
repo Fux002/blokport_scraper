@@ -19,7 +19,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BASES = ["from_medusa/development/variants_export_base.csv", "from_medusa/production/variants_export_base.csv"]
+FIELD_KINDS = ROOT / "stone_pipeline" / "tests" / "fixtures" / "field-kinds.json"
+BASES =["from_medusa/development/variants_export_base.csv", "from_medusa/production/variants_export_base.csv"]
 KEPT = ("Key", "Name", "Type")
 
 
@@ -42,8 +43,12 @@ def _write_csv(header: list[str], rows: list[dict], like: str) -> str:
 
 
 def project(text: str) -> list[dict]:
-    """emit's hermetic projection (seed_only: the base and the backbone, nothing else) of a base's text."""
+    """emit's hermetic projection (seed_only: the base and the backbone, nothing else) of a base's text. Names are
+    written through the committed field-kinds fixture, the only committed copy of the map (a produce fetches the
+    published one; this tool runs where none was fetched), as clean_committed_names does."""
+    from stone_pipeline.reference.loaders import field_kinds
     from stone_pipeline.stages import emit_catalog
+    field_kinds._path = lambda: FIELD_KINDS
     with tempfile.TemporaryDirectory() as td:
         base, out = Path(td) / "variants_export_base.csv", Path(td) / "1_variants_full.csv"
         base.write_bytes(text.encode("utf-8"))
