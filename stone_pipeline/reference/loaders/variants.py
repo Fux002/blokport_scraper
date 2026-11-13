@@ -10,6 +10,8 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.aliases import stores as alias_stores
+from stone_pipeline.aliases.surfaces import Stores, Variety, surfaces_by_key
 from stone_pipeline.config.settings import VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.phase1.variety_key import variety_key_type
@@ -24,6 +26,8 @@ class Variant:
     key: str
     name: str
     aliases: list[str]
+    # the variety's codes ('G603'): exact-tier surfaces only (matching.index.add_code)
+    codes: list[str] = field(default_factory=list)
     # VE2: the export marks this variety archived. It STAYS in the matcher (recognition keeps the full
     # vocabulary), but the matcher must not LEARN a new alias onto it (match_variation write-back).
     archived: bool = False
@@ -73,32 +77,36 @@ def _read_variant_records(path: Path) -> tuple[list[ExportVariation], str]:
     return records, hashlib.sha256(data).hexdigest()[:16]
 
 
-def load_existing_variants(path: Path, categories: list[str]) -> ExistingVariants:
+def load_existing_variants(path: Path, categories: list[str], stores: Stores) -> ExistingVariants:
     """The one variety table from ONE read of the file, under each of `categories`: a variety belongs to the stone,
-    not a format, so every category's engine matches against every variety, under the same Key and id."""
+    not a format, so every category's engine matches against every variety, under the same Key and id. `stores`:
+    the scraper's alias stores (aliases.stores.scraper_stores); the file adds its hand rows."""
     path = Path(path)
     if not path.exists():
         log.warning(f"variants file absent: {path}")
         table, sha = VariantTable(), "absent"
     else:
         records, sha = _read_variant_records(path)
-        table = _table(records)
+        table = _table(records, stores)
     return ExistingVariants({c: table for c in categories}, path, sha)
 
 
-def load_variants(path: Path) -> VariantTable:
-    """The one variety table of a file (an absent file is an empty table)."""
+def load_variants(path: Path, stores: Stores) -> VariantTable:
+    """The one variety table of a file (an absent file is an empty table), its surfaces from `stores` and the
+    file's hand rows."""
     path = Path(path)
     if not path.exists():
         log.warning(f"variants file absent: {path}")
         return VariantTable()
     records, _ = _read_variant_records(path)
-    return _table(records)
+    return _table(records, stores)
 
 
-def _table(records: list[ExportVariation]) -> VariantTable:
+def _table(records: list[ExportVariation], stores: Stores) -> VariantTable:
     """The table of every eligible record. Every record's Key is read by the one parser first, an excluded row's
-    too: a Key it refuses (an old prefixed Key) raises, never read as some category's or skipped silently."""
+    too: a Key it refuses (an old prefixed Key) raises, never read as some category's or skipped silently. A
+    variety's aliases and codes are its surfaces from the stores (aliases.surfaces) plus the file's hand rows; the
+    file's own Aliases column is the scraper's output, never read back as a store."""
     for record in records:
         if record.key:
             variety_key_type(record.key)
@@ -131,6 +139,7 @@ def _table(records: list[ExportVariation]) -> VariantTable:
     dup_losers = {k for keys in _by_identity.values() if len(keys) > 1
                   for k in keys if k != survivor_of(keys, _seed)}
     delete_keys = delete_keys | dup_losers
+    kept = []
     for record in records:
         name, key = record.name, record.key
         # The Id-free base is the matcher's fallback source when the live export is absent (post factory
@@ -147,8 +156,17 @@ def _table(records: list[ExportVariation]) -> VariantTable:
         # the name here: a variety is matchable by its assigned type, never hidden on a name-vs-type guess.
         if looks_code_shaped(name) == "bare_code" or key in delete_keys:
             continue
+        kept.append((vid, record))
+    surfaces, unbound = surfaces_by_key(
+        [Variety(r.key, r.name, r.type) for _, r in kept],
+        Stores(seed=stores.seed, operator=stores.operator, learned=stores.learned,
+               admin=alias_stores.admin_of(r for _, r in kept)),
+        alias_stores.is_code())
+    alias_stores.log_unbound(unbound)
+    for vid, record in kept:
+        found = surfaces[record.key]
         table.by_id[vid] = Variant(
-            variation_id=vid, key=key, name=name, aliases=list(record.aliases),
-            archived=record.archived,
+            variation_id=vid, key=record.key, name=record.name, aliases=[v for v, _ in found.aliases],
+            codes=[v for v, _ in found.codes], archived=record.archived,
         )
     return table

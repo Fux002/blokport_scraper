@@ -40,6 +40,7 @@ class CandidateIndex:
     by_tokenset: dict[tuple, set[str]] = field(default_factory=dict)
     by_deprefixed: dict[str, set[str]] = field(default_factory=dict)
     by_phonetic: dict[tuple, set[str]] = field(default_factory=dict)
+    by_code: dict[str, set[str]] = field(default_factory=dict)       # a code's compact key -> cids (exact tier only)
 
     def _add_surface(self, cid: str, surface: str) -> None:
         # A surface that folds to an empty key (a name in a non-Latin script only) is no usable name:
@@ -78,6 +79,14 @@ class CandidateIndex:
                 candidate.surfaces.append(surface)
                 self._add_surface(cid, surface)
 
+    def add_code(self, cid: str, code: str) -> None:
+        """A code (the brand's name_code_pattern, 'G603') is a surface of the EXACT tier only: never a candidate
+        surface, which the fuzzy and overlap tiers score against, and never a projection or phonetic key, so a code
+        one character off ('G630') is another stone, never a near match (P2-10 C3). The exact tier finds it by the
+        query's compact key, so a listing spelling it spaced or hyphenated ('G 603', 'G-603') still binds it."""
+        if cid in self.candidates and (key := proj.compact(code)):
+            self.by_code.setdefault(key, set()).add(cid)
+
     def add_surface_alias(self, cid: str, surface: str) -> None:
         """Write-back: register a newly confirmed spelling (section 8.4)."""
         candidate = self.candidates.get(cid)
@@ -89,7 +98,8 @@ class CandidateIndex:
 
     # --- exact-projection lookups (tiers 2 and 3) -----------------------------
     def lookup_norm(self, query: str) -> set[str]:
-        return self.by_norm.get(proj.norm(query), set())
+        """The exact tier: the query's key among the names and aliases, and its compact key among the codes."""
+        return self.by_norm.get(proj.norm(query), set()) | self.by_code.get(proj.compact(query), set())
 
     def lookup_compact(self, query: str) -> set[str]:
         return self.by_compact.get(proj.compact(query), set())
@@ -136,16 +146,17 @@ def build_variation_index(variant_table, backbone, origin_map=None) -> "Candidat
         # blocking never depends on the backbone's display FORM of the type. `variety` stays for block_colors.
         block_type = key_type
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
-        surfaces = set(variant.aliases)
         rule = origin_map.exact(variant.name, key_type) if origin_map is not None else None
         index.add(
             cid=variant.variation_id,
             canonical=variant.name,
-            surfaces=list(surfaces),
+            surfaces=list(variant.aliases),
             block_type=block_type,
             block_colors=block_colors,
             origins=set(rule.countries) if rule else set(),
         )
+        for code in variant.codes:
+            index.add_code(variant.variation_id, code)
     return index
 
 

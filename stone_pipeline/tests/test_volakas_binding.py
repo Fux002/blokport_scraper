@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from stone_pipeline.aliases.stores import seed_of
+from stone_pipeline.aliases.surfaces import Stores
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import build_variation_index
@@ -26,7 +28,8 @@ def engines():
     backbone, origin_map, t = load_backbone(), load_origin_map(), SETTINGS.thresholds
     out = {}
     for form in FORMS:
-        table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv")   # one table, every form
+        # one table, every form
+        table = load_variants(ROOT / "from_medusa/production/variants_export_base.csv", Stores(seed=seed_of(backbone)))
         index = build_variation_index(table, backbone, origin_map)
         out[form] = (VariationEngine(index, t.variation_auto_accept, t.variation_review_floor), table)
     return out
