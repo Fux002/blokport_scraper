@@ -47,16 +47,6 @@ log = logfmt.get_logger("match_variation")
 STANDALONE_MATCHERS: dict = {}   # category name -> fn(row, ref)
 
 
-def _apply_learned(index, table, learned: list[dict]) -> None:
-    """The ACTIVE learned aliases (config.db learned_alias, P2-10 C2) onto the index: each row names its variety by
-    the identity Key, the index by the variety's id, so the table maps one to the other. A Key this table does not
-    hold (a variety outside this run's export) adds nothing."""
-    cid_of = {variant.key: cid for cid, variant in table.by_id.items()}
-    for row in learned:
-        if (cid := cid_of.get(row["identity_key"])) is not None:
-            index.add_surface_alias(cid, row["value"])
-
-
 def origin_evidence(row: CanonicalRow, source_cfg, ref: ReferenceData) -> str:
     """The product's origin EVIDENCE for matching, as ISO-2 or '': the scraped origin field when the listing
     states one, else the vendor's declared primary origin. A narrowing signal for the engine (it keeps the
@@ -122,13 +112,12 @@ class VariationStage:
         # One engine per registry category; a new category gets its engine automatically from ref.variants.
         # Every stone-vocabulary category's table is the same varieties (phase 1), so each engine binds the
         # same Keys.
-        from stone_pipeline.config import decisions_store
-        learned = decisions_store.active_learned_aliases()   # approved guesses -> exact hits; a proposal is not one
+        # each table's surfaces (aliases.surfaces: seed, operator, ACTIVE learned, the hand rows) came with ref, from
+        # the one store reader; a proposed learned alias is no surface until approved (P2-10 C2, C3)
         auto, floor = thresholds.variation_auto_accept, thresholds.variation_review_floor
         engines: dict[str, VariationEngine] = {}
         for name, table in ref.variants.items():
             index = build_variation_index(table, ref.backbone, ref.origin_map)
-            _apply_learned(index, table, learned)
             engines[name] = VariationEngine(index, auto, floor, suggester=_build_suggester(index))
         return cls(
             ref=ref, engines=engines,

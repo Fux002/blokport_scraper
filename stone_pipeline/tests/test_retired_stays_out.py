@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from stone_pipeline.aliases.surfaces import Stores
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import build_variation_index
@@ -64,11 +65,12 @@ def reference(tmp_path, monkeypatch):
     monkeypatch.setattr(loaders, "_delete_keys", lambda: set())
     monkeypatch.setattr(loaders, "pristine_seed_keys", lambda: frozenset())
     base = _write(tmp_path / "variants_export_base.csv", emit_catalog._COLS,
-                  [[VOLOCAS, "Volocas", "Marble", "Volakas"], [VOLAKAS, "Volakas", "Marble", ""]])
+                  [[VOLOCAS, "Volocas", "Marble", ""], [VOLAKAS, "Volakas", "Marble", ""]])
+    stores = Stores(seed={VOLOCAS: (["Volakas"], [])})   # P2-10 C3: a variety's aliases come from the stores
 
     def table(retired: set[str]):
         monkeypatch.setattr(decisions, "load_retired", lambda: set(retired))
-        return loaders.load_variants(base)
+        return loaders.load_variants(base, stores)
     return table
 
 
