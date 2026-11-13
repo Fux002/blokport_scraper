@@ -222,14 +222,17 @@ def test_the_s3_dry_run_writes_the_folder_and_uploads_nothing(tmp_path):
     assert (outcome.run_dir / config.OBSERVATIONS_FILE).is_file()
 
 
-def test_main_runs_the_deployments_brand_from_env_and_publishes(monkeypatch, tmp_path):
+@pytest.mark.parametrize("variable", ["SCRAPER_MARKET_PRICES_BRAND", "BLOKPORT_MARKET_PRICES_BRAND"])
+def test_main_runs_the_run_inputs_brand_not_the_deployments_and_publishes_under_it(variable, monkeypatch, tmp_path):
+    # this deployment is blokport's (the dev default); the run input names wudport, so wudport's register is run and
+    # its keys land under wudport's prefix in this deployment's bucket: the one shared runner
     loaded: list[str] = []
     s3 = _S3()
 
     def load(brand: str) -> Register:
         loaded.append(brand)
-        return _register()
-    monkeypatch.setattr(run, "BRAND", "blokport")
+        return Register.model_validate({"brand": brand, "sites": [_site()]})
+    monkeypatch.setenv(variable, "wudport")
     monkeypatch.setattr(run, "_dry_run", lambda: False)
     monkeypatch.setattr(run, "_s3_client", lambda: s3)
     monkeypatch.setattr(run, "_runs_root", lambda: tmp_path)
@@ -238,14 +241,22 @@ def test_main_runs_the_deployments_brand_from_env_and_publishes(monkeypatch, tmp
     monkeypatch.setattr(run, "_now", lambda: MOMENT)
     monkeypatch.setattr(run.time, "sleep", lambda _seconds: None)
     run.main()
-    assert loaded == ["blokport"]
-    assert "dev/market_prices/blokport/latest.json" in s3.objects
+    assert loaded == ["wudport"]
+    assert "dev/market_prices/wudport/latest.json" in s3.objects
+    assert not any(key.startswith("dev/market_prices/blokport/") for key in s3.objects)
 
 
-def test_a_register_that_does_not_validate_stops_the_run_before_any_request(monkeypatch):
-    monkeypatch.setattr(run, "BRAND", "no_such_brand")
+def test_a_run_without_the_brand_input_stops_before_any_register_or_request(monkeypatch):
+    monkeypatch.setattr(run, "load_register", lambda brand: pytest.fail(f"the {brand} register was read"))
     monkeypatch.setattr(run, "LiveTransport", lambda: pytest.fail("a transport was built"))
-    with pytest.raises(RegisterError):
+    with pytest.raises(SystemExit, match="SCRAPER_MARKET_PRICES_BRAND"):
+        run.main()
+
+
+def test_an_unknown_run_brand_stops_the_run_before_any_request(monkeypatch):
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "no_such_brand")
+    monkeypatch.setattr(run, "LiveTransport", lambda: pytest.fail("a transport was built"))
+    with pytest.raises(RegisterError, match="no site register for brand 'no_such_brand'"):
         run.main()
 
 
