@@ -96,6 +96,8 @@ def test_the_rewrite_never_merges_a_non_latin_alias_into_another(tmp_path):
     post = {"key": "granite__alpha_1", "variant": "Alpha", "stone_type": "Granite", "aliases": ["Wratza"],
             "codes": [], "merged_from": []}
     (tmp_path / seed_rewrite.BACKBONE).write_text(json.dumps({"posts": [post]}), encoding="utf-8")
+    # the source fixes table is a required input (an absent one fails loud): none here, so the header only
+    (tmp_path / seed_rewrite.FIXES).write_text(",".join(seed_rewrite.FIX_COLUMNS) + "\n", encoding="utf-8")
     doc = json.loads(seed_rewrite.render(tmp_path)[seed_rewrite.BACKBONE])
     # each value is its own alias: none collapsed to "" or merged into "Wratza" (joined in alias_key order)
     assert doc["posts"][0]["aliases"] == ["Wratza", *_SCRIPTS.split("|")]
