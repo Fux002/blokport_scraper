@@ -29,7 +29,7 @@ from stone_pipeline.adapters import tokens
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.medusa_files import read_attributes
 
-HEADER = "category,value,sourceid,status,internal,category_handles\n"
+HEADER = "category,value,sourceid,status,internal,category_handles,handle\n"
 ROWS = (
     "type,Granite,t_granite,active,false,blocks|slabs|tiles\n"
     "type,Marble,t_marble,active,false,\n"                      # a seed type, no combination yet: the pack's
@@ -41,9 +41,9 @@ ROWS = (
     "type,Novelite,t_nov,active,false,slabs\n"                   # new, no seed variety: enters by its combination
     "color,Grey,c_grey,active,false,\n"
     "color,Red,c_red,active,false,\n"
-    "category,Slabs,pcat_s,active,false,\n"
-    "category,Blocks,pcat_b,active,false,\n"
-    "category,Tiles,pcat_t,active,false,\n"
+    "category,Slabs,pcat_s,active,false,,slabs\n"
+    "category,Blocks,pcat_b,active,false,,blocks\n"
+    "category,Tiles,pcat_t,active,false,,tiles\n"
 )
 DARK_STEEL = "granite__dark_steel_0aff6871-0874-50f4-a814-169e6a961135"
 
@@ -143,7 +143,7 @@ def test_dark_steel_granite_is_not_mistyped_and_stays_off_the_delete_list(attrib
 
 def test_an_attributes_file_without_category_handles_is_refused(tmp_path):
     path = tmp_path / "attributes.csv"
-    path.write_text("category,value,sourceid,status,internal\ntype,Granite,t_granite,active,false\n",
+    path.write_text("category,value,sourceid,status,internal,handle\ntype,Granite,t_granite,active,false,\n",
                     encoding="utf-8")
     with pytest.raises(ValueError, match="category_handles"):
         loaders.load_attributes(path)
@@ -153,7 +153,7 @@ def test_the_fetch_refuses_an_attributes_download_without_category_handles(tmp_p
     # at the boundary: a download without the column never replaces the local file (medusa_inputs.check_readable)
     from stone_pipeline.io import medusa_inputs
     old = tmp_path / "old.csv"
-    old.write_text("category,value,sourceid,status,internal\ntype,Granite,t_granite,active,false\n", encoding="utf-8")
+    old.write_text("category,value,sourceid,status,internal,handle\ntype,Granite,t_granite,active,false,\n", encoding="utf-8")
     with pytest.raises(ValueError, match="category_handles"):
         medusa_inputs.check_readable("attributes.csv", old)
     good = tmp_path / "good.csv"

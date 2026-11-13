@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import sync
@@ -103,6 +105,7 @@ def test_a_reset_serves_everything_from_zero_without_a_wait(tmp_path):
         assert ledger.get("product", "sku", "P-1")["retry_after"] is None
 
 
+@pytest.mark.usefixtures("ledger_product_pcats")   # its rows carry PC1 / PC2 (table 577: the registry's)
 def test_new_content_is_served_at_once_even_while_a_failure_waits(tmp_path):
     cfg = load_source("polonine")
     rows = _fixture_rows()

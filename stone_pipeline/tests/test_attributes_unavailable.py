@@ -18,7 +18,7 @@ from stone_pipeline.config import store
 from stone_pipeline.config.control import server
 from stone_pipeline.io import medusa_inputs
 
-HEADER = "category,value,sourceid,category_handles\n"
+HEADER = "category,value,sourceid,category_handles,handle\n"
 FULL = HEADER + "".join(f"color,c{i},id{i},\n" for i in range(100))
 FULLER = HEADER + "".join(f"color,c{i},id{i},\n" for i in range(110))
 THIN = HEADER + "color,c0,id0,\n"                                   # 2 lines against 101: Medusa mid-reset
@@ -88,7 +88,7 @@ def test_a_boot_in_a_new_environment_before_be_s_first_export_serves(attributes,
 
 
 def test_a_boot_with_a_malformed_copy_serves_and_names_it(attributes, tmp_path, monkeypatch):
-    no_column = "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(100))
+    no_column = "category,value,sourceid,handle\n" + "".join(f"color,c{i},id{i},\n" for i in range(100))
     _boot(monkeypatch, tmp_path, _S3(no_column))
     assert _unavailable(server.dispatch("GET", ["types"], None), "category_handles")
 
