@@ -53,8 +53,8 @@ _NO_SUCH_KEY = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "
 def _committed(tmp_path, lines: int):
     """A tmp attributes.csv seeded with `lines` colour rows (the committed baseline stand-in)."""
     target = tmp_path / "attributes.csv"
-    target.write_text("category,value,sourceid,category_handles\n" + "".join(
-        f"color,c{i},id{i},\n" for i in range(lines)), encoding="utf-8")
+    target.write_text("category,value,sourceid,category_handles,handle\n" + "".join(
+        f"color,c{i},id{i},,\n" for i in range(lines)), encoding="utf-8")
     return target
 
 
@@ -67,7 +67,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
     # replace found the first one's file gone (FileNotFoundError, a 500)
     import threading
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
+    live = "category,value,sourceid,category_handles,handle\n" + "".join(f"color,c{i},id{i},,\n" for i in range(38))
     both = threading.Barrier(2)
 
     class _Together(_FakeS3):
@@ -94,7 +94,7 @@ def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(t
 
 def test_fetch_attributes_writes_a_fuller_live_copy(tmp_path):
     target = _committed(tmp_path, 26)
-    live = "category,value,sourceid,category_handles\n" + "".join(f"color,c{i},id{i},\n" for i in range(38))
+    live = "category,value,sourceid,category_handles,handle\n" + "".join(f"color,c{i},id{i},,\n" for i in range(38))
     fetch_inputs.fetch_attributes(client=_FakeS3(live), target=target)
     assert target.read_text().count("color,") == 38          # replaced with the live vocab
     assert _leftovers(tmp_path) == []                         # temp cleaned up
@@ -104,7 +104,7 @@ def test_fetch_attributes_refuses_a_thin_copy_and_leaves_the_local_file(tmp_path
     # one path with the produce fetch: a thin copy is refused LOUD, never kept quietly as if the local file were fresh
     target = _committed(tmp_path, 100)
     before = target.read_text()
-    thin = "category,value,sourceid,category_handles\ncolor,c0,id0,\n"          # 2 lines << 50% of 101
+    thin = "category,value,sourceid,category_handles,handle\ncolor,c0,id0,,\n"          # 2 lines << 50% of 101
     with pytest.raises(RuntimeError, match="attributes.csv.*thin"):
         fetch_inputs.fetch_attributes(client=_FakeS3(thin), target=target)
     assert target.read_text() == before
@@ -226,11 +226,13 @@ def test_the_thin_copy_floor_is_one_setting():
 # settings parses attributes.csv at import, so a malformed S3 copy written over the good local file would stop every
 # later produce at `import settings`, before its own fetch could heal it. The fetch validates before it replaces.
 _MALFORMED_ATTRIBUTES = {
-    "empty status cell": "category,value,sourceid,status,internal,category_handles\n" + "".join(
-        f"color,c{i},id{i},active,false,\n" for i in range(30)) + "color,cx,idx,,false,\n",
-    "conflicting duplicate": "category,value,sourceid,category_handles\n" + "".join(
-        f"color,c{i},id{i},\n" for i in range(30)) + "color,C0,other,\n",
-    "no category_handles column": "category,value,sourceid\n" + "".join(f"color,c{i},id{i}\n" for i in range(30)),
+    "empty status cell": "category,value,sourceid,status,internal,category_handles,handle\n" + "".join(
+        f"color,c{i},id{i},active,false,,\n" for i in range(30)) + "color,cx,idx,,false,,\n",
+    "conflicting duplicate": "category,value,sourceid,category_handles,handle\n" + "".join(
+        f"color,c{i},id{i},,\n" for i in range(30)) + "color,C0,other,,\n",
+    "no category_handles column": "category,value,sourceid,handle\n" + "".join(f"color,c{i},id{i},\n" for i in range(30)),
+    "no handle column": "category,value,sourceid,category_handles\n" + "".join(  # table 577
+        f"color,c{i},id{i},\n" for i in range(30)),
 }
 
 
@@ -261,7 +263,7 @@ def test_the_produce_fetch_never_writes_a_malformed_attributes_file_where_none_w
 
 
 def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeypatch):
-    body = "category,value,sourceid,status,internal,category_handles\ncolor,Black,col_1,archived,false,\n"
+    body = "category,value,sourceid,status,internal,category_handles,handle\ncolor,Black,col_1,archived,false,,\n"
     _main_with(tmp_path, monkeypatch, "attributes.csv", body)
     assert (tmp_path / "attributes.csv").read_text(encoding="utf-8") == body
 
