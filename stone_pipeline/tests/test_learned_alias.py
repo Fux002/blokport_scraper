@@ -74,7 +74,7 @@ def test_the_learned_alias_table_has_the_frozen_shape(config_db):
                                                                                                       "norm"]
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO learned_alias VALUES ('k', 'v', 'v', 'fuzzy', '', 'maybe', 't', NULL, NULL, NULL)")
-    assert store.SCHEMA_VERSION == 13 and store.PHASE1_SCHEMA_VERSION == 12
+    assert store.SCHEMA_VERSION == 14 and store.PHASE1_SCHEMA_VERSION == 12
 
 
 def test_a_phase_1_store_opens_in_place_as_v13_with_an_empty_learned_alias(config_db):
@@ -84,7 +84,7 @@ def test_a_phase_1_store_opens_in_place_as_v13_with_an_empty_learned_alias(confi
         conn.execute(f"PRAGMA user_version = {store.PHASE1_SCHEMA_VERSION}")
         conn.commit()
     with closing(store.open_store()) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
         assert conn.execute("SELECT COUNT(*) FROM learned_alias").fetchone()[0] == 0
         assert [r[0] for r in conn.execute("SELECT key FROM retired_variation")] == ["marble__gone_1"]
 
@@ -459,3 +459,47 @@ def test_a_module_scoped_fixture_sees_an_isolated_config_store(module_config_db)
     from stone_pipeline.config.settings import SETTINGS
     assert module_config_db and Path(module_config_db) != SETTINGS.paths.workspace_root / "config.db"
     assert not Path(module_config_db).exists()
+
+
+# --- config.db v14: norms rekeyed to alias_key (Mas, 13 Nov) ---------------------------------------------------------
+
+_REKEY = getattr(store, "learned_norms_to_rekey", None)
+_INSERT = ("INSERT INTO learned_alias (identity_key, value, norm, method, source, status, first_seen) "
+           "VALUES (?, ?, ?, 'fuzzy', '', 'active', 't')")
+
+
+def _as_v13(path, rows):
+    """The store as a v13 open left it: `rows` (Key, value, norm) stored, the rekey not yet recorded."""
+    with closing(sqlite3.connect(str(path))) as conn:
+        conn.executemany(_INSERT, rows)
+        conn.execute("DELETE FROM migration WHERE name = 'learned_norm_alias_key_v1'")
+        conn.execute("PRAGMA user_version = 13")
+        conn.commit()
+
+
+def test_the_rekey_moves_a_non_latin_norm_once_and_leaves_every_latin_norm(config_db):
+    assert _REKEY is not None, "config.store has no learned_norms_to_rekey (the alias_key rekey)"
+    _as_v13(config_db, [(KEY, "Wratza 维纳多", match_key("Wratza 维纳多")),
+                        (KEY, "Kashmir Gold", match_key("Kashmir Gold"))])
+    with closing(store.open_store()) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert _REKEY(conn) == []                                    # a re-run would move 0 rows
+    assert [(r["value"], r["norm"]) for r in _rows(config_db)] == [
+        ("Kashmir Gold", "kashmir gold"), ("Wratza 维纳多", "wratza 维纳多")]
+
+
+def test_a_rekey_onto_a_held_norm_refuses_the_open_and_changes_nothing(config_db):
+    assert _REKEY is not None, "config.store has no learned_norms_to_rekey (the alias_key rekey)"
+    rows = [(KEY, "Wratza 维纳多", "wratza"), (KEY, "WRATZA 维纳多", "wratza 维纳多")]
+    _as_v13(config_db, rows)
+    with pytest.raises(store.ConfigStoreError, match="rekey"):
+        store.open_store()
+    assert sorted((r["identity_key"], r["value"], r["norm"]) for r in _rows(config_db)) == sorted(rows)
+    with closing(sqlite3.connect(str(config_db))) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 13
+
+
+def test_a_non_latin_learned_alias_is_proposed_under_its_own_key(config_db):
+    # match_key reads a pure-CJK value as empty (refused); its alias_key keeps the script
+    assert decisions_store.propose_learned_aliases([_proposal("巴比伦金")]) == 1
+    assert [(r["value"], r["norm"]) for r in _rows(config_db)] == [("巴比伦金", "巴比伦金")]

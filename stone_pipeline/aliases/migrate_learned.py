@@ -33,7 +33,7 @@ from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.alias_problem import AliasContext, alias_refusal, code_matcher
 from stone_pipeline.core.csvio import atomic_write
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key
 from stone_pipeline.io import storage
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.state.writeback import is_learned
@@ -128,10 +128,10 @@ def plan(records: Iterable[tuple[str, str, str]], ledger_rows: list[dict], conte
             reason = "no_live_key"
         elif (refusal := alias_refusal(alias, contexts[key], is_code)) is not None:
             reason = refusal
-        elif (key, match_key(alias)) in taken:
+        elif (key, alias_key(alias)) in taken:
             reason = "duplicate"
         else:
-            taken.add((key, match_key(alias)))
+            taken.add((key, alias_key(alias)))
             active.append({"identity_key": key, "value": alias, "method": method, "source": ""})
             continue
         dropped.append({"variation_id": vid, "alias": alias, "method": method, "reason": reason})
