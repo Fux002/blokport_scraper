@@ -161,6 +161,15 @@ def _is_live(entry: dict) -> bool:
     return qty is None or qty > 0
 
 
+def newly_gone(gone: list[tuple[str, str]], cfg: SourceConfig, known: KnownProducts) -> list[tuple[str, str]]:
+    """The dropped products this run takes off sale: the ones Medusa still lists with stock (_is_live). A gone
+    listing stays in Medusa at stock 0 (table 505), so every later run finds it again (discontinued); the delete-loop
+    report lists it once, here."""
+    prefix = f"{cfg.source_code}-".upper()
+    return [(sku, handle) for sku, handle in gone
+            if sku.startswith(prefix) and _is_live(known.by_sku.get(sku, {"inventory": "0"}))]
+
+
 def delist_exposure(gone: list[tuple[str, str]], cfg: SourceConfig, known: KnownProducts) -> tuple[int, int]:
     """(live products this delist would take down, live products this source has in Medusa): the two sides
     of the mass-delist guard in run_source. A product Medusa holds at stock 0 is sold history, delisted

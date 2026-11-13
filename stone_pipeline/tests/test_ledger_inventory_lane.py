@@ -144,9 +144,18 @@ def test_a_reason_cleared_at_stock_0_is_served(tmp_path):
         _product(ledger, "S-1")
         _stock(ledger, "S-1", 0, reason="no_photo", synced=(0, 0, "no_photo", None))
         assert _lane(ledger) == []
-        populate_discontinued(ledger, [("S-1", "h")])                 # dropped: dead stock, no reason any more
+        ledger.execute("UPDATE inventory SET reason = NULL WHERE sku = 'S-1'")      # the reason cleared at stock 0
         assert [i["payload"] for i in sync.ready_inventory(ledger)] == [
             {"sku": "S-1", "quantity": 0, "made_to_order": False}]
+
+
+def test_a_hidden_product_dropped_keeps_its_reason_and_gone_at_alone_is_not_a_delta(tmp_path):
+    # table 505: a gone listing keeps the publish state it had; gone_at rides its next served stock (v1 stores none)
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "S-1")
+        _stock(ledger, "S-1", 0, reason="no_photo", synced=(0, 0, "no_photo", None))
+        populate_discontinued(ledger, [("S-1", "h")])
+        assert ledger.get("inventory", "sku", "S-1")["reason"] == "no_photo" and _lane(ledger) == []
 
 
 # --- defect 7: stock moves for every product Medusa holds -------------------------------------------------------
@@ -190,6 +199,8 @@ def test_a_bootstrap_row_is_in_medusa_even_once_a_run_makes_it_dirty(tmp_path):
         assert (ledger.get("product", "sku", "B-1")["state"], ledger.get("product", "sku", "B-1")["payload_hash"]) == (
             "synced", "")
         assert withdraw_unsent(ledger, [], SourceConfig(source="s", source_code="s")) == 1   # the unsent one is
+        # back on sale: a hard reset tombstones a product Medusa holds (a delisted one it spares, table 505)
+        ledger.execute("UPDATE inventory SET qty = 3, reason = NULL WHERE sku = 'B-1'")
         sync.reset_sync_state(ledger, hard=True)
         assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["B-1"]
 
@@ -198,8 +209,9 @@ def test_a_dropped_product_the_export_knows_gets_its_delist(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         populate_discontinued(ledger, [("B-2", "h")])                    # a minimal row: Medusa holds it by SKU
         assert ledger.get("product", "sku", "B-2")["last_synced"] is not None
-        assert [i["payload"] for i in sync.ready_inventory(ledger)] == [
-            {"sku": "B-2", "quantity": 0, "made_to_order": False}]
+        gone_at = ledger.get("inventory", "sku", "B-2")["gone_at"]
+        assert gone_at and [i["payload"] for i in sync.ready_inventory(ledger)] == [
+            {"sku": "B-2", "quantity": 0, "made_to_order": False, "reason": "sold_out", "gone_at": gone_at}]
 
 
 def test_an_empty_id_without_a_sync_is_not_in_medusa_for_a_hard_reset(tmp_path):
@@ -217,8 +229,8 @@ def test_a_lot_redirect_waits_for_a_piece_medusa_holds(tmp_path):
         assert _lane(ledger) == []
         populate_discontinued(ledger, [("C-P3", "h")])                    # a piece Medusa holds by SKU only
         ledger.execute("UPDATE product SET lot_code = 'LOT2' WHERE sku = 'C-P3'")
-        ledger.execute("UPDATE inventory SET qty = 1, last_synced_qty = 1, last_synced_made_to_order = 0 "
-                       "WHERE sku = 'C-P3'")
+        ledger.execute("UPDATE inventory SET qty = 1, reason = NULL, gone_at = NULL, last_synced_qty = 1, "
+                       "last_synced_made_to_order = 0 WHERE sku = 'C-P3'")                # on sale, synced
         assert _lane(ledger) == ["C-B"]
 
 
