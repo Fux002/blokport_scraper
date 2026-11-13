@@ -674,6 +674,12 @@ class Decisions:
     chosen: dict
 
 
+def held_photos(frozen, kept):
+    """The photos a run leaves exactly as published: those of the listings whose choice record cannot be read (frozen),
+    and the produce's kept set (publish.read_kept: the photos of the listings that left sale and keep their records)."""
+    return {(l["source"], sha) for l in frozen for sha in l["photos"]} | set(kept)
+
+
 def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
@@ -781,6 +787,7 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     decisions = read_decisions(s3, root, listings)
+    kept_photos = publish.read_kept(s3)                # read before anything is paid: no publish without it
     frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
@@ -800,8 +807,7 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     kept_as_was = restandardise_kept(s3, restandardise, lambda src: round_prefix(C.RUN_TAG, src))
     problems += [f"re-standardise {r['source']} {r['sha'][:12]} kept as it was: {r['why']}" for r in kept_as_was]
     try:
-        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned,
-                                    held={(l["source"], sha) for l in frozen for sha in l["photos"]})
+        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned, held=held_photos(frozen, kept_photos))
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
@@ -1006,7 +1012,7 @@ def main() -> int:
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4
-    except (publish.NoConflictSet, ScopeRefused) as exc:
+    except (publish.NoConflictSet, publish.NoKeptSet, ScopeRefused) as exc:
         print(f"ERROR: {exc}; nothing done")
         return 2
     print(f"==> spent ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month"
