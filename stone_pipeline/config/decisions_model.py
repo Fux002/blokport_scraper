@@ -198,8 +198,12 @@ class Decisions:
         st = self._first(source, spelling, clean, lambda s: s.is_mint and bool(s.color))
         return st.color if st else None
 
+    def renaming(self, source: str, spelling: str, clean: str) -> Statement | None:
+        """The mint statement that names this listing's variety (its stated name), or None."""
+        return self._first(source, spelling, clean, lambda s: s.is_mint and bool(s.name))
+
     def seed_name(self, source: str, spelling: str, clean: str) -> str | None:
-        st = self._first(source, spelling, clean, lambda s: s.is_mint and bool(s.name))
+        st = self.renaming(source, spelling, clean)
         return st.name if st else None
 
     def scope(self, source: str, spelling: str, clean: str) -> str:

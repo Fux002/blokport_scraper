@@ -435,6 +435,7 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     monkeypatch.setattr(produce, "_mirror_archived", lambda: None)
     monkeypatch.setattr(writethrough, "enabled", lambda: True)
     monkeypatch.setattr(migrate_learned, "run_once", lambda **k: calls.append("migrate"))
+    monkeypatch.setattr(produce, "_carry_alias_sets", lambda: None)     # C4's carry: test_p2_10_alias_carry pins it
     monkeypatch.setattr(produce, "_live_scrape", lambda s: 0)
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append("build") or 1)
     monkeypatch.setattr(produce, "_finalize_control_plane", lambda stage: None)

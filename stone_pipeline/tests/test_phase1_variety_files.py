@@ -42,8 +42,9 @@ def test_a_variety_file_without_a_type_column_fails_loud():
 def test_the_emitted_rows_carry_exactly_the_four_columns(tmp_path):
     path = tmp_path / "variants_export_base.csv"
     path.write_text("Key,Name,Type,Aliases\n" f"{_KEY},Absolute Black,Granite,Nero Assoluto\n", encoding="utf-8")
+    # a file's Aliases is never read back (P2-10 C4): emit derives every variety's aliases from the alias stores
     assert emit_catalog._rows(path) == [
-        {"Key": _KEY, "Name": "Absolute Black", "Type": "Granite", "Aliases": "Nero Assoluto"}]
+        {"Key": _KEY, "Name": "Absolute Black", "Type": "Granite", "Aliases": ""}]
 
 
 def test_the_base_sync_keeps_the_four_columns(tmp_path):
