@@ -1,21 +1,17 @@
-"""P2-10 C4, the acked alias set survives ledger v18 (reviewer 2's blocking; Mas's final ruling, 13 Nov).
+"""P2-10 C4, the acked alias set survives ledger v18 (reviewer 2's blocking; Mas's rulings, 13 Nov).
 
-v18 adds alias_rows and codes (NULL: not computed yet, held from the serve) and the variation_alias_superseded table,
-and no longer drops the old `aliases`. THE conversion is a one-time step at the produce's start (aliases.carry, after
-the learned-alias migration, before any build). Its owners are C5's: ONE owner function (cleanup.owner_of over
-cleanup.load_stores: seed = the env's base Aliases and the backbone posts, operator, active learned), imported by both
-the carry and the classification. In ONE ledger transaction, for every NULL row:
-- an owned value carries with its owner as method, a code-shaped value goes to codes;
-- an unowned value on a row OUTSIDE the produced set at the carry (in_full=0 or retiring) is a REFUSAL: nothing is
-  written, the Keys and values are named, and the produce stops;
-- an unowned value on a row IN the set is SUPERSEDED: not carried, recorded in variation_alias_superseded and listed in
-  review/<env>/alias_carry_superseded.csv; C5 names it `removed` under its Key when that row is in_full=0 when it
-  classifies (the produce left it out, so Medusa still holds it).
-Then no NULL row is left in the whole ledger, and `aliases` is dropped. A ledger without `aliases` is done (the step
-skips and says so). A dry run takes the same path, writes nothing and counts both sets. No em dashes."""
+v18 adds alias_rows and codes (NULL: not computed yet, held from the serve) and no longer drops the old `aliases`. THE
+conversion is a one-time step at the produce's start (aliases.carry, after the learned-alias migration, before any
+build). Its owners are C5's: ONE owner function (cleanup.owner_of over cleanup.load_stores: seed = the env's base
+Aliases and the backbone posts, operator, active learned), imported by both the carry and the classification. In ONE
+ledger transaction, for every NULL row, an owned value carries with its owner as method and a code-shaped value goes
+to codes. A value no store owns is a REFUSAL, on any row (Mas, ~15:2xZ, the owner's fix-at-source rule: no in-set
+exemption): nothing is written, the Keys and values are named, and the produce stops until the owner gives the value
+an owner in a store or removes it. Then no NULL row is left in the whole ledger, and `aliases` is dropped. A ledger
+without `aliases` is done (the step skips and says so). A dry run takes the same path, writes nothing and counts the
+refusals. No em dashes."""
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import sqlite3
@@ -53,7 +49,7 @@ def _row(ledger, key, name, type_, *, in_full=1, state="synced"):
 
 
 def _v17(path, aliases: dict[str, list[str]]):
-    """A v17 ledger (before C4): variation carries `aliases`, no alias_rows or codes, no superseded table. Three rows:
+    """A v17 ledger (before C4): variation carries `aliases`, no alias_rows or codes. Three rows:
     KASH in the produced set, ABS export-only (in_full=0, synced), CARR retiring with its pending tombstone."""
     with Ledger.open(path, env="development") as lg:
         _row(lg, KASH, "Kashmir White", "Granite")
@@ -66,7 +62,6 @@ def _v17(path, aliases: dict[str, list[str]]):
     raw = sqlite3.connect(path)
     raw.execute("ALTER TABLE variation DROP COLUMN alias_rows")
     raw.execute("ALTER TABLE variation DROP COLUMN codes")
-    raw.execute("DROP TABLE IF EXISTS variation_alias_superseded")
     raw.execute("ALTER TABLE variation ADD COLUMN aliases TEXT")
     for key, values in aliases.items():
         raw.execute("UPDATE variation SET aliases = ? WHERE key = ?", (json.dumps(values), key))
@@ -89,9 +84,9 @@ def _stores(seed=SEED, operator=None, learned=None):
                           is_code=IS_CODE)
 
 
-def _carry(ledger, tmp_path, stores=None, **kw):
+def _carry(ledger, stores=None, **kw):
     from stone_pipeline.aliases import carry
-    return carry.run(ledger, stores=stores or _stores(), review_dir=tmp_path / "review", **kw)
+    return carry.run(ledger, stores=stores or _stores(), **kw)
 
 
 def _null_rows(ledger):
@@ -99,11 +94,10 @@ def _null_rows(ledger):
 
 
 # --- the ledger step -----------------------------------------------------------------------------------------------------
-def test_v18_adds_alias_rows_codes_and_the_superseded_table_and_keeps_the_old_set(tmp_path):
+def test_v18_adds_alias_rows_and_codes_and_keeps_the_old_set_for_the_carry(tmp_path):
     _v17(tmp_path / "l.db", OLD)
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
         assert {"alias_rows", "codes", "aliases"} <= _columns(lg)
-        assert lg.execute("SELECT COUNT(*) FROM variation_alias_superseded").fetchone()[0] == 0
         assert json.loads(lg.get("variation", "key", ABS)["aliases"]) == ["G654", "Nero Assoluto"]
 
 
@@ -117,12 +111,13 @@ def test_between_the_roll_and_the_carry_no_null_row_serves_and_the_file_refuses(
             cleanup.classify(lg, _stores())
 
 
-# --- the carry: one owner function, refused vs superseded ------------------------------------------------------------
+# --- the carry: one owner function; an unowned value refuses ---------------------------------------------------------
 def test_an_export_only_and_a_retiring_row_classify_after_the_carry_with_the_pre_c4_bytes(tmp_path):
     _v17(tmp_path / "l.db", OLD)
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        report = _carry(lg, tmp_path)
-        assert (report["rows"], report["refused"], report["superseded"]) == (3, [], [])
+        report = _carry(lg)
+        assert (report["rows"], report["refused"]) == (3, [])
+        assert "superseded" not in report
         assert "aliases" not in _columns(lg) and _null_rows(lg) == 0
         abs_row = lg.get("variation", "key", ABS)
         assert (json.loads(abs_row["alias_rows"]), json.loads(abs_row["codes"])) == (
@@ -149,7 +144,7 @@ def test_a_base_owned_value_on_an_out_of_set_row_carries_as_seed(tmp_path, monke
     from stone_pipeline.aliases import carry
     _v17(tmp_path / "l.db", {**OLD, ABS: ["Black", "Blue", "Nero Assoluto"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        report = carry.run(lg, review_dir=tmp_path / "review")              # the stores: cleanup.load_stores()
+        report = carry.run(lg)                                               # the stores: cleanup.load_stores()
         assert report["refused"] == []
         assert json.loads(lg.get("variation", "key", ABS)["alias_rows"]) == [
             {"value": "Black", "method": "seed"}, {"value": "Blue", "method": "seed"},
@@ -161,39 +156,28 @@ def test_an_unowned_value_on_an_out_of_set_row_refuses_and_leaves_the_ledger_as_
     _v17(tmp_path / "l.db", {**OLD, ABS: ["Nero Assoluto", "Mystery Stone"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
         with pytest.raises(carry.CarryRefused, match="Mystery Stone") as refused:
-            _carry(lg, tmp_path)
+            _carry(lg)
         assert refused.value.refused == [(ABS, "Mystery Stone")]
         assert "aliases" in _columns(lg) and _null_rows(lg) == 3
-        assert lg.execute("SELECT COUNT(*) FROM variation_alias_superseded").fetchone()[0] == 0
-    assert not (tmp_path / "review" / carry.SUPERSEDED_REVIEW).exists()
 
 
-def test_an_unowned_value_on_an_in_set_row_is_superseded_listed_and_not_carried(tmp_path):
+def test_an_unowned_value_on_an_in_set_row_refuses_too(tmp_path):
+    # Mas's ruling (2): no in-set exemption; the owner fixes the value at its source, then the carry reruns
     from stone_pipeline.aliases import carry
     _v17(tmp_path / "l.db", {**OLD, KASH: ["Bianco Kashmir", "Hn"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        report = _carry(lg, tmp_path)
-        assert (report["refused"], report["superseded"]) == ([], [[KASH, "Hn"]])
-        assert json.loads(lg.get("variation", "key", KASH)["alias_rows"]) == [{"value": "Bianco Kashmir",
-                                                                                "method": "seed"}]
-        assert [tuple(r) for r in lg.execute("SELECT key, value FROM variation_alias_superseded")] == [(KASH, "Hn")]
-    with (tmp_path / "review" / carry.SUPERSEDED_REVIEW).open(encoding="utf-8-sig", newline="") as h:
-        assert [(r["Key"], r["value"]) for r in csv.DictReader(h)] == [(KASH, "Hn")]
+        with pytest.raises(carry.CarryRefused, match="Hn") as refused:
+            _carry(lg)
+        assert refused.value.refused == [(KASH, "Hn")]
+        assert "aliases" in _columns(lg) and _null_rows(lg) == 3
 
 
-def test_a_superseded_value_is_removed_in_the_file_once_its_row_leaves_the_set(tmp_path):
-    # reviewer 2's condition: a row in the set at the carry that this produce leaves out (populate.py resets in_full
-    # to 0, no tombstone) is never re-served, so Medusa still holds its superseded value: the file names it removed.
-    # A row still in the set re-served its new whole set (its payload_hash changed), so its entries are inert.
-    _v17(tmp_path / "l.db", {**OLD, KASH: ["Bianco Kashmir", "Hn"]})
+def test_no_superseded_path_is_left(tmp_path):
+    from stone_pipeline.aliases import carry
+    assert not hasattr(carry, "SUPERSEDED_REVIEW") and not hasattr(cleanup, "SUPERSEDED")
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        _carry(lg, tmp_path)
-        rows = cleanup.classify(lg, _stores()).rows
-        assert (KASH, "Hn", "removed") not in rows                       # in the set: Medusa holds the new set
-        lg.execute("UPDATE variation SET in_full = 0 WHERE key = ?", (KASH,))
-        result = cleanup.classify(lg, _stores())
-        assert (KASH, "Hn", "removed") in result.rows
-        assert (KASH, "Hn", "removed", cleanup.SUPERSEDED) in result.differences
+        tables = {r["name"] for r in lg.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "variation_alias_superseded" not in tables
 
 
 def test_a_refused_carry_is_retried_whole_and_a_done_one_skips_and_says_so(tmp_path, caplog):
@@ -201,22 +185,20 @@ def test_a_refused_carry_is_retried_whole_and_a_done_one_skips_and_says_so(tmp_p
     _v17(tmp_path / "l.db", {**OLD, ABS: ["Nero Assoluto", "Jet Black"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
         with pytest.raises(carry.CarryRefused):
-            _carry(lg, tmp_path)
+            _carry(lg)
         owned = _stores(seed={**SEED, ABS: ["Nero Assoluto", "Jet Black"]})    # the owner's store now names it
-        assert _carry(lg, tmp_path, stores=owned)["rows"] == 3
+        assert _carry(lg, stores=owned)["rows"] == 3
         with caplog.at_level(logging.INFO):
-            assert _carry(lg, tmp_path, stores=owned) is None
+            assert _carry(lg, stores=owned) is None
         assert "already carried" in caplog.text
 
 
-def test_a_dry_run_takes_the_same_path_writes_nothing_and_counts_both_sets(tmp_path):
+def test_a_dry_run_takes_the_same_path_writes_nothing_and_counts_the_refusals(tmp_path):
     _v17(tmp_path / "l.db", {**OLD, ABS: ["Nero Assoluto", "Mystery Stone"], KASH: ["Bianco Kashmir", "Hn"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        report = _carry(lg, tmp_path, dry_run=True)
-        assert (report["rows"], report["refused"], report["superseded"]) == (3, [[ABS, "Mystery Stone"]],
-                                                                              [[KASH, "Hn"]])
+        report = _carry(lg, dry_run=True)
+        assert (report["rows"], report["refused"]) == (3, [[ABS, "Mystery Stone"], [KASH, "Hn"]])
         assert "aliases" in _columns(lg) and _null_rows(lg) == 3
-    assert not (tmp_path / "review").exists()
 
 
 def test_the_method_is_the_owner_operator_over_seed_over_learned(tmp_path):
@@ -225,7 +207,7 @@ def test_the_method_is_the_owner_operator_over_seed_over_learned(tmp_path):
                      operator={("Absolute Black", "Granite"): ["Nero Assoluto"]},
                      learned={ABS: ["Shanxi Black", "Jet Black"]})
     with Ledger.open(tmp_path / "l.db", env="development") as lg:
-        _carry(lg, tmp_path, stores=stores)
+        _carry(lg, stores=stores)
         assert json.loads(lg.get("variation", "key", ABS)["alias_rows"]) == [
             {"value": "Jet Black", "method": "learned"}, {"value": "Nero Assoluto", "method": "operator"},
             {"value": "Shanxi Black", "method": "seed"}]
