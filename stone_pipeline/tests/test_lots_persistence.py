@@ -42,7 +42,7 @@ def _row(lot_code="B6392-u", lot_position=5):
 def _seed_variation(ledger):
     now = now_iso()
     ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Calacatta Viola",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "V1", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))

@@ -38,7 +38,7 @@ def _seed_ids(ledger: Ledger) -> None:
     ]:
         ledger.upsert("variation", {
             "key": key, "type": "Marble", "name": name,
-            "aliases": "[]",
+            "alias_rows": "[]", "codes": "[]",
             "medusa_id": mid, "payload_hash": "", "state": "synced",
             "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
         }, pk=("key",))
