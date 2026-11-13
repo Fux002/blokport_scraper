@@ -25,6 +25,7 @@ dormant C3 case). No em dashes (design principle 2).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
@@ -78,6 +79,13 @@ _ENTITY = {
 
 # --- GET /sync/status ---------------------------------------------------------
 
+# The products a change waits on (pending or dirty, not a dead-letter) that are held back because they link a
+# standardised file the photos side has not published: /status counts them, /failures lists them. `{cols}` is the
+# select list. A synced product with the fact is not waiting on anything, so it is neither.
+_PHOTO_HELD = ("SELECT {cols} FROM product WHERE photo_unpublished IS NOT NULL AND state IN ('pending', 'dirty') "
+               "AND abandoned_at IS NULL")
+
+
 def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     """Per-type state counts. Each state-bearing table reports every state it can hold (db.STATES), 0 for one
     with no rows: a count is always a value, never an absent key;
@@ -103,6 +111,9 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
         "SELECT COUNT(*) AS n FROM variation v WHERE v.state = 'synced' AND v.in_full = 1 "
         "AND NOT EXISTS (SELECT 1 FROM product p WHERE p.variation_key = v.key)").fetchone()
     out["variation_reconcile"] = {"orphaned": orphaned["n"] or 0}
+    # products a change waits on that are held back because they link a photo the photos side has not published
+    held = ledger.execute(_PHOTO_HELD.replace("{cols}", "COUNT(*) AS n")).fetchone()["n"]
+    out["product_photos"] = {"unpublished": held}
     return out
 
 
@@ -167,10 +178,12 @@ def _sub_limit(limit: int | None) -> str:
 # VE2: an archived variation is FROZEN -- the variations lane never serves it (no create, no update), and the
 # products lane admits it only for an EXISTING product (one Medusa holds, in_medusa_sql): a new product on an
 # archived variety is never served. archived beats dirty. Both are a pure mirror of the export (writethrough).
+# Nor a product linking a standardised file the photos side has not published (photo_unpublished, recomputed by every
+# produce: populate.mark_unpublished_photos): a content fact, so a requeue or a reset never revives it.
 _ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archived = 0 "
                        "AND type IS NOT NULL AND type != '' "
                        "AND (retry_after IS NULL OR retry_after <= ?)")
-_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') "
+_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND p.photo_unpublished IS NULL "
                      f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
                      "AND v.type IS NOT NULL AND v.type != '' "
                      "AND EXISTS (SELECT 1 FROM variation_category_image ci "
@@ -601,6 +614,11 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
             f"WHERE state = ? OR abandoned_at IS NOT NULL ORDER BY updated_at DESC LIMIT ?", (active, limit)):
             out.append(_row(type_, r["xid"], r["state"], r["sync_attempts"], r["sync_error"],
                             r["updated_at"], r["abandoned_at"]))
+    for r in ledger.execute(_PHOTO_HELD.replace("{cols}", "sku, sync_attempts, updated_at, photo_unpublished") +
+                            " ORDER BY updated_at DESC LIMIT ?", (limit,)):   # held back: a photo not published
+        files = json.loads(r["photo_unpublished"])
+        out.append(_row("products", r["sku"], "photo_unpublished", r["sync_attempts"],
+                        f"photo not published: {len(files)} files ({files[0]})", r["updated_at"], None))
     for r in ledger.execute(                             # tombstones stuck 'dead' (Medusa kept blocking)
         "SELECT external_id AS xid, state, sync_attempts, sync_error, updated_at, abandoned_at FROM removed "
         "WHERE state = 'dead' OR abandoned_at IS NOT NULL ORDER BY updated_at DESC LIMIT ?", (limit,)):
