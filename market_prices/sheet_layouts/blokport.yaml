@@ -77,7 +77,8 @@ layouts:
               "Carrara net price (EUR/m²)", "Price used in master (EUR/m²)", "Discount (%)", "Price status",
               "Source file", "Source row", "List date", "Lot date / source note", "Vendor notes"]
     competitor: {column: "Source file"}
-    # Finish and Dimensions are often empty here, so the key is the source row; both ride in stated_specs
+    # Finish and Dimensions are often empty here, so the key is the source row; both ride in stated_specs. 'Source row'
+    # is unique within one file, but a re-transcribed sheet re-keys its listings.
     listing_key: ["Cereser product name (source)", "Thickness (cm)", "Source row"]
     listing_text: ["Cereser product name (source)"]
     price_by_competitor:
