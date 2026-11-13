@@ -361,7 +361,7 @@ def test_duplicate_sites_are_refused():
 
 def test_shipped_registers_load():
     assert load_register("blokport").brand == "blokport"
-    assert load_register("wudport").sites == ()
+    assert load_register("wudport").brand == "wudport"
 
 
 def test_a_register_problem_raises(tmp_path):

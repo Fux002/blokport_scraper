@@ -1,3 +1,600 @@
-# Competitor sites for WudPort (wood). Empty until the owner supplies and approves the list.
+# Competitor sites for WudPort (wood): every site on the owner's list of 13 Nov 2026
+# (blokport_research/full-model-plan/owner-inputs/wudport-wood-sites-13nov.md, sha256 79e5b5a8aff20893...).
+# His list is his decision for his unblocked public-price sites; a terms or robots read can only REMOVE a site, never
+# add one. A site is collected only with decision: approved, recorded on Mas's word on the reviewed rows (decided_by,
+# decided_on). Terms and robots.txt were read on 13 Nov 2026, 22:53-22:58Z, as `market-price-observer/1.0`, with one
+# public product page per site viewed for its structured price data (the "JSON-LD" note in each summary). Blocked and
+# excluded sites were never requested. VAT basis only where the owner states it (UK: ex VAT as he lists it; EU: incl).
 brand: wudport
-sites: []
+sites:
+  # ---- UK, the owner's unblocked public-price sites ---------------------------------------------------------------
+  - site_id: jewson
+    brand: wudport
+    seller_name: Jewson
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.jewson.co.uk
+    discovery:
+      listing_pages: ["/timber/sheet-materials/plywood", "/timber/sheet-materials/chipboard-osb",
+                      "/timber/sheet-materials/mdf-hardboard"]
+      product_path: "^/p/[A-Za-z0-9-]+$"
+    terms:
+      terms_url: https://www.jewson.co.uk/terms-and-conditions
+      checked_on: 2026-11-13
+      summary: >-
+        The online terms have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
+        listings and product pages for our client. JSON-LD Product and Offer price on a product page (69.52 GBP). The
+        owner notes Jewson shows a branch price at a central postcode.
+    decision: pending
+  - site_id: selcobw
+    brand: wudport
+    seller_name: Selco Builders Warehouse
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.selcobw.com
+    discovery:
+      listing_pages: ["/products/timber-mdf-sheet-materials/sheet-materials",
+                      "/products/timber-mdf-sheet-materials/melamine-faced-chipboard"]
+      product_path: "^/[a-z0-9-]*[0-9][a-z0-9-]*$"
+    terms:
+      terms_url: https://www.selcobw.com/info/support/terms
+      checked_on: 2026-11-13
+      summary: >-
+        The terms (trade conditions of sale) have no clause on scraping, automated access or copying prices.
+        robots.txt allows the sheet listings for our client. JSON-LD Product and Offer price on a product page
+        (10.63 GBP), but the sheet listing pages hold no product links in plain HTML (a script-rendered grid), so
+        this site is expected to report 0 listings; its sitemap covers the whole catalogue (about 9,000 URLs), so it
+        is no entry point. The owner notes the site needs a browser.
+    decision: pending
+  - site_id: totemtimber
+    brand: wudport
+    seller_name: Totem Timber
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.totemtimber.co.uk
+    discovery:
+      listing_pages: ["/shop/timber-sheets-and-joinery/sheet-materials/"]
+      product_path: "^/product/timber-sheets-and-joinery/sheet-materials/[a-z0-9-]+/[a-z0-9-]+/?$"
+    terms:
+      terms_url: https://www.totemtimber.co.uk/terms-conditions/
+      checked_on: 2026-11-13
+      summary: >-
+        The terms have no clause on scraping, automated access or copying prices. robots.txt disallows only
+        WooCommerce internals and add-to-cart links. JSON-LD Product and Offer price on a product page (4.00 GBP).
+    decision: pending
+  - site_id: mkm
+    brand: wudport
+    seller_name: MKM Building Supplies
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://mkm.com
+    discovery:
+      listing_pages: ["/category/timber/sheet-materials/plywood", "/category/timber/sheet-materials/osb",
+                      "/category/timber/sheet-materials/mdf", "/category/timber/sheet-materials/chipboard",
+                      "/category/timber/sheet-materials/hardboard"]
+      product_path: "^/product/[a-z0-9-]+$"
+    terms:
+      terms_url: https://mkm.com/policies/terms-and-conditions
+      checked_on: 2026-11-13
+      summary: >-
+        mkmbs.co.uk (the owner's listing) now redirects to mkm.com. The terms cover the supply of goods and
+        promotions and have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
+        listings and product pages. A product page carries a JSON-LD Product but NO offers price, so this site is
+        expected to give no priced rows (the owner noted only 44 of 780 priced).
+    decision: pending
+  - site_id: originalmarquetry
+    brand: wudport
+    seller_name: Original Marquetry
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.originalmarquetry.co.uk
+    discovery:
+      listing_pages: ["/product-category/wood-veneers/"]
+      product_path: "^/product/[a-z0-9-]+/?$"
+    terms:
+      terms_url: https://www.originalmarquetry.co.uk/terms-and-conditions/
+      checked_on: 2026-11-13
+      summary: >-
+        Clause 2.1 forbids copying any part of the website, including images, without authorisation; there is no
+        clause on scraping or collecting prices (Mas, 13 Nov: a copying ban only, fine to approve; observations keep
+        facts and the source URL and never reproduce content). robots.txt allows the veneer listings and product
+        pages. JSON-LD Product and Offer price on a product page (38.50 GBP).
+    decision: pending
+    statements: {vat_basis: excl}
+  - site_id: scbs
+    brand: wudport
+    seller_name: SCBS
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://scbs.ltd
+    discovery:
+      listing_pages: ["/timber-sheet-materials/sheet-materials", "/timber-sheet-materials/sheet-materials/osb",
+                      "/timber-sheet-materials/sheet-materials/mdf", "/timber-sheet-materials/sheet-materials/chipboard",
+                      "/timber-sheet-materials/sheet-materials/hardboard"]
+      product_path: "^/products/[a-z0-9-]+$"
+    terms:
+      terms_url: https://scbs.ltd/terms
+      checked_on: 2026-11-13
+      summary: >-
+        The terms have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
+        listings and product pages. JSON-LD Product and Offer price on a product page (18.94 GBP). The owner lists
+        it as not yet added (about 48 sheet products).
+    decision: pending
+  # ---- UK, on the owner's list but not approvable on the 13 Nov read (a reason each; never collected) ------------
+  - site_id: travisperkins
+    brand: wudport
+    seller_name: Travis Perkins
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.travisperkins.co.uk
+    discovery:
+      listing_pages: ["/product/timber-and-sheet-materials/sheet-materials/plywood/c/1500008/",
+                      "/product/timber-and-sheet-materials/sheet-materials/osb/c/1500010/",
+                      "/product/timber-and-sheet-materials/sheet-materials/mdf-hardboard-and-pinboard/c/1500009/",
+                      "/product/timber-and-sheet-materials/sheet-materials/flooring-grade-chipboard/c/1500028/",
+                      "/product/timber-and-sheet-materials/sheet-materials/melamine-board/c/1515000/"]
+      product_path: "^/[a-z0-9-]+/[a-z0-9-]+/p/[0-9]+$"
+    terms:
+      terms_url: https://www.travisperkins.co.uk/terms-and-conditions
+      checked_on: 2026-11-13
+      summary: >-
+        NOT READ: the terms page answers with an empty body to a plain request (rendered by script), so the terms
+        are unknown and the site cannot be approved. Its listing pages hold no product links in plain HTML, and a
+        product page carries no JSON-LD Product.
+    decision: pending
+    statements: {vat_basis: excl}
+  - site_id: edecks
+    brand: wudport
+    seller_name: eDecks
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.edecks.co.uk
+    discovery:
+      listing_pages: ["/dept/325/sheet-timbers"]
+      product_path: "^/products/[0-9]+/"
+    terms:
+      summary: >-
+        NOT READ: /terms-and-conditions redirects to the home page, so no terms page was found and the site cannot be
+        approved. A product page carries no JSON-LD Product.
+    decision: pending
+  - site_id: tudors
+    brand: wudport
+    seller_name: Tudors
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://tudors.uk.com
+    terms:
+      terms_url: https://tudors.uk.com/terms-pages/terms-and-conditions-of-sale/
+      checked_on: 2026-11-13
+      summary: >-
+        The terms of sale have no clause on scraping, automated access or copying prices. NO ENTRY POINT: its
+        sitemap lists no URLs and its navigation is script-rendered, so no sheet-material listing was found and the
+        site cannot be approved yet.
+    decision: pending
+  - site_id: toolstation
+    brand: wudport
+    seller_name: Toolstation
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.toolstation.com
+    terms:
+      terms_url: https://www.toolstation.com/terms-of-business
+      checked_on: 2026-11-13
+      summary: >-
+        The terms of business have no clause on scraping, automated access or copying prices. NO SHEET-MATERIAL
+        CATEGORY: its only near category is plasterboard (/construction-insulation/plasterboard/c1573); the owner's
+        5 Nov count was 1 product. Not approvable until a sheet-material listing exists.
+    decision: pending
+  - site_id: lathamtimber
+    brand: wudport
+    seller_name: James Latham
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.lathamtimber.co.uk
+    terms:
+      summary: No public prices (the owner's list, 13 Nov). Never collected.
+    decision: refused
+  - site_id: builderdepot
+    brand: wudport
+    seller_name: Builder Depot
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.builderdepot.co.uk
+    terms:
+      terms_url: https://www.builderdepot.co.uk/terms-and-conditions
+      checked_on: 2026-11-13
+      summary: >-
+        TERMS FORBID SCRAPING. Clause 8.2: "you must not collect, scrape, harvest, frame or deep-link to any
+        information on our website without our specific prior written consent". Never collected.
+    decision: refused
+    statements: {vat_basis: excl}
+  - site_id: wickes
+    brand: wudport
+    seller_name: Wickes
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.wickes.co.uk
+    terms:
+      terms_url: https://www.wickes.co.uk/Terms-of-Use
+      checked_on: 2026-11-13
+      summary: >-
+        TERMS FORBID COMMERCIAL USE (Mas, 13 Nov: not approved). Extracts only "provided that you do not make
+        commercial use or gain from the website or any of its content". Never collected.
+    decision: refused
+  - site_id: diy
+    brand: wudport
+    seller_name: B&Q (diy.com)
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: schema_org_product
+    base_url: https://www.diy.com
+    terms:
+      summary: >-
+        BLOCKS OUR CLIENT NAME: robots.txt and every terms path answer 503 to `market-price-observer/1.0` (13 Nov).
+        Never worked around; never collected.
+    decision: refused
+  # ---- UK, blocked or refused on the owner's list (never requested) -----------------------------------------------
+  - {site_id: sheetmaterialswholesale, brand: wudport, seller_name: Sheet Materials Wholesale, seller_type: wholesaler,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://sheetmaterialswholesale.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: screwfix, brand: wudport, seller_name: Screwfix, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://screwfix.com,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: thewoodveneerhub, brand: wudport, seller_name: The Wood Veneer Hub, seller_type: merchant,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://thewoodveneerhub.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: materialsmarket, brand: wudport, seller_name: Materials Market, seller_type: marketplace,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://materialsmarket.com,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: harlowbros, brand: wudport, seller_name: Harlow Bros, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://harlowbros.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: huwsgray, brand: wudport, seller_name: Huws Gray, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://huwsgray.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: timbersource, brand: wudport, seller_name: Timber Source, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://timbersource.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: winghamtimber, brand: wudport, seller_name: Wingham Timber, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://winghamtimber.com,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: diybuildingsupplies, brand: wudport, seller_name: DIY Building Supplies, seller_type: merchant,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://diybuildingsupplies.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: build4less, brand: wudport, seller_name: Build4Less, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://build4less.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: insulation4less, brand: wudport, seller_name: Insulation4Less, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://insulation4less.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: tradesuperstoreonline, brand: wudport, seller_name: Trade Superstore Online, seller_type: merchant,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://tradesuperstoreonline.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  - {site_id: plywoodetc, brand: wudport, seller_name: Plywood Etc, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://plywoodetc.co.uk,
+     terms: {summary: "Blocked or refused us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused}
+  # ---- UK, excluded on the owner's list (never requested) --------------------------------------------------------
+  - {site_id: welbm, brand: wudport, seller_name: WELBM, seller_type: merchant, seller_country: GB, served_market: GB,
+     platform: schema_org_product, base_url: https://welbm.co.uk,
+     terms: {summary: "Excluded: its terms forbid scraping (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: doorsuperstore, brand: wudport, seller_name: Door Superstore, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://doorsuperstore.co.uk,
+     terms: {summary: "Excluded: robots.txt disallows the price requests (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: beersltd, brand: wudport, seller_name: Beers, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://beersltd.co.uk,
+     terms: {summary: "Excluded: unreachable (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: cutwrights, brand: wudport, seller_name: Cutwrights, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://cutwrights.com,
+     terms: {summary: "Excluded: no public prices (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: woodveneers, brand: wudport, seller_name: Wood Veneers, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://woodveneers.co.uk,
+     terms: {summary: "Excluded: no public prices (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: capitalcrispin, brand: wudport, seller_name: Capital Crispin, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://capitalcrispin.com,
+     terms: {summary: "Excluded: no public prices (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: kellaway, brand: wudport, seller_name: Kellaway, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://kellaway.co.uk,
+     terms: {summary: "Excluded: few sheet products (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: countrysupplies, brand: wudport, seller_name: Country Supplies, seller_type: merchant, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://countrysupplies.uk,
+     terms: {summary: "Excluded: few sheet products (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: beesleyandfildes, brand: wudport, seller_name: Beesley and Fildes, seller_type: merchant,
+     seller_country: GB, served_market: GB, platform: schema_org_product, base_url: https://beesleyandfildes.co.uk,
+     terms: {summary: "Excluded: prices are loaded by script (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: buildbuddy, brand: wudport, seller_name: BuildBuddy, seller_type: marketplace, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://buildbuddy.co.uk,
+     terms: {summary: "Excluded: a marketplace, avoided (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  - {site_id: buymaterials, brand: wudport, seller_name: BuyMaterials, seller_type: marketplace, seller_country: GB,
+     served_market: GB, platform: schema_org_product, base_url: https://buymaterials.com,
+     terms: {summary: "Excluded: a marketplace, avoided (the owner's list, 13 Nov). Never requested."},
+     decision: refused}
+  # ---- EU, the owner's unblocked public-price sites (prices incl VAT, as he states) -------------------------------
+  - site_id: holzhandel_deutschland
+    brand: wudport
+    seller_name: Holzhandel Deutschland
+    seller_type: merchant
+    seller_country: DE
+    served_market: DE
+    platform: schema_org_product
+    base_url: https://holzhandel-deutschland.de
+    discovery:
+      listing_pages: ["/osb-platten/"]
+      product_path: "^/[a-z0-9-]+/[0-9]{8}$"
+    terms:
+      terms_url: https://holzhandel-deutschland.de/agb
+      checked_on: 2026-11-13
+      summary: >-
+        The AGB have no clause on scraping, automated access or copying prices. robots.txt allows the OSB listing
+        and product pages. JSON-LD Product and Offer price on a product page (16.58 EUR). Its sitemaps name only the
+        OSB category among sheet materials.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: holzland
+    brand: wudport
+    seller_name: HolzLand
+    seller_type: marketplace
+    seller_country: DE
+    served_market: DE
+    platform: schema_org_product
+    base_url: https://www.holzland.de
+    discovery:
+      listing_pages: ["/sperrholzplatten/", "/multiplexplatten/", "/osb-platten/", "/mdf-platten/", "/spanplatten/",
+                      "/tischlerplatten/"]
+      product_path: "^/p/[a-z0-9-]+/HL[0-9]+/?$"
+    terms:
+      terms_url: https://www.holzland.de/nutzungsbedingungen/
+      checked_on: 2026-11-13
+      summary: >-
+        The marketplace terms forbid copying photos, graphics and texts without consent and have no clause on
+        scraping or collecting prices (Mas, 13 Nov: a copying ban only, fine to approve). Per the same terms HolzLand
+        is a platform: the participating HolzLand dealers sell, and HolzLand is not a party to the sale. robots.txt
+        disallows `*?pmzr=*`, which every product link on its listing pages carries, so this site is expected to
+        report 0 listings with that robots reason (the link is never requested without its query). Its product
+        sitemaps hold clean URLs but cover the whole catalogue in chunks, not a category, so they are no entry point.
+        A product page carries JSON-LD Product and Offer price (726.00 EUR).
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: beijerbygg
+    brand: wudport
+    seller_name: Beijer Byggmaterial
+    seller_type: merchant
+    seller_country: SE
+    served_market: SE
+    platform: schema_org_product
+    base_url: https://www.beijerbygg.se
+    discovery:
+      listing_pages: ["/privat/sv/produkter/byggmaterial-traprodukter/byggmaterial/byggskivor"]
+      product_path: "^/privat/sv/produkter/byggmaterial-traprodukter/byggmaterial/byggskivor/[a-z0-9-]+/[a-z0-9-]+$"
+    terms:
+      terms_url: https://www.beijerbygg.se/privat/sv/mer-information/kopvillkor-konsument
+      checked_on: 2026-11-13
+      summary: >-
+        The consumer purchase terms have no clause on scraping, automated access or copying prices. robots.txt
+        disallows only search, ProductDisplay and history parameters. A product page carries no JSON-LD Product, so
+        this site is expected to give no priced rows. Prices in SEK.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: byggmax
+    brand: wudport
+    seller_name: Byggmax
+    seller_type: merchant
+    seller_country: SE
+    served_market: SE
+    platform: schema_org_product
+    base_url: https://www.byggmax.se
+    discovery:
+      listing_pages: ["/hus-och-bygg/skivmaterial-och-byggskivor/osb-skivor",
+                      "/hus-och-bygg/skivmaterial-och-byggskivor/mdf-skivor",
+                      "/hus-och-bygg/skivmaterial-och-byggskivor/formplywood-och-formskiva",
+                      "/hus-och-bygg/skivmaterial-och-byggskivor/board",
+                      "/hus-och-bygg/skivmaterial-och-byggskivor/ovriga-skivmaterial"]
+      product_path: "^/[^/]+-p[0-9]+$"
+    terms:
+      terms_url: https://www.byggmax.se/kopvillkor
+      checked_on: 2026-11-13
+      summary: >-
+        The purchase terms have no clause on scraping, automated access or copying prices. robots.txt allows the
+        sheet listings. A product page carries no JSON-LD Product and its listing pages hold no product links in
+        plain HTML, so this site is expected to give no priced rows. Prices in SEK.
+    decision: pending
+    statements: {vat_basis: incl}
+  # ---- EU, on the owner's list but not approvable on the 13 Nov read ----------------------------------------------
+  - site_id: toom
+    brand: wudport
+    seller_name: toom Baumarkt
+    seller_type: merchant
+    seller_country: DE
+    served_market: DE
+    platform: schema_org_product
+    base_url: https://toom.de
+    discovery:
+      listing_pages: ["/c/bauen-renovieren/holz/sperrholz-tischlerplatten", "/c/bauen-renovieren/holz/osb-platten",
+                      "/c/bauen-renovieren/holz/spanplatten", "/c/bauen-renovieren/holz/multiplexplatten-mehrzweckplatten",
+                      "/c/bauen-renovieren/holz/moebelholz-zubehoer/mdf-platten"]
+      product_path: "^/p/[a-z0-9-]+/[0-9]+$"
+    terms:
+      terms_url: https://toom.de/agb/
+      checked_on: 2026-11-13
+      summary: >-
+        NOT READ: the AGB page loads its text by script, so the terms are unknown and the site cannot be approved. A
+        product page carries no JSON-LD Product.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: bricodepot
+    brand: wudport
+    seller_name: Brico Depot
+    seller_type: merchant
+    seller_country: FR
+    served_market: FR
+    platform: schema_org_product
+    base_url: https://www.bricodepot.fr
+    discovery:
+      listing_pages: ["/produits/materiau-et-gros-oeuvre/isolation-et-cloison/panneau-bois-et-dalle-de-plancher/panneau-bois"]
+      product_path: "^/p/[0-9]+/[a-z0-9-]+$"
+    terms:
+      summary: >-
+        NOT READ: no terms page was found (/cgv answers its 404 page), so the site cannot be approved. A product page
+        carries JSON-LD Product and Offer price (2.99 EUR), but its listing pages hold no product links in plain HTML
+        and its sitemaps cover the whole catalogue (about 31,000 URLs), so it would report 0 listings.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: bauhaus_se
+    brand: wudport
+    seller_name: BAUHAUS (Sweden)
+    seller_type: merchant
+    seller_country: SE
+    served_market: SE
+    platform: schema_org_product
+    base_url: https://www.bauhaus.se
+    terms:
+      terms_url: https://www.bauhaus.se/media/pdf/kopvillkor_bauhaus_251209.pdf
+      checked_on: 2026-11-13
+      summary: >-
+        The purchase terms (PDF, 9 Dec 2025 version) have no clause on scraping, automated access or copying prices.
+        NO ENTRY POINT: its sitemaps name no sheet-material category, and a product page carries no JSON-LD Product.
+        Prices in SEK.
+    decision: pending
+    statements: {vat_basis: incl}
+  - site_id: obi
+    brand: wudport
+    seller_name: OBI
+    seller_type: merchant
+    seller_country: DE
+    served_market: DE
+    platform: schema_org_product
+    base_url: https://www.obi.de
+    terms:
+      summary: >-
+        TERMS UNREADABLE TO US: robots.txt answers, but its AGB and legal pages answer an empty 404 to
+        `market-price-observer/1.0` (13 Nov) (Mas, 13 Nov: not approved). Never collected.
+    decision: refused
+    statements: {vat_basis: incl}
+  - site_id: castorama_fr
+    brand: wudport
+    seller_name: Castorama (France)
+    seller_type: merchant
+    seller_country: FR
+    served_market: FR
+    platform: schema_org_product
+    base_url: https://www.castorama.fr
+    terms:
+      summary: >-
+        BLOCKS OUR CLIENT NAME: robots.txt and every terms path answer 503 to `market-price-observer/1.0` (13 Nov).
+        Never worked around; never collected.
+    decision: refused
+    statements: {vat_basis: incl}
+  - site_id: castorama_pl
+    brand: wudport
+    seller_name: Castorama (Poland)
+    seller_type: merchant
+    seller_country: PL
+    served_market: PL
+    platform: schema_org_product
+    base_url: https://www.castorama.pl
+    terms:
+      summary: >-
+        BLOCKS OUR CLIENT NAME: robots.txt and every terms path answer 503 to `market-price-observer/1.0` (13 Nov).
+        Never worked around; never collected. Prices in PLN.
+    decision: refused
+    statements: {vat_basis: incl}
+  - site_id: praxis
+    brand: wudport
+    seller_name: Praxis
+    seller_type: merchant
+    seller_country: NL
+    served_market: NL
+    platform: schema_org_product
+    base_url: https://www.praxis.nl
+    terms:
+      summary: >-
+        BLOCKS OUR CLIENT NAME: robots.txt and every terms path answer 403 to `market-price-observer/1.0` (13 Nov).
+        Never worked around; never collected.
+    decision: refused
+    statements: {vat_basis: incl}
+  - site_id: hubo
+    brand: wudport
+    seller_name: Hubo
+    seller_type: merchant
+    seller_country: BE
+    served_market: BE
+    platform: schema_org_product
+    base_url: https://www.hubo.be
+    terms:
+      terms_url: https://www.hubo.be/nl/algemene-voorwaarden/
+      checked_on: 2026-11-13
+      summary: >-
+        TERMS FORBID COMMERCIAL USE (Mas, 13 Nov: not approved): reproduction, "gebruik voor commerciele doeleinden"
+        and electronic storage are forbidden without prior written consent. Never collected.
+    decision: refused
+    statements: {vat_basis: incl}
+  # ---- EU, blocked on the owner's list (never requested) ----------------------------------------------------------
+  - {site_id: hornbach, brand: wudport, seller_name: Hornbach, seller_type: merchant, seller_country: DE,
+     served_market: DE, platform: schema_org_product, base_url: https://hornbach.de,
+     terms: {summary: "Blocked us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused, statements: {vat_basis: incl}}
+  - {site_id: bauhaus_de, brand: wudport, seller_name: BAUHAUS (Germany), seller_type: merchant, seller_country: DE,
+     served_market: DE, platform: schema_org_product, base_url: https://bauhaus.info,
+     terms: {summary: "Blocked us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused, statements: {vat_basis: incl}}
+  - {site_id: gamma, brand: wudport, seller_name: GAMMA, seller_type: merchant, seller_country: NL, served_market: NL,
+     platform: schema_org_product, base_url: https://gamma.nl,
+     terms: {summary: "Blocked us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused, statements: {vat_basis: incl}}
+  - {site_id: leroymerlin_pl, brand: wudport, seller_name: Leroy Merlin (Poland), seller_type: merchant,
+     seller_country: PL, served_market: PL, platform: schema_org_product, base_url: https://leroymerlin.pl,
+     terms: {summary: "Blocked us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused, statements: {vat_basis: incl}}
+  - {site_id: leroymerlin_es, brand: wudport, seller_name: Leroy Merlin (Spain), seller_type: merchant,
+     seller_country: ES, served_market: ES, platform: schema_org_product, base_url: https://leroymerlin.es,
+     terms: {summary: "Blocked us (the owner's list, 13 Nov). Never requested, never worked around."},
+     decision: refused, statements: {vat_basis: incl}}
