@@ -16,6 +16,7 @@ Called by the reset lifecycle only, never on a schedule.
 from __future__ import annotations
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET
+from stone_pipeline.io.imagestore import photo_of
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 # Subfolders under <env>/products/ that hold hosted PRODUCT images, counted each on their own; everything else under
@@ -25,7 +26,7 @@ from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 _PRODUCT_IMAGE_FOLDERS = ("scraped", "improved", "standard")
 
 
-def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
+def wipe_all_product_images(client=None, dry_run: bool = False, keep=frozenset()) -> dict:
     """Delete EVERY hosted product image under <env>/products/ (the scraped originals, the re-hosted photos, the
     published standardised views and 3D slabs, anything else there) and the url->image manifest(s), so the NEXT scrape
     re-downloads and re-hosts from scratch. This is the 'fresh images' half of the pristine (factory) reset; the cheaper
@@ -33,11 +34,13 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
     <env>/variations/ (variant textures) or any other prefix/bucket: it lists+deletes ONLY the hardcoded
     <env>/products/<folder>/ prefixes and refuses if any key is somehow outside products/ or under
     variations/. Env-scoped bucket (settings refuses a production run on the dev bucket at import). Idempotent.
-    Returns per-folder delete counts."""
+    `keep` = {(source, sha)} of the photos never deleted, whatever their folder (imagestore.photo_of): the photos of the
+    listings that left sale and keep their records (ledger.sync.kept_photos, table 505), which no re-scrape would bring
+    back. Returns per-folder delete counts and how many keys were kept."""
     client = client or aws_client("s3", config=BOTOCORE_DEFAULTS)
     products_root = f"{ENV_SEGMENT}/products/"
     variations_root = f"{ENV_SEGMENT}/variations/"        # the protected sibling -- must never appear in a key
-    counts: dict[str, int] = {}
+    counts: dict[str, int] = {"kept": 0}
     for folder in _PRODUCT_IMAGE_FOLDERS:
         prefix = f"{products_root}{folder}/"
         keys: list[str] = []
@@ -46,6 +49,9 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
         for k in keys:                                    # HARD GUARD: refuse the whole wipe on any stray key
             if not k.startswith(prefix) or variations_root in k:
                 raise RuntimeError(f"refusing image wipe: key {k!r} is outside {prefix!r} or under variations/")
+        kept = [k for k in keys if photo_of(k) in keep]
+        counts["kept"] += len(kept)
+        keys = [k for k in keys if photo_of(k) not in keep]
         counts[folder] = len(keys)
         if not dry_run:
             for i in range(0, len(keys), 1000):           # S3 delete_objects caps at 1000 keys per call
@@ -64,6 +70,9 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
                 continue
             if variations_root in k:
                 raise RuntimeError(f"refusing image wipe: key {k!r} is under variations/")
+            if photo_of(k) in keep:
+                counts["kept"] += 1
+                continue
             other.append(k)
     counts["other"] = len(other)
     if not dry_run and other:
