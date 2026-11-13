@@ -17,7 +17,12 @@ import dataclasses
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, decisions, tree_build
 from stone_pipeline.stages.curate import CurationResult
+import pytest
+
 from stone_pipeline.tests.test_tree_build import COL, _attrs, _backbone, _export, _for, _post, _products, _prow
+
+# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 
 # --- combinations: (type, name) inheritance ----------------------------------------------------------------

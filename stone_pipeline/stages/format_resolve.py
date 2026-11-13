@@ -52,14 +52,14 @@ def branch_of(row) -> str:
     return value if category(value) else _DEFAULT_BRANCH
 
 
-def category_pcat_for_branch(branch: str, ref) -> str | None:
-    """The backend category pcat for a branch: the attributes.csv mapping (by the
-    category's label), falling back to the registry pcat (lets a config-supplied id
-    activate a category not yet in attributes.csv, e.g. tiles)."""
+def category_pcat_for_branch(branch: str) -> str | None:
+    """The backend category pcat for a branch: the registry's (config/categories, keyed by the category's exact
+    handle from attributes.csv, or its env override), the same pcat validate's category check accepts. None for a
+    category with no pcat on this env (inactive, never guessed)."""
     c = category(branch)
     if not c:
         return None
-    return ref.attributes.category_pcat.get(c.label) or (c.pcat_id or None)
+    return c.pcat_id or None
 
 
 def _conf(c: Confidence) -> str:

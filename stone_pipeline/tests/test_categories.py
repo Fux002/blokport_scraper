@@ -74,12 +74,12 @@ def test_pcat_comes_only_from_env_export(monkeypatch):
     # a category's Medusa pcat is sourced ONLY from THIS env's export (attributes.csv -> _ENV_PCATS),
     # never a hardcoded literal; a category absent from the export goes inactive ("").
     from stone_pipeline.config import categories
-    monkeypatch.setattr(categories, "_ENV_PCATS", {"Slabs": "pcat_FROM_EXPORT"})
-    assert categories._pcat("Slabs") == "pcat_FROM_EXPORT"          # from the env's export
+    monkeypatch.setattr(categories, "_ENV_PCATS", {"slabs": "pcat_FROM_EXPORT"})
+    assert categories._pcat("slabs") == "pcat_FROM_EXPORT"          # from the env's export
     monkeypatch.setattr(categories, "_ENV_PCATS", {})
-    assert categories._pcat("Slabs") == ""                          # absent -> inactive, no literal id
+    assert categories._pcat("slabs") == ""                          # absent -> inactive, no literal id
     monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_OVERRIDE")
-    assert categories._pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT") == "pcat_OVERRIDE"  # explicit override only
+    assert categories._pcat("tiles", "BLOKPORT_CAT_TILES_PCAT") == "pcat_OVERRIDE"  # explicit override only
 
 
 def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
@@ -95,15 +95,15 @@ def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
     attrs = tmp_path / "attributes.csv"
     try:
         # 1) an export with NO category rows (the stale pre-fix state) -> the registry goes inactive
-        attrs.write_text("category,value,sourceid\ncolor,Black,col_x\n", encoding="utf-8")
+        attrs.write_text("category,value,sourceid,handle\ncolor,Black,col_x\n", encoding="utf-8")
         categories.refresh_category_pcats()
         assert categories.active_categories() == ()
         assert categories.category("slab").pcat_id == ""            # inactive: nothing can emit
 
         # 2) the corrected export arrives AFTER import -> refresh reactivates from the live file
         attrs.write_text(
-            "category,value,sourceid\n"
-            "category,Slabs,pcat_slab\ncategory,Blocks,pcat_block\ncategory,Tiles,pcat_tile\n",
+            "category,value,sourceid,handle\n"
+            "category,Slabs,pcat_slab,slabs\ncategory,Blocks,pcat_block,blocks\ncategory,Tiles,pcat_tile,tiles\n",
             encoding="utf-8")
         categories.refresh_category_pcats()
         assert categories.category("slab").pcat_id == "pcat_slab"   # re-derived from the fresh export
@@ -121,7 +121,7 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
     monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_TILE_OVERRIDE")
     (tmp_path / "attributes.csv").write_text(
-        "category,value,sourceid\ncategory,Tiles,pcat_tile_from_file\n", encoding="utf-8")
+        "category,value,sourceid,handle\ncategory,Tiles,pcat_tile_from_file,tiles\n", encoding="utf-8")
     try:
         categories.refresh_category_pcats()
         assert categories.category("tile").pcat_id == "pcat_TILE_OVERRIDE"  # override, not the file value

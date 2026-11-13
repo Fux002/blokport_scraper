@@ -20,13 +20,14 @@ from stone_pipeline.ledger.existing import acked_products
 from stone_pipeline.reference.loaders import restricted_values
 from stone_pipeline.reference.loaders.common import norm
 from stone_pipeline.stages import validate
+from stone_pipeline.tests._category_registry import set_category_pcats
 
 
 # --- restricted_values: the single authority (the files) --------------------
 
 def test_restricted_values_reads_archived_and_internal(tmp_path):
     p = tmp_path / "attributes.csv"
-    p.write_text("category,value,sourceid,status,internal\n"
+    p.write_text("category,value,sourceid,status,internal,handle\n"
                  "color,Beige,c1,active,false\n"
                  "finish,Polished,f1,archived,false\n"
                  "color,SecretBlue,c2,active,true\n", encoding="utf-8")
@@ -35,7 +36,7 @@ def test_restricted_values_reads_archived_and_internal(tmp_path):
 
 def test_restricted_values_empty_without_status_columns(tmp_path):
     p = tmp_path / "attributes.csv"
-    p.write_text("category,value,sourceid\ncolor,Beige,c1\n", encoding="utf-8")
+    p.write_text("category,value,sourceid,handle\ncolor,Beige,c1\n", encoding="utf-8")
     assert restricted_values(p) == {}   # expand phase: nothing is restricted until the columns exist
 
 
@@ -62,11 +63,11 @@ def test_acked_products_only_includes_medusa_held(tmp_path):
     assert out == {"ZUCCHI-1": {("color", norm("Beige")), ("finish", norm("Polished"))}}
 
 
-def test_acked_products_carry_the_category_label_of_the_stored_handle(tmp_path):
+def test_acked_products_carry_the_stored_category_handle(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
         _ledger_product(lg, "ZUCCHI-1", category="tiles", medusa_id="M1")   # stored by handle (D11)
         out = acked_products(lg)
-    assert out == {"ZUCCHI-1": {("category", norm("Tiles"))}}
+    assert out == {"ZUCCHI-1": {("category", "tiles")}}                     # the handle itself (table 577)
 
 
 # --- validate value_frozen ---------------------------------------------------
@@ -124,56 +125,36 @@ def test_value_frozen_exemption_is_value_specific():
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
 
 
-def test_value_frozen_holds_a_new_product_in_an_archived_category():
+def test_value_frozen_holds_a_new_product_in_an_archived_category(monkeypatch):
+    set_category_pcats(monkeypatch, {"tile": "pcat_tiles"})       # the row's pcat is the registry's (577)
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="pcat_tiles")
-    validate.validate_row(row, frozen={"category": {norm("Tiles")}}, acked={},
-                          category_labels={"pcat_tiles": "Tiles"}, source_code="zucchi")
+    validate.validate_row(row, frozen={"category": {"tiles"}}, acked={}, source_code="zucchi")
     assert "value_frozen" in {r.rule for r in row.reject_reasons}
 
 
-def test_value_frozen_exempts_an_existing_product_in_an_archived_category():
+def test_value_frozen_exempts_an_existing_product_in_an_archived_category(monkeypatch):
+    set_category_pcats(monkeypatch, {"tile": "pcat_tiles"})
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="pcat_tiles")
-    validate.validate_row(row, frozen={"category": {norm("Tiles")}},
-                          acked={"ZUCCHI-1": {("category", norm("Tiles"))}},
-                          category_labels={"pcat_tiles": "Tiles"}, source_code="zucchi")
+    validate.validate_row(row, frozen={"category": {"tiles"}},
+                          acked={"ZUCCHI-1": {("category", "tiles")}}, source_code="zucchi")
     assert "value_frozen" not in {r.rule for r in row.reject_reasons}
 
 
-def test_a_row_on_a_pcat_absent_from_attributes_is_not_held_or_crashed():
-    # a category pcat with no attributes.csv row can never be restricted (restricted_values comes only from
-    # those rows), so it returns None. One such row (an env-override pcat) must NOT raise or hold while another
-    # value is restricted -- one dead row never crashes the source's produce.
-    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="env_override_pcat",
+def test_a_row_on_a_pcat_no_category_has_is_not_held_or_crashed():
+    # a pcat no active category has (category_invalid refuses that row on its own) carries no category to
+    # freeze, so it returns None: it must NOT raise or hold while another value is restricted -- one dead row
+    # never crashes the source's produce.
+    row = CanonicalRow(src_site="zucchi", surrogate_key="1", category_pcat_id="pcat_no_category",
                        color_name="Grey")
-    validate.validate_row(row, frozen={"color": {norm("Pink")}}, acked={},
-                          category_labels={}, source_code="zucchi")   # must not raise
+    validate.validate_row(row, frozen={"color": {norm("Pink")}}, acked={}, source_code="zucchi")   # must not raise
     assert "value_frozen" not in {r.rule for r in row.reject_reasons}
-
-
-def test_category_labels_come_from_attributes_not_the_registry(monkeypatch):
-    # finding 1: the label map is sourced from attributes.csv (the same table the row's pcat comes from), so
-    # an env override on the Category REGISTRY pcat can never make the category silently skip the check.
-    from stone_pipeline.config.settings import SETTINGS
-    from stone_pipeline.reference.medusa_files import read_attributes
-    if not SETTINGS.paths.attributes_csv.exists():
-        pytest.skip("no attributes.csv")
-    cats = {a.sourceid: a.value for a in read_attributes(SETTINGS.paths.attributes_csv, require_status=False)
-            if a.category == "category" and a.sourceid}
-    if not cats:
-        pytest.skip("no category rows in attributes.csv")
-    monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
-                        lambda *a, **k: {"color": {norm("Beige")}})
-    monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "an-override-that-differs-from-attributes")
-    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(SETTINGS.paths.workspace_root / "nonexistent.ledger"))
-    _frozen, _acked, category_labels = validate._frozen_and_acked("zucchi")
-    assert category_labels == cats   # straight from attributes.csv, unaffected by the registry override
 
 
 def test_frozen_and_acked_with_no_ledger_holds_everything(tmp_path, monkeypatch):
     monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
                         lambda *a, **k: {"color": {norm("Beige")}})
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "nonexistent.ledger"))
-    frozen, acked, _cats = validate._frozen_and_acked("zucchi")
+    frozen, acked = validate._frozen_and_acked("zucchi")
     assert frozen and acked == {}   # no ledger -> nobody exempt -> every restricted value held
 
 
@@ -186,7 +167,7 @@ def test_frozen_and_acked_reads_a_real_ledger(tmp_path, monkeypatch):
     monkeypatch.setattr("stone_pipeline.reference.loaders.restricted_values",
                         lambda *a, **k: {"color": {norm("Beige")}})
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(lpath))
-    _frozen, acked, _cats = validate._frozen_and_acked("zucchi")
+    _frozen, acked = validate._frozen_and_acked("zucchi")
     assert acked.get("ZUCCHI-1") == {("color", norm("Beige"))}
 
 
