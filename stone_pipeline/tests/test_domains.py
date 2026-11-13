@@ -5,6 +5,8 @@ never silently substituting a default vocabulary.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from stone_pipeline.config import domain
@@ -359,6 +361,17 @@ def test_a_backbone_file_the_pack_names_must_be_a_file_name(tmp_path, monkeypatc
     _write_pack(tmp_path, pack)
     # the exact refusal: the tmp folder's own name holds "backbone_file", so a looser match passes on any error
     with pytest.raises(ValueError, match="backbone_file must be a file name, got ''"):
+        domain.load_pack("bad")
+
+
+@pytest.mark.parametrize("name", ["../x.json", "sub/x.json"])
+def test_a_backbone_file_the_pack_names_must_be_a_bare_file_name_not_a_path(tmp_path, monkeypatch, name):
+    # the file is joined under catalog_source; a path would read a file outside it or in a sub-folder no pack owns
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["backbone_file"] = name
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match=f"backbone_file must be a file name, got '{re.escape(name)}'"):
         domain.load_pack("bad")
 
 
