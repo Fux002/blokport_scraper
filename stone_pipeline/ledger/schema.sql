@@ -106,18 +106,6 @@ CREATE TABLE IF NOT EXISTS variation_category_image (
 );
 
 -- ---------------------------------------------------------------------------
--- variation_alias_superseded (v18, P2-10 C4): an acked alias value the v18 carry did not carry because no store owns
--- it, on a row that was in the produced set at the carry (aliases.carry). That row is re-served with its new whole
--- set, so Medusa replaces the value; if the produce leaves the row out instead (in_full=0, no tombstone), Medusa still
--- holds it, and the alias classification names it `removed` under its Key (aliases.cleanup).
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS variation_alias_superseded (
-    key    TEXT NOT NULL REFERENCES variation (key) ON DELETE CASCADE,
-    value  TEXT NOT NULL,
-    PRIMARY KEY (key, value)
-);
-
--- ---------------------------------------------------------------------------
 -- attribute: the controlled vocabulary. Existing values are refreshed from
 -- Medusa; NEW values discovered by the pipeline start `pending` and HOLD their
 -- dependents until synced (design C3). Keyed by (category, value).
