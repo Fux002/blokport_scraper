@@ -4,7 +4,7 @@
 
 The backend's phase 2 fill reads it to give every scraper alias row on Medusa its owner. It names every served Key and
 every pending variation tombstone with its CURRENT ACKED set (the ledger keeps no history), one row per
-(Key, match_key(Value)), each value in ONE class, the first that applies:
+(Key, alias_key(Value)), each value in ONE class, the first that applies:
 - `code`: the brand's code pattern accepts it (C1's code test, inside alias_refusal);
 - `operator`: a GLOBAL `is` statement renamed onto the variety (vendor bindings stay match-only);
 - `removed`: a seed or learned value C1's alias refusal fails (the cleanup drops it; an operator's row is never
@@ -34,7 +34,7 @@ from stone_pipeline.aliases import open_items
 from stone_pipeline.aliases.context import build_contexts
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.alias_problem import AliasContext, alias_refusal, code_matcher
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key, match_key
 
 log = logfmt.get_logger("alias_cleanup")
 
@@ -80,7 +80,7 @@ class Unclassifiable(RuntimeError):
 @dataclass(frozen=True)
 class Stores:
     """The alias owners, keyed for the lookups: seed and learned by Key, operator by (match_key(name), match_key(type)),
-    every value as its match_key; plus the brand's code test."""
+    every value as its alias_key; plus the brand's code test."""
     seed: dict[str, frozenset[str]]
     operator: dict[tuple[str, str], frozenset[str]]
     learned: dict[str, frozenset[str]]
@@ -89,7 +89,7 @@ class Stores:
 
 @dataclass(frozen=True)
 class Classification:
-    rows: tuple[tuple[str, str, str], ...]             # (Key, Value, Class), sorted by Key then match_key(Value)
+    rows: tuple[tuple[str, str, str], ...]             # (Key, Value, Class), sorted by Key then alias_key(Value)
     variations: int                                    # synced rows named
     tombstoned: int                                    # retiring rows named (their pending tombstone)
     differences: tuple[tuple[str, str, str, str], ...]  # (Key, Value, 'removed' | 'refused', reason), same order
@@ -125,9 +125,9 @@ def classify(ledger, stores: Stores) -> Classification:
 
 
 def _order(row: tuple) -> tuple:
-    """Sorted by Key, then match_key(Value), then the Value itself (two spellings never share a row, so this is
+    """Sorted by Key, then alias_key(Value), then the Value itself (two spellings never share a row, so this is
     total)."""
-    return row[0], match_key(row[1]), row[1]
+    return row[0], alias_key(row[1]), row[1]
 
 
 def alias_contexts(variations: list[dict]) -> dict[str, AliasContext]:
@@ -157,7 +157,7 @@ def _classify_variety(v: dict, stores: Stores, context: AliasContext, rows: list
         return
     by_norm: dict[str, list[str]] = {}
     for value in values:
-        by_norm.setdefault(match_key(value), []).append(value)
+        by_norm.setdefault(alias_key(value), []).append(value)
     operator = stores.operator.get((name_key, type_key), frozenset()) | stores.operator.get((name_key, ""), frozenset())
     for norm, spellings in by_norm.items():
         value = min(spellings)                          # one row per (Key, norm): the least spelling, deterministic
@@ -200,7 +200,7 @@ def _csv(columns, rows) -> bytes:
 
 
 def csv_bytes(classification: Classification) -> bytes:
-    """The file: UTF-8 with no BOM, \\n line ends, minimal quoting, sorted by Key then match_key(Value)."""
+    """The file: UTF-8 with no BOM, \\n line ends, minimal quoting, sorted by Key then alias_key(Value)."""
     return _csv(COLUMNS, classification.rows)
 
 
@@ -227,20 +227,20 @@ def load_stores() -> Stores:
     base, backbones = _seed_files()
     seed: dict[str, set[str]] = {}
     for row in read_variants_export(Path(base), require_status=False, name=Path(base).name):
-        seed.setdefault(row.key, set()).update(match_key(a) for a in row.aliases)
+        seed.setdefault(row.key, set()).update(alias_key(a) for a in row.aliases)
     for path in backbones:
         if Path(path).exists():
             for post in read_posts(Path(path)):
                 if post.get("key"):
-                    seed.setdefault(post["key"], set()).update(match_key(a) for a in post.get("aliases") or [])
+                    seed.setdefault(post["key"], set()).update(alias_key(a) for a in post.get("aliases") or [])
     operator: dict[tuple[str, str], set[str]] = {}
     for s in decisions_store.statement_rows():
         display = s.get("spelling") or s["spelling_norm"]
         if (s["source"] or "") or s["verdict"] != "is" or not s.get("name"):
             continue                                    # a vendor binding is match-only; a reject names no alias
-        if match_key(s["name"]) != match_key(display):
+        if match_key(s["name"]) != alias_key(display):
             operator.setdefault((match_key(s["name"]), match_key(s.get("stone_type") or "")), set()).add(
-                match_key(display))
+                alias_key(display))
     learned: dict[str, set[str]] = {}
     for row in decisions_store.active_learned_aliases():
         learned.setdefault(row["identity_key"], set()).add(row["norm"])
@@ -306,7 +306,7 @@ def admin_items(export: Path, is_code: Callable[[str], bool]) -> Optional[list[t
         for value in (v.strip() for v in (r[ADMIN_ALIASES_COLUMN] or "").split("|")):
             if value and (why := alias_refusal(value, contexts[r["Key"]], is_code)):
                 items.append(("admin_refused", r["Key"], value, why))
-    return sorted(items, key=lambda i: (i[0], i[1], match_key(i[2]), i[2]))
+    return sorted(items, key=lambda i: (i[0], i[1], alias_key(i[2]), i[2]))
 
 
 @dataclass(frozen=True)

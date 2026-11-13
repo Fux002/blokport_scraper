@@ -4,9 +4,10 @@ table 171; PHASE-2-SPEC WP2.1). The phase 2 cleaner pre-classifies every value w
 disagreement.
 
 PAIRED with the backend through tests/fixtures/alias_problem_vectors.json, byte-identical to the backend's
-src/model/catalog/__tests__/alias-problem.vectors.json: a change to either side is a paired PR. The key is
-core.text.match_key, the backend nameKey's paired twin (tests/fixtures/name_key_vectors.json). Both are pure: the same
-input always gives the same answer, and neither throws. No em dashes (design principle 2).
+src/model/catalog/__tests__/alias-problem.vectors.json: a change to either side is a paired PR. A value's key is
+core.text.alias_key, the backend aliasKey's paired twin (match_key for an all-Latin value; the `alias_key` column
+of tests/fixtures/name_key_vectors.json); names (the own name, the context sets) key by match_key. Both are pure:
+the same input always gives the same answer, and neither throws. No em dashes (design principle 2).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Callable, Optional
 
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key, match_key
 
 # aliasProblem's codes, in the order it checks them (the first that applies wins). A contract with the backend's
 # AliasProblem type, not a tunable.
@@ -45,7 +46,7 @@ def alias_problem(value: str, context: AliasContext) -> Optional[str]:
     good alias. `delimiter` reads the raw value; every other check reads its key."""
     if any(d in value for d in _DELIMITERS):
         return "delimiter"
-    key = match_key(value)
+    key = alias_key(value)
     if not key:
         return "empty"
     own = match_key(context.own_name)

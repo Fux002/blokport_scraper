@@ -166,6 +166,69 @@ def clean_identifier(text: str) -> str:
     the shared name-key vectors (`identifier`)."""
     return " ".join(_ascii_display(text).split())
 
+
+# The display rule for an ALIAS (field kind "alias", 34's OWNED-NAMES-CLEAN row; the owner's ruling, 13 Nov, with
+# Mas's refusal (b)): every letter of every script is kept as written (accents never folded, a non-Latin script never
+# dropped), so the stored class is the database's ^[[:alpha:]̀-ͯ0-9 '-]+$.
+_ALIAS_TYPOGRAPHIC = str.maketrans({
+    "`": "'", "´": "'", "‘": "'", "’": "'", "‚": "'", "‛": "'", "ʼ": "'",
+    "“": '"', "”": '"', "„": '"', "‟": '"', "−": "-",
+})
+_ALIAS_NON_LETTERS = frozenset("0123456789 '-")
+_ALIAS_MARKS = range(0x0300, 0x0370)            # the combining diacritical marks block, kept as written
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+class AliasRefused(ValueError):
+    """An alias that is not stored at all (Mas's ruling (b)): mojibake ('?' or U+FFFD between two letters, a lost
+    letter such as 'K?r?ehir'). The caller lists it for the owner (review/aliases_dropped.csv); where the real spelling
+    is recoverable the fix belongs at the alias's source, not in the cleaner."""
+
+
+def _mojibake(text: str) -> bool:
+    """'?' or U+FFFD with a letter (any script) on BOTH sides: 'C?te' and 'K?r?ehir' are, 'Picass?' and 'Who? Me' are
+    not (their '?' becomes a space)."""
+    return any(c in "?�" and 0 < i < len(text) - 1 and text[i - 1].isalpha() and text[i + 1].isalpha()
+               for i, c in enumerate(text))
+
+
+def _is_letter(c: str) -> bool:
+    return unicodedata.category(c).startswith("L")
+
+
+def _alias_char(c: str) -> bool:
+    return _is_letter(c) or ord(c) in _ALIAS_MARKS or c in _ALIAS_NON_LETTERS
+
+
+def _drop_loose_alias_apostrophes(text: str) -> str:
+    """Each apostrophe kept only inside a word: a letter (any script), a kept combining mark or an ASCII digit before
+    it AND a letter or an ASCII digit after it; any other apostrophe becomes a space."""
+    def inside(i: int) -> bool:
+        before, after = text[i - 1] if i else "", text[i + 1] if i + 1 < len(text) else ""
+        return (bool(before) and (_is_letter(before) or ord(before) in _ALIAS_MARKS or before in _ASCII_DIGITS)
+                and bool(after) and (_is_letter(after) or after in _ASCII_DIGITS))
+    return "".join(" " if c == "'" and not inside(i) else c for i, c in enumerate(text))
+
+
+def clean_alias(text: str) -> str:
+    """The display rule for an ALIAS, step for step (34's spec): REFUSED first (AliasRefused) when the raw value holds
+    mojibake (_mojibake); then (1) every format character removed (a zero-width space goes, never a space); (2) the
+    alias typographic table (a backtick, an acute or a curly quote is an apostrophe) and every dash a hyphen; (3) NFC,
+    accents kept; (4) '&' reads 'and'; (5) every character that is not a letter (any script), a combining mark in
+    U+0300-U+036F, an ASCII digit, a space, an apostrophe or a hyphen becomes a space; (6) apostrophe runs collapse,
+    an apostrophe outside a word becomes a space (_drop_loose_alias_apostrophes), then the name's hyphen rules,
+    whitespace collapsed. '' when nothing is left: the caller refuses it, it is never stored. Case is the caller's.
+    Expectations live in the shared name-key vectors (`alias`)."""
+    text = text or ""
+    if _mojibake(text):
+        raise AliasRefused(f"{text!r} holds mojibake ('?' or U+FFFD between two letters)")
+    visible = "".join(c for c in text if unicodedata.category(c) != "Cf")
+    typed = "".join("-" if unicodedata.category(c) == "Pd" else c for c in visible.translate(_ALIAS_TYPOGRAPHIC))
+    joined = unicodedata.normalize("NFC", typed).replace("&", " and ")
+    kept = "".join(c if _alias_char(c) else " " for c in joined)
+    kept = _drop_loose_alias_apostrophes(_APOSTROPHE_RUN.sub("'", kept))
+    return " ".join(_HYPHEN_RUN.sub("-", kept).split()).strip("- ")
+
 _HTML_RE = re.compile(r"<[A-Za-z/!][^>]*>|&[A-Za-z]+;|&#\d+;")
 _PROSE_WORD_RE = re.compile(r"[a-z']+")
 
@@ -218,6 +281,45 @@ _ALIAS_SEPARATOR_RE = re.compile("[,\u060c\u3001\ufe10\ufe11\ufe50\ufe51\uff0c\u
 _ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 
 
+# The Latin script (Scripts.txt sc=Latn, the JS \p{Script=Latin}), from Unicode 18.0.0's Scripts.txt. Python has no
+# script property. 18.0.0's set is a strict superset of 14.0.0's (the vectors' floor; no code point changed script),
+# so it agrees with the floor on every vector input and with any runtime up to 18.0.0.
+_LATIN_RANGES = (
+    (0x0041, 0x005A), (0x0061, 0x007A), (0x00AA, 0x00AA), (0x00BA, 0x00BA), (0x00C0, 0x00D6), (0x00D8, 0x00F6),
+    (0x00F8, 0x02B8), (0x02E0, 0x02E4), (0x1D00, 0x1D25), (0x1D2C, 0x1D5C), (0x1D62, 0x1D65), (0x1D6B, 0x1D77),
+    (0x1D79, 0x1DBE), (0x1E00, 0x1EFF), (0x2071, 0x2071), (0x207F, 0x207F), (0x2090, 0x209F), (0x212A, 0x212B),
+    (0x2132, 0x2132), (0x214E, 0x214E), (0x2160, 0x2188), (0x2C60, 0x2C7F), (0xA722, 0xA787), (0xA78B, 0xA7DD),
+    (0xA7E2, 0xA7E2), (0xA7F1, 0xA7FF), (0xAB30, 0xAB5A), (0xAB5C, 0xAB64), (0xAB66, 0xAB69), (0xAB6C, 0xAB6D),
+    (0xFB00, 0xFB06), (0xFF21, 0xFF3A), (0xFF41, 0xFF5A), (0x10780, 0x10785), (0x10787, 0x107B0), (0x107B2, 0x107BF),
+    (0x1DF00, 0x1DF81), (0x1DF90, 0x1DF96), (0x1DFCD, 0x1DFF2), (0x1DFF5, 0x1DFFF),
+)
+
+
+def _is_latin(c: str) -> bool:
+    cp = ord(c)
+    return any(lo <= cp <= hi for lo, hi in _LATIN_RANGES)
+
+
+def _alias_key_char(c: str) -> bool:
+    category = unicodedata.category(c)
+    return category[0] in "LM" or category == "Nd"
+
+
+def alias_key(text: str) -> str:
+    """THE key of an alias value (Mas's ruling, 13 Nov; the backend's paired aliasKey, `alias_key` in the shared
+    name-key vectors): match_key when the RAW value has no letter outside the Latin script (Latin with diacritics
+    keys as matching sees it, so every all-Latin key is unchanged). Otherwise the value keeps its script: every format
+    character removed, NFKC, lower() (the default lowercase mapping JS toLowerCase also applies; NOT casefold, which
+    JS lacks: a final sigma stays), every character that is not a letter, a mark or a decimal digit (any script) a
+    space, whitespace collapsed. '' when nothing is left: the callers refuse it. Pure; never raises."""
+    text = text or ""
+    if not any(_is_letter(c) and not _is_latin(c) for c in text):
+        return match_key(text)
+    visible = "".join(c for c in text if unicodedata.category(c) != "Cf")
+    lowered = unicodedata.normalize("NFKC", visible).lower()
+    return " ".join("".join(c if _alias_key_char(c) else " " for c in lowered).split())
+
+
 def clean_alias_list(name: str, raw_aliases, clean) -> tuple[list[str], list[str]]:
     """Normalize a variant's alias list into clean, de-duplicated alternative names:
       - split a blob on every comma form ('Tropical Rain Forest, Rain Forest'), before cleaning,
@@ -225,8 +327,10 @@ def clean_alias_list(name: str, raw_aliases, clean) -> tuple[list[str], list[str
       - strip stray wrapping punctuation/brackets and junk (an alias with no letters or digits),
       - clean each piece with `clean` (the alias field's display rule, which the caller passes in, so this module
         holds no kind),
-      - drop any alias equal to the variant Name (redundant) and de-duplicate on match_key, first seen kept.
-    Returns (kept, dropped): a piece with no ASCII form (UnfoldableName) is dropped and returned for reporting."""
+      - drop any alias equal to the variant Name (redundant) and de-duplicate on alias_key (match_key for an
+        all-Latin alias), first seen kept.
+    Returns (kept, dropped): a piece with no ASCII form (UnfoldableName, under the name kind) or a refused alias
+    (AliasRefused, under the alias kind) is dropped and returned for reporting."""
     name_key = match_key(name or "")
     kept: list[str] = []
     dropped: list[str] = []
@@ -238,10 +342,10 @@ def clean_alias_list(name: str, raw_aliases, clean) -> tuple[list[str], list[str
             return                                   # pure punctuation -> junk
         try:
             value = clean(value)
-        except UnfoldableName:
+        except (UnfoldableName, AliasRefused):
             dropped.append(value)
             return
-        key = match_key(value)
+        key = alias_key(value)
         if not key or key == name_key or key in seen:
             return                                   # empty, == Name, or already have it
         seen.add(key)
