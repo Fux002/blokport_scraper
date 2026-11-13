@@ -29,8 +29,10 @@ from stone_pipeline.stages import tree_build
 CATALOG = rewrite_committed.REPO_ROOT / "catalog_source"
 VARIETIES = CATALOG / "backbone_varieties.json"
 ADDITIONS = CATALOG / "backbone_additions" / "varieties.json"
-POST_FIELDS = {"key", "variant", "stone_type", "color", "finishes", "qualities", "aliases", "merged_from"}
-ADDITION_FIELDS = POST_FIELDS | {"categories"}
+# P2-10's seed rewrite adds `codes` to every backbone post (the seed store's code set); curate's additions keep theirs
+ADDITION_FIELDS = {"key", "variant", "stone_type", "color", "finishes", "qualities", "aliases", "merged_from",
+                   "categories"}
+POST_FIELDS = ADDITION_FIELDS - {"categories"} | {"codes"}
 # D7: block's own finish set, as the finish vocabulary spells it
 BLOCK_FINISHES = ["Brushed", "Chain Sawn & Squared", "Chain Sawn & Un-squared", "Diamond Wire Sawn & Squared",
                   "Diamond Wire Sawn & Un-squared", "Drill, Split & Squared", "Drill, Split & Un-squared",
