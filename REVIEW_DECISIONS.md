@@ -91,8 +91,8 @@ statement adjusts a row; `DELETE` clears it.
 
 ## What a decision touches
 
-- **Vendor alias** (`scoped_alias`): vendor + spelling -> variety. Applied by the matcher's override tier,
-  before any alias or similarity lookup, for that vendor only.
+- **Vendor alias** (a vendor-level `is` statement, `Decisions.bindings`): vendor + spelling -> variety. Applied by
+  the matcher's override tier, before any alias or similarity lookup, for that vendor only.
 - **Vendor origin** (`origin_decision`): vendor + variety + type -> country. Read by derive at its top curated
   rung, above the origin map and the vendor gate, for that vendor's products only.
 - **Mint** (`variety_decision`, keyed vendor + spelling): the global level (vendor `''`, `asked_by` = who
