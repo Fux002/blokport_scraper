@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Iterable
 
 from stone_pipeline.aliases.surfaces import Surfaces
 from stone_pipeline.core.text import alias_key, match_key
@@ -18,10 +19,18 @@ def rows_of(surfaces: Surfaces) -> tuple[list[dict], list[str]]:
     """(alias_rows, codes) of one variety: the scraper's values only, alias_rows ordered by alias_key (the backend
     aliasKey's paired twin; match_key for an all-Latin value) and codes by match_key, so the same set always serves,
     and hashes, the same."""
-    rows = sorted(({"value": v, "method": m} for v, m in surfaces.aliases if m in SENT_METHODS),
-                  key=lambda r: (alias_key(r["value"]), r["value"]))
-    codes = sorted((v for v, m in surfaces.codes if m in SENT_METHODS), key=lambda v: (match_key(v), v))
-    return rows, codes
+    return (ordered_rows((v, m) for v, m in surfaces.aliases if m in SENT_METHODS),
+            ordered_codes(v for v, m in surfaces.codes if m in SENT_METHODS))
+
+
+def ordered_rows(pairs: Iterable[tuple[str, str]]) -> list[dict]:
+    """alias_rows [{value, method}] in the served order: by alias_key, then the value."""
+    return sorted(({"value": v, "method": m} for v, m in pairs), key=lambda r: (alias_key(r["value"]), r["value"]))
+
+
+def ordered_codes(values: Iterable[str]) -> list[str]:
+    """codes in the served order: by match_key, then the value."""
+    return sorted(values, key=lambda v: (match_key(v), v))
 
 
 def write_sidecar(directory: Path, by_key: dict[str, tuple[list[dict], list[str]]]) -> Path:

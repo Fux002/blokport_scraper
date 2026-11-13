@@ -34,8 +34,10 @@ SCHEMA_VERSION = 19  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per 
 #                      v16: product.photo_unpublished -- the standardised files a product links that are not
 #                           published (never served while any); null on every existing row until its next produce.
 #                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
-#                      v18: variation.aliases replaced by alias_rows + codes (P2-10 C4), NULL on every existing row:
-#                           not computed yet, so held from the serve until the next produce computes both.
+#                      v18: variation.alias_rows + codes (P2-10 C4), NULL on every existing row: not computed
+#                           yet, so held from the serve. The old `aliases` stays until the produce-start carry
+#                           (aliases.carry) moves each row's acked set into them and drops it, in one transaction;
+#                           variation_alias_superseded holds the in-set values no store owns (schema.sql).
 #                      v19: inventory.gone_at -- when a listing was first missing at its supplier (table 505: it stays
 #                           published as sold out); null on every existing row until a run finds it gone, so a
 #                           listing gone before v19 gets the first v19 run's date.
@@ -227,8 +229,6 @@ class Ledger:
         if "alias_rows" not in variation_cols:    # v18: NULL = not computed yet (held), never '[]' (the empty channel)
             self.conn.execute("ALTER TABLE variation ADD COLUMN alias_rows TEXT")
             self.conn.execute("ALTER TABLE variation ADD COLUMN codes TEXT")
-        if "aliases" in variation_cols:           # v18: the old unowned set, never served again
-            self.conn.execute("ALTER TABLE variation DROP COLUMN aliases")
         inventory_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "gone_at" not in inventory_cols:       # v19: no backfill, the next run that finds a listing gone stamps it
             self.conn.execute("ALTER TABLE inventory ADD COLUMN gone_at TEXT")
