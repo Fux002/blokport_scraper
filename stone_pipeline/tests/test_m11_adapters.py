@@ -150,7 +150,7 @@ def test_varsha_reads_stone_type_from_composition_head_only_when_real():
     assert tag.raw_type == ""           # a classification tag leaves type empty (held / matched, not tag)
 
 
-def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path, scrape_data_dir):
+def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path, scrape_data_dir, seeded_config_store):
     out = tmp_path / "out"
     out.mkdir()
     manifest = run_source("marenostone", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
@@ -248,7 +248,7 @@ def test_accents_fold_in_display_and_in_identity():
     assert fk.display(fk.VARIATION_NAME, "Rosa Porri\u00f1o") == "Rosa Porrino"
 
 
-def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch, scrape_data_dir):
+def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch, scrape_data_dir, seeded_config_store):
     # a source that overrides load_frame (e.g. an API/DB) runs through the WHOLE pipeline without
     # the CSV ingest being touched; the run id uses the timestamp it hands back.
 

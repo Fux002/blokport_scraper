@@ -1,7 +1,6 @@
 """THE derivation of a variety's alias set (P2-10 C4, D1): each Key's (value, method) aliases and codes from the alias
-stores, as the produce sends them. Emit computes the payload with it, and the v18 carry (aliases.carry) names an old
-value's owner with it, so the two can never disagree. Pure: the caller passes the stores, the brand's code test and
-the alias field's display rule; nothing is read or written here. No em dashes.
+stores, as the produce sends them. Emit computes the payload with it. Pure: the caller passes the stores, the brand's
+code test and the alias field's display rule; nothing is read or written here. No em dashes.
 
 The rule, in ONE order: the stores' values per Key (aliases.surfaces: operator over seed over learned over admin, each
 value once per alias_key, the first in that precedence and then in the store's own order), the scraper's own methods
