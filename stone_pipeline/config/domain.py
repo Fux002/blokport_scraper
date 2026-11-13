@@ -159,7 +159,9 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
 
     if not data["attributes"]:
         bad("'attributes' is empty")
-    if "backbone_file" in data and not (isinstance(data["backbone_file"], str) and data["backbone_file"].strip()):
+    # a bare file name only: it is joined under catalog_source, so a path would read outside it or a sub-folder
+    if "backbone_file" in data and not (isinstance(data["backbone_file"], str) and data["backbone_file"].strip()
+                                        and Path(data["backbone_file"]).name == data["backbone_file"] != ".."):
         bad(f"backbone_file must be a file name, got {data['backbone_file']!r}; leave it out for a pack with no seed")
     if not isinstance(data["last_resort_finishes"], dict):
         bad("'last_resort_finishes' must be a mapping of branch -> finish")
