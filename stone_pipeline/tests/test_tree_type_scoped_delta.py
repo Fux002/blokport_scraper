@@ -49,7 +49,7 @@ def test_a_same_name_post_of_another_type_lends_nothing_its_own_type_s_does(tmp_
 
 
 # --- the update delta is always this run's ---------------------------------------------------------------
-def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch):
+def test_an_empty_update_delta_replaces_a_stale_one(tmp_path, monkeypatch, seeded_config_store):
     dirs = {a: tmp_path / a for a in ("to_upload_dir", "catalog_source_dir", "review_dir")}
     for d in dirs.values():
         d.mkdir(parents=True)
