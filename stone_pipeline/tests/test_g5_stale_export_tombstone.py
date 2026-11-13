@@ -46,8 +46,10 @@ def _deleted(ledger, key):
 
 
 def _variation(ledger, key, state="synced", medusa_id="VM-1"):
+    # no alias column is written: v15 holds `aliases`, C4's v18 `alias_rows` and `codes` (all nullable), and the
+    # tombstone never reads them, so the row stands under either schema
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "type": "Marble", "name": key, "aliases": "[]", "medusa_id": medusa_id,
+    ledger.upsert("variation", {"key": key, "type": "Marble", "name": key, "medusa_id": medusa_id,
                                 "in_full": 1, "payload_hash": "", "state": state, "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
 
