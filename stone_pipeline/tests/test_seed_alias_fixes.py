@@ -25,6 +25,7 @@ SIENA_RIVER = "granite__siena_river_7dd64323-8da5-5c94-849d-4a2406b0f55f"
 SIENA_WHITE = "granite__siena_white_24f3553a-eab9-57b0-b07c-3f179226ca96"
 CIPOLLINO = "marble__cipollino_renoir_43ea7fda-5f90-55cd-9318-4007d87e490a"
 BLUE_COAST = "marble__blue_coast_92272076-a92a-5721-80a6-7daca3f0665d"
+CREMA_DOLOMIT = "marble__crema_dolomit_2b4a0981-bc6b-5faa-b562-c75ca7123858"
 
 
 def _fixes() -> list[dict]:
@@ -66,6 +67,14 @@ def test_every_fix_is_listed_once_for_the_owner_with_its_reason():
     assert set(listed) == set(fixes)
     assert all(fixes[k]["Reason"] in listed[k] for k in fixes)
     assert "UNDETERMINABLE" in listed[(BLUE_COAST, match_key("C Te D"))]
+
+
+def test_a_former_type_name_is_no_variety_s_alias():
+    # the manager, 13 Nov: "Dolomite Marble" is the type #293 collapsed into Dolomite, not a name of one stone; as an
+    # alias it would send every "Dolomite Marble" search to one marble variety
+    assert "Dolomite Marble" not in _posts()[CREMA_DOLOMIT]["aliases"]
+    listed = {(r["Key"], r["Value"]): r["Reason"] for r in _differences(FIXED)}
+    assert "former type name" in listed.get((CREMA_DOLOMIT, "Dolomite Marble"), "")
 
 
 def test_every_split_reason_states_the_type_word_rule():
