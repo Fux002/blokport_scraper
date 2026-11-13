@@ -113,8 +113,11 @@ def test_the_alias_list_keeps_every_script_and_drops_nothing(monkeypatch):
     assert kept == ["巴比伦金", "Huángjiā Hǔpò", "Kırşehir Nero"] and dropped == ["K?r?ehir Nero"]
 
 
-def test_under_the_name_kind_an_unfoldable_alias_is_still_dropped():
-    # the published map still saying `name` (today's fixture): behaviour unchanged, the alias is dropped and listed
+def test_under_the_name_kind_an_unfoldable_alias_is_still_dropped(monkeypatch):
+    # a map saying `name` for the alias field: the name rule, the alias dropped and listed
+    published = dict(field_kinds.kinds())
+    published[field_kinds.VARIATION_ALIAS_VALUE] = field_kinds.NAME
+    monkeypatch.setattr(field_kinds, "kinds", lambda: published)
     alias = lambda v: field_kinds.display(field_kinds.VARIATION_ALIAS_VALUE, v)   # noqa: E731
     kept, dropped = text.clean_alias_list("Amber Gold", ["巴比伦金", "Huángjiā Hǔpò"], alias)
     assert kept == ["Huangjia Hupo"] and dropped == ["巴比伦金"]

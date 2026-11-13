@@ -78,6 +78,13 @@ def test_clean_and_display_follow_the_field_kind(map_path):
     assert fk.clean(fk.PRODUCT_TITLE, "Black & Gold Polished") == "Black & Gold Polished"
 
 
+def test_the_committed_map_publishes_owned_aliases_as_the_alias_kind():
+    # Mas, 13 Nov: every committed field-kinds copy says what BE publishes, variation_alias.value = "alias" (names
+    # keep "name"), so the committed seed is judged by the rule its writer uses
+    assert fk.kind(fk.VARIATION_ALIAS_VALUE) == getattr(fk, "ALIAS", "alias")
+    assert fk.kind(fk.VARIATION_NAME) == fk.NAME
+
+
 def test_an_unknown_field_fails_at_once(map_path):
     shutil.copy(FIXTURE, map_path)
     with pytest.raises(KeyError):
