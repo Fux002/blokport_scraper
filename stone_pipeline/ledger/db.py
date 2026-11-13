@@ -27,13 +27,17 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 17  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 18  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
 #                      v16: product.photo_unpublished -- the standardised files a product links that are not
 #                           published (never served while any); null on every existing row until its next produce.
 #                      v17: variation.reserved_at -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased.
+#                      v18: variation.alias_rows + codes (P2-10 C4), NULL on every existing row: not computed
+#                           yet, so held from the serve. The old `aliases` stays until the produce-start carry
+#                           (aliases.carry) moves each row's acked set into them and drops it, in one transaction;
+#                           variation_alias_superseded holds the in-set values no store owns (schema.sql).
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -209,6 +213,9 @@ class Ledger:
         variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
         if "reserved_at" not in variation_cols:   # v17: NULL = no reserve waiting for a lease
             self.conn.execute("ALTER TABLE variation ADD COLUMN reserved_at TEXT")
+        if "alias_rows" not in variation_cols:    # v18: NULL = not computed yet (held), never '[]' (the empty channel)
+            self.conn.execute("ALTER TABLE variation ADD COLUMN alias_rows TEXT")
+            self.conn.execute("ALTER TABLE variation ADD COLUMN codes TEXT")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

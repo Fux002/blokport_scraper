@@ -142,7 +142,7 @@ def ledger(tmp_path, monkeypatch):
     with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
         lg.upsert("variation", {
-            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": "[]",
+            "key": KEY, "type": "Marble", "name": "Carrara", "alias_rows": "[]", "codes": "[]",
             "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))

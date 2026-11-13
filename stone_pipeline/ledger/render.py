@@ -28,10 +28,11 @@ from stone_pipeline.stages.emit_catalog import _COLS as VARIANTS_FULL_COLS
 
 
 def _aliases_cell(stored: str | None) -> str:
-    """JSON array (ledger form) -> the pipe-joined cell the variants file uses."""
+    """The alias_rows JSON (ledger form) -> the pipe-joined values the variants file's Aliases cell holds (empty when
+    not computed yet)."""
     if not stored:
         return ""
-    return "|".join(json.loads(stored))
+    return "|".join(r["value"] for r in json.loads(stored))
 
 
 def render_variants_full(ledger: Ledger, path: str | Path) -> int:
@@ -46,9 +47,9 @@ def render_variants_full(ledger: Ledger, path: str | Path) -> int:
         key_col: v["key"],
         name_col: v["name"],
         type_col: v["type"],
-        aliases_col: _aliases_cell(v["aliases"]),
+        aliases_col: _aliases_cell(v["alias_rows"]),
     } for v in ledger.execute(
-        "SELECT key, name, type, aliases FROM variation "
+        "SELECT key, name, type, alias_rows FROM variation "
         "WHERE in_full = 1 ORDER BY rowid")]
     return csvio.write_dicts(path, VARIANTS_FULL_COLS, rows, sanitize=False)
 
@@ -173,8 +174,8 @@ def _dump_variations_export(ledger: Ledger, path: Path) -> None:
     with Path(path).open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
         w.writerow(["Id", *VARIANTS_FULL_COLS])
-        for r in ledger.execute("SELECT medusa_id, key, name, type, aliases FROM variation"):
-            w.writerow([r["medusa_id"] or "", r["key"], r["name"] or "", r["type"], _aliases_cell(r["aliases"])])
+        for r in ledger.execute("SELECT medusa_id, key, name, type, alias_rows FROM variation"):
+            w.writerow([r["medusa_id"] or "", r["key"], r["name"] or "", r["type"], _aliases_cell(r["alias_rows"])])
 
 
 def render_combinations(ledger: Ledger, path: str | Path, *,
