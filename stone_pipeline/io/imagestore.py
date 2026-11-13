@@ -21,6 +21,8 @@ Layout (under the env segment, e.g. dev/):
     products/standard/tile/<src>/<listing hash>.json  what that listing's files were made from (written last)
     products/standard/assigned/<src>/<hash>.json  a published photo listings of several stones show: the SKUs it is for
     products/standard/conflicts/<src>.json  the produce's conflict set: {sha: [handles]} of its emitted products
+    products/standard/kept.json             the produce's kept-photo set: {src: [sha, ...]} of the listings that left
+                                            sale and keep their records (table 505): never removed or wiped
     standardise-test/removed/<SKU>.json     a listing the owner removed (SKU percent-encoded)
 """
 
@@ -51,6 +53,24 @@ STANDARD_MARKER = f"/products/{STANDARD_SUBDIR}/"   # so does a standardised fil
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
 # hosted url or key -- the one identity the photo process (filename) and Stage 7 (improved url) share.
 _SHA_RE = re.compile(r"([0-9a-f]{64})\.[a-z0-9]+$", re.IGNORECASE)
+
+
+def photo_of(link: str) -> Optional[tuple[str, str]]:
+    """The (source, sha) of the photo an image link or object key holds: every image object ends <source>/<sha>.<ext>
+    (_SHA_RE), whatever its folder (raw, scraped, improved, a standardised view, a 3D slab, an assignment, a tile
+    record). None for any other object (a manifest, a conflict set)."""
+    match = _SHA_RE.search(link or "")
+    if not match:
+        return None
+    source = link[:match.start()].rstrip("/").rsplit("/", 1)[-1]
+    return (source, match.group(1).lower()) if source else None
+
+
+def kept_key() -> str:
+    """The produce's kept-photo set (stages.images.save_kept): {source: [sha, ...]} of the photos of the listings that
+    left sale and keep their records, gone at their supplier or delisted (table 505). The photo process leaves them
+    exactly as published and the factory wipe never deletes them."""
+    return f"{_PRODUCTS}/{STANDARD_SUBDIR}/kept.json"
 
 
 def raw_prefix(source: str) -> str:
