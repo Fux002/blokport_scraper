@@ -36,7 +36,7 @@ def _fixture_doc():
 def test_the_fixture_lists_every_required_field_with_a_known_kind():
     doc = _fixture_doc()
     assert set(doc["fields"]) == fk.REQUIRED
-    assert set(doc["fields"].values()) <= {fk.NAME, fk.IDENTIFIER}
+    assert set(doc["fields"].values()) <= set(fk._CLEAN)          # the reader's own kinds, never a literal list
 
 
 @pytest.mark.parametrize("breakage, reason", [
