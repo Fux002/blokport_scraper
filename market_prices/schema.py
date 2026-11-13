@@ -155,6 +155,8 @@ class ListingFacts:
     price_status: PriceStatus = PriceStatus.none
     min_qty_text: Optional[str] = None
     availability_text: Optional[str] = None
+    # the listing's own VAT statement; it wins over the site's (collect._observation)
+    vat_basis: Optional[VatBasis] = None
 
 
 def columns(model: type[BaseModel]) -> tuple[str, ...]:

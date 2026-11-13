@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import csv
 import time
 from dataclasses import dataclass
@@ -25,6 +26,9 @@ from market_prices.schema import (
 _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
                           "delivery_included": DeliveryIncluded.unknown}
 _LISTING_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
+# A statement a listing may make for itself; it wins over the site's, being the more specific (manager's ruling 13 Nov)
+_LISTING_STATEMENT_FIELDS = ("vat_basis",)
+_VAT_CONFLICT = "listing VAT differs from the site statement"
 
 
 @dataclass(frozen=True)
@@ -60,9 +64,14 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     stated: dict[str, object] = {}
     provenance: dict[str, Provenance] = {}
     for name, unknown in _SITE_STATEMENT_FIELDS.items():
+        own = getattr(facts, name) if name in _LISTING_STATEMENT_FIELDS else None
         general = getattr(site.statements, name)
-        stated[name] = general if general is not None else unknown
-        provenance[name] = Provenance.site_statement if general is not None else Provenance.unknown
+        if own is not None:
+            stated[name], provenance[name] = own, Provenance.listing
+        elif general is not None:
+            stated[name], provenance[name] = general, Provenance.site_statement
+        else:
+            stated[name], provenance[name] = unknown, Provenance.unknown
     for name in _LISTING_FIELDS:
         provenance[name] = Provenance.listing if getattr(facts, name) is not None else Provenance.unknown
     return Observation(
@@ -78,16 +87,39 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     )
 
 
+def _vat_conflict(facts: ListingFacts, site: Site) -> bool:
+    stated = site.statements.vat_basis
+    return facts.vat_basis is not None and stated is not None and facts.vat_basis != stated
+
+
+def _invalid(exc: ValidationError) -> str:
+    """A row that does not validate, named by its first field and not its value (the value is the seller's)."""
+    first = exc.errors()[0]
+    return f"{'.'.join(str(part) for part in first['loc']) or 'row'} does not validate"
+
+
+def _counted(reasons: collections.Counter) -> str:
+    """The most common reasons with their counts, the rest summed: '<reason> x<n>; ...; other reasons x<n>'."""
+    ranked = sorted(reasons.items(), key=lambda item: (-item[1], item[0]))
+    shown = [f"{reason} x{count}" for reason, count in ranked[:config.MALFORMED_REASONS_SHOWN]]
+    rest = sum(count for _, count in ranked[config.MALFORMED_REASONS_SHOWN:])
+    return "; ".join(shown + ([f"other reasons x{rest}"] if rest else []))
+
+
 def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
                  pause: Callable[[float], None]) -> SiteResult:
-    malformed = duplicates = 0
+    malformed = duplicates = vat_conflicts = 0
+    reasons: collections.Counter = collections.Counter()
 
     def finish(status: SiteRunStatus, detail: str, kept: Iterable[Observation] = ()) -> SiteResult:
         ordered = tuple(sorted(kept, key=lambda row: row.listing_key))
+        parts = [detail] if detail else []
+        if vat_conflicts:
+            parts.append(f"{_VAT_CONFLICT} x{vat_conflicts}")
         return SiteResult(ordered, SiteStatus(
             contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
             status=status, rows=len(ordered), malformed_listings=malformed, duplicate_listings=duplicates,
-            detail=detail,
+            detail="; ".join(parts),
             terms_checked_on=site.terms.checked_on.isoformat() if site.terms.checked_on else None,
             decision=site.decision.value, observed_at=stamp.observed_at, run_id=stamp.run_id))
 
@@ -99,26 +131,36 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
         fetcher = SiteFetcher(site.robots_url, transport, pause)
         for raw in collector.listings(site, fetcher):
             try:
-                row = _observation(collector.facts(raw, site), site, brand, stamp, collector.version)
-            except (MalformedListing, ValidationError):
+                facts = collector.facts(raw, site)
+                row = _observation(facts, site, brand, stamp, collector.version)
+            except MalformedListing as exc:
                 malformed += 1
+                reasons[str(exc)] += 1
+                continue
+            except ValidationError as exc:
+                malformed += 1
+                reasons[_invalid(exc)] += 1
                 continue
             if row.listing_key in rows:
                 duplicates += 1     # a listing that moved between pages while they were read
                 continue
             rows[row.listing_key] = row
+            vat_conflicts += _vat_conflict(facts, site)
     except SiteBlocked as exc:
         return finish(SiteRunStatus.unavailable_blocked, str(exc))
     except SiteDisallowed as exc:
         return finish(SiteRunStatus.disallowed_robots, str(exc))
     except (TransportError, UnexpectedResponse) as exc:
+        skipped = f"; {malformed} malformed listings skipped: {_counted(reasons)}" if malformed else ""
         if rows:
-            return finish(SiteRunStatus.partial, f"stopped early: {exc}", rows.values())
-        return finish(SiteRunStatus.unavailable_error, str(exc))
+            return finish(SiteRunStatus.partial, f"stopped early: {exc}{skipped}", rows.values())
+        return finish(SiteRunStatus.unavailable_error, f"{exc}{skipped}")
     if not rows:
-        return finish(SiteRunStatus.unavailable_error, f"no readable listings ({malformed} malformed)")
+        why = f": {_counted(reasons)}" if malformed else ""
+        return finish(SiteRunStatus.unavailable_error, f"no readable listings ({malformed} malformed{why})")
     if malformed:
-        return finish(SiteRunStatus.partial, f"{malformed} malformed listings skipped", rows.values())
+        return finish(SiteRunStatus.partial, f"{malformed} malformed listings skipped: {_counted(reasons)}",
+                      rows.values())
     return finish(SiteRunStatus.ok, "", rows.values())
 
 

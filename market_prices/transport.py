@@ -75,4 +75,4 @@ class LiveTransport:
         except httpx.HTTPError as exc:     # timeout, connection, protocol or decoding failure: no usable answer
             raise TransportError(f"{url}: {type(exc).__name__}: {exc}") from exc
         return Response(status=answer.status_code, text=body.decode(answer.encoding or "utf-8", errors="replace"),
-                        headers=dict(answer.headers))
+                        headers=dict(answer.headers), body=body)
