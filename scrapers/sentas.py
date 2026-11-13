@@ -32,6 +32,7 @@ Run:  python -m scrapers.sentas
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import csv
 import html
 import io
@@ -287,6 +288,7 @@ def _parse_cards(cards_html: str) -> list[tuple[str, str, str]]:
 
 class SentasScraper(ScraperBase):
     source = "sentas"
+    site_domain = urlsplit(SITE).hostname   # the supplier's public site, from its own URL
     category = "slab"   # /en/stocks is the slab inventory; the site sells no blocks or tiles
     # DECLARED source convention: the product page renders dimensions in centimetres ("198 cm"); the
     # value is captured with its unit, so the adapter passes it through unchanged.

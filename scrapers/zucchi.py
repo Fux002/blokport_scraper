@@ -12,6 +12,7 @@ Run:  python scrapers/zucchi.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import json
 from typing import Any, Iterable, Optional
 
@@ -54,6 +55,7 @@ def _product_url(name_en: str, bundle_id: str) -> str:
 
 class ZucchiScraper(ScraperBase):
     source = "zucchi"
+    site_domain = urlsplit(SITE_URL).hostname   # the supplier's public site, from its own URL
     category = "slab"      # Zucchi is slab inventory (item 3: explicit format)
     id_field = "bundle_id"  # images named zucchi_<bundle_id>_<idx>
     page_delay = 4.0

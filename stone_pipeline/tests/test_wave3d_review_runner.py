@@ -27,7 +27,7 @@ def test_a_malformed_integer_on_the_source_put_is_a_400_naming_the_field(field):
     assert status == 400 and field in err["error"]
 
 
-def test_two_pending_varieties_with_the_same_name_and_different_types_are_two_cards():
+def test_two_pending_varieties_with_the_same_name_and_different_types_are_two_cards(seeded_config_store):
     from stone_pipeline.stages import decisions as stage_decisions
     pending = [{"variant": "Imperial White", "reason": "r", "stone_type": "Granite", "src": "marenostone",
                 "scraped": "Imperial White Granite", "sources": ["marenostone"]},

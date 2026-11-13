@@ -21,6 +21,7 @@ Run:  python scrapers/polonine.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import json
 import re
 from typing import Any, Iterable, Optional
@@ -68,6 +69,7 @@ def _status(html):
 
 class PolonineScraper(ScraperBase):
     source = "polonine"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     category = "slab"        # SlabWare slab inventory; explicit format (item 3)
     id_field = "product_id"
     use_curl_cffi = True     # Cloudflare-fronted

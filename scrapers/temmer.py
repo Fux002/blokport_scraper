@@ -30,6 +30,7 @@ Run:  python scrapers/temmer.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import re
 from html import unescape
 from typing import Any, Iterable, Optional
@@ -146,6 +147,7 @@ def extract_main_image(images: list[str], slug: str):
 
 class TemmerScraper(ScraperBase):
     source = "temmer"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     category = "slab"      # constant: site has no slab/block/tile field; source
                            # language is slab-centric ("main slab photo")
     id_field = "slug"      # images named temmer_<slug>_<idx>

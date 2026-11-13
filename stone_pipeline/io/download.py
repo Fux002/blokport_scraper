@@ -18,11 +18,10 @@ from typing import Callable, Optional
 from PIL import Image, UnidentifiedImageError
 
 from stone_pipeline.core import logfmt
-from stone_pipeline.io.ssrf import url_allowed
+from stone_pipeline.io.ssrf import RedirectFailed, SSRFBlocked, follow_redirects
 
 log = logfmt.get_logger("download")
 
-_MAX_REDIRECTS = 5
 # images come from semi-trusted scraped hosts; a body over this is not a catalog stone photo and is
 # rejected so a hostile/broken host can't OOM the run (read in capped chunks, so a chunked response
 # with no Content-Length is bounded too).
@@ -40,11 +39,35 @@ def _is_image(data: bytes) -> bool:
         return False
 
 
+def _image_body(response, url: str) -> Optional[bytes]:
+    """The image bytes of a 200 answer, or None: over the size cap (declared or streamed), empty, or not an image."""
+    clen = response.headers.get("content-length")
+    if clen and clen.isdigit() and int(clen) > _MAX_BYTES:
+        log.warning("image exceeds size cap (declared)", extra={"extra_fields": {"url": url, "bytes": clen}})
+        return None
+    buf = bytearray()
+    for chunk in response.iter_bytes():
+        buf += chunk
+        if len(buf) > _MAX_BYTES:
+            log.warning("image exceeds size cap (streamed)", extra={"extra_fields": {"url": url}})
+            return None
+    if not buf:
+        return None
+    if not _is_image(buf):
+        # a verdict on the body, not a transport failure: no retry this run; the row
+        # is flagged image_download_failed and the next run fetches it again
+        log.warning("not an image, refused", extra={"extra_fields": {
+            "url": url, "content_type": response.headers.get("content-type"), "bytes": len(buf)}})
+        return None
+    return bytes(buf)
+
+
 def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5) -> Callable[[str], Optional[bytes]]:
     """Return a fetch(url) -> bytes | None using httpx, with retry and backoff.
 
-    SSRF guard: redirects are followed MANUALLY so every hop is validated by url_allowed (a public URL
-    must not 302 into an internal/link-local one).
+    SSRF guard: redirects are followed by ssrf.follow_redirects (the scraper's one rule), so every hop is validated
+    by url_allowed before it is requested: a public URL must not 302 into an internal/link-local one. A blocked hop,
+    a redirect with no Location or a redirect loop is a miss, never retried.
 
     NO proxy: image downloads go DIRECT. The residential proxy (BLOKPORT_SCRAPER_PROXY) exists for the
     SITE scrape of Cloudflare-fronted sources (scrapers/base.py, use_curl_cffi), whose dynamic pages block
@@ -60,49 +83,30 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
 
     def fetch(url: str) -> Optional[bytes]:
         for attempt in range(retries):
+            opened: list[httpx.Response] = []
+
+            def send(hop: str) -> httpx.Response:
+                opened.append(client.send(client.build_request("GET", hop), stream=True))
+                return opened[-1]
+
             try:
-                current = url
-                for _ in range(_MAX_REDIRECTS + 1):
-                    if not url_allowed(current):
-                        log.warning("blocked by SSRF guard (non-public host or scheme)",
-                                    extra={"extra_fields": {"url": current}})
-                        return None
-                    with client.stream("GET", current) as response:
-                        if response.is_redirect:
-                            loc = response.headers.get("location")
-                            if not loc:
-                                return None
-                            current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
-                            continue
-                        if response.status_code in (404, 410):
-                            return None  # permanent, do not retry
-                        if response.status_code != 200:
-                            break  # other status -> retry with backoff
-                        clen = response.headers.get("content-length")
-                        if clen and clen.isdigit() and int(clen) > _MAX_BYTES:
-                            log.warning("image exceeds size cap (declared)",
-                                        extra={"extra_fields": {"url": current, "bytes": clen}})
-                            return None
-                        buf = bytearray()
-                        for chunk in response.iter_bytes():
-                            buf += chunk
-                            if len(buf) > _MAX_BYTES:
-                                log.warning("image exceeds size cap (streamed)",
-                                            extra={"extra_fields": {"url": current}})
-                                return None
-                        if not buf:
-                            return None
-                        if not _is_image(buf):
-                            # a verdict on the body, not a transport failure: no retry this run; the row
-                            # is flagged image_download_failed and the next run fetches it again
-                            log.warning("not an image, refused", extra={"extra_fields": {
-                                "url": current, "content_type": response.headers.get("content-type"),
-                                "bytes": len(buf)}})
-                            return None
-                        return bytes(buf)
-                else:
-                    log.warning("too many redirects", extra={"extra_fields": {"url": url}})
-                    return None
+                try:
+                    current, response = follow_redirects(url, send)
+                    if response.status_code in (404, 410):
+                        return None  # permanent, do not retry
+                    if response.status_code == 200:
+                        return _image_body(response, current)
+                    # any other status: retry with backoff
+                finally:
+                    for each in opened:     # every hop, read or not, so no connection is left held
+                        each.close()
+            except SSRFBlocked as blocked:
+                log.warning("blocked by SSRF guard (non-public host or scheme)",
+                            extra={"extra_fields": {"url": blocked.url}})
+                return None
+            except RedirectFailed as failed:     # a redirect with no Location, or a loop: a miss, never retried
+                log.warning(f"redirect not followed: {failed}", extra={"extra_fields": {"url": url}})
+                return None
             except Exception as exc:  # transient: retry with backoff
                 if attempt == retries - 1:
                     log.warning("download failed", extra={"extra_fields": {"url": url, "error": str(exc)}})

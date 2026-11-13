@@ -11,12 +11,17 @@ and ledger equivalence tests.
 
 from __future__ import annotations
 
+import pytest
+
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import simulate, sync
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_inventory, populate_products
-from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon, seed_slab_category
+from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
+
+# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's (table 577)
+pytestmark = pytest.mark.usefixtures("slab_category_pcat")
 
 
 def _variety(lg: Ledger, key: str, medusa_id: str, state: str = "synced") -> None:
@@ -28,7 +33,6 @@ def _variety(lg: Ledger, key: str, medusa_id: str, state: str = "synced") -> Non
         "medusa_id": medusa_id, "in_full": 1, "payload_hash": key, "state": state,
         "first_seen": now, "last_synced": None, "created_at": now, "updated_at": now}, pk=("key",))
     add_icon(lg, key)
-    seed_slab_category(lg)
 
 
 def _row(surrogate: str, variation_key: str, color: str = "Black", qty: str = "5") -> CanonicalRow:

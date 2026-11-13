@@ -3,9 +3,10 @@
     python -m stone_pipeline.phase1.migrate_run
 
 Inputs come from the environment, never flags:
-- MIGRATE_INPUTS: one JSON object. The two maps and the new export as {key, version_id, sha256}. The step-1 record:
+- MIGRATE_INPUTS: one JSON object. The two maps and the new export as {key, version_id, sha256}; the env's committed
+  retired-Keys file (retired_keys/{env}.csv) as {sha256}. The step-1 record:
   every store's version_id and, for the real run, the dry run's digest:
-  {"key_map": {...}, "survivor_map": {...}, "export": {...},
+  {"key_map": {...}, "survivor_map": {...}, "export": {...}, "retired_keys": {"sha256": "..."},
    "stores": {"ledger": {"version_id": "...", "digest": "..."}, "config": ..., "writeback": ..., "refreshed": ...,
               "base_from_medusa": ..., "base_to_upload": ..., "outputs": {"version_id": "..."}}}
   A store absent at step 1 has version_id null.
@@ -26,17 +27,19 @@ import sys
 import tempfile
 from pathlib import Path
 
+from stone_pipeline.aliases.migrate_learned import (load_alias_writeback_records, write_alias_writeback_records,
+                                                   writeback_key)
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import storage
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.phase1 import store_writer
-from stone_pipeline.phase1.migrate_stores import MigrationRefused, read_key_map, read_survivor_map
+from stone_pipeline.phase1.migrate_stores import (MigrationRefused, read_key_map, read_retired_keys,
+                                                  read_survivor_map)
 from stone_pipeline.phase1.rewrite_committed import rewrite_base
 from stone_pipeline.reference.medusa_files import read_variants_export
 from stone_pipeline.refresh_images import MARKER_KEY
-from stone_pipeline.state.writeback import _write_records, load_alias_writeback_records
 
 log = logfmt.get_logger("phase1.migrate_run")
 
@@ -47,16 +50,19 @@ _MISSING = ("NoSuchKey", "404", "NotFound")
 STORES = {
     "ledger": (snapshot._legacy_key(snapshot.snapshot_key(ENV_NAME)), "sqlite"),
     "config": (snapshot._legacy_key(snapshot.config_key(ENV_NAME)), "sqlite"),
-    "writeback": (snapshot._legacy_key(snapshot.state_writeback_key(ENV_NAME)), "bytes"),
+    "writeback": (snapshot._legacy_key(writeback_key(ENV_NAME)), "bytes"),
     "refreshed": (MARKER_KEY, "bytes"),
     "base_from_medusa": (f"{ENV_SEGMENT}/scraper/from_medusa/variants_export_base.csv", "bytes"),
     "base_to_upload": (f"{ENV_SEGMENT}/scraper/to_upload/variants_export_base.csv", "bytes"),
     "outputs": (snapshot.artifacts_key("outputs", ENV_NAME), "bytes"),
 }
-# the `.v2` stores: name -> new S3 key (code constants, snapshot.py)
+# the `.v2` stores: name -> new S3 key (code constants: snapshot.py; the write-back's is aliases.migrate_learned's)
 NEW_STORES = {"ledger": snapshot.snapshot_key(ENV_NAME), "config": snapshot.config_key(ENV_NAME),
-              "writeback": snapshot.state_writeback_key(ENV_NAME)}
+              "writeback": writeback_key(ENV_NAME)}
 REQUIRED_STORES = ("ledger", "config")     # the migration has nothing to migrate without them
+# the env's committed retired-Keys file (baked into the image), read only at MIGRATE_INPUTS.retired_keys.sha256
+RETIRED_KEYS_DIR = Path(__file__).with_name("retired_keys")
+RETIRED_KEYS_PATH = RETIRED_KEYS_DIR / f"{ENV_NAME}.csv"
 
 
 class _S3:
@@ -107,6 +113,24 @@ def _versioned(s3: _S3, spec: dict, what: str) -> bytes:
     return data
 
 
+def _retired_keys_file(inputs: dict) -> tuple[bytes, str]:
+    """(the env's committed retired-Keys file, its pin MIGRATE_INPUTS.retired_keys.sha256), checked before any store or
+    map is read: an absent or empty pin, a file not committed for this env, or bytes off the pin each refuse by name.
+    Its lines are checked against the key map later (migrate_stores.read_retired_keys)."""
+    spec = inputs.get("retired_keys")
+    sha = spec.get("sha256") if isinstance(spec, dict) else None
+    if not isinstance(sha, str) or not sha:
+        raise MigrationRefused("MIGRATE_INPUTS has no retired_keys {sha256} pin: the env's committed retired-Keys file "
+                               f"({RETIRED_KEYS_PATH.name}) is read only at its pinned digest")
+    try:
+        data = RETIRED_KEYS_PATH.read_bytes()
+    except FileNotFoundError as exc:
+        raise MigrationRefused(f"retired keys: {RETIRED_KEYS_PATH} is not committed for this env") from exc
+    if (got := store_writer.bytes_digest(data)) != sha:
+        raise MigrationRefused(f"retired keys: sha256 {got} is not the expected {sha}")
+    return data, sha
+
+
 def _fetch_stores(s3: _S3, recorded: dict, work: Path, write: bool) -> dict:
     """Each step-1 store, read by its recorded VersionId into `work`: name -> {path, digest, version_id}. Refuses a
     store moved on since step 1 with other content, and in the real run a digest that is not the dry run's."""
@@ -138,12 +162,14 @@ def _fetch_stores(s3: _S3, recorded: dict, work: Path, write: bool) -> dict:
     return out
 
 
-def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_writer.Report, dict]:
+def _plan(s3: _S3, inputs: dict, stores: dict, work: Path,
+          retired_file: tuple[bytes, str]) -> tuple[dict, store_writer.Report, dict]:
     """Every decision and every new file, written under `work`, nothing to S3: (new files by name, report, the
     icon copies)."""
     key_map = read_key_map(_versioned(s3, inputs["key_map"], "key map"), inputs["key_map"]["sha256"])
     survivors = read_survivor_map(_versioned(s3, inputs["survivor_map"], "survivor map"),
                                   inputs["survivor_map"]["sha256"], inputs["key_map"]["sha256"])
+    retired_keys = read_retired_keys(*retired_file, key_map)
     export = read_variants_export(_versioned(s3, inputs["export"], "export").decode("utf-8-sig"),
                                   require_status=True, name=inputs["export"]["key"])
     archived = {v.key for v in export if v.status == "archived"}
@@ -162,7 +188,7 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_
     moved, sub = store_writer.migrate_writeback(records, old_rows, key_map, survivors)
     _fold(report, sub)
     files["writeback"] = work / "alias_writeback.v2.csv"
-    _write_records(files["writeback"], moved)
+    write_alias_writeback_records(files["writeback"], moved)
     for name in ("base_from_medusa", "base_to_upload"):
         if stores[name]["path"] is None:
             continue
@@ -171,7 +197,9 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path) -> tuple[dict, store_
                                             STORES[name][0]), encoding="utf-8")
     if stores["refreshed"]["path"] is not None:
         old_keys = store_writer.old_marker_keys(stores["refreshed"]["path"].read_bytes())
-        pairs, sub = store_writer.remap_marker(old_keys, key_map)
+        pairs, sub = store_writer.remap_marker(old_keys, key_map,
+                                               store_writer.ledger_variation_tombstones(stores["ledger"]["path"]),
+                                               retired_keys)
         _fold(report, sub)
         files["refreshed"] = work / "refreshed.json"
         files["refreshed"].write_text(json.dumps(pairs), encoding="utf-8")
@@ -222,11 +250,12 @@ def _write(s3: _S3, files: dict, copies: list, stores: dict) -> dict:
 
 def run(client, inputs: dict, write: bool) -> dict:
     """The whole run against an S3 client; returns the report. Raises MigrationRefused on a refused input."""
+    retired_file = _retired_keys_file(inputs)
     s3 = _S3(client, SETTINGS.s3.bucket)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         stores = _fetch_stores(s3, inputs["stores"], work, write)
-        files, report, copies = _plan(s3, inputs, stores, work)
+        files, report, copies = _plan(s3, inputs, stores, work, retired_file)
         result = {"write": write, "counts": report.counts, "listed": report.listed, "aborts": report.aborts,
                   "step1_digests": {n: s["digest"] for n, s in stores.items()}}
         if report.aborts:

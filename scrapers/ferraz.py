@@ -22,6 +22,7 @@ Run:  python scrapers/ferraz.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import json
 from typing import Any, Iterable, Optional
 
@@ -66,6 +67,7 @@ def build_image_urls(bundle_id, filename):
 
 class FerrazScraper(ScraperBase):
     source = "ferraz"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     category = "slab"        # Ferraz is slab inventory (bundles of slabs); item 3 explicit format
     id_field = "bundle_id"   # images named ferraz_<bundle_id>_<idx>
     use_curl_cffi = True   # Cloudflare-fronted SlabWare tenant

@@ -8,7 +8,7 @@ the step-1 stores and writes the phase 1 stores, with no S3 and no network (plan
   stamped 12. Its tables are otherwise unchanged by phase 1.
 - The learned-alias write-back: every record on the survivor's id.
 - The icons: each flat `{old Key}.png` planned onto its pair `{new Key}/{category}.png`, add-only.
-- The best-model marker: its old Keys become pair ids.
+- The best-model marker: its old Keys become pair ids; a retired old Key outside the map is dropped and listed.
 
 Every builder returns its report (counts, listed items, aborts) and writes nothing when anything aborts. The same
 inputs give the same rows in the same order, so a re-run's logical digest is the same. No argparse, no em dashes.
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stone_pipeline.config.categories import category
-from stone_pipeline.config.store import SCHEMA_VERSION as CONFIG_SCHEMA_VERSION
+from stone_pipeline.config.store import PHASE1_SCHEMA_VERSION as CONFIG_SCHEMA_VERSION
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX, icon_key, icon_pair, pair_id
 from stone_pipeline.ledger.db import _SCHEMA_PATH, SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
 from stone_pipeline.ledger.payloads import variation_hash
@@ -191,18 +191,26 @@ def old_marker_keys(data: bytes) -> list[str]:
     return sorted(doc)
 
 
-def remap_marker(old_keys: list[str], key_map: KeyMap) -> tuple[list[str], Report]:
-    """The best-model marker's old Keys as sorted pair ids `{new Key}/{category}`; an old Key outside the map, or
-    with no category prefix, aborts."""
-    report, out, bad = Report(), set(), []
+def remap_marker(old_keys: list[str], key_map: KeyMap, tombstones: dict[str, str | None],
+                 retired_keys: dict[str, str]) -> tuple[list[str], Report]:
+    """The best-model marker's old Keys as sorted pair ids `{new Key}/{category}`. An old Key outside the map that a
+    record retired is dropped and listed with that record: a ledger variation tombstone (its reason), else the env's
+    retired-Keys file (its step). The marker only says a refresh ran, and that variety's current Key carries its own
+    line. Any other old Key outside the map, or one with no category prefix, aborts: it may be a mapping fault."""
+    report, out, bad, dropped = Report(), set(), [], []
     for old in old_keys:
         new, name = key_map.new_key(old), _old_key_category(old)
-        if new is None or name is None:
+        if new is not None and name is not None:
+            out.add(pair_id(new, name))
+        elif new is None and old in tombstones:
+            dropped.append({"key": old, "retired_by": "ledger_removed", "reason": tombstones[old]})
+        elif new is None and old in retired_keys:
+            dropped.append({"key": old, "retired_by": "retired_keys", "reason": retired_keys[old]})
+        else:
             bad.append(old)
-            continue
-        out.add(pair_id(new, name))
     report.abort("marker_unmapped_key", bad)
-    report.counts["marker_pairs"] = len(out)
+    report.listed["marker_dropped_unmapped"] = sorted(dropped, key=lambda d: d["key"])
+    report.counts.update(marker_pairs=len(out), marker_dropped=len(dropped))
     return sorted(out), report
 
 
@@ -331,6 +339,15 @@ def migrate_writeback(records: list[tuple[str, str, str]], ledger_old_rows: list
     report.merge_aborts(aborts)
     report.counts["alias_writeback"] = len(out)
     return out, report
+
+
+def ledger_variation_tombstones(path: Path) -> dict[str, str | None]:
+    """The old ledger's variation tombstones: Key -> reason, the ledger's record of a Key retired before phase 1."""
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return dict(conn.execute("SELECT external_id, reason FROM removed WHERE kind = 'variation'").fetchall())
+    finally:
+        conn.close()
 
 
 def ledger_variation_rows(path: Path) -> list[dict]:

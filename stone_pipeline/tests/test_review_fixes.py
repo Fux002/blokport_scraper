@@ -195,14 +195,15 @@ def test_clean_alias_list_splits_every_comma_form_before_cleaning_and_reports_dr
     from stone_pipeline.core.text import clean_alias_list
     from stone_pipeline.reference.loaders import field_kinds as fk
     clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
-    # a fullwidth comma joins a Latin alias to a CJK one: the Latin half is kept, the CJK half reported
+    # a fullwidth comma joins a Latin alias to a CJK one: the split comes first, and both halves are kept (the alias
+    # kind keeps every script, Mas 13 Nov)
     blob = "Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a"
-    assert clean_alias_list("X", [blob], clean) == (["Wratza Limestone"], ["\u7ef4\u7eb3\u591a"])
+    assert clean_alias_list("X", [blob], clean) == (["Wratza Limestone", "\u7ef4\u7eb3\u591a"], [])
     assert clean_alias_list("X", ["Nero\u3001Black"], clean) == (["Nero", "Black"], [])
     # fullwidth brackets split like ASCII ones
     assert clean_alias_list("X", ["Nero\uff08Black Marble\uff09"], clean) == (["Nero", "Black Marble"], [])
-    # an accented alias is cleaned; a case or accent twin collapses onto the first
-    assert clean_alias_list("Rosa", ["Ros\u00e9", "rose", "ROS\u00c9"], clean) == (["Rose"], [])
+    # an accented alias keeps its accent; a case or accent twin collapses onto the first
+    assert clean_alias_list("Rosa", ["Ros\u00e9", "rose", "ROS\u00c9"], clean) == (["Ros\u00e9"], [])
 
 
 # --- consolidate_inventory: cross-source SKU collision, newest wins ----------

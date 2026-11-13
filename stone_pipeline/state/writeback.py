@@ -1,42 +1,21 @@
-"""Outbound write-back (section 8.4).
+"""Outbound write-back (section 8.4), now PROPOSALS (P2-10 C2).
 
-A confirmed phonetic or fuzzy variation match appends the scraped spelling
-to that variation's alias list. This is what makes the system more consistent every
-run instead of re-reviewing the same names forever. Write-backs are recorded in the
-manifest. (Origin is NOT written back automatically -- origin_map.csv is hand-maintained
-in catalog_source/; the origin review flag is the worklist.)
+A confirmed phonetic or fuzzy variation match proposes the scraped spelling as a learned alias of the variety it bound:
+a row in config.db `learned_alias`, keyed by the variety's identity Key, with the match METHOD and the vendor as
+provenance. A proposal is not a matcher input: only an operator decision makes it active (decisions_store.learned).
 
-Rather than mutate the live backend exports (which can be re-pulled), confirmed
-aliases are appended to state/alias_writeback.csv. The variation index loader
-reads this file in addition to the exports, so the next run resolves the spelling
-as an exact alias hit for free.
+ONLY a learned GUESS is proposed (is_learned): a phonetic or fuzzy match, the tiers where the index could not name
+the variety by a known surface. Every other bind (exact, exact narrowed by name, type, colour or origin, projection,
+override) is re-derived from the seed on every run, so proposing it adds nothing but stickiness: a later seed
+correction (an alias moved to its right owner) would be undone by the saved pick.
 
-Each row records the MATCH METHOD that learned it, so a learned alias is auditable and
-distinguishable from a hand-curated export alias, and can be reversed with `forget_alias` if a
-wrong high-scoring fuzzy guess was persisted.
-
-ONLY a learned GUESS is kept (is_learned): a phonetic or fuzzy match, the tiers where the index
-could not name the variety by a known surface. Every other bind (exact, exact narrowed by name,
-type, colour or origin, projection, override) is re-derived from the seed on every run, so
-persisting it adds nothing but stickiness: a later seed correction (an alias moved to its right
-owner) would be undone by the saved pick. Rows recorded before this rule are not applied and are
-dropped from the file on the next flush.
+The old state/alias_writeback.csv, its reader and its writer belong to the one-time move into learned_alias
+(aliases.migrate_learned) and the phase 1 store migration; nothing here reads or writes it.
 """
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass, field
-from pathlib import Path
-
-from stone_pipeline.config.settings import SETTINGS
-from stone_pipeline.core import logfmt
-from stone_pipeline.core.csvio import atomic_write
-
-log = logfmt.get_logger("writeback")
-
-ALIAS_WRITEBACK = "alias_writeback.csv"
-_FIELDS = ["variation_id", "alias", "method"]
 
 # The engine tiers that GUESS (matching/engine.py: "phonetic" tier 4, "fuzzy" / "fuzzy_origin" tiers 5-6).
 LEARNED_TIERS = ("phonetic", "fuzzy")
@@ -56,94 +35,29 @@ def is_learned(method: str) -> bool:
     return method.startswith(LEARNED_TIERS)
 
 
-def _writeback_path(name: str) -> Path:
-    return SETTINGS.paths.state_dir / name
-
-
 @dataclass
 class WriteBack:
-    """Accumulates confirmed learnings during a run; flushed at the end."""
+    """Accumulates the run's learned guesses; flushed at the end as proposals."""
 
-    aliases: list[tuple[str, str, str]] = field(default_factory=list)  # (variation_id, alias, method)
+    aliases: list[tuple] = field(default_factory=list)  # (identity Key, alias, method, source, score)
     seen_aliases: set[tuple[str, str]] = field(default_factory=set)
 
-    def add_alias(self, variation_id: str, alias: str, method: str = "") -> None:
+    def add_alias(self, identity_key: str, alias: str, method: str = "", source: str = "",
+                  score: float | None = None) -> None:
         alias = (alias or "").strip()
-        if not variation_id or not alias:
+        if not identity_key or not alias:
             return
-        key = (variation_id, alias.casefold())
+        key = (identity_key, alias.casefold())
         if key in self.seen_aliases:
             return
         self.seen_aliases.add(key)
-        self.aliases.append((variation_id, alias, (method or "").strip()))
+        self.aliases.append((identity_key, alias, (method or "").strip(), (source or "").strip(), score))
 
-    def flush(self, path: Path | None = None) -> int:
-        """Persist newly-learned aliases, skipping ones already recorded, and drop recorded rows that are
-        not learned guesses (is_learned). Returns the count of new aliases written. Idempotent: with nothing
-        new and nothing to drop it does not touch the file, so a re-run is a no-op. Otherwise the whole file
-        is rewritten under the current schema, which is deterministic -- same runs produce the same file."""
-        path = Path(path or _writeback_path(ALIAS_WRITEBACK))
-        recorded = load_alias_writeback_records(path)
-        kept = [record for record in recorded if is_learned(record[2])]
-        kept_keys = {(vid, alias.casefold()) for vid, alias, _ in kept}
-        new = [(vid, alias, method) for vid, alias, method in self.aliases
-               if is_learned(method) and (vid, alias.casefold()) not in kept_keys]
-        dropped = len(recorded) - len(kept)
-        if not new and not dropped:
-            return 0
-        if dropped:
-            log.info("alias write-back: dropped rows that are not learned guesses",
-                     extra={"extra_fields": {"dropped": dropped, "kept": len(kept)}})
-        _write_records(path, kept + new)
-        return len(new)
+    def flush(self) -> int:
+        """Propose this run's learned guesses (decisions_store.propose_learned_aliases: a Key and norm already holding
+        a row is left as it is). Returns the number of new proposals."""
+        from stone_pipeline.config import decisions_store
+        return decisions_store.propose_learned_aliases(
+            {"identity_key": key, "value": alias, "method": method, "source": source, "score": score}
+            for key, alias, method, source, score in self.aliases)
 
-
-def _write_records(path: Path, records: list[tuple[str, str, str]]) -> None:
-    # Atomic temp-file + os.replace: the whole-file rewrite must never leave a truncated file (which would
-    # lose ALL previously-learned aliases, not just the tail), and overlapping produce/build writers must not
-    # tear each other's output. Last-writer-wins is fine here; a torn file is not.
-    def _write(handle) -> None:
-        writer = csv.writer(handle)
-        writer.writerow(_FIELDS)
-        for vid, alias, method in records:
-            writer.writerow([vid, alias, method])
-    atomic_write(path, _write)
-
-
-def load_alias_writeback_records(path: Path | None = None) -> list[tuple[str, str, str]]:
-    """Full learned-alias records (variation_id, alias, method) for audit/undo. Tolerates a legacy
-    two-column file (method reads as "")."""
-    path = Path(path or _writeback_path(ALIAS_WRITEBACK))
-    if not path.exists():
-        return []
-    out: list[tuple[str, str, str]] = []
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for record in csv.DictReader(handle):
-            vid = (record.get("variation_id") or "").strip()
-            alias = (record.get("alias") or "").strip()
-            method = (record.get("method") or "").strip()
-            if vid and alias:
-                out.append((vid, alias, method))
-    return out
-
-
-def load_alias_writeback(path: Path | None = None) -> list[tuple[str, str]]:
-    """The (variation_id, alias) pairs the matcher applies -- the stable contract the index loader reads:
-    the learned guesses only, so a row recorded before the rule never binds even before the file is healed."""
-    return [(vid, alias) for vid, alias, method in load_alias_writeback_records(path) if is_learned(method)]
-
-
-def forget_alias(variation_id: str, alias: str, path: Path | None = None) -> bool:
-    """Remove one learned alias (the undo path for a wrong fuzzy/phonetic guess that was persisted as an
-    exact alias). Rewrites the file without that (variation_id, alias) row. Returns True if a row was
-    removed, False if it was not present. Case-insensitive on the alias, matching how it is keyed."""
-    path = Path(path or _writeback_path(ALIAS_WRITEBACK))
-    records = load_alias_writeback_records(path)
-    if not records:
-        return False
-    target = (variation_id, (alias or "").strip().casefold())
-    kept = [r for r in records if (r[0], r[1].casefold()) != target]
-    if len(kept) == len(records):
-        return False
-    _write_records(path, kept)
-    return True

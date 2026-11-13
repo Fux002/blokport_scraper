@@ -5,9 +5,15 @@ on:
     branches: [main, develop]
   pull_request:
 
+# WHERE IT RUNS (Mas, 12 Nov: hosted minutes are capped, ~$100/day of them were this workflow). A push to main or
+# develop, and a pull request from this repository not opened by a bot, run on the CI boxes' scraper slots (label
+# blokport-ci-sc, one slot per box, registered to this repo; the boxes are the backend repo's terraform/envs/ci-runner),
+# except the terraform job (see there).
+# A fork's or a bot's pull request stays on ubuntu-latest, so no outside code reaches a box. The expression is repeated
+# per job because runs-on cannot read env.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && 'blokport-ci-sc' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -27,12 +33,12 @@ jobs:
         env:
           LC_ALL: C.UTF-8   # one collation for sort/comm, and UTF-8 for the PCRE match
         run: |
-          rc=0; git grep -I -l -P "\x{2014}" > /tmp/hits.txt || rc=$?
+          rc=0; git grep -I -l -P "\x{2014}" > "$RUNNER_TEMP/hits.txt" || rc=$?
           [ "$rc" -le 1 ] || { echo "git grep failed (exit $rc)"; exit 1; }   # 1 = no match, anything above is an error
-          sort /tmp/hits.txt > /tmp/offenders.txt
-          sort .github/em-dash-allowlist.txt > /tmp/allowed.txt
-          mapfile -t new < <(comm -23 /tmp/offenders.txt /tmp/allowed.txt)
-          mapfile -t stale < <(comm -13 /tmp/offenders.txt /tmp/allowed.txt)
+          sort "$RUNNER_TEMP/hits.txt" > "$RUNNER_TEMP/offenders.txt"
+          sort .github/em-dash-allowlist.txt > "$RUNNER_TEMP/allowed.txt"
+          mapfile -t new < <(comm -23 "$RUNNER_TEMP/offenders.txt" "$RUNNER_TEMP/allowed.txt")
+          mapfile -t stale < <(comm -13 "$RUNNER_TEMP/offenders.txt" "$RUNNER_TEMP/allowed.txt")
           if [ "${#new[@]}" -gt 0 ]; then
             echo "em dash found (plan section 0: none anywhere):"; git grep -I -n -P "\x{2014}" -- "${new[@]}"; exit 1
           fi
@@ -48,18 +54,20 @@ jobs:
   syntax-floor:
     # The declared Python floor is 3.11 (pyproject). Tests run on 3.12, so a 3.12-only construct (PEP 701
     # nested f-string quotes) would ship unnoticed; compiling every package on 3.11 catches it.
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && 'blokport-ci-sc' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       - name: Compile on the declared floor
-        run: python -m compileall -q stone_pipeline scrapers deploy
+        run: python -m compileall -q stone_pipeline scrapers deploy market_prices
 
   terraform:
     # The infra is code too: formatting drift and a configuration that no longer validates (a removed
     # variable still referenced, a bad attribute) must fail here, not at the next apply.
+    # Hosted, unlike the jobs above: setup-terraform needs unzip, which the CI boxes do not carry (run 43250648058), and
+    # this job takes seconds, so it costs about one billed minute per run.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

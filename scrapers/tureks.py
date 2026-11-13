@@ -19,6 +19,7 @@ Run:  python scrapers/tureks.py
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 import re
 from html import unescape
 from typing import Any, Iterable, Optional
@@ -88,6 +89,7 @@ def parse_categories(categories: list):
 
 class TureksScraper(ScraperBase):
     source = "tureks"
+    site_domain = urlsplit(BASE).hostname   # the supplier's public site, from its own URL
     category = "slab"        # Tureks is slab inventory (item 3: explicit format)
     id_field = "product_id"  # images named tureks_<product_id>_<idx>
     columns = [

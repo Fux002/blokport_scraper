@@ -41,10 +41,15 @@ def _fetch_inputs() -> None:
     stops the produce in EVERY environment (fetch_inputs raises SystemExit, which this does not catch): left out,
     it would run as a cold start and publish empty valid combinations. An exception is a real S3 / credential
     failure: in production it aborts the produce (matching against a stale or absent export would hold every
-    variety and exit 0); in development (a laptop without S3) it logs and continues."""
+    variety and exit 0); in development (a laptop without S3) it logs and continues. A REFUSED attributes.csv (thin or
+    malformed: Medusa mid-reset) is no outage and stops the produce in every environment: a produce never runs on a
+    vocabulary it knows is stale (G10's attributes half)."""
+    from stone_pipeline.io import medusa_inputs
     try:
-        from stone_pipeline.io import medusa_inputs
         medusa_inputs.fetch_all()
+    except medusa_inputs.AttributesUnavailable:
+        log.exception("attributes.csv refused; a produce never runs on a stale vocabulary")
+        raise SystemExit(2)
     except Exception:
         if IS_PRODUCTION:
             log.exception("fetch_inputs FAILED in production; refusing to produce against a stale or absent export")
@@ -127,6 +132,18 @@ def _mirror_archived() -> None:
     with writethrough.open_ledger() as ledger:
         n = writethrough.mirror_archived_variations(ledger)
     log.info("VE2 archived mirror after fetch", extra={"extra_fields": {"archived_changed": n}})
+
+
+def _migrate_learned_aliases() -> None:
+    """P2-10 C2: move state/alias_writeback.csv into config.db learned_alias, ONCE per env (the scraper manager's
+    ruling 11-12), before any stage can match. It resolves each record through the ledger, so it runs where the
+    ledger is the live sync source (write-through on); a later produce finds the marker and returns at once. A
+    failure RAISES: a produce must not match with the learned aliases half moved."""
+    from stone_pipeline.ledger import writethrough
+    if not writethrough.enabled():
+        return
+    from stone_pipeline.aliases import migrate_learned
+    migrate_learned.run_once()
 
 
 def _frozen_waiting() -> int:
@@ -245,6 +262,7 @@ def run(sources: list[str] | None, stage: str, verify: bool = False) -> int:
 
     _fetch_inputs()
     _mirror_archived()   # VE2: freeze archived varieties from the FRESH export before any source is recorded
+    _migrate_learned_aliases()
     # Stages that REUSE the last scrape instead of re-fetching suppliers: `catalog` (consolidate only) and
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
