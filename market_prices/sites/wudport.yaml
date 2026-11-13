@@ -27,7 +27,9 @@ sites:
         The online terms have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
         listings and product pages for our client. JSON-LD Product and Offer price on a product page (69.52 GBP). The
         owner notes Jewson shows a branch price at a central postcode.
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
   - site_id: selcobw
     brand: wudport
     seller_name: Selco Builders Warehouse
@@ -49,7 +51,9 @@ sites:
         (10.63 GBP), but the sheet listing pages hold no product links in plain HTML (a script-rendered grid), so
         this site is expected to report 0 listings; its sitemap covers the whole catalogue (about 9,000 URLs), so it
         is no entry point. The owner notes the site needs a browser.
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
   - site_id: totemtimber
     brand: wudport
     seller_name: Totem Timber
@@ -67,7 +71,9 @@ sites:
       summary: >-
         The terms have no clause on scraping, automated access or copying prices. robots.txt disallows only
         WooCommerce internals and add-to-cart links. JSON-LD Product and Offer price on a product page (4.00 GBP).
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
   - site_id: mkm
     brand: wudport
     seller_name: MKM Building Supplies
@@ -89,7 +95,9 @@ sites:
         promotions and have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
         listings and product pages. A product page carries a JSON-LD Product but NO offers price, so this site is
         expected to give no priced rows (the owner noted only 44 of 780 priced).
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
   - site_id: originalmarquetry
     brand: wudport
     seller_name: Original Marquetry
@@ -109,7 +117,9 @@ sites:
         clause on scraping or collecting prices (Mas, 13 Nov: a copying ban only, fine to approve; observations keep
         facts and the source URL and never reproduce content). robots.txt allows the veneer listings and product
         pages. JSON-LD Product and Offer price on a product page (38.50 GBP).
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
     statements: {vat_basis: excl}
   - site_id: scbs
     brand: wudport
@@ -131,7 +141,9 @@ sites:
         The terms have no clause on scraping, automated access or copying prices. robots.txt allows the sheet
         listings and product pages. JSON-LD Product and Offer price on a product page (18.94 GBP). The owner lists
         it as not yet added (about 48 sheet products).
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
   # ---- UK, on the owner's list but not approvable on the 13 Nov read (a reason each; never collected) ------------
   - site_id: travisperkins
     brand: wudport
@@ -377,7 +389,9 @@ sites:
         The AGB have no clause on scraping, automated access or copying prices. robots.txt allows the OSB listing
         and product pages. JSON-LD Product and Offer price on a product page (16.58 EUR). Its sitemaps name only the
         OSB category among sheet materials.
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
     statements: {vat_basis: incl}
   - site_id: holzland
     brand: wudport
@@ -387,22 +401,19 @@ sites:
     served_market: DE
     platform: schema_org_product
     base_url: https://www.holzland.de
-    discovery:
-      listing_pages: ["/sperrholzplatten/", "/multiplexplatten/", "/osb-platten/", "/mdf-platten/", "/spanplatten/",
-                      "/tischlerplatten/"]
-      product_path: "^/p/[a-z0-9-]+/HL[0-9]+/?$"
     terms:
       terms_url: https://www.holzland.de/nutzungsbedingungen/
       checked_on: 2026-11-13
       summary: >-
-        The marketplace terms forbid copying photos, graphics and texts without consent and have no clause on
+        NOT APPROVED (Mas, 13 Nov): dealer marketplace (HolzLand is not a party to the sale), same rule as
+        buildbuddy and buymaterials. The marketplace terms forbid copying photos, graphics and texts without consent and have no clause on
         scraping or collecting prices (Mas, 13 Nov: a copying ban only, fine to approve). Per the same terms HolzLand
         is a platform: the participating HolzLand dealers sell, and HolzLand is not a party to the sale. robots.txt
         disallows `*?pmzr=*`, which every product link on its listing pages carries, so this site is expected to
         report 0 listings with that robots reason (the link is never requested without its query). Its product
         sitemaps hold clean URLs but cover the whole catalogue in chunks, not a category, so they are no entry point.
         A product page carries JSON-LD Product and Offer price (726.00 EUR).
-    decision: pending
+    decision: refused
     statements: {vat_basis: incl}
   - site_id: beijerbygg
     brand: wudport
@@ -422,7 +433,9 @@ sites:
         The consumer purchase terms have no clause on scraping, automated access or copying prices. robots.txt
         disallows only search, ProductDisplay and history parameters. A product page carries no JSON-LD Product, so
         this site is expected to give no priced rows. Prices in SEK.
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
     statements: {vat_basis: incl}
   - site_id: byggmax
     brand: wudport
@@ -446,7 +459,9 @@ sites:
         The purchase terms have no clause on scraping, automated access or copying prices. robots.txt allows the
         sheet listings. A product page carries no JSON-LD Product and its listing pages hold no product links in
         plain HTML, so this site is expected to give no priced rows. Prices in SEK.
-    decision: pending
+    decision: approved
+    decided_by: "Mas for the owner (owner's 13 Nov site list)"
+    decided_on: 2026-11-13
     statements: {vat_basis: incl}
   # ---- EU, on the owner's list but not approvable on the 13 Nov read ----------------------------------------------
   - site_id: toom
