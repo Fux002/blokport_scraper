@@ -70,7 +70,7 @@ def test_seed_products_minimal_and_excluded_from_render(tmp_path):
     export = tmp_path / "products_export.csv"
     with export.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["SKU", "Handle", "Inventory"])
+        w.writerow(["Variant Sku", "Product Handle", "Inventory Quantity"])   # BE's header (table 572, T4)
         w.writerow(["POLONINE-OLD1", "old-one", "5"])
         w.writerow(["POLONINE-OLD2", "old-two", "0"])
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
