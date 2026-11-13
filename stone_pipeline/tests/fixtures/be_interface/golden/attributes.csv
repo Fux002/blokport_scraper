@@ -1,0 +1,13 @@
+category,value,sourceid,status,internal,category_handles,handle
+color,Black,col_01,archived,false,,
+color,"Blue, deep",col_03,active,false,,
+color,Grey,col_02,active,false,,
+finish,Honed,fin_01,active,false,,
+finish,Polished,fin_02,active,false,,
+type,Granite,typ_01,active,false,blocks|slabs|tiles,
+type,Internal only,typ_03,active,true,,
+type,Marble,typ_02,active,false,slabs,
+quality,First,qua_01,active,false,,
+category,Blocks,pcat_01,active,false,,blocks
+category,Slabs,pcat_02,active,false,,slabs
+category,Tiles,pcat_03,active,false,,tiles
