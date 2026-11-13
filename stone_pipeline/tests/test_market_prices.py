@@ -743,3 +743,30 @@ def test_only_the_live_transport_holds_an_http_client():
     holders = {path.relative_to(_PACKAGE).as_posix() for path in _PACKAGE.rglob("*.py")
                if {name.split(".")[0] for name in _imports(path)} & _HTTP_CLIENTS}
     assert holders == {"transport.py"}
+
+
+# --- the run's scope: its brand's vocabulary, asked once per listing after the fetch (W4, Mas 13 Nov) -----------------
+def _wudport_register() -> Register:
+    return Register.model_validate({"brand": "wudport", "sites": [_site(served_market="GB")]})
+
+
+def test_a_listing_outside_the_brands_scope_is_not_delivered_and_is_counted():
+    result = _run(_shop(_page([_listing(1, name="Birch plywood 18mm 2440 x 1220"),
+                               _listing(2, name="Paint roller 9 inch")])), _wudport_register())
+    assert [row.listing_key for row in result.observations] == ["1"]
+    status = _status(result)
+    assert (status.status.value, status.rows) == ("ok", 1)
+    assert "listings out of scope x1" in status.detail
+
+
+def test_a_site_with_no_listing_in_scope_is_read_whole_and_delivers_none():
+    result = _run(_shop(_page([_listing(1, name="Paint roller 9 inch")])), _wudport_register())
+    status = _status(result)
+    assert (status.status.value, status.rows, result.observations) == ("ok", 0, ())
+    assert "listings out of scope x1" in status.detail
+
+
+def test_a_scope_all_brand_delivers_every_listing_as_before():
+    result = _run(_shop(_page([_listing(1), _listing(2, name="Paint roller 9 inch")])))
+    assert [row.listing_key for row in result.observations] == ["1", "2"]
+    assert (_status(result).status.value, _status(result).detail) == ("ok", "")
