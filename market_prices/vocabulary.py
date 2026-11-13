@@ -99,6 +99,10 @@ class Vocabulary(BaseModel):
             for market, named in self.languages_by_market.items()}
         return self
 
+    def covers(self, market: str) -> bool:
+        """Whether in_scope can answer for `market`: every market under scope all, a declared one under scope words."""
+        return self.scope is Scope.all or market in self._words_by_market
+
     def in_scope(self, listing_text: str, market: str) -> bool:
         """Whether the run keeps this listing: always under scope all; under scope words, when the listing's text
         holds a word of a category in `market`'s languages. A market the vocabulary does not declare raises."""

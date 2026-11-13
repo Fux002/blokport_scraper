@@ -21,6 +21,7 @@ from market_prices.schema import (
     DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source,
     VatBasis, columns, csv_values,
 )
+from market_prices.vocabulary import Vocabulary, VocabularyError, load_vocabulary
 
 _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
                           "delivery_included": DeliveryIncluded.unknown}
@@ -78,16 +79,19 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     )
 
 
-def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
+def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Transport, stamp: Stamp,
                  pause: Callable[[float], None]) -> SiteResult:
-    malformed = duplicates = 0
+    """One site, isolated. A listing is kept only when the run brand's vocabulary has it in scope; one out of scope
+    is counted in `detail`, never dropped silently."""
+    malformed = duplicates = out_of_scope = 0
 
     def finish(status: SiteRunStatus, detail: str, kept: Iterable[Observation] = ()) -> SiteResult:
         ordered = tuple(sorted(kept, key=lambda row: row.listing_key))
+        scoped = f"listings out of scope x{out_of_scope}" if out_of_scope else ""
         return SiteResult(ordered, SiteStatus(
             contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
             status=status, rows=len(ordered), malformed_listings=malformed, duplicate_listings=duplicates,
-            detail=detail,
+            detail="; ".join(part for part in (detail, scoped) if part),
             terms_checked_on=site.terms.checked_on.isoformat() if site.terms.checked_on else None,
             decision=site.decision.value, observed_at=stamp.observed_at, run_id=stamp.run_id))
 
@@ -99,7 +103,11 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
         fetcher = SiteFetcher(site.robots_url, transport, pause)
         for raw in collector.listings(site, fetcher):
             try:
-                row = _observation(collector.facts(raw, site), site, brand, stamp, collector.version)
+                facts = collector.facts(raw, site)
+                if not vocabulary.in_scope(facts.listing_text, site.served_market):
+                    out_of_scope += 1
+                    continue
+                row = _observation(facts, site, brand, stamp, collector.version)
             except (MalformedListing, ValidationError):
                 malformed += 1
                 continue
@@ -115,7 +123,7 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
         if rows:
             return finish(SiteRunStatus.partial, f"stopped early: {exc}", rows.values())
         return finish(SiteRunStatus.unavailable_error, str(exc))
-    if not rows:
+    if not rows and (malformed or not out_of_scope):
         return finish(SiteRunStatus.unavailable_error, f"no readable listings ({malformed} malformed)")
     if malformed:
         return finish(SiteRunStatus.partial, f"{malformed} malformed listings skipped", rows.values())
@@ -125,7 +133,11 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
 def collect_run(register: Register, transport: Transport, moment: datetime,
                 pause: Callable[[float], None] = time.sleep) -> RunResult:
     stamp = stamp_for(moment)
-    results = [collect_site(site, register.brand, transport, stamp, pause)
+    vocabulary = load_vocabulary(register.brand)
+    if uncovered := sorted(site.site_id for site in register.sites
+                           if site.collectable and not vocabulary.covers(site.served_market)):
+        raise VocabularyError(f"{register.brand}'s scope vocabulary declares no market for sites {uncovered}")
+    results = [collect_site(site, register.brand, vocabulary, transport, stamp, pause)
                for site in sorted(register.sites, key=lambda site: site.site_id)]
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),

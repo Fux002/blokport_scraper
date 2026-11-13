@@ -67,6 +67,8 @@ One row per site in the register, every run.
 
 A listing that cannot be read or delivered (for example a cell over 100,000 characters) is counted in `malformed_listings` and left out.
 
+A listing outside the run brand's scope (its vocabulary, `market_prices/vocabulary/<brand>.yaml`) is left out and counted in `detail` as `listings out of scope xN`. A site read whole stays `ok`, including when no listing on it is in scope.
+
 Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_checked_on`, `decision`, `observed_at`, `run_id`, `contract_version`, `brand`, `site_id`.
 
 ## Running
