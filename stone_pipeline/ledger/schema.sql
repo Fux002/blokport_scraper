@@ -175,6 +175,12 @@ CREATE TABLE IF NOT EXISTS product (
     -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
     -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
     photo_ready          INTEGER NOT NULL DEFAULT 1,
+    -- the standardised files the product links that the photos side has not published
+    -- (populate.mark_unpublished_photos, recomputed for every product of the source on every produce): a sorted JSON
+    -- array of object keys, null = none.
+    -- A product with any is never served (sync._ELIGIBLE_PRODUCT). A content fact, not a sync state: a requeue or a
+    -- reset never clears it, only a produce that finds the files published. Not served, so not in payload_hash.
+    photo_unpublished    TEXT,
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids

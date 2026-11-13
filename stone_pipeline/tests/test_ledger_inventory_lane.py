@@ -185,7 +185,10 @@ def test_a_bootstrap_row_is_in_medusa_even_once_a_run_makes_it_dirty(tmp_path):
         assert sync.ack(ledger, "inventory", "B-1", status_="updated", quantity=0) == 1
         from stone_pipeline.ledger.populate import withdraw_unsent
         from stone_pipeline.config.sources import SourceConfig
-        assert withdraw_unsent(ledger, [], SourceConfig(source="b", source_code="b")) == 0   # not withdrawn
+        # B-1 is in Medusa but no longer produced: only its unsent change is withdrawn (the row stays, the delist owns it)
+        assert withdraw_unsent(ledger, [], SourceConfig(source="b", source_code="b")) == 1
+        assert (ledger.get("product", "sku", "B-1")["state"], ledger.get("product", "sku", "B-1")["payload_hash"]) == (
+            "synced", "")
         assert withdraw_unsent(ledger, [], SourceConfig(source="s", source_code="s")) == 1   # the unsent one is
         sync.reset_sync_state(ledger, hard=True)
         assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["B-1"]
