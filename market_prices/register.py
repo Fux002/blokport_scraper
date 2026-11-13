@@ -205,8 +205,11 @@ def _read_register(sites_dir: Path, brand: str) -> Register:
 
 def check_one_register_per_site(register: Register, sites_dir: Path) -> None:
     """one_register_per_site: a site_id or host of this register is in no other brand's register, unless both rows
-    name each other in shared_with. Every other register in `sites_dir` is read, and one that does not validate stops
-    this one too: the rule cannot be checked against a register that cannot be read."""
+    name each other in shared_with. So every brand's register is read on each load: configuration only (which sites
+    exist, their hosts and shared_with), never another brand's data. One that does not validate stops every brand's
+    run, since the rule cannot be checked against a register that cannot be read; CI loading every shipped register
+    (test_every_shipped_register_row_carries_its_files_brand, beside test_shipped_registers_load) is what keeps a broken
+    one from merging."""
     for path in sorted(sites_dir.glob("*.yaml")):
         if path.stem == register.brand:
             continue
