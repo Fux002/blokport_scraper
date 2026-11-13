@@ -407,7 +407,7 @@ sites:
       summary: >-
         NOT APPROVED (Mas, 13 Nov): dealer marketplace (HolzLand is not a party to the sale), same rule as
         buildbuddy and buymaterials. The marketplace terms forbid copying photos, graphics and texts without consent and have no clause on
-        scraping or collecting prices (Mas, 13 Nov: a copying ban only, fine to approve). Per the same terms HolzLand
+        scraping or collecting prices. Per the same terms HolzLand
         is a platform: the participating HolzLand dealers sell, and HolzLand is not a party to the sale. robots.txt
         disallows `*?pmzr=*`, which every product link on its listing pages carries, so this site is expected to
         report 0 listings with that robots reason (the link is never requested without its query). Its product
