@@ -53,10 +53,12 @@ def ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(path))
     now = now_iso()
     with Ledger.open(path, env="development") as lg:
+        # no alias column: the review reads key, name and type only, and the column is `aliases` before C4's ledger v18
+        # and `alias_rows`/`codes` after it (all nullable), so naming none keeps this fixture valid on both
         for key, name, type_ in ((KEY, "Kashmir Gold", "Granite"), (SIBLING, "Kashmir Gold", "Granite"),
                                  (BYSTANDER, "Bianco Carrara", "Marble"),
                                  (OTHER_GRANITE, "Absolute Black", "Granite")):
-            lg.upsert("variation", {"key": key, "type": type_, "name": name, "aliases": "[]", "medusa_id": None,
+            lg.upsert("variation", {"key": key, "type": type_, "name": name, "medusa_id": None,
                                     "in_full": 1, "payload_hash": "", "state": "pending", "first_seen": now,
                                     "last_synced": None, "created_at": now, "updated_at": now}, pk=("key",))
     return path
