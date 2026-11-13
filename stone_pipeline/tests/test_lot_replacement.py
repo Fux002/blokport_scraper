@@ -4,7 +4,8 @@ When the loader turns a bundle into its pieces, the bundle's SKU vanishes from t
 takes the existing discontinued path (inventory 0). Agreed with Blokport: that inventory delta carries
 `reason: "replaced_by_lot"` and the `lot_code`, so Blokport deactivates the bundle (never deletes it) and
 301s its slug to the lot page from the same message. The delta is served only once a piece of that lot
-exists in Medusa, so the redirect never points at an empty lot. A plain sold-out stays a bare zero.
+exists in Medusa, so the redirect never points at an empty lot. A plain drop is sold out (reason 'sold_out' and its
+gone_at, table 505).
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ def _synced_stock(ledger, sku, qty):
                   pk=("sku",))
 
 
-def test_a_replaced_bundle_is_zeroed_with_its_lot_and_a_plain_drop_stays_a_bare_zero(tmp_path):
+def test_a_replaced_bundle_is_zeroed_with_its_lot_and_a_plain_drop_is_sold_out(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         for sku in ("SEN-2555", "SEN-2213"):
             _product(ledger, sku, medusa_id=f"m-{sku}")
@@ -62,7 +63,8 @@ def test_a_replaced_bundle_is_zeroed_with_its_lot_and_a_plain_drop_stays_a_bare_
                               replaced={"SEN-2555": CODE})
         replaced, plain = _inventory_row(ledger, "SEN-2555"), _inventory_row(ledger, "SEN-2213")
         assert (replaced["qty"], replaced["reason"], replaced["replaced_by_lot_code"]) == (0, "replaced_by_lot", CODE)
-        assert (plain["qty"], plain["reason"], plain["replaced_by_lot_code"]) == (0, None, None)
+        assert (plain["qty"], plain["reason"], plain["replaced_by_lot_code"]) == (0, "sold_out", None)
+        assert plain["gone_at"] and replaced["gone_at"] is None
 
 
 def test_the_replacement_is_served_only_once_a_piece_of_the_lot_exists_in_medusa(tmp_path):
@@ -79,13 +81,14 @@ def test_the_replacement_is_served_only_once_a_piece_of_the_lot_exists_in_medusa
             "sku": "SEN-2555", "quantity": 0, "made_to_order": False, "reason": "replaced_by_lot", "lot_code": CODE}}]
 
 
-def test_a_plain_sold_out_delta_carries_no_reason_and_no_lot(tmp_path):
+def test_a_plain_sold_out_delta_carries_sold_out_and_its_gone_at_and_no_lot(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "SEN-2213", medusa_id="m")
         _synced_stock(ledger, "SEN-2213", 9)
         populate_discontinued(ledger, [("SEN-2213", "h")])
-        assert ready(ledger, "inventory") == [{"external_id": "SEN-2213",
-                                               "payload": {"sku": "SEN-2213", "quantity": 0, "made_to_order": False}}]
+        gone_at = _inventory_row(ledger, "SEN-2213")["gone_at"]
+        assert gone_at and ready(ledger, "inventory") == [{"external_id": "SEN-2213", "payload": {
+            "sku": "SEN-2213", "quantity": 0, "made_to_order": False, "reason": "sold_out", "gone_at": gone_at}}]
 
 
 def test_a_bundle_listed_again_drops_its_replacement(tmp_path):
