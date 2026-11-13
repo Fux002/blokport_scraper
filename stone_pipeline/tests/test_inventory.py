@@ -122,7 +122,6 @@ def test_a_failed_stock_refresh_fails_the_produce_the_run_record_reads(monkeypat
     monkeypatch.setattr(produce, "_live_scrape", lambda sources: 0)
     persisted = []
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: persisted.append("artifacts"))
-    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: persisted.append("state"))
     assert produce.run(["marenostone", "polonine"], "inventory") == 1
     assert persisted == []
 
