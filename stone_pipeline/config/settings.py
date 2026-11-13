@@ -746,6 +746,9 @@ class SyncConfig:
     # An authed request body cap, so a hostile Content-Length cannot force an unbounded read. The largest real body
     # is an ack page (2000 items, well under 1 MiB).
     max_body_bytes: int = 8 << 20
+    # POST /sync/v1/reserve takes at most this many distinct external_ids per call; more is refused whole. A contract
+    # value: the backend's restore pages by its RESERVE_PAGE of the same size, so a change is a paired PR.
+    max_reserve_ids: int = 1000
     # Page bounds for the pull routes: an unbounded pull on a full delta builds it all in memory and writes it in one
     # buffer (http.server has no backpressure); a 24k-item bootstrap delta is ~4.6 MB.
     default_page: int = 500

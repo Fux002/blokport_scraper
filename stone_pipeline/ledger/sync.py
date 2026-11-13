@@ -26,13 +26,14 @@ dormant C3 case). No em dashes (design principle 2).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
-                                      STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql, now_iso,
-                                      on_sale_sql, variation_icons)
+                                      RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql,
+                                      now_iso, on_sale_sql, variation_icons)
 from stone_pipeline.ledger.payloads import product_payload, variation_payload
 
 log = logfmt.get_logger("ledger.sync")
@@ -233,7 +234,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
     reap_stale_syncing(ledger, "variation")
     now = now_iso()
     rows = ledger.execute(
-        "UPDATE variation SET state = 'syncing', updated_at = ? WHERE key IN ("
+        "UPDATE variation SET state = 'syncing', reserved_at = NULL, updated_at = ? WHERE key IN ("
         "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
         "RETURNING key, type, name, aliases, payload_hash",
@@ -521,9 +522,13 @@ def _ack_entity(ledger: Ledger, type_: str, external_id: str, medusa_id: str | N
         version_cond, version_params = " AND payload_hash = ?", [payload_hash]
     else:
         version_cond, version_params = "", []
+    # reserve guard: a variation stamped reserved_at was reserved after this ack's lease (the next lease clears the
+    # stamp), so Medusa applied what it held before the reserve. The ack records it and leaves the row dirty, and the
+    # next pull serves it (sync.reserve_variations).
+    synced = "CASE WHEN reserved_at IS NOT NULL THEN 'dirty' ELSE 'synced' END" if table == "variation" else "'synced'"
     cur = ledger.execute(
-        f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
-        f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
+        f"UPDATE {table} SET medusa_id = ?, state = {synced}, sync_attempts = 0, sync_error = NULL, "
+        f"retry_after = NULL, last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
         (medusa_id, now, now, external_id, *version_params))
     if cur.rowcount == 0 and type_ == "products":
         log.warning("refused a product ack ahead of its variation (out-of-order / not resolvable)",
@@ -655,6 +660,37 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
         raise ValueError(f"unsupported requeue type {type_!r}; expected one of {REQUEUE_TYPES}")
     now = now_iso()
     return sum(ledger.execute(_REQUEUE_SQL[lane], (now,)).rowcount for lane in ([type_] if type_ else REQUEUE_TYPES))
+
+
+# Why the scraper does not serve an existing variation, the first that applies (NULL = it serves). The reserve answers
+# it as `frozen` and never marks the row. The operator's terminal verdict (an abandoned dead-letter) outranks the rest;
+# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays.
+_FROZEN_REASON_SQL = ("CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned' "
+                      "WHEN archived = 1 THEN 'archived' WHEN state = 'retiring' THEN 'retiring' "
+                      "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' END")
+
+
+def reserve_variations(ledger: Ledger, external_ids: Iterable[str]) -> dict[str, list]:
+    """POST /sync/v1/reserve: re-serve exactly these variation Keys once, with their whole payload (the backend's
+    variety restore, 173 F18). Each deduped Key lands in exactly one list, sorted by Key:
+    - `unknown`: no ledger row; never created.
+    - `frozen`: {external_id, reason}, the row exists but the scraper does not serve it (_FROZEN_REASON_SQL);
+      never marked.
+    - `reserved`: every other row. It WILL serve on a coming pull (a retry wait only delays it): marked and stamped
+      by RESERVE_SQL, so it outranks every lease issued before it.
+    Idempotent: a stamped row is skipped, so a second call before the next pull writes nothing. The bound
+    (SETTINGS.sync.max_reserve_ids) is the route's to enforce, before any write."""
+    keys = sorted(set(external_ids))
+    marks = ",".join("?" * len(keys))
+    now = now_iso()
+    # the write first: it opens the transaction, so the read below classifies the same rows the write marked
+    ledger.execute(f"UPDATE variation SET {RESERVE_SQL}, updated_at = ? WHERE key IN ({marks}) "
+                   f"AND ({_FROZEN_REASON_SQL}) IS NULL AND reserved_at IS NULL", (now, now, *keys))
+    reason = {r["key"]: r["reason"] for r in ledger.execute(
+        f"SELECT key, {_FROZEN_REASON_SQL} AS reason FROM variation WHERE key IN ({marks})", keys)}
+    return {"reserved": [k for k in keys if k in reason and reason[k] is None],
+            "unknown": [k for k in keys if k not in reason],
+            "frozen": [{"external_id": k, "reason": reason[k]} for k in keys if reason.get(k)]}
 
 
 def serve_in_flight(ledger: Ledger) -> bool:

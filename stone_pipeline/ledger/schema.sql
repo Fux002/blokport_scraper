@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS variation (
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     retry_after   TEXT,                                 -- after a failed apply: not served again before this time
+    -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased: an ack leaves the row dirty while it is set,
+    -- so no lease issued before the reserve can sync it away. The next lease clears it.
+    reserved_at   TEXT,
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,

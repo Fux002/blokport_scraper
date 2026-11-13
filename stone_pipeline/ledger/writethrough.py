@@ -83,15 +83,15 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
 
 def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None = None) -> int:
     """Mirror the Medusa export's archived flag onto variation.archived (VE2 design section 6). A PURE FUNCTION
-    of the variants export: a variety no longer archived flips back to 0. Touches ONLY the rows whose flag
-    actually changes, so an unchanged row keeps its updated_at and is never re-served. Dormant when the export is
+    of the variants export: a variety no longer archived flips back to 0 and re-serves once. Touches ONLY the rows
+    whose flag actually changes, so an unchanged row keeps its updated_at and is never re-served. Dormant when the export is
     absent (returns 0). Reads through the one reader with the download-path status decision, so an export without
     the column reads tolerant until step C flips the flag. Returns the number of variation rows changed.
     Idempotent: a second call with the same export changes nothing.
 
     attribute.restricted is deliberately NOT mirrored here: PR4 decides restricted values from the files through
     medusa_files.read_attributes, the single authority, so no partial copy is kept in the ledger."""
-    from stone_pipeline.ledger.db import now_iso
+    from stone_pipeline.ledger.db import RESERVE_SQL, now_iso
     from stone_pipeline.reference.loaders import variants_status_required
     from stone_pipeline.reference.medusa_files import read_variants_export
 
@@ -107,9 +107,12 @@ def mirror_archived_variations(ledger: Ledger, *, export_path: str | Path | None
         changed += ledger.execute(
             "UPDATE variation SET archived = 1, updated_at = ? WHERE key = ? AND archived = 0",
             (now, key)).rowcount
-    for key in sorted(current - archived):   # lower the rows no longer archived in the file
+    # lower the rows no longer archived in the file. An archived row was never served, so the consumer may hold it
+    # without its current payload: the same UPDATE marks it to re-serve once (173 F18e), as a reserve does.
+    for key in sorted(current - archived):
         changed += ledger.execute(
-            "UPDATE variation SET archived = 0, updated_at = ? WHERE key = ?", (now, key)).rowcount
+            f"UPDATE variation SET archived = 0, {RESERVE_SQL}, updated_at = ? WHERE key = ? AND archived = 1",
+            (now, now, key)).rowcount
     return changed
 
 
