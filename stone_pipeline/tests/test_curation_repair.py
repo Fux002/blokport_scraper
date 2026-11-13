@@ -16,7 +16,7 @@ from stone_pipeline.ledger.sync import (abandon_dead_letter, cancel_variation_to
 def _variation(ledger, key, state, medusa_id=None, name="x", in_full=1):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": "Marble", "name": name,
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": medusa_id,
                                 "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,

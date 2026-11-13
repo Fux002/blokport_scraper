@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from stone_pipeline.aliases import payload as alias_payload
 from stone_pipeline.config.categories import category, category_by_pcat
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
@@ -48,12 +49,17 @@ def read_icon_sidecar(path: Path) -> dict[str, list[dict]] | None:
 
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     """Reflect a produced variety file (1_variants_full.csv, or the base on a reset) onto the variation table: write
-    each variety's content (type, name, aliases) and its icons, and mark it in_full=1; insert a new variety as pending
-    (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state and
-    first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves."""
-    _key, _name, _type, _aliases = _VARIANTS_FULL_COLS
+    each variety's content (type, name, alias_rows, codes) and its icons, and mark it in_full=1; insert a new variety
+    as pending (no Medusa id yet). Rows not in the file are reset to in_full=0 so they never render. medusa_id, state
+    and first_seen are preserved on existing rows; only the produced content moves, and a content change re-serves.
+    alias_rows and codes come from the alias sidecar emit writes beside the file (aliases.payload); with no sidecar
+    (the base a reset populates from) populate SETS both NULL, overwriting any earlier value: not computed, held from
+    the serve until a produce computes them, so no stale spelling is served. A sidecar
+    without a produced variety fails loud: a NULL there would hold a variety the produce did compute."""
+    _key, _name, _type, _ = _VARIANTS_FULL_COLS
     now = now_iso()
     sidecar = read_icon_sidecar(Path(path).parent / ICON_SIDECAR)
+    alias_sidecar = alias_payload.read_sidecar(Path(path).parent)
     stored = variation_icons(ledger) if sidecar is None else {}
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
@@ -65,15 +71,16 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
             if (problem := variety_key_problem(key)) is not None:
                 raise ValueError(f"{Path(path).name}: {key!r} is not a variety Key ({problem})")
             name, type_ = r.get(_name) or "", r.get(_type) or ""
-            aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
+            alias_rows, codes = _alias_cells(alias_sidecar, key, name, Path(path).name)
             icons = sidecar.get(key, []) if sidecar is not None else stored.get(key, [])
-            ph = variation_hash({"type": type_, "name": name, "aliases": json.dumps(aliases)}, icons)
+            ph = variation_hash({"type": type_, "name": name, "alias_rows": alias_rows, "codes": codes}, icons)
             ledger.execute(
-                "INSERT INTO variation (key, type, name, aliases, medusa_id, in_full, payload_hash, "
+                "INSERT INTO variation (key, type, name, alias_rows, codes, medusa_id, in_full, payload_hash, "
                 "state, first_seen, last_synced, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET type = excluded.type, name = excluded.name, "
-                "aliases = excluded.aliases, in_full = 1, payload_hash = excluded.payload_hash, "
+                "alias_rows = excluded.alias_rows, codes = excluded.codes, in_full = 1, "
+                "payload_hash = excluded.payload_hash, "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
                 # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
                 # 'retiring' variety that reappears in the produced set (its exclusion was cleared) must
@@ -93,7 +100,7 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "ELSE variation.retry_after END, "
                 "abandoned_at = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
                 "ELSE variation.abandoned_at END",
-                (key, type_, name, json.dumps(aliases), None, ph, "pending", now, None, now, now),
+                (key, type_, name, alias_rows, codes, None, ph, "pending", now, None, now, now),
             )
             if sidecar is not None:   # the listing is the icons' authority: a pair gone from S3 is gone here
                 ledger.execute("DELETE FROM variation_category_image WHERE key = ?", (key,))
@@ -106,6 +113,17 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id IN "
                    "(SELECT key FROM variation WHERE in_full = 1)")
     return n
+
+
+def _alias_cells(sidecar: dict | None, key: str, name: str, file: str) -> tuple[str | None, str | None]:
+    """The stored (alias_rows, codes) JSON of one produced variety: NULL, NULL without a sidecar (not computed)."""
+    if sidecar is None:
+        return None, None
+    if key not in sidecar:
+        raise ValueError(f"{file}: {key} {name!r} is not in {alias_payload.ALIAS_SIDECAR}: emit computes every "
+                         "produced variety's alias_rows and codes")
+    entry = sidecar[key]
+    return json.dumps(entry["alias_rows"], ensure_ascii=False), json.dumps(entry["codes"], ensure_ascii=False)
 
 
 def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:
