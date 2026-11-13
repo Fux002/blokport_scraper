@@ -153,8 +153,6 @@ class Site(BaseModel):
         collector = COLLECTORS.get(self.platform)
         if collector is None:
             raise ValueError(f"unknown platform {self.platform!r}; known: {sorted(COLLECTORS)}")
-        if collector.needs_discovery and self.discovery is None:
-            raise ValueError(f"platform {self.platform} needs discovery: the site's entry points")
         if not collector.needs_discovery and self.discovery is not None:
             raise ValueError(f"platform {self.platform} takes no discovery")
         if self.query and not collector.takes_query:
@@ -162,10 +160,12 @@ class Site(BaseModel):
         if reserved := sorted(collector.reserved_query & set(self.query)):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
-            self._require_full_record()
+            self._require_full_record(collector.needs_discovery)
         return self
 
-    def _require_full_record(self) -> None:
+    def _require_full_record(self, needs_discovery: bool) -> None:
+        """What a site needs before any request: only an approved row is ever fetched, so a row never requested (a
+        blocked or excluded site) carries none of it, and nothing about it is invented."""
         if not self.terms.complete:
             raise ValueError("approved needs terms_url, checked_on and summary")
         if not self.decided_by or not self.decided_on:
@@ -176,6 +176,8 @@ class Site(BaseModel):
             raise ValueError("approved needs dates that are not in the future")
         if not self.seller_country or not self.served_market:
             raise ValueError("approved needs seller_country and served_market")
+        if needs_discovery and self.discovery is None:
+            raise ValueError(f"approved needs discovery: platform {self.platform} reads the site's entry points")
 
     @property
     def collectable(self) -> bool:

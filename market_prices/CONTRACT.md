@@ -97,7 +97,7 @@ One `competitors` entry (id, the names the sheet uses, seller type, country, mar
 
 One entry in `market_prices/sites/<brand>.yaml`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
 
-A `schema_org_product` site needs `discovery` (another platform refuses it), and takes no `query`:
+An approved `schema_org_product` site needs `discovery` (another platform refuses it; a site never requested, such as a blocked one registered unapproved, may leave it out, so nothing about it is invented), and takes no `query`:
 
 ```yaml
 discovery:
