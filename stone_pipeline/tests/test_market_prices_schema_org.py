@@ -130,6 +130,22 @@ def test_a_retail_site_without_entry_points_is_refused():
         _register(site)
 
 
+@pytest.mark.parametrize("decision", ["pending", "refused"])
+def test_a_retail_site_never_requested_needs_no_entry_points(decision):
+    """A blocked or excluded site is registered unapproved and sent no request, so its entry points cannot be known
+    and are never invented: discovery is required only where the collector reads, an approved row."""
+    site = _site(decision=decision)
+    del site["discovery"]
+    sites = _Sites({})
+    result = collect_run(_register(site), sites, MOMENT, _no_pause)
+    assert (_status(result).status.value, sites.requested) == ("disabled_terms", [])
+
+
+def test_entry_points_on_an_unapproved_row_are_still_checked():
+    with pytest.raises(ValidationError):
+        _register(_site(decision="pending", discovery={"sitemaps": ["sitemap.xml"], "product_path": PRODUCT_PATH}))
+
+
 def test_a_woocommerce_site_may_not_carry_entry_points():
     site = _site(platform="woocommerce_store")
     with pytest.raises(ValidationError, match="discovery"):
