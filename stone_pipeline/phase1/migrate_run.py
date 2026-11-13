@@ -27,6 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from stone_pipeline.aliases.migrate_learned import (load_alias_writeback_records, write_alias_writeback_records,
+                                                   writeback_key)
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import storage
@@ -38,7 +40,6 @@ from stone_pipeline.phase1.migrate_stores import (MigrationRefused, read_key_map
 from stone_pipeline.phase1.rewrite_committed import rewrite_base
 from stone_pipeline.reference.medusa_files import read_variants_export
 from stone_pipeline.refresh_images import MARKER_KEY
-from stone_pipeline.state.writeback import _write_records, load_alias_writeback_records
 
 log = logfmt.get_logger("phase1.migrate_run")
 
@@ -49,15 +50,15 @@ _MISSING = ("NoSuchKey", "404", "NotFound")
 STORES = {
     "ledger": (snapshot._legacy_key(snapshot.snapshot_key(ENV_NAME)), "sqlite"),
     "config": (snapshot._legacy_key(snapshot.config_key(ENV_NAME)), "sqlite"),
-    "writeback": (snapshot._legacy_key(snapshot.state_writeback_key(ENV_NAME)), "bytes"),
+    "writeback": (snapshot._legacy_key(writeback_key(ENV_NAME)), "bytes"),
     "refreshed": (MARKER_KEY, "bytes"),
     "base_from_medusa": (f"{ENV_SEGMENT}/scraper/from_medusa/variants_export_base.csv", "bytes"),
     "base_to_upload": (f"{ENV_SEGMENT}/scraper/to_upload/variants_export_base.csv", "bytes"),
     "outputs": (snapshot.artifacts_key("outputs", ENV_NAME), "bytes"),
 }
-# the `.v2` stores: name -> new S3 key (code constants, snapshot.py)
+# the `.v2` stores: name -> new S3 key (code constants: snapshot.py; the write-back's is aliases.migrate_learned's)
 NEW_STORES = {"ledger": snapshot.snapshot_key(ENV_NAME), "config": snapshot.config_key(ENV_NAME),
-              "writeback": snapshot.state_writeback_key(ENV_NAME)}
+              "writeback": writeback_key(ENV_NAME)}
 REQUIRED_STORES = ("ledger", "config")     # the migration has nothing to migrate without them
 # the env's committed retired-Keys file (baked into the image), read only at MIGRATE_INPUTS.retired_keys.sha256
 RETIRED_KEYS_DIR = Path(__file__).with_name("retired_keys")
@@ -187,7 +188,7 @@ def _plan(s3: _S3, inputs: dict, stores: dict, work: Path,
     moved, sub = store_writer.migrate_writeback(records, old_rows, key_map, survivors)
     _fold(report, sub)
     files["writeback"] = work / "alias_writeback.v2.csv"
-    _write_records(files["writeback"], moved)
+    write_alias_writeback_records(files["writeback"], moved)
     for name in ("base_from_medusa", "base_to_upload"):
         if stores[name]["path"] is None:
             continue

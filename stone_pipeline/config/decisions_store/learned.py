@@ -1,5 +1,6 @@
 """Learned aliases (P2-10 C2): the spellings the pipeline GUESSED for a variety, in config.db `learned_alias`, keyed by
-the variety's identity Key and norm = core.text.match_key(value).
+the variety's identity Key and norm = core.text.alias_key(value) (match_key for an all-Latin value, so no stored
+row's norm changes).
 
 The lifecycle is one rule: the matcher's guesses and curate's alias arms PROPOSE; an operator decision makes a row
 ACTIVE or REJECTED; only an active row is a matcher input. A (Key, norm) holds one row, so a proposal never
@@ -12,7 +13,7 @@ from contextlib import closing
 from typing import Iterable
 
 from stone_pipeline.config import store
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import alias_key
 
 from ._common import InvalidDecision, _now
 
@@ -30,7 +31,7 @@ def active_learned_aliases() -> list[dict]:
 
 def _row(proposal: dict) -> tuple:
     key, value = (proposal.get("identity_key") or "").strip(), (proposal.get("value") or "").strip()
-    norm = match_key(value)
+    norm = alias_key(value)
     if not key or not norm:
         raise InvalidDecision(f"a learned alias needs an identity Key and a value with a key: {proposal!r}")
     return (key, value, norm, (proposal.get("method") or "").strip(), (proposal.get("source") or "").strip(),
@@ -60,7 +61,7 @@ def decide_learned_alias(identity_key: str, value: str, status: str, decided_by:
     with closing(store.open_existing_store()) as conn, conn:
         return conn.execute("UPDATE learned_alias SET status = ?, decided_by = ?, decided_at = ? "
                             "WHERE identity_key = ? AND norm = ?",
-                            (status, decided_by, _now(), identity_key, match_key(value))).rowcount == 1
+                            (status, decided_by, _now(), identity_key, alias_key(value))).rowcount == 1
 
 
 def learned_migration_done(name: str) -> bool:
