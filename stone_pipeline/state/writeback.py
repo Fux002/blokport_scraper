@@ -9,20 +9,13 @@ the variety by a known surface. Every other bind (exact, exact narrowed by name,
 override) is re-derived from the seed on every run, so proposing it adds nothing but stickiness: a later seed
 correction (an alias moved to its right owner) would be undone by the saved pick.
 
-The old state/alias_writeback.csv is read only by the phase 1 store migration and by the one-time move into
-learned_alias (aliases.migrate_learned); nothing writes it any more.
+The old state/alias_writeback.csv, its reader and its writer belong to the one-time move into learned_alias
+(aliases.migrate_learned) and the phase 1 store migration; nothing here reads or writes it.
 """
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass, field
-from pathlib import Path
-
-from stone_pipeline.core.csvio import atomic_write
-
-ALIAS_WRITEBACK = "alias_writeback.csv"
-_FIELDS = ["variation_id", "alias", "method"]
 
 # The engine tiers that GUESS (matching/engine.py: "phonetic" tier 4, "fuzzy" / "fuzzy_origin" tiers 5-6).
 LEARNED_TIERS = ("phonetic", "fuzzy")
@@ -68,30 +61,3 @@ class WriteBack:
             {"identity_key": key, "value": alias, "method": method, "source": source, "score": score}
             for key, alias, method, source, score in self.aliases)
 
-
-def _write_records(path: Path, records: list[tuple[str, str, str]]) -> None:
-    # The phase 1 store migration's writer (phase1/migrate_run.py). Atomic temp-file + os.replace: a whole-file
-    # rewrite must never leave a truncated file.
-    def _write(handle) -> None:
-        writer = csv.writer(handle)
-        writer.writerow(_FIELDS)
-        for vid, alias, method in records:
-            writer.writerow([vid, alias, method])
-    atomic_write(path, _write)
-
-
-def load_alias_writeback_records(path: Path) -> list[tuple[str, str, str]]:
-    """The old file's records (variation_id, alias, method); [] when it is absent. Tolerates a legacy two-column file
-    (method reads as "")."""
-    path = Path(path)
-    if not path.exists():
-        return []
-    out: list[tuple[str, str, str]] = []
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for record in csv.DictReader(handle):
-            vid = (record.get("variation_id") or "").strip()
-            alias = (record.get("alias") or "").strip()
-            method = (record.get("method") or "").strip()
-            if vid and alias:
-                out.append((vid, alias, method))
-    return out
