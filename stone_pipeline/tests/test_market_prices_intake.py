@@ -732,3 +732,47 @@ def test_run_mode_market_prices_intake_runs_the_intake_entry(tmp_path):
 def test_the_intake_imports_nothing_from_the_produce():
     text = (REPO / "market_prices" / "intake.py").read_text(encoding="utf-8")
     assert not any(f"stone_pipeline.{name}" in text for name in ("stages", "matching", "ledger", "emit"))
+
+
+# --- one sheet, several competitors, each priced from its own stated column (W7, the manager 13 Nov) -----------------
+_TWO_LISTS = ["Code", "Product", "List", "List -20%", "Net", "Source"]
+
+
+def _two_lists(**overrides) -> dict:
+    """A sheet naming its competitor per row (the Source column), each competitor's price in its own column."""
+    layout = {**_layout(layout_id="two_lists", header_row=1, headers=_TWO_LISTS, competitor={"column": "Source"},
+                        unit=None, statements={"currency": "EUR", "vat_basis": "excl", "unit_text": "m²"},
+                        currency_symbols={}),
+              "price_by_competitor": {"stonecorp_gb": "List", "rocca_it": "Net"}}
+    layout.pop("price")
+    return {**layout, **overrides}
+
+
+TWO_LISTS = _csv(_TWO_LISTS, ["SC-1", "Nero slab", "100.00", "80.00", "77.00", "StoneCorp Ltd"],
+                 ["R-1", "Rosso slab", "", "", "55.50", "Rocca"])
+
+
+def test_each_row_takes_its_own_competitors_stated_price_column():
+    result = _absorb(TWO_LISTS, _layouts(_two_lists()), key=f"{PREFIX}/intake/two_lists.csv")
+    rows = {row.site_id: row for row in result.observations}
+    assert (rows["stonecorp_gb"].price_amount, rows["rocca_it"].price_amount) == ("100.00", "55.50")
+    # every other stated column rides in stated_specs as written, another competitor's price column included
+    assert rows["stonecorp_gb"].stated_specs == {"List -20%": "80.00", "Net": "77.00"}
+    assert "Net" not in rows["rocca_it"].stated_specs
+
+
+@pytest.mark.parametrize("layout, message", [
+    (_two_lists(price="List"), "not both"),
+    ({k: v for k, v in _two_lists().items() if k != "price_by_competitor"}, "names no price column"),
+    (_two_lists(price_by_competitor={"stonecorp_gb": "List", "nobody": "Net"}), "not a declared competitor"),
+    (_two_lists(price_by_competitor={"stonecorp_gb": "List", "rocca_it": "Missing"}), "is not a header"),
+])
+def test_a_layout_names_one_price_column_per_competitor_or_is_refused(layout, message):
+    with pytest.raises(ValueError, match=message):
+        _layouts(layout)
+
+
+def test_a_row_naming_a_competitor_without_a_price_column_refuses_the_file():
+    layouts = _layouts(_two_lists(price_by_competitor={"stonecorp_gb": "List"}))
+    with pytest.raises(FileRefused, match="rocca_it"):
+        _absorb(TWO_LISTS, layouts, key=f"{PREFIX}/intake/two_lists.csv")
