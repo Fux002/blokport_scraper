@@ -35,12 +35,14 @@ def test_a_projection_with_another_row_count_is_refused():
 def test_the_projection_needs_no_published_field_kinds(tmp_path, monkeypatch):
     # a dispatch runner has no from_medusa/<env>/field-kinds.json (a produce fetches it): the tool reads the committed
     # fixture, the only committed copy of the map (as clean_committed_names does)
+    from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.reference.loaders import field_kinds
     from stone_pipeline.stages import emit_catalog
     monkeypatch.setattr(field_kinds, "_path", lambda: tmp_path / "absent" / "field-kinds.json")
     monkeypatch.setattr(emit_catalog, "_alias_rows", lambda rows, seed_only: ({r["Key"]: [] for r in rows},
                                                                              {r["Key"]: [] for r in rows}, []))
-    assert [r["Name"] for r in rba.project("Key,Name,Type,Aliases\nk1,casa blue,Marble,\n")] == ["Casa Blue"]
+    base = f"Key,Name,Type,Aliases\n{new_key('Marble', 'Casa Blue')},casa blue,Marble,\n"   # emit refuses a non-Key
+    assert [r["Name"] for r in rba.project(base)] == ["Casa Blue"]
 
 
 def test_nothing_is_written_when_a_second_pass_would_change_a_base(tmp_path, monkeypatch):
