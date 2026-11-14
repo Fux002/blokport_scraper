@@ -668,6 +668,19 @@ def test_a_crash_before_the_record_redoes_the_file_into_the_same_run_and_bytes(t
     assert f"{PREFIX}/{RUN_ID}/observations.csv" not in s3.puts and RECORD in s3.puts
 
 
+def test_a_crash_before_latest_records_the_file_and_moves_latest_without_rewriting_its_run_folder(tmp_path):
+    # a run folder is written once (CONTRACT.md): the redo of the file's own published run writes no file in it, and
+    # still finishes what the crash left, its latest pointer and its record
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
+    _intake(s3, tmp_path)
+    del s3.objects[RECORD], s3.objects[f"{PREFIX}/{config.LATEST_FILE}"]     # died after the manifest, before latest
+    s3.puts.clear()
+    assert _intake(s3, tmp_path).absorbed == ((f"{PREFIX}/intake/stonecorp.csv", RUN_ID),)
+    assert not [key for key in s3.puts if key.startswith(f"{PREFIX}/{RUN_ID}/")]
+    assert json.loads(s3.objects[f"{PREFIX}/{config.LATEST_FILE}"][0])["run_id"] == RUN_ID
+    assert RECORD in s3.puts
+
 def test_a_run_folder_held_by_another_run_refuses_the_file(tmp_path):
     s3 = _S3()
     s3.add(f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}",

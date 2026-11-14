@@ -111,6 +111,17 @@ def test_the_register_file_is_byte_identical_on_a_rewrite(tmp_path):
     assert (write_run(result, tmp_path) / config.REGISTER_FILE).read_bytes() == first
 
 
+def test_a_run_folder_is_written_once_and_a_second_publish_is_refused_before_anything_is_written(tmp_path):
+    # CONTRACT.md: after its manifest no file in a run folder changes; a correction is a new run (M22's car 3)
+    from market_prices.publish import RunAlreadyPublished
+    run_dir = write_run(collect_run(_register(), _shop(_page([_listing()])), MOMENT, _no_pause), tmp_path)
+    s3 = _S3()
+    publish_run(s3, "bucket", "blokport", run_dir)
+    written = list(s3.order)
+    with pytest.raises(RunAlreadyPublished, match=r"written once.*20261108T123005Z"):
+        publish_run(s3, "bucket", "blokport", run_dir)            # the same bytes too: a folder is never re-written
+    assert s3.order == written
+
 # --- the regular price (Mas's sale rule) -----------------------------------------------------------------------------
 def test_a_store_api_listing_on_sale_gives_its_current_and_its_regular_price():
     on_sale = _listing(1, price_html="<del>&euro;&nbsp;25,00</del> <ins>&euro;&nbsp;21,25</ins>",
