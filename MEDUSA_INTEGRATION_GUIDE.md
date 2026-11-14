@@ -226,7 +226,9 @@ angled view. Every view is drawn at the product's own `length` x `width` x `heig
 `v6-model-3d`, so ignore it if you do not use it): the scraper's photo rule decision for the product, whether it has its
 standardised photo. The same decision sends the product's stock at quantity 0 with reason `"no_photo"` (section 5), so
 in one produce both come from it together. **Read it at create only; the stock lane owns visibility afterwards.** On
-create, `false` -> create the product as a hidden draft (never publish it, priced or not); `true` -> publish as usual.
+create, `false` -> create the product as a hidden draft (never publish it, priced or not); `true` -> publish it, priced or
+not: price never decides published or draft (owner, 13 Nov: a listing without a correct price stays listed and he adds the
+price), so an unpriced product shows as request pricing until it is priced.
 After that, hiding and showing again are the stock lane's alone (reason `"no_photo"`, then a quantity above 0 with no
 reason once the photo is published). `photo_ready` is not part of `payload_hash`: a change of it never re-serves a
 product, and an existing product that is re-served for another reason carries the current value, which you ignore.

@@ -1,9 +1,13 @@
 # Competitor sites for BlokPort (stone). A site is collected only with decision: approved, which the loader refuses
 # without complete terms, who decided, the seller's country and the market served. A site selling into several markets
-# is one entry per market. The checks below come from the 2026-11-02 research and are not a decision.
+# is one entry per market. The checks below come from the 2026-11-02 research and are not a decision. Every row carries
+# the register's brand; a site also registered for another brand needs shared_with on both rows.
 brand: blokport
+# The dev pilot's one site (market_prices/pilot.py); it runs only once its decision is approved.
+pilot_site: ceralith
 sites:
-  - site_id: ceralith
+  - brand: blokport
+    site_id: ceralith
     seller_name: Ceralith
     seller_type: merchant
     platform: woocommerce_store
@@ -15,7 +19,8 @@ sites:
       summary: robots.txt allows everything; the terms have no clause on intellectual property, copying or scraping.
     decision: pending
     statements: {vat_basis: incl}
-  - site_id: renier
+  - brand: blokport
+    site_id: renier
     seller_name: Renier
     seller_type: merchant
     platform: woocommerce_store

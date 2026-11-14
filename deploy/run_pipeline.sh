@@ -7,8 +7,9 @@ set -euo pipefail
 # RUN_MODE selects what this task does (there is no default: an unset mode is refused, and `pipeline`
 # names the produce, which runs only in the sync service). The GPU modes are submitted to Batch by the
 # photo process (standardise, standardise-retouch) and by the texture trigger (generate-textures). market-prices runs
-# in the ad-hoc task: the competitor-price collection for this deployment's brand (market_prices/CONTRACT.md), and
-# market-prices-intake absorbs the competitor price sheets the owner puts in the brand's intake folder.
+# in the ad-hoc task: the competitor-price collection for the brand named by the required run input
+# SCRAPER_MARKET_PRICES_BRAND (market_prices/CONTRACT.md), and market-prices-intake absorbs the competitor price sheets
+# the owner puts in that brand's intake folder. One deployment's task serves every brand's register.
 RUN_MODE="${RUN_MODE:-}"
 # Explicit dispatch: an UNKNOWN or unset mode must fail loud, never silently fall through to anything.
 case "$RUN_MODE" in
@@ -41,10 +42,10 @@ case "$RUN_MODE" in
     echo "==> phase 1 store migration (SC-3): MIGRATE_WRITE=0 decides and writes nothing; 1 writes the .v2 stores"
     exec python -m stone_pipeline.phase1.migrate_run ;;
   market-prices)
-    echo "==> collect competitor prices for this deployment's brand (approved sites only) -> <env>/market_prices/<brand>/"
+    echo "==> collect competitor prices for SCRAPER_MARKET_PRICES_BRAND's register (approved sites only) -> <env>/market_prices/<brand>/"
     exec python -m market_prices.run ;;
   market-prices-intake)
-    echo "==> absorb this brand's competitor price sheets from <env>/market_prices/<brand>/intake/ (each once)"
+    echo "==> absorb SCRAPER_MARKET_PRICES_BRAND's competitor price sheets from <env>/market_prices/<brand>/intake/ (each once)"
     exec python -m market_prices.intake ;;
   *)
     echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: standardise | standardise-close | standardise-retouch | standardise-edit-test | standardise-diag | generate-textures | cutout-meta | phase1-migrate | market-prices | market-prices-intake)" >&2
