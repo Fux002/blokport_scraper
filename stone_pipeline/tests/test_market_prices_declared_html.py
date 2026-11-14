@@ -10,13 +10,14 @@ from __future__ import annotations
 import html
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
 
 from market_prices.collect import collect_run
 from market_prices.fetching import Response
-from market_prices.register import Register
+from market_prices.register import Register, load_register
 from market_prices.schema import PriceStatus
 
 MOMENT = datetime(2026, 11, 14, 9, 0, 0, tzinfo=timezone.utc)
@@ -350,3 +351,49 @@ def test_another_platform_takes_no_html_declaration():
     woo = {**_site(CARDS), "platform": "woocommerce_store", "discovery": None}
     with pytest.raises(ValidationError, match="takes no html"):
         _register(woo)
+
+
+# --- the shipped blokport rows read a price whole or not at all (reviewer 2 on SC #785) --------------------------------
+def _shipped(site_id: str):
+    register = load_register("blokport")
+    return register.model_copy(update={"sites": tuple(s for s in register.sites if s.site_id == site_id)})
+
+
+def _amounts(register, answers: dict) -> dict:
+    site = register.sites[0]
+    transport = _Sites({f"{site.base_url}/robots.txt": ROBOTS_OPEN, **answers})
+    result = collect_run(register, transport, MOMENT, lambda _seconds: None)
+    return {row.listing_text: (None if row.price_amount is None else Decimal(str(row.price_amount)))
+            for row in result.observations}
+
+
+def test_the_shipped_stoneks_row_reads_a_price_whole_or_leaves_it_unpriced_never_a_part_of_it():
+    register = _shipped("stoneks")
+    base = register.sites[0].base_url
+    shown = {"Alpha": "313", "Beta": "120,50", "Gamma": "1 234"}     # whole euros; a decimal comma; a grouped figure
+    links = "".join(f'<a href="/en/product/{name.lower()}/">{name}</a>' for name in shown)
+    answers = {f"{base}{path}": _page(links if path.endswith("/granite/") else "")
+               for path in register.sites[0].discovery.listing_pages}
+    for index, (name, amount) in enumerate(shown.items()):
+        answers[f"{base}/en/product/{name.lower()}/"] = _page(
+            f'<div id="post-{index}" class="product type-product"><h1 class="fusion-title-heading">{name}</h1>'
+            f'<p class="price"><span class="woocommerce-Price-amount amount"><bdi>{amount}&nbsp;&euro;</bdi></span>'
+            f'<span class="stx-unit">/m²</span></p><table class="woocommerce-product-attributes"><tr><th>Material</th>'
+            f'<td><p>Granite</p></td></tr></table></div>')
+    # its declared notation has no decimal comma and no grouping: those forms are unpriced, never read as 50 or 234
+    assert _amounts(register, answers) == {"Alpha": Decimal("313"), "Beta": None, "Gamma": None}
+
+
+def test_the_shipped_terra_row_reads_a_grouped_price_with_its_pence_whole():
+    register = _shipped("mosstonex_terra")
+    base = register.sites[0].base_url
+    shown = {"Carrara Marble": "185", "Calacatta Viola Marble": "1,234.50"}
+    links = "".join(f'<a href="/product/{index}/">{name}</a>' for index, name in enumerate(shown))
+    answers = {f"{base}/Terra/": _page(links)}
+    for index, (name, amount) in enumerate(shown.items()):
+        answers[f"{base}/product/{index}/"] = _page(
+            f'<div class="elementor-location-single product type-product"><h1 class="elementor-heading-title">{name}'
+            f'</h1><p class="elementor-heading-title"><span class="woocommerce-Price-amount amount"><span '
+            f'class="woocommerce-Price-currencySymbol">&pound;</span>{amount}</span></p></div>')
+    assert _amounts(register, answers) == {"Carrara Marble": Decimal("185"),
+                                           "Calacatta Viola Marble": Decimal("1234.50")}
