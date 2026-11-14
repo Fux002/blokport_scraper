@@ -72,12 +72,14 @@ def test_an_identity_s_copies_collapse_to_its_survivor_copy_under_the_new_key_se
     assert plan.collapsed == {NEW: [SLAB, BLOCK, TILE]}
 
 
-def test_the_survivor_row_carries_every_copy_s_aliases_slab_casing_first_and_the_widest_in_full():
+def test_the_survivor_row_has_its_alias_rows_not_computed_and_the_widest_in_full():
+    # P2-10 C4: an old row's aliases carry no owner, so no union is carried; alias_rows and codes are NULL (held)
+    # until the first produce computes them from the alias stores
     rows = [_variation(SLAB, "var_A", aliases=json.dumps(["Bianco Carrara", "Carrara C"]), in_full=0),
             _variation(BLOCK, "var_B", aliases=json.dumps(["carrara c", "Statuario"]), in_full=0),
             _variation(TILE, None, "pending", aliases=None, in_full=1)]
     survivor = ms.plan_variations(rows, _key_map(), _survivors()).rows[NEW]
-    assert json.loads(survivor["aliases"]) == ["Bianco Carrara", "Carrara C", "Statuario"]   # union, slab casing wins
+    assert (survivor["alias_rows"], survivor["codes"]) == (None, None)
     assert survivor["in_full"] == 1 and survivor["medusa_id"] == "var_B"
 
 

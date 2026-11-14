@@ -17,6 +17,10 @@ on:
         description: "With dump: the sha to dump the same rows at (the PR's merge-base with main)"
         required: false
         default: ""
+      bases:
+        description: "First regenerate both committed bases' Aliases (regen_base_aliases), so the golden is computed over them"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +37,21 @@ jobs:
           python-version: "3.12"
       - name: Install deps
         run: pip install -r stone_pipeline/requirements.txt
+      # A one-off data commit (P2-10 C4): the bases go back as an artifact, never committed here; the golden below is
+      # then computed over them, so one dispatch hands back both files of the change.
+      - name: Regenerate the committed bases' Aliases
+        if: inputs.bases
+        run: |
+          python -m stone_pipeline.reference.regen_base_aliases
+          git diff --stat -- from_medusa/development/variants_export_base.csv from_medusa/production/variants_export_base.csv
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.bases
+        with:
+          name: committed-bases
+          path: |
+            from_medusa/development/variants_export_base.csv
+            from_medusa/production/variants_export_base.csv
+          if-no-files-found: error
       # The test fails by design after a rewrite, so the step passes only when the log shows the rewrite happened.
       - name: Rewrite the golden
         env:

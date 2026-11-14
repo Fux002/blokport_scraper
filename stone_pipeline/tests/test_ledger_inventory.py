@@ -14,7 +14,7 @@ def _seed_variations(ledger: Ledger) -> None:
     for key, mid in [("marble__a_0001", "V1"), ("marble__b_0002", "V2")]:
         ledger.upsert("variation", {
             "key": key, "type": "Marble", "name": "X",
-            "aliases": "[]",
+            "alias_rows": "[]", "codes": "[]",
             "medusa_id": mid, "payload_hash": "", "state": "synced",
             "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
         }, pk=("key",))

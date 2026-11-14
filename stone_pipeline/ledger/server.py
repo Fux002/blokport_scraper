@@ -26,7 +26,7 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
     POST /sync/v1/reserve   body: {type: "variations", external_ids: [Key, ...]}  -- re-serve exactly those
       variations once (the backend's variety restore), answering {reserved: [Key], unknown: [Key],
       frozen: [{external_id, reason}]}: disjoint, together the deduped Keys sent, reason the first of
-      abandoned | archived | retiring | not_in_full | no_type (sync.reserve_variations). At most
+      abandoned | archived | retiring | not_in_full | no_type | uncomputed (sync.reserve_variations). At most
       SETTINGS.sync.max_reserve_ids distinct Keys; more is a 400 with nothing marked.
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the

@@ -124,13 +124,18 @@ def test_under_the_name_kind_an_unfoldable_alias_is_still_dropped(monkeypatch):
 
 
 def test_emit_writes_owned_aliases_by_the_alias_kind_and_keeps_key_and_name(monkeypatch):
+    # P2-10 C4: emit writes a variety's Name by its rule (_write_name) and its aliases through THE derivation
+    # (aliases.derive) with the alias display rule (emit_catalog._alias_display); the Key never changes
+    from stone_pipeline.aliases import derive
+    from stone_pipeline.aliases.surfaces import Stores
     from stone_pipeline.stages import emit_catalog
     _alias_kinds(monkeypatch)
-    row = {"Key": "granite__amber_gold_x", "Name": "Amber Gold", "Type": "Granite",
-           "Aliases": "巴比伦金|Huángjiā Hǔpò|Celestial Splendor​|St. Laurent"}
-    dropped = emit_catalog._write_names(row)
+    row = {"Key": "granite__amber_gold_x", "Name": "Amber Gold", "Type": "Granite"}
+    seed = {row["Key"]: (["巴比伦金", "Huángjiā Hǔpò", "Celestial Splendor​", "St. Laurent"], [])}
+    aliases, _, dropped, _ = derive.alias_sets([row], Stores(seed=seed), lambda v: False, emit_catalog._alias_display)
+    emit_catalog._write_name(row)
     assert dropped == []
-    assert row["Aliases"].split("|") == ["巴比伦金", "Huángjiā Hǔpò", "Celestial Splendor", "St Laurent"]
+    assert [v for v, _ in aliases[row["Key"]]] == ["巴比伦金", "Huángjiā Hǔpò", "Celestial Splendor", "St Laurent"]
     assert (row["Key"], row["Name"]) == ("granite__amber_gold_x", "Amber Gold")
 
 

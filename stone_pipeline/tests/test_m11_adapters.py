@@ -279,8 +279,8 @@ def test_looks_code_shaped_flags_codes_not_real_names():
 
 
 def test_emit_consolidate_folds_grade_codes_only():
-    # graded variants fold into one base (originals -> aliases); distinct same-name variants are
-    # NOT deduped and real names never merge.
+    # graded variants fold into one base; distinct same-name variants are NOT deduped and real names never merge.
+    # The fold carries no aliases (P2-10 C4, D3): the coded spellings ('Rosal B', 'Rosal C') are the seed's values.
     from stone_pipeline.stages.emit_catalog import _consolidate
     rows=[{"Key":"limestone__rosal_b_1","Name":"Rosal B","Type":"Limestone","Aliases":"Rosal Cd"},
           {"Key":"limestone__rosal_c_1","Name":"Rosal C","Type":"Limestone","Aliases":""},
@@ -293,7 +293,7 @@ def test_emit_consolidate_folds_grade_codes_only():
     assert names.count("Agata Black")==2                                            # NOT deduped
     assert "Rosal Original" in names                                                # distinct, kept
     rosal=next(r for r in out if r["Name"]=="Rosal")
-    assert "Rosal B" in rosal["Aliases"] and "Rosal C" in rosal["Aliases"] and "Rosal Cd" in rosal["Aliases"]
+    assert rosal["Key"] == "limestone__rosal_b_1" and rosal["Aliases"] == "Rosal Cd"   # the row's own, untouched
 
 
 def test_plural_format_tag_resolves():
