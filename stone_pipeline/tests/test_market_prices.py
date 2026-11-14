@@ -713,7 +713,7 @@ def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, brand, parts)
 _PACKAGE = Path(market_prices.__file__).parent
 # the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
 # factory (the run entry)
-# scrapers.run: the product scraper's suppliers, for the supplier flag (register.supplier_keys)
+# scrapers.run: the product scraper's suppliers, whose domains are refused (register.supplier_keys)
 # stone_pipeline.core.env: the repo's one env reader, for the run input naming the run's brand (run_input.run_brand)
 # stone_pipeline.core.text: the one shared name folding (match_key), which a vocabulary word is compared by; pure, no I/O
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",

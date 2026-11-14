@@ -12,7 +12,6 @@ import httpx
 import pytest
 
 from market_prices import config, pilot, run
-from market_prices.collectors import COLLECTORS
 from market_prices.fetching import Response, TransportError, UnexpectedResponse
 from market_prices.register import Register, RegisterError
 from market_prices.transport import LiveTransport
@@ -222,12 +221,10 @@ def test_a_run_requests_only_the_approved_sites_and_never_a_refused_or_pending_o
     register = run.load_register(brand)
     transport = _BlocksAll()
     outcome = run.run_register(register, transport, _S3(), "bucket", tmp_path, MOMENT, dry_run=True, pause=_no_pause)
-    # a site run is the register's fetching rows; a supplier_scrape row (polonine) comes with its supplier's scrape
-    fetching = [site for site in register.sites if COLLECTORS[site.platform].fetches]
-    approved = {site.site_id for site in fetching if site.collectable}
+    approved = {site.site_id for site in register.sites if site.collectable}
     assert approved == APPROVED[brand]
     # each approved site asks for its robots.txt first and stops at the block; no other site is asked anything
-    assert sorted(transport.requested) == sorted(site.robots_url for site in fetching if site.collectable)
+    assert sorted(transport.requested) == sorted(site.robots_url for site in register.sites if site.collectable)
     statuses = {status.site_id: status.status.value for status in outcome.result.statuses}
     assert {site_id for site_id, value in statuses.items() if value == "unavailable_blocked"} == APPROVED[brand]
     assert {value for site_id, value in statuses.items() if site_id not in APPROVED[brand]} == {"disabled_terms"}

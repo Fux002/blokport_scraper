@@ -1,35 +1,29 @@
-"""A competitor that is also one of the owner's suppliers is flagged in the market data (owner's ruling via Mas,
-11-11, part of contract v2). The flag is derived from the product scraper's own suppliers, never hand-typed:
+"""Supplier prices are not in market_prices (Mas's split, 14 Nov; contract v4): they are a separate contract, delivered
+under <env>/supplier_prices/<brand>/. market_prices knows the product scraper's suppliers only to refuse them:
 
 - each of the 11 fetchers (the REGISTRY sources and the dormant ScraperBase modules) declares its `site_domain` once,
   derived from the module's own site URL where it has one;
-- a register site names its supplier by the fetcher's source id (`supplier_key`); an unknown key, a supplier's domain
-  without the key, or a key whose domain is not the site's all refuse at register load;
-- the row copies `seller_is_our_supplier` and `supplier_key` from the register.
+- a register site whose host is a supplier's domain, and a sheet competitor whose site_domain is one, are refused at
+  load, named; neither takes a `supplier_key`, and an observation carries no supplier column.
 Fixtures only: nothing here reaches a site."""
 
 from __future__ import annotations
 
 import ast
-import csv
-import io
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 import yaml
 
-from market_prices import intake
-from market_prices.collect import _observation, stamp_for
+from pydantic import ValidationError
+
 from market_prices.layouts import LayoutError, Layouts, load_layouts
 from market_prices.register import Register, RegisterError, check_suppliers, load_register
-from market_prices.schema import ListingFacts, Observation, columns, csv_values
+from market_prices.schema import Observation, columns
 from market_prices.text import same_site
-from market_prices.vocabulary import load_vocabulary
 from scrapers import run as scrapers_run
 
 REPO = Path(__file__).resolve().parents[2]
-MOMENT = datetime(2026, 11, 11, 9, 15, 0, tzinfo=timezone.utc)
 DOMAINS = {"polonine": "polonine.slabware.com", "ferraz": "www.ferrazbrasilinventory.com", "develi": "marbleslabs.tr"}
 EXPECTED_DOMAINS = {
     "marenostone": "marenostone.com", "polonine": "polonine.slabware.com", "zucchi": "inventory.zucchistones.com",
@@ -111,79 +105,50 @@ def test_a_site_is_a_suppliers_when_its_host_is_the_domain_or_under_it(url, doma
     assert same_site(url, domain) is same
 
 
-# --- the register checks, both ways ----------------------------------------------------------------------------------
-def test_an_unknown_supplier_key_refuses():
-    with pytest.raises(RegisterError, match="supplier_key 'nonexistent'"):
-        check_suppliers(_register(_site(supplier_key="nonexistent")), DOMAINS)
+# --- the register: a supplier's site is refused, named ---------------------------------------------------------------
+REFUSED = "supplier prices are not in market_prices"
 
 
-def test_a_suppliers_domain_without_the_key_refuses():
-    with pytest.raises(RegisterError, match="polonine"):
+def test_a_site_on_a_suppliers_domain_is_refused_by_name():
+    named = rf"site shop: polonine.slabware.com is the domain of supplier polonine: {REFUSED}"
+    with pytest.raises(RegisterError, match=named):
         check_suppliers(_register(_site(base_url="https://polonine.slabware.com")), DOMAINS)
-    with pytest.raises(RegisterError, match="ferraz"):
-        check_suppliers(_register(_site(base_url="https://ferrazbrasilinventory.com")), DOMAINS)
+    with pytest.raises(RegisterError, match=rf"supplier ferraz: {REFUSED}"):
+        check_suppliers(_register(_site(base_url="https://ferrazbrasilinventory.com")), DOMAINS)   # www. on one side
 
 
-def test_a_supplier_key_on_another_domain_refuses():
-    with pytest.raises(RegisterError, match="other.slabware.com"):
-        check_suppliers(_register(_site(base_url="https://other.slabware.com", supplier_key="polonine")), DOMAINS)
+def test_another_tenant_of_a_suppliers_platform_is_no_supplier():
+    check_suppliers(_register(_site("other", base_url="https://other.slabware.com")), DOMAINS)
 
 
-def test_matching_sites_pass_and_other_slabware_tenants_need_no_key():
-    check_suppliers(_register(_site("pol", base_url="https://polonine.slabware.com", supplier_key="polonine"),
-                              _site("dev", base_url="https://www.marbleslabs.tr", supplier_key="develi"),
-                              _site("other", base_url="https://other.slabware.com")), DOMAINS)
+def test_a_site_takes_no_supplier_key():
+    with pytest.raises(ValidationError, match="supplier_key"):
+        _register(_site(base_url="https://polonine.slabware.com", supplier_key="polonine"))
 
 
-def test_the_register_load_runs_the_check_on_the_product_scrapers_suppliers(tmp_path):
+def test_the_register_load_refuses_a_site_of_the_product_scrapers_suppliers(tmp_path):
     document = {"brand": "blokport", "sites": [_site(base_url="https://temmermarble.com")]}
     (tmp_path / "blokport.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
-    with pytest.raises(RegisterError, match="temmer"):
+    with pytest.raises(RegisterError, match=rf"supplier temmer: {REFUSED}"):
         load_register("blokport", tmp_path)
 
 
 @pytest.mark.parametrize("brand", ["blokport", "wudport"])
-def test_the_committed_registers_hold_no_unflagged_supplier(brand):
-    assert load_register(brand).brand == brand
+def test_the_committed_registers_hold_no_suppliers_site(brand):
+    domains = scrapers_run.supplier_domains()
+    sites = load_register(brand).sites
+    assert not [site.site_id for site in sites if any(same_site(site.base_url, d) for d in domains.values())]
 
 
-# --- the row ---------------------------------------------------------------------------------------------------------
-def _row(site: dict) -> Observation:
-    from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails these tests only
-    facts = ListingFacts(listing_key="1", source_url=f"{site['base_url']}/p/1", listing_text="Slab")
-    return _observation(facts, _register(site).sites[0], "blokport", stamp_for(MOMENT), "woo/1", NO_SPECS)
-
-
-def test_the_row_copies_the_supplier_flag_from_the_register():
-    flagged = _row(_site(base_url="https://polonine.slabware.com", supplier_key="polonine"))
-    assert (flagged.seller_is_our_supplier, flagged.supplier_key) == (True, "polonine")
-    plain = _row(_site())
-    assert (plain.seller_is_our_supplier, plain.supplier_key) == (False, None)
-
-
-def test_the_flag_is_two_columns_after_the_seller_and_written_true_or_false():
-    names = columns(Observation)
-    at = names.index("served_market")
-    assert names[at + 1:at + 3] == ("seller_is_our_supplier", "supplier_key")
-    cells = dict(zip(names, csv_values(_row(_site(base_url="https://polonine.slabware.com", supplier_key="polonine")))))
-    assert (cells["seller_is_our_supplier"], cells["supplier_key"]) == ("true", "polonine")
-    cells = dict(zip(names, csv_values(_row(_site()))))
-    assert (cells["seller_is_our_supplier"], cells["supplier_key"]) == ("false", "")
-
-
-def test_a_row_cannot_say_supplier_without_its_key_or_the_reverse():
-    row = _row(_site()).model_dump()
-    for changed in ({"seller_is_our_supplier": True}, {"supplier_key": "polonine"}):
-        with pytest.raises(ValueError, match="supplier_key"):
-            Observation.model_validate({**row, **changed})
+def test_an_observation_carries_no_supplier_column():
+    assert not {"seller_is_our_supplier", "supplier_key"} & set(columns(Observation))
 
 
 # --- a price sheet's competitor ---------------------------------------------------------------------------------------
-def _layouts(supplier_key=None, site_domain="ferraz-rival.example") -> dict:
+def _layouts(site_domain="ferraz-rival.example", **extra) -> dict:
     competitor = {"competitor_id": "ferraz_br", "names": ["Ferraz"], "seller_type": "wholesaler",
-                  "seller_country": "BR", "served_market": "GB", "site_domain": site_domain, "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}
-    if supplier_key:
-        competitor["supplier_key"] = supplier_key
+                  "seller_country": "BR", "served_market": "GB", "site_domain": site_domain, "price_basis": "list",
+                  "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13", **extra}
     return {"brand": "blokport", "competitors": [competitor], "layouts": [{
         "layout_id": "ferraz_csv", "header_row": 2, "headers": ["Code", "Product", "Price"],
         "competitor": {"cell": "A1"}, "listing_key": ["Code"], "listing_text": ["Product"], "price": "Price",
@@ -203,45 +168,21 @@ def test_a_sheet_competitor_declares_its_site_domain_as_a_bare_host():
             Layouts.model_validate(_layouts(site_domain=bad))
 
 
-def test_a_sheet_supplier_key_on_its_suppliers_domain_loads(tmp_path):
-    loaded = _load(tmp_path, _layouts("ferraz", site_domain="ferrazbrasilinventory.com"))  # www. on one side only
-    assert loaded.competitors[0].supplier_key == "ferraz"
+def test_a_sheet_competitor_on_a_suppliers_domain_is_refused_by_name(tmp_path):
+    with pytest.raises(LayoutError, match=rf"competitor ferraz_br: www.ferrazbrasilinventory.com is the domain of "
+                                          rf"supplier ferraz: {REFUSED}"):
+        _load(tmp_path, _layouts(site_domain="www.ferrazbrasilinventory.com"))
+    assert _load(tmp_path, _layouts(site_domain="other.slabware.com")).competitors[0].competitor_id == "ferraz_br"
 
 
-def test_a_sheet_competitors_unknown_supplier_key_refuses(tmp_path):
-    with pytest.raises(LayoutError, match="supplier_key 'nonexistent'"):
-        _load(tmp_path, _layouts("nonexistent"))
-
-
-def test_a_sheet_supplier_key_on_another_domain_refuses(tmp_path):
-    with pytest.raises(LayoutError, match="ferraz-rival.example"):
-        _load(tmp_path, _layouts("ferraz"))
-
-
-def test_a_sheet_competitor_on_a_suppliers_domain_without_the_key_refuses(tmp_path):
-    with pytest.raises(LayoutError, match="polonine"):
-        _load(tmp_path, _layouts(site_domain="polonine.slabware.com"))
-    assert _load(tmp_path, _layouts(site_domain="other.slabware.com")).competitors[0].supplier_key is None
-
-
-def test_a_sheet_row_copies_its_competitors_supplier_flag():
-    out = io.StringIO()
-    csv.writer(out, lineterminator="\n").writerows([["Ferraz"], ["Code", "Product", "Price"], ["F1", "Slab", "9"]])
-    file = intake.IntakeFile(key="dev/market_prices/blokport/intake/ferraz.csv", version_id="v1",
-                             last_modified=MOMENT, data=out.getvalue().encode())
-    for key, flag in (("ferraz", True), (None, False)):
-        layouts = Layouts.model_validate(_layouts(key, site_domain="www.ferrazbrasilinventory.com" if key
-                                                  else "ferraz-rival.example"))
-        from market_prices.specs import load_countries     # v3; here so a red run fails this test only
-        (row,) = intake.absorb_file(file, layouts, load_vocabulary("blokport"), load_countries(), "bucket",
-                                    "blokport", sources=()).observations
-        assert (row.seller_is_our_supplier, row.supplier_key) == (flag, key)
+def test_a_sheet_competitor_takes_no_supplier_key():
+    with pytest.raises(ValidationError, match="supplier_key"):
+        Layouts.model_validate(_layouts(supplier_key="ferraz"))
 
 
 # --- the contract ----------------------------------------------------------------------------------------------------
-def test_the_contract_says_a_suppliers_list_price_is_its_own_line_never_the_buy_price():
+def test_the_contract_says_supplier_prices_are_a_separate_contract():
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
-    assert "| seller_is_our_supplier, supplier_key |" in text
-    assert "never as the buy price" in text
-    assert "written in the register and checked both ways against the product scraper's suppliers at load" in text
-    assert "never typed by hand" not in text
+    assert ("**Supplier prices** are not in market_prices: they are delivered under "
+            "`<env>/supplier_prices/<brand>/`") in text
+    assert "seller_is_our_supplier" not in text.split("## Observations", 1)[-1]

@@ -25,7 +25,7 @@ def _specs():
 
 V4_HEADER = (
     "contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,"
-    "seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,"
+    "listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,"
     "material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,"
     "price_text,price_amount,regular_price_text,regular_price_amount,currency,price_status,vat_basis,unit_text,"
     "delivery_text,delivery_included,min_qty_text,"

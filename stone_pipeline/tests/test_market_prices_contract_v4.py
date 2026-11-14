@@ -21,7 +21,7 @@ from stone_pipeline.tests.test_market_prices import (
 
 REGISTER_KEYS = {"brand", "source_key", "source", "seller_name", "seller_type", "country_iso_2", "served_market",
                  "price_basis", "net_markup", "net_markup_stated_by", "vat_rate", "vat_rate_stated_by",
-                 "seller_is_our_supplier", "supplier_key", "decided_by", "decided_on"}
+                 "decided_by", "decided_on"}
 
 
 def _competitor(**overrides) -> dict:
@@ -94,7 +94,7 @@ def test_every_run_folder_carries_the_register_and_its_manifest_lists_it(tmp_pat
         "brand": "blokport", "source_key": "shop", "source": "site", "seller_name": "Shop", "seller_type": "merchant",
         "country_iso_2": "be", "served_market": "NL", "price_basis": "list", "net_markup": None,
         "net_markup_stated_by": None, "vat_rate": "0.21", "vat_rate_stated_by": "site",
-        "seller_is_our_supplier": False, "supplier_key": None, "decided_by": "owner", "decided_on": "2026-11-08"}
+        "decided_by": "owner", "decided_on": "2026-11-08"}
     # the committed sheet competitors ride along whatever the run read (Cereser's Carrara list is net, grossed up
     # x1.20: the owner's)
     carrara = next(row for row in document["sources"] if row["source_key"] == "cereser_carrara")
@@ -168,3 +168,26 @@ def test_a_price_html_over_the_element_cap_is_that_listings_problem_alone(monkey
     assert [row.listing_key for row in result.observations] == ["1"]
     (status,) = result.statuses
     assert (status.status.value, status.malformed_listings) == ("partial", 1)
+
+
+
+def test_the_shipped_blokport_sites_declare_the_owners_terms():
+    # the manager, 14 Nov: every approved BlokPort site is LIST; a page-stated VAT rate is the site's, the owner's
+    # standard rate where the page states incl. without one; countryfloors is stated excl. (no rate). Polonine, one of
+    # the owner's suppliers, is not a market_prices site (Mas's split).
+    from market_prices.register import load_register
+    terms = {site.site_id: (site.price_basis, site.vat_rate, site.vat_rate_stated_by)
+             for site in load_register("blokport").sites if site.decision.value == "approved"}
+    assert terms == {"mandarinstone": ("list", "0.2", "site"), "countryfloors": ("list", None, None),
+                     "starelstones": ("list", "0.2", "owner"), "stoneks": ("list", "0.24", "site"),
+                     "mosstonex_terra": ("list", "0.2", "owner")}
+
+
+def test_the_shipped_struck_prices_are_regular_prices_never_specs():
+    from market_prices.register import load_register
+    for site in load_register("blokport").sites:
+        if site.html is None:
+            continue
+        assert not [label for label, source in site.html.specs.items() if source.struck], site.site_id
+        if site.site_id != "countryfloors":
+            assert site.html.fields.regular_price is not None and site.html.fields.regular_price.struck, site.site_id

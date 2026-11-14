@@ -313,7 +313,7 @@ def test_a_known_layout_gives_the_exact_rows():
     assert first == {
         "contract_version": "4", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
-        "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
+        "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
         "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"},
         "thickness_mm": None, "finish": None, "material_type": None, "origin_iso_2": None, "thickness_text": None,
         "finish_text": None, "material_text": None, "origin_text": None, "spec_labels": {}, "grade_text": None,
@@ -896,12 +896,12 @@ def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
 
 def test_the_owner_competitors_are_declared_from_the_owners_answers():
     competitors = load_layouts("blokport").competitors
-    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value, c.supplier_key)
+    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value)
             for c in competitors} == {
-        "brachot": ("brachot.com", "BE", "EU", "wholesaler", None),
-        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler", None),
-        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
-        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+        "brachot": ("brachot.com", "BE", "EU", "wholesaler"),
+        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler"),
+        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler"),
+        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler"),
     }
 
 
