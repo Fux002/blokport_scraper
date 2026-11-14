@@ -2,12 +2,12 @@
 
 Reference prices seen on competitor sites, and read from the competitor price sheets the owner supplies, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site or a sheet says. Matching, conversion, grading and trust rules belong to the consumer.
 
-Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1. Version 3 adds nine columns to observations.csv right after `stated_specs` (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`, `thickness_text`, `finish_text`, `material_text`, `origin_text`, `spec_labels`; see "Specs") and four keys to `provenance`; every other column, and site_status.csv's columns, are as in version 2. Version 3 replaces version 2 outright: no version 2 run was ever delivered, so no consumer reads both. Version 4 adds two columns to observations.csv right after `price_amount` (`regular_price_text`, `regular_price_amount`; Mas's sale rule, 14 Nov) and a `register.json` file to every run folder (see "register.json"); site_status.csv is as in version 3. Version 4 is the first version a consumer loads (P4, 14 Nov): no version 3 run is ever loaded, and the owner's competitor sheets are read in once the consumer reads version 4.
+Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1. Version 3 adds nine columns to observations.csv right after `stated_specs` (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`, `thickness_text`, `finish_text`, `material_text`, `origin_text`, `spec_labels`; see "Specs") and four keys to `provenance`; every other column, and site_status.csv's columns, are as in version 2. Version 3 replaces version 2 outright: no version 2 run was ever delivered, so no consumer reads both. Version 4 adds two columns to observations.csv right after `price_amount` (`regular_price_text`, `regular_price_amount`; Mas's sale rule, 14 Nov), removes `seller_is_our_supplier` and `supplier_key` (supplier prices are a separate contract, see "Supplier prices"), and adds a `register.json` file to every run folder (see "register.json"); site_status.csv is as in version 3. Version 4 is the first version a consumer loads (P4, 14 Nov): no version 3 run is ever loaded, and the owner's competitor sheets are read in once the consumer reads version 4.
 
 The observations.csv header, version 4, in order:
 
 ```
-contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,price_text,price_amount,regular_price_text,regular_price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,availability_text,provenance,observed_at,run_id,collector_version
+contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,price_text,price_amount,regular_price_text,regular_price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,availability_text,provenance,observed_at,run_id,collector_version
 ```
 
 ## Where
@@ -23,6 +23,7 @@ s3://<bucket>/<env>/market_prices/<brand>/latest.json
 - `run_id` is the run's UTC start, `YYYYMMDDTHHMMSSZ`. Run folders are kept, so they are the price history.
 - `manifest.json` has the run's `brand` and the sha256, row count and S3 version of each file (`register.json` among them), and is written after them. A folder without a manifest is not a delivered run.
 - A run folder is written once: after its manifest no file in it changes; a correction is a new run.
+- A run id is unique, not ordered. It is when the prices were seen (a crawl: when it started; the intake: when S3 received the newest of its sheets), so a run published later may carry an older id. Write-once keeps ids unique; a consumer tracks the set of runs it has loaded, never a high-water mark.
 - `latest.json` names the newest run with at least one observation (`brand`, `run_id`, `manifest_key`, `rows`, `contract_version`). A run with no rows is delivered as evidence but does not move it.
 - Brands never mix: every row, manifest and pointer carries the run's brand, every key is under `<env>/market_prices/<brand>/`, and a site sits in one brand's register unless both registers declare it shared (`shared_with`). The rules are named in `market_prices/brand.py`.
 - The newest run may hold only some sites: `site_status.csv` says which. For a site missing from it, the consumer looks back through the run folders, and decides how old a price may be.
@@ -38,7 +39,6 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
 | seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
-| seller_is_our_supplier, supplier_key | `true` when this seller is also one of the owner's suppliers, with `supplier_key` the product scraper's source id for it (empty when `false`). Copied from the row's seller: written in the register and checked both ways against the product scraper's suppliers at load |
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
 | listing_text | The seller's name for the listing, and short description when there is one |
@@ -65,7 +65,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
 
-A row with `seller_is_our_supplier` = `true` is one of the owner's suppliers' shown prices, kept verbatim: an indicative cost input for the supplier-cost module. It is never a competitor price: a competitor-price consumer refuses it by `seller_is_our_supplier`, as a named refusal. Nor is it ever a buy price on its own: the owner's buy price comes only from his own load.
+**Supplier prices** are not in market_prices: they are delivered under `<env>/supplier_prices/<brand>/`, a separate contract. A register site whose host is one of the product scraper's suppliers' domains is refused at load, named.
 
 No photos are collected. Text cells are the seller's own words: read them as data, and do not open the raw file in a spreadsheet that runs formulas.
 
@@ -98,8 +98,7 @@ Every run folder carries the brand's register as it stood when the run started: 
   {"brand": "blokport", "source_key": "cereser_carrara", "source": "file", "seller_name": "Cereser Listino Carrara",
    "seller_type": "wholesaler", "country_iso_2": "it", "served_market": "EU", "price_basis": "net",
    "net_markup": "0.20", "net_markup_stated_by": "owner", "vat_rate": null, "vat_rate_stated_by": null,
-   "seller_is_our_supplier": false,
-   "supplier_key": null, "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}]}
+   "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}]}
 ```
 
 `sources` is sorted by `source_key`, and every row has exactly these keys (an empty value is `null`):
@@ -112,12 +111,11 @@ Every run folder carries the brand's register as it stood when the run started: 
 | seller_name, seller_type | As its observations carry them |
 | country_iso_2 | The seller's country, ISO 3166 alpha-2 in LOWER case (`it`), `^[a-z]{2}$`: the pricing module keys countries that way (as `origin_iso_2`); its observations' `seller_country` stays as the register writes it (upper case) |
 | served_market | As its observations carry it, as the register writes it (`EU` included) |
-| price_basis | `list` or `net`: whether a competitor's prices are list prices or net prices. Declared on every approved competitor site and every sheet competitor; never defaulted. `null` on a supplier row (`seller_is_our_supplier` = `true`): a supplier's price is what the owner pays, never a competitor price, so a supplier row stating one is refused at register load |
-| net_markup | For a `net` competitor only (else `null`, a supplier row included): the exact decimal, 0 or more, that grosses its net prices up to list: list = net x (1 + net_markup) (`0.20`: EUR 100 net is EUR 120 list) |
+| price_basis | `list` or `net`: whether a competitor's prices are list prices or net prices. Declared on every approved site and every sheet competitor; never defaulted |
+| net_markup | For a `net` source only (else `null`): the exact decimal, 0 or more, that grosses its net prices up to list: list = net x (1 + net_markup) (`0.20`: EUR 100 net is EUR 120 list) |
 | net_markup_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `net_markup` is |
 | vat_rate | The VAT rate as an exact decimal (`0.2`), only when the site or the owner states it; else `null`, never inferred |
 | vat_rate_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `vat_rate` is |
-| seller_is_our_supplier, supplier_key | As its observations carry them |
 | decided_by, decided_on | Who approved the source and when (`YYYY-MM-DD`): a site's register decision, a competitor's declared decision |
 
 ## site_status.csv
@@ -161,11 +159,11 @@ A file is refused, named in the intake's output, and left in the intake (never h
 
 ## Adding a competitor sheet
 
-One `competitors` entry (id, the names the sheet uses, seller type, country, market, its own `site_domain` (a bare host), and `supplier_key` when the competitor is one of the owner's suppliers; the flag is written in the layout file and checked both ways against the product scraper's suppliers at load, as for a site) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the spec columns (`specs`, see "Specs"), the number separators, the currency symbols it accepts and what the sheet states once. A sheet that names several competitors, each stating its price in its own column, names those columns per competitor (`price_by_competitor`, competitor id to column) instead of one `price`: each row takes its own competitor's column, every other stated column (another competitor's price among them) is kept in `stated_specs`, and a row naming a competitor the layout gives no price column refuses the file. A competitor named by a column is matched only by its declared names: where that column states the source document a row was transcribed from (the owner's workbook tabs), each competitor's names include that document's file name, so a sheet from a new source document refuses the file until the layout gains the name. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
+One `competitors` entry (id, the names the sheet uses, seller type, country, market, its own `site_domain` (a bare host)) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the spec columns (`specs`, see "Specs"), the number separators, the currency symbols it accepts and what the sheet states once. A sheet that names several competitors, each stating its price in its own column, names those columns per competitor (`price_by_competitor`, competitor id to column) instead of one `price`: each row takes its own competitor's column, every other stated column (another competitor's price among them) is kept in `stated_specs`, and a row naming a competitor the layout gives no price column refuses the file. A competitor named by a column is matched only by its declared names: where that column states the source document a row was transcribed from (the owner's workbook tabs), each competitor's names include that document's file name, so a sheet from a new source document refuses the file until the layout gains the name. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
 
 ## Adding a site
 
-One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. A site's `spec_labels` (see "Specs") names the labels that state its specs, taken from its listings as fetched. robots.txt is read from the site's root on every run.
+One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site on one of the owner's suppliers' domains is refused, named (supplier prices are a separate contract): at load every site is checked against every supplier the product scraper knows (each fetcher's `site_domain`). The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. A site's `spec_labels` (see "Specs") names the labels that state its specs, taken from its listings as fetched. robots.txt is read from the site's root on every run.
 
 An approved `schema_org_product` site needs `discovery` (another platform refuses it; a site never requested, such as a blocked one registered unapproved, may leave it out, so nothing about it is invented), and takes no `query`:
 
