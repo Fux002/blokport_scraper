@@ -978,3 +978,80 @@ def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
     assert (carrara.finish, carrara.finish_text, carrara.thickness_mm) == ("Split Face", "a spacco", "20")
     # an unpriced row is kept as stated, never priced from another column
     assert (unpriced.price_amount, unpriced.price_status) == (None, PriceStatus.none)
+
+
+
+# --- one intake run delivers every pending readable sheet (contract v4, the manager) ---------------------------------
+ROCCA = _csv(["Rocca"], ["Code", "Product", "Finish", "Price", "Unit"],
+             ["R1", "Statuario slab 2cm", "Polished", "990.00", "m2"])
+LATER = datetime(2026, 11, 11, 9, 20, 0, tzinfo=timezone.utc)
+LATER_RUN = "20261111T092000Z"
+
+
+def _one_run_rows(s3: _S3, run_id: str) -> list[dict]:
+    return list(csv.DictReader(io.StringIO(s3.objects[f"{PREFIX}/{run_id}/observations.csv"][0].decode("utf-8"))))
+
+
+def test_two_sheets_received_in_the_same_second_are_one_run_with_both_competitors(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
+    outcome = _intake(s3, tmp_path)
+    assert outcome.refused == ()
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", RUN_ID))
+    assert [key for key in s3.puts if key.endswith(MANIFEST_NAME)] == [f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}"]
+    assert {row["site_id"] for row in _one_run_rows(s3, RUN_ID)} == {"rocca_it", "stonecorp_gb"}
+    assert sorted((row["key"], row["run_id"]) for row in _record(s3)) == [
+        (f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", RUN_ID)]
+
+
+def test_one_run_is_stamped_by_its_newest_sheet_and_each_row_by_its_own(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, LATER)
+    assert {run for _key, run in _intake(s3, tmp_path).absorbed} == {LATER_RUN}
+    seen = {row["site_id"]: row["observed_at"] for row in _one_run_rows(s3, LATER_RUN)}
+    assert seen == {"rocca_it": "2026-11-11T09:15:00Z", "stonecorp_gb": "2026-11-11T09:20:00Z"}
+
+
+def test_a_refused_sheet_is_left_and_named_and_the_run_is_delivered_without_it(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/a_unknown.csv", _csv(["Who"], ["Ref", "Cost"], ["1", "2"]))
+    s3.add(f"{PREFIX}/intake/b_rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/c_stonecorp.csv", STONECORP, LATER)
+    outcome = _intake(s3, tmp_path)
+    assert [key for key, _why in outcome.refused] == [f"{PREFIX}/intake/a_unknown.csv"]
+    assert outcome.absorbed == ((f"{PREFIX}/intake/b_rocca.csv", LATER_RUN),
+                                (f"{PREFIX}/intake/c_stonecorp.csv", LATER_RUN))
+    assert {row["key"] for row in _record(s3)} == {f"{PREFIX}/intake/b_rocca.csv", f"{PREFIX}/intake/c_stonecorp.csv"}
+
+
+def test_one_competitor_in_two_pending_sheets_refuses_both_and_delivers_the_rest(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp_new.csv", STONECORP.replace(b"1,234.50", b"1,199.00"), LATER)
+    outcome = _intake(s3, tmp_path)
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID),)
+    refused = dict(outcome.refused)
+    assert sorted(refused) == [f"{PREFIX}/intake/stonecorp.csv", f"{PREFIX}/intake/stonecorp_new.csv"]
+    assert all("stonecorp_gb" in why and "more than one pending file" in why for why in refused.values())
+    assert [row["key"] for row in _record(s3)] == [f"{PREFIX}/intake/rocca.csv"]
+
+
+def test_a_crashed_run_is_finished_and_a_new_sheet_makes_its_own_run(tmp_path):
+    # the double fault the manager ruled closed: a run dies after its manifest, before its record, and a new sheet
+    # lands before the redo. The redo finishes the crashed run (nothing in its folder is written again) and the new
+    # sheet is a run of its own: no sheet is ever delivered twice.
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    _intake(s3, tmp_path / "first")
+    del s3.objects[RECORD]
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, LATER)
+    s3.puts.clear()
+    outcome = _intake(s3, tmp_path / "redo")
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", LATER_RUN))
+    assert not [key for key in s3.puts if key.startswith(f"{PREFIX}/{RUN_ID}/")]
+    assert {row["site_id"] for row in _one_run_rows(s3, LATER_RUN)} == {"stonecorp_gb"}
+    assert sorted((row["key"], row["run_id"]) for row in _record(s3)) == [
+        (f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", LATER_RUN)]
