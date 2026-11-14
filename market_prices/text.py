@@ -22,7 +22,12 @@ def clean_text(value: object) -> Optional[str]:
         return None
     if isinstance(value, float) and not math.isfinite(value):
         return None
-    text = html.unescape(_TAG.sub(" ", str(value)))
+    return one_line(html.unescape(_TAG.sub(" ", str(value))))
+
+
+def one_line(text: str) -> Optional[str]:
+    """Control characters and runs of whitespace as single spaces, trimmed; None when nothing is left. The one rule
+    for every text cell, whether its markup was stripped here or parsed (html_tree)."""
     return _SPACE.sub(" ", _CONTROL.sub(" ", text)).strip() or None
 
 

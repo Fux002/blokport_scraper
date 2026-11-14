@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from market_prices import config
 from market_prices.fetching import SiteFetcher, UnexpectedResponse
 from market_prices.schema import ListingFacts, MalformedListing, PriceStatus
-from market_prices.html_tree import Element, parse, text
+from market_prices.html_tree import Element, PageTooLarge, parse, text
 from market_prices.text import clean_text, on_site
 
 if TYPE_CHECKING:
@@ -61,6 +61,16 @@ def _amount(prices: Mapping) -> Optional[str]:
         return None
     whole, fraction = divmod(value, 10 ** minor)
     return f"{whole}.{fraction:0{minor}d}" if minor else str(whole)
+
+
+def _shown(price_html: object) -> Optional[Element]:
+    """The listing's price_html as a parsed page fragment; one over the element cap is this listing's problem."""
+    if not isinstance(price_html, str):
+        return None
+    try:
+        return parse(price_html)
+    except PageTooLarge as exc:
+        raise MalformedListing(f"price_html: {exc}") from exc
 
 
 def _regular_amount(prices: Mapping, amount: Optional[str]) -> Optional[str]:
@@ -221,7 +231,7 @@ class WooCommerceStoreCollector:
         return f"{name} | {summary}" if summary else name
 
     def facts(self, raw: object, site: "Site") -> ListingFacts:
-        text = self.listing_text(raw, site)
+        listing_text = self.listing_text(raw, site)
         listing = _mapping(raw, "listing")
         key = _listing_key(listing.get("id"))
         url = listing.get("permalink")
@@ -229,7 +239,7 @@ class WooCommerceStoreCollector:
             raise MalformedListing(f"permalink is not on {site.base_url}")
         prices = _mapping(listing.get("prices"), "prices")
         amount = _amount(prices)
-        shown = parse(listing.get("price_html")) if isinstance(listing.get("price_html"), str) else None
+        shown = _shown(listing.get("price_html"))
         regular_amount = _regular_amount(prices, amount)
         currency = _currency(prices)
         attributes = _attributes(listing)
@@ -237,7 +247,7 @@ class WooCommerceStoreCollector:
         return ListingFacts(
             listing_key=key,
             source_url=url,
-            listing_text=text,
+            listing_text=listing_text,
             stated_specs=_stated_specs(listing, attributes),
             grade_text=_grade(attributes, site.grade_labels),
             price_text=text(shown, hidden=config.WOOCOMMERCE_HIDDEN_CLASSES) if shown is not None else None,

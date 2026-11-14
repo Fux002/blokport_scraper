@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 from typing import Iterator, Optional
 
 from market_prices import config
+from market_prices.text import one_line
 
 # elements that never hold content, so a start tag closes itself
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
@@ -135,9 +136,9 @@ def text(element: Element, struck: bool = False, inside_struck: bool = False,
 
 
 def collapse(value: str) -> Optional[str]:
-    """Whitespace collapsed to single spaces; None when nothing is left. The parser has already decoded the
-    page's entities, so nothing is decoded twice."""
-    return _SPACE.sub(" ", value).strip() or None
+    """One clean line (text.one_line); None when nothing is left. The parser has already decoded the page's
+    entities, so nothing is decoded twice."""
+    return one_line(value)
 
 
 
