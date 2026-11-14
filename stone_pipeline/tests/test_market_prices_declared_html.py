@@ -62,7 +62,9 @@ SALE = {
                   "thousands": ","},
         "currency_symbols": {"£": "GBP"},
     },
-    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True}},
+    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True},
+              # Mas's sale rule (14 Nov): the struck "was" price is kept, read explicitly, never as the price
+              "Regular price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True}},
 }
 
 
@@ -199,7 +201,8 @@ def test_a_product_page_without_a_declared_record_is_counted_with_its_reason():
 
 
 # --- sale cards: the struck price is never read (the Starel Stones shape) --------------------------------------------
-def test_struck_text_is_never_read_so_a_sale_card_gives_its_current_price():
+def test_struck_text_is_never_the_price_but_is_kept_as_the_regular_price_with_the_sale_flag():
+    # Mas's sale rule (14 Nov): the price is the current one as shown; the struck "was" price and "On sale" are kept
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/arabescato/">x</a>'
             '<h3 class="card-title">Arabescato Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--slab"><del>£2,400.00</del> <ins>£1,999.00</ins> per slab</div>'
@@ -207,7 +210,16 @@ def test_struck_text_is_never_read_so_a_sale_card_gives_its_current_price():
             '</article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/arabescato/"]
     assert (row.price_amount, row.price_text) == ("1375.00", "£1,375.00 per m²")
-    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab"}
+    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab", "Regular price": "£1,450.00",
+                                "On sale": "yes"}
+
+
+def test_a_card_not_on_sale_has_no_regular_price_and_no_sale_flag():
+    card = ('<article class="starel-loop-card"><a class="card-link" href="/p/bianco/">x</a>'
+            '<h3 class="card-title">Bianco Carrara Marble Slab</h3>'
+            '<div class="starel-loop-card-price__row--sqm">£295.00 per m²</div></article>')
+    row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/bianco/"]
+    assert (row.price_amount, row.stated_specs) == ("295.00", {})
 
 
 # --- refusals: one record's problem, never the site's ----------------------------------------------------------------
@@ -248,6 +260,9 @@ def test_a_declared_html_site_loads_with_its_declaration():
      "one capture group"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "listing_key": {"text": True, "pattern": "(a)(b)"}}}},
      "one capture group"),
+    ({"html": {**CARDS, "specs": {"Regular price": {"json": ["data-x", "price"], "struck": True}}}}, "struck"),
+    ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
+     "struck"),                                                          # struck text is never the price
     ({"discovery": {"sitemaps": ["/sitemap.xml"], "product_path": "^/p/"}}, "listing_pages"),  # read: listing_pages
 ])
 def test_a_declaration_that_is_not_whole_is_refused(change, message):
