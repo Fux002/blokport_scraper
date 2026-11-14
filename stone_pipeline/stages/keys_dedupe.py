@@ -32,12 +32,17 @@ class DedupResult:
     near_duplicates: int
 
 
+def natural_surrogate(row: CanonicalRow) -> str:
+    """The surrogate a row's natural key gives it ("" when it has none, which assign_surrogates mints)."""
+    return (row.src_natural_key or "").strip()
+
+
 def assign_surrogates(rows: list[CanonicalRow]) -> int:
     """Set surrogate_key on every row; mint when the natural key is blank.
     Returns the count of minted keys."""
     minted = 0
     for ordinal, row in enumerate(rows):
-        natural = (row.src_natural_key or "").strip()
+        natural = natural_surrogate(row)
         if natural:
             row.surrogate_key = natural
         else:

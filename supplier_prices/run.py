@@ -47,5 +47,6 @@ def deliver(sources: Optional[Iterable[str]], since: str, *, data_dir: Path, out
             log.error(f"supplier prices of {source} not delivered: {type(exc).__name__}: {exc}")
             continue
         delivered.append({"source": source, "run_id": written.run_id, "rows": written.rows,
-                          "left_out": written.left_out, "duplicates": written.duplicates, "published": published})
+                          "malformed": written.malformed, "left_out": written.left_out,
+                          "duplicates": written.duplicates, "published": published})
     return delivered

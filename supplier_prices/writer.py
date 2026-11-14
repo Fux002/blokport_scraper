@@ -18,6 +18,7 @@ from scrapers.base import PRICES_CSV, PRICES_KEY, PRICES_MARKER, RUN_STAMP_FORMA
 from stone_pipeline import adapters
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.logfmt import get_logger
+from stone_pipeline.stages.keys_dedupe import natural_surrogate
 from stone_pipeline.stages.product_state import sku_from
 from supplier_prices import config
 
@@ -39,6 +40,7 @@ class RunWritten:
     run_dir: Path
     vendor: dict
     rows: int
+    malformed: int      # rows the source's adapter could not map: dropped, as the product path's adapt drops them
     left_out: int       # rows with no natural key: the product path would mint a key from row order, never guessed here
     duplicates: int     # rows whose SKU an earlier row already holds: the product path keeps the first
 
@@ -105,13 +107,19 @@ def write_run(folder: Path, root: Path, brand: str) -> RunWritten:
     common = {"contract_version": config.CONTRACT_VERSION, "run_id": run_id, "brand": brand, "vendor_key": source,
               "vat_basis": adapter.supplier_vat_basis, "observed_at": moment.strftime(config.OBSERVED_AT_FORMAT)}
     by_sku: dict[str, dict] = {}
-    left_out = duplicates = 0
+    malformed = left_out = duplicates = 0
     for raw in rows:
-        listing = adapter.adapt_record(raw)
-        if listing is None:
+        try:
+            listing = adapter.adapt_record(raw)
+        except Exception as exc:    # broad on purpose, as AdapterBase.adapt: one unforeseen row never costs the run
+            malformed += 1
+            log.warning(f"{source} price pass {stamp}: the adapter could not map a row: {type(exc).__name__}: {exc}")
+            continue
+        key = natural_surrogate(listing) if listing is not None else ""
+        if not key:
             left_out += 1
             continue
-        sku = sku_from(cfg.source_code, listing.src_natural_key)
+        sku = sku_from(cfg.source_code, key)
         if sku in by_sku:
             duplicates += 1
             continue
@@ -121,9 +129,9 @@ def write_run(folder: Path, root: Path, brand: str) -> RunWritten:
                        "price_amount": price.amount, "price_status": price.status, "currency": price.currency,
                        "unit_text": price.unit, "source_url": listing.src_url or "",
                        "provenance": json.dumps(provenance, sort_keys=True, separators=(",", ":"))}
-    if left_out or duplicates:
-        log.warning(f"{source} price pass {stamp}: {left_out} row(s) with no key left out, "
-                    f"{duplicates} repeated SKU(s) kept as the first row")
+    if malformed or left_out or duplicates:
+        log.warning(f"{source} price pass {stamp}: {malformed} malformed row(s) dropped, {left_out} row(s) with no key "
+                    f"left out, {duplicates} repeated SKU(s) kept as the first row")
     run_dir = root / brand / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     with (run_dir / config.PRICES_FILE).open("w", newline="", encoding="utf-8") as handle:
@@ -132,4 +140,4 @@ def write_run(folder: Path, root: Path, brand: str) -> RunWritten:
         writer.writerows(by_sku[sku] for sku in sorted(by_sku))
     return RunWritten(source=source, run_id=run_id, run_dir=run_dir,
                       vendor={"vendor_key": source, "vendor_name": cfg.vendor},
-                      rows=len(by_sku), left_out=left_out, duplicates=duplicates)
+                      rows=len(by_sku), malformed=malformed, left_out=left_out, duplicates=duplicates)
