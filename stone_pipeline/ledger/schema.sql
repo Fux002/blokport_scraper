@@ -229,10 +229,17 @@ CREATE TABLE IF NOT EXISTS inventory (
     made_to_order    INTEGER NOT NULL DEFAULT 0,
     last_synced_qty  INTEGER,
     last_synced_made_to_order INTEGER,                  -- null until first inventory sync
-    reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
-                                                        -- hides it), 'replaced_by_lot' (a bundle split into its
-                                                        -- pieces) vs null (ordinary out-of-stock, stays listed)
+    reason           TEXT,                              -- why qty is 0: 'sold_out' (gone at its supplier: stays
+                                                        -- published, not buyable), 'delisted' (admin take-offline
+                                                        -- or vendor removal, Medusa hides it), 'no_photo' (hidden
+                                                        -- until its standardised photo), 'replaced_by_lot' (a bundle
+                                                        -- split into its pieces) vs null (a plain stock 0: Blokport
+                                                        -- hides it, M4 measured; table 505)
     replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
+    gone_at          TEXT,                              -- the first run its supplier no longer had it (UTC ISO), kept
+                                                        -- while it stays gone (one gone before v18: the first v18
+                                                        -- run's date); null when listed. A gone listing's record is
+                                                        -- never deleted (table 505)
     updated_at       TEXT NOT NULL,
     last_synced_reason   TEXT,                          -- the reason Medusa last acked (null until first sync)
     last_synced_lot_code TEXT,                          -- the lot code Medusa last acked
