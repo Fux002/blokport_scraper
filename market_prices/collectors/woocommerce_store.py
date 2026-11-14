@@ -157,6 +157,7 @@ class WooCommerceStoreCollector:
     version = "woocommerce_store-1"
     takes_query = True
     needs_discovery = False
+    needs_html = False
     needs_scrape = False
     fetches = True
     reserved_query = frozenset({"page", "per_page"})

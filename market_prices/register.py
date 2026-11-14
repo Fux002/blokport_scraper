@@ -17,6 +17,7 @@ from pydantic import (
 from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
 from market_prices.collectors import COLLECTORS
+from market_prices.html_declaration import HtmlDeclaration
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 from market_prices.specs import SpecLabels
 from market_prices.text import same_host, site_host
@@ -138,6 +139,8 @@ class Site(BaseModel):
     base_url: str
     query: dict[str, str] = {}
     discovery: Optional[Discovery] = None
+    # declared_html: where its pages hold each listing's facts (market_prices/html_declaration.py)
+    html: Optional[HtmlDeclaration] = None
     scrape: Optional[ScrapeColumns] = None
     terms: Terms
     decision: Decision
@@ -175,6 +178,11 @@ class Site(BaseModel):
             raise ValueError(f"unknown platform {self.platform!r}; known: {sorted(COLLECTORS)}")
         if not collector.needs_discovery and self.discovery is not None:
             raise ValueError(f"platform {self.platform} takes no discovery")
+        if not collector.needs_html and self.html is not None:
+            raise ValueError(f"platform {self.platform} takes no html declaration")
+        if self.html is not None and self.html.read == "listing_pages" and (
+                self.discovery is None or not self.discovery.listing_pages):
+            raise ValueError("html read: listing_pages needs discovery listing_pages to read")
         if not collector.needs_scrape and self.scrape is not None:
             raise ValueError(f"platform {self.platform} takes no scrape columns")
         if not collector.fetches and self.supplier_key is None:
@@ -185,6 +193,8 @@ class Site(BaseModel):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
             self._require_full_record(collector.needs_discovery, collector.needs_scrape)
+            if collector.needs_html and self.html is None:
+                raise ValueError(f"an approved {self.platform} site needs its html declaration")
         return self
 
     def _require_full_record(self, needs_discovery: bool, needs_scrape: bool) -> None:

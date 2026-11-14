@@ -72,6 +72,12 @@ SCHEMA_ORG_MAX_UNZIPPED_BYTES = 50 * 1024 * 1024
 SCHEMA_ORG_MAX_NESTING = 32
 # site_status detail names the most common reasons listings were skipped, the rest summed
 MALFORMED_REASONS_SHOWN = 3
+# The generic declared-HTML collector (collectors/declared_html.py) walks the same entry points under the same caps. A
+# page parsed into more elements than this is not read (the response itself is already capped by MAX_RESPONSE_BYTES).
+DECLARED_HTML_MAX_ELEMENTS = 200_000
+# Mas's sale rule (14 Nov): when a record's price element holds struck text, stated_specs carries this label and value
+SALE_FLAG_LABEL = "On sale"
+SALE_FLAG_VALUE = "yes"
 
 # Supplier prices read from the product scraper's own fetch (collectors/supplier_scrape.py; the produce publishes them,
 # market_prices/supplier.py). Only a declared currency symbol names a currency: another leaves the listing unpriced and

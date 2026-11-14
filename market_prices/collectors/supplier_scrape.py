@@ -89,6 +89,7 @@ class SupplierScrapeCollector:
     version = "supplier_scrape-1"
     takes_query = False
     needs_discovery = False
+    needs_html = False
     needs_scrape = True
     fetches = False
     reserved_query: frozenset = frozenset()
