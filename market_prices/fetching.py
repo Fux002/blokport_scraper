@@ -19,6 +19,7 @@ class Response:
     status: int
     text: str
     headers: Mapping[str, str] = field(default_factory=dict)
+    body: bytes = b""       # the raw bytes as received, for a body that is not text (a gzipped sitemap)
 
     def header(self, name: str) -> str:
         return next((value for key, value in self.headers.items() if key.lower() == name.lower()), "")
@@ -35,6 +36,14 @@ class TransportError(Exception):
 
 class UnexpectedResponse(Exception):
     """The site answered, but not with what this request needs."""
+
+
+class UnexpectedStatus(UnexpectedResponse):
+    """The site answered with an HTTP status other than 200 that is not a block."""
+
+    def __init__(self, status: int, url: str):
+        super().__init__(f"HTTP {status} from {url}")
+        self.status = status
 
 
 class SiteBlocked(Exception):
@@ -91,12 +100,16 @@ class SiteFetcher:
             raise UnexpectedResponse(f"robots file at {url} is over {config.MAX_ROBOTS_CHARS} characters")
         return parse_robots(response.text, config.ROBOTS_TOKEN)
 
+    def allows(self, url: str) -> bool:
+        """Whether robots.txt lets this client request `url`."""
+        return self._robots.allows(_target(url))
+
     def get(self, url: str) -> Response:
-        if not self._robots.allows(_target(url)):
+        if not self.allows(url):
             raise SiteDisallowed(f"robots.txt disallows {url}")
         self._pause(self._interval)
         response = self._transport.get(url)
         _raise_if_blocked(response, url)
         if response.status != 200:
-            raise UnexpectedResponse(f"HTTP {response.status} from {url}")
+            raise UnexpectedStatus(response.status, url)
         return response
