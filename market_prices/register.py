@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AfterValidator, BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator, model_validator,
+)
 
 from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
@@ -16,13 +19,25 @@ from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 from market_prices.text import same_host, site_host
 
+# whitespace, a backslash or a fragment could be read differently by another parser; a path names one page plainly
+_NOT_IN_PATH = re.compile(r"[\s\\#]")
+
+
 def _refuse_number(value: object) -> object:
     if isinstance(value, (int, float)):
         raise ValueError("a date must be written as a date, not a number")
     return value
 
 
+def _site_path(value: str) -> str:
+    """A path on the site's own origin: it starts with one '/', so it can never name another host."""
+    if not value.startswith("/") or value.startswith("//") or not value.isascii() or _NOT_IN_PATH.search(value):
+        raise ValueError(f"{value!r} must be a plain path on the site, starting with one '/'")
+    return value
+
+
 Day = Annotated[date, BeforeValidator(_refuse_number)]
+SitePath = Annotated[str, AfterValidator(_site_path)]
 Words = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Country = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 
@@ -67,6 +82,32 @@ class SiteStatements(BaseModel):
     delivery_included: Optional[DeliveryIncluded] = None
 
 
+class Discovery(BaseModel):
+    """Where a collector that reads product pages finds them: the site's own sitemaps or listing pages (the register
+    names the in-scope ones, such as its sheet-material categories), and the path pattern of a product page."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sitemaps: tuple[SitePath, ...] = ()
+    listing_pages: tuple[SitePath, ...] = ()
+    product_path: str
+
+    @field_validator("product_path")
+    @classmethod
+    def _product_path_is_a_pattern(cls, value: str) -> str:
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"product_path {value!r} is not a regular expression: {exc}") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _has_an_entry_point(self) -> "Discovery":
+        if not self.sitemaps and not self.listing_pages:
+            raise ValueError("discovery needs at least one sitemap or listing page")
+        return self
+
+
 class Site(BaseModel):
     """One storefront. A site selling into several markets is one entry per market."""
 
@@ -81,6 +122,7 @@ class Site(BaseModel):
     platform: str
     base_url: str
     query: dict[str, str] = {}
+    discovery: Optional[Discovery] = None
     terms: Terms
     decision: Decision
     decided_by: Optional[Words] = None
@@ -112,13 +154,19 @@ class Site(BaseModel):
         collector = COLLECTORS.get(self.platform)
         if collector is None:
             raise ValueError(f"unknown platform {self.platform!r}; known: {sorted(COLLECTORS)}")
+        if not collector.needs_discovery and self.discovery is not None:
+            raise ValueError(f"platform {self.platform} takes no discovery")
+        if self.query and not collector.takes_query:
+            raise ValueError(f"platform {self.platform} takes no query")
         if reserved := sorted(collector.reserved_query & set(self.query)):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
-            self._require_full_record()
+            self._require_full_record(collector.needs_discovery)
         return self
 
-    def _require_full_record(self) -> None:
+    def _require_full_record(self, needs_discovery: bool) -> None:
+        """What a site needs before any request: only an approved row is ever fetched, so a row never requested (a
+        blocked or excluded site) carries none of it, and nothing about it is invented."""
         if not self.terms.complete:
             raise ValueError("approved needs terms_url, checked_on and summary")
         if not self.decided_by or not self.decided_on:
@@ -129,6 +177,8 @@ class Site(BaseModel):
             raise ValueError("approved needs dates that are not in the future")
         if not self.seller_country or not self.served_market:
             raise ValueError("approved needs seller_country and served_market")
+        if needs_discovery and self.discovery is None:
+            raise ValueError(f"approved needs discovery: platform {self.platform} reads the site's entry points")
 
     @property
     def collectable(self) -> bool:

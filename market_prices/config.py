@@ -56,6 +56,21 @@ WOO_MAX_DIGITS = 18
 DESCRIPTION_SPEC_MAX_LABEL_CHARS = 60
 DESCRIPTION_SPEC_MAX_VALUE_CHARS = 200
 
+# The generic retail collector (collectors/schema_org_product.py): each product page's schema.org Product/Offer data,
+# reached through the entry points the site's register row names. The caps bound one site's run; reaching one is said
+# in site_status, never passed over silently.
+SCHEMA_ORG_MAX_SITEMAPS = 50
+# an entry sitemap may be an index, and its sitemaps may be indexes once more; deeper is refused
+SCHEMA_ORG_MAX_SITEMAP_DEPTH = 2
+SCHEMA_ORG_MAX_LISTING_PAGES = 100
+SCHEMA_ORG_MAX_PRODUCT_PAGES = 2000
+# the sitemap protocol's own limit for one uncompressed file
+SCHEMA_ORG_MAX_UNZIPPED_BYTES = 50 * 1024 * 1024
+# how deep the structured data is walked for a Product; deeper nodes are not read
+SCHEMA_ORG_MAX_NESTING = 32
+# site_status detail names the most common reasons listings were skipped, the rest summed
+MALFORMED_REASONS_SHOWN = 3
+
 # The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
 # with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
 PILOT_SAMPLE_ROWS = 5
