@@ -29,6 +29,14 @@ from stone_pipeline.stages import images
 from stone_pipeline.standardise import tile_pattern as P
 from stone_pipeline.standardise import tile_plan, tile_stone, tile_views
 
+
+@pytest.fixture(autouse=True)
+def _nothing_kept(monkeypatch):
+    """No listing here left sale keeping its record: the produce's kept-photo set is empty (table 505; its reading and
+    its refusal are test_sold_out_keeps_photos's)."""
+    monkeypatch.setattr(pub, "read_kept", lambda s3: frozenset(), raising=False)
+
+
 FIXTURES = Path(__file__).parent / "fixtures" / "tiles"
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 POLISHED, FLAMED = "fin_polished", "fin_flamed"

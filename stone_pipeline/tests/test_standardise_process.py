@@ -34,6 +34,13 @@ def _judged_by_inputs(monkeypatch):
     is paid), so a fake judge receives (original, result, fmt) and a fake check (original, copy)."""
     monkeypatch.setattr(select.judge, "judging", lambda original, result, fmt: (original, result, fmt))
     monkeypatch.setattr(select.judge, "checking", lambda original, copy: (original, copy))
+
+
+@pytest.fixture(autouse=True)
+def _nothing_kept(monkeypatch):
+    """No listing here left sale keeping its record: the produce's kept-photo set is empty (table 505; its reading and
+    its refusal are test_sold_out_keeps_photos's)."""
+    monkeypatch.setattr(pub, "read_kept", lambda s3: frozenset(), raising=False)
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
 NO_TILES = "Product Handle,Product Category 1\n"            # a product sheet without tile listings
