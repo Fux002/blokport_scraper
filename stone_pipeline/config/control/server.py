@@ -1401,9 +1401,6 @@ def boot(config_db, ledger_path) -> None:
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.
     snapshot.restore_artifacts()
-    # ...and the learned-alias write-back (state/alias_writeback.csv): matcher consistency accumulated over
-    # prior runs, on the same ephemeral disk. No-op when a local one already exists or none was snapshotted.
-    snapshot.restore_state()
     # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
