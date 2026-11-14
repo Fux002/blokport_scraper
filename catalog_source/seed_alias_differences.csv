@@ -4516,6 +4516,7 @@ marble__white_star_beige_744de545-7057-50fc-8210-ba672cb136e5,White Star Beige M
 marble__white_sunset_aa29d471-7f55-5760-8664-47eeeb927c63,White Sunset Marble,removed,own_name_type_word
 marble__white_super_0caae4a1-7d46-5dac-b34c-028b9616bac6,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 marble__white_super_0caae4a1-7d46-5dac-b34c-028b9616bac6,White Super Es,removed,same_type_name
+marble__white_super_es_836bb5b9-2b53-50a7-aaef-cd795358a778,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 marble__white_super_es_836bb5b9-2b53-50a7-aaef-cd795358a778,Branco White Super Es,no_post,"base-only Key, no backbone post (SC-3): the value leaves the seed when C4 derives the base"
 marble__white_tiger_4e960aa0-83a4-5f91-9365-a6d36f586d3e,White Tiger Marble,removed,own_name_type_word
 marble__white_treasure_b427caa3-7f5c-5742-9adc-a0576158b035,White Treasure Marble,removed,own_name_type_word
@@ -4824,6 +4825,7 @@ quartzite__fantasy_88ffb7b3-ddfc-5717-8122-5430a29f6a3a,Fantasy Quartzite,remove
 quartzite__fantasy_brown_dbbbda90-529d-5664-8572-da6144b1595d,Fantasy Brown Quartzite,removed,own_name_type_word
 quartzite__flamboyant_9a99ab8b-8978-5d36-acd1-02dfaba16e1a,Flamboyant Quartzite,removed,own_name_type_word
 quartzite__fleur_de_lis_9dc3396a-e685-5ab8-b26b-cdda797520b3,Fleur de Lis Quartzite,removed,own_name_type_word
+quartzite__gaya_quartzite_b8e3c4a6-7dee-5c3a-9ea4-5802570b433c,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 quartzite__gaya_quartzite_b8e3c4a6-7dee-5c3a-9ea4-5802570b433c,Maya Quartzite,no_post,"base-only Key, no backbone post (SC-3): the value leaves the seed when C4 derives the base"
 quartzite__golden_storm_36716ba8-48b3-5036-8a85-e4eea3fd8017,Golden Storm Quartzite,removed,own_name_type_word
 quartzite__green_patagonia_4090f58c-464a-59fb-919c-7e922fab2155,Green Patagonia Quartzite,removed,own_name_type_word
@@ -5581,6 +5583,7 @@ travertine__provence_e08e7c73-475a-5d71-a65e-845ab0fe906b,Provence Travertine,re
 travertine__ramshe_mojdar_29898619-dbff-5ae7-9916-5441048f8993,Ramshe Mojdar Travertine,removed,own_name_type_word
 travertine__rattle_skin_d99b47b1-c19c-5f7e-a50b-f451580c1a59,Silver,removed,bare_vocabulary_word
 travertine__reale_1f8af288-8164-55dc-a2a4-80195c329ec6,Reale Travertine,removed,own_name_type_word
+travertine__red_travertine_82ad8ce0-bfbe-566f-8cff-3e7b659bf421,,no_post,"base-only Key, no backbone post (SC-3): no value to keep"
 travertine__red_travertine_82ad8ce0-bfbe-566f-8cff-3e7b659bf421,Persian Red,no_post,"base-only Key, no backbone post (SC-3): the value leaves the seed when C4 derives the base"
 travertine__reddish_7f45803b-aa1b-5814-aa30-c97537989de4,Reddish Travertine,removed,own_name_type_word
 travertine__roccia_5f1814b6-7db5-5f48-a030-f080793d4d5f,Roccia Travertine,removed,own_name_type_word

@@ -52,7 +52,8 @@ def test_brazilian_white_is_its_own_variety_in_every_base(base):
     assert ("Marble", "Super White") not in rows and ("Onyx", "Super White") not in rows
     quartzite = rows[("Quartzite", "Super White")]
     assert quartzite["Key"] == new_key("Quartzite", "Super White")
-    assert _aliases(quartzite["Aliases"]) == {"super white quartzite", "fjord white quartzite"}
+    # C4's own-name+type rule (SC #651): "Super White Quartzite" is the row's own name and type, never stored as an alias
+    assert _aliases(quartzite["Aliases"]) == {"fjord white quartzite"}
     assert rows[("Dolomite", "Super White")]["Key"] == new_key("Dolomite", "Super White")
 
 
