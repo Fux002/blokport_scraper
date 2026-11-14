@@ -349,8 +349,13 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
         run_dir = write_run(run, root)
         if not dry_run:
             if published_manifest(client, bucket, output_key(brand, run.run_id, MANIFEST_NAME)):
-                refused.extend((read.file.key, f"run folder {run.run_id} already holds another run; the file is left "
-                                               f"for the next run") for read in reads)
+                # the id is the newest file's LastModified, so every rerun meets the same folder: only a new upload of
+                # that file (a new LastModified, so a new id) or the owner's call clears it; refused, so exit non-zero
+                newest = max(reads, key=lambda read: read.file.last_modified).file.key
+                refused.extend((read.file.key, f"run folder {run.run_id} already holds another run; the file is left, "
+                                               f"and every rerun meets the same folder until {newest} is uploaded "
+                                               f"again (a new LastModified gives the run a new id) or the owner "
+                                               f"decides") for read in reads)
                 reads = []
             else:
                 publish_run(client, bucket, brand, run_dir)
@@ -397,7 +402,10 @@ def _finish_crashed_runs(client, bucket: str, brand: str, reads: list[_Read], so
     received at or before its id: for each pending file's second, oldest first, a folder there whose observations and
     site status the files up to that second rebuild exactly is that lost run. It is finished (latest, then the record)
     and nothing in its folder is written again; its files leave the pending ones, so a file received since is a run of
-    its own. A folder that does not rebuild is another producer's run and is left to the publish's own check."""
+    its own. A folder that does not rebuild is another producer's run and is left to the publish's own check.
+    Limit: a lost run one of whose files later meets a second pending file of the same competitor is not finished
+    while both are pending (_one_file_per_competitor refuses the pair first); it is finished once an operator removes
+    the duplicate."""
     for second in sorted({read.file.last_modified for read in reads}):
         run_id = stamp_for(second).run_id
         held = published_manifest(client, bucket, output_key(brand, run_id, MANIFEST_NAME))
