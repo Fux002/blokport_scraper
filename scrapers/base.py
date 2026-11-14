@@ -39,6 +39,9 @@ DATA_DIR = REPO_ROOT / "data"
 # Supplier prices are a separate contract (<env>/supplier_prices/<brand>/), never market_prices.
 PRICES_CSV = "prices.csv"
 PRICES_MARKER = "prices_complete.json"
+PRICES_KEY = "prices"            # the marker's statement: "ok", or why no price was read
+# A run folder is named by its UTC start in this form.
+RUN_STAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 VALID_FORMATS = ("slab", "block", "tile")
 # A pool of current desktop UAs; ONE is picked per scraper INSTANCE (per run), not per request, so a
@@ -121,7 +124,7 @@ class ScraperBase:
     def __init__(self, data_dir: Path | None = None):
         if not self.source:
             raise ValueError("scraper must set `source`")
-        self.timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        self.timestamp = datetime.now(timezone.utc).strftime(RUN_STAMP_FORMAT)
         root = Path(data_dir or DATA_DIR)
         self.run_dir = root / self.source / self.timestamp
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -369,7 +372,7 @@ class ScraperBase:
                 writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(rows)
-        (self.run_dir / PRICES_MARKER).write_text(json.dumps({"prices": prices, "rows": len(rows)}), encoding="utf-8")
+        (self.run_dir / PRICES_MARKER).write_text(json.dumps({PRICES_KEY: prices, "rows": len(rows)}), encoding="utf-8")
 
     def mark_incomplete(self, reason: str = "") -> None:
         """A scraper calls this when it knows it stopped short (e.g. pagination broke before the

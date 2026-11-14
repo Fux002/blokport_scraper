@@ -91,6 +91,19 @@ def published_manifest(client, bucket: str, key: str) -> dict:
     return json.loads(body)
 
 
+class RunAlreadyPublished(RuntimeError):
+    """The run folder already has its manifest: a run folder is written once, and a correction is a new run."""
+
+
+def refuse_published_run(client, bucket: str, manifest_key: str, run_id: str) -> None:
+    """Raise RunAlreadyPublished when the run's manifest is on S3, before anything of the run is written. Read, then
+    write: only two publishes of one id inside the same moment pass it together, which no conditional write is spent
+    on (each producer publishes one run at a time, and an id is a second)."""
+    if published_manifest(client, bucket, manifest_key):
+        raise RunAlreadyPublished(f"s3://{bucket}/{manifest_key} exists: a run folder is written once, so run "
+                                  f"{run_id} is not published again (a correction is a new run)")
+
+
 def _put_version(client, bucket: str, key: str, path: Path, sha256: str) -> str:
     """Upload one deliverable and return the VersionId of the object written. S3 checks the bytes it stores against
     `sha256` (the manifest's), so the version the manifest names is exactly the hashed content."""
@@ -134,12 +147,13 @@ def _put_manifest(client, bucket: str, key: str, manifest: dict) -> None:
 
 
 def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None,
-                         only: set[str] | None = None, *, brand: str) -> dict:
+                         only: set[str] | None = None, *, brand: str, header: dict | None = None) -> dict:
     """Upload the changed deliverables and side files under `local`, then write the manifest, which carries `brand`
     (whose deliverables these are: every manifest says it). `only` restricts the publish, and so the manifest, to
     exactly those names whatever else `local` holds (a factory reset: the seed base is the one valid deliverable for a
     wiped Medusa, so no other deliverable and no side file is listed); a name in `only` that `local` lacks raises
-    before anything is written. Returns
+    before anything is written. `header` sets top-level manifest fields of the caller's own contract (its name and
+    version, say) over the shared ones. Returns
     {"uploaded": [...], "unchanged": [...], "side": [<side files uploaded>], "manifest": <the manifest written>}."""
     if only is not None and (missing := sorted(n for n in only if not (local / n).is_file())):
         raise FileNotFoundError(f"cannot publish {missing}: not in {local}")
@@ -164,7 +178,7 @@ def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: 
             (uploaded if changed else unchanged).append(name)
     manifest = {"contract": MANIFEST_CONTRACT, "brand": brand, "env": ENV_NAME, "run_id": run_id,
                 "produced_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
-                **sections}
+                **(header or {}), **sections}
     _put_manifest(client, bucket, manifest_key, manifest)
     return {"uploaded": uploaded, "unchanged": unchanged, "side": side, "manifest": manifest}
 

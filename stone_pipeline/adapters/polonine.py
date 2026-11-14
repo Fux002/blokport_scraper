@@ -32,6 +32,9 @@ class PolonineAdapter(AdapterBase):
         "image_urls",
     ]
     required_canonical = ("src_natural_key", "raw_name")
+    # price1 is the price per square metre (price2 restates it per square foot); the logged-in prices exclude VAT
+    supplier_price_field = "price1"
+    supplier_vat_basis = "excl"
 
     field_map = {
         "src_natural_key": lambda r: AdapterBase.clean(r.get("product_id")),

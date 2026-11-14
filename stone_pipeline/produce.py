@@ -107,6 +107,33 @@ def _live_scrape(sources: list[str] | None) -> int:
     return scrapers_run.main(scraper_sources)
 
 
+def _scrape_stamp_now() -> str:
+    """Now, in the form the product scraper stamps its run folders with."""
+    from datetime import datetime, timezone
+    from scrapers.base import RUN_STAMP_FORMAT
+    return datetime.now(timezone.utc).strftime(RUN_STAMP_FORMAT)
+
+
+def _emit_supplier_prices(sources: list[str] | None, since: str) -> None:
+    """Deliver the supplier prices this produce's own scrape read (supplier_prices.run), isolated from the products: a
+    failure is logged loudly and never fails the product produce, whose products carry no price."""
+    from botocore.exceptions import BotoCoreError, ClientError
+    from stone_pipeline.config.settings import BRAND, ENV_NAME, S3_BUCKET
+    from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
+    from supplier_prices import run
+    from supplier_prices.config import RUNS_DIR
+    try:
+        client = None if SETTINGS.s3.dry_run else aws_client("s3", config=BOTOCORE_DEFAULTS)
+        delivered = run.deliver(sources, since, data_dir=SETTINGS.paths.data_dir, out_root=RUNS_DIR / ENV_NAME,
+                                client=client, bucket=S3_BUCKET, brand=BRAND)
+    except (ClientError, BotoCoreError, OSError) as exc:
+        log.error(f"supplier prices not delivered: {type(exc).__name__}: {exc}",
+                  extra={"extra_fields": {"sources": sources or "all"}})
+        return
+    for run_line in delivered:
+        log.info("supplier prices delivered", extra={"extra_fields": run_line})
+
+
 # The catalog consistency gate keys off variants_export.csv, so it FALSE-ALARMS on the two-pass pull
 # checkpoint: (1) varieties minted THIS produce have no Medusa id yet ("NOT in the current export" /
 # "NO valid-combination row"), and (2) a PRISTINE cold start has an EMPTY export, so the gate cannot
@@ -267,10 +294,12 @@ def run(sources: list[str] | None, stage: str, verify: bool = False) -> int:
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
     if stage not in _NO_SCRAPE_STAGES:
+        since = _scrape_stamp_now()     # this produce's scrape folders are stamped at or after it
         if (rc := _live_scrape(sources)) != 0:
             log.error("produce aborted: live scrape failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
+        _emit_supplier_prices(sources, since)
     rc = build.run(sources, stage)
     _finalize_control_plane(stage)
     if stage in _CATALOG_STAGES:
