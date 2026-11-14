@@ -53,7 +53,7 @@ def attributes(tmp_path, monkeypatch) -> Path:
 def _boot(monkeypatch, tmp_path, s3: _S3) -> None:
     """server.boot with every restore a no-op and attributes.csv fetched from `s3`."""
     from stone_pipeline.ledger import snapshot
-    for step in ("restore_config", "await_file", "restore_artifacts", "restore_state"):
+    for step in ("restore_config", "await_file", "restore_artifacts"):
         monkeypatch.setattr(snapshot, step, lambda *a, **k: None)
     monkeypatch.setattr(store, "seed_from_yaml", lambda *a, **k: None)
     monkeypatch.setattr(store, "reconcile_interrupted_runs", lambda *a, **k: [])

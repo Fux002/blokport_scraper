@@ -39,7 +39,6 @@ from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.loaders import ReferenceData, field_kinds
-from stone_pipeline.state.writeback import WriteBack
 from stone_pipeline.stages import (
     constants,
     derive,
@@ -303,7 +302,7 @@ class Resolved:
     the alias write-back collected on the way."""
     rows: list[CanonicalRow]
     reconcile_stats: reconcile_tree.ReconcileStats
-    writeback: WriteBack
+    writeback: match_variation.WriteBack
 
 
 @dataclass(frozen=True)
@@ -488,7 +487,7 @@ def resolve(ctx: RunContext, rows: list[CanonicalRow]) -> Resolved:
     _record(manifest, run_log, normalize.run(rows, ref))
     # Stage 4: variation (collects the learned guesses, proposed at run end). The source config carries
     # the vendor's declared origin, the matcher's origin evidence when a listing states none.
-    writeback = WriteBack()
+    writeback = match_variation.WriteBack()
     _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback,
                                                    generic_descriptor=ctx.adapter.generic_descriptor,
                                                    source_cfg=ctx.source_cfg))
@@ -692,7 +691,7 @@ def write_outputs(ctx: RunContext, rows: list[CanonicalRow], validation: validat
 
 
 def record(ctx: RunContext, rows: list[CanonicalRow], validation: validate.ValidationResult, delist: Delist,
-           writeback: WriteBack, gap_count: int) -> Manifest:
+           writeback: match_variation.WriteBack, gap_count: int) -> Manifest:
     """Record the run: this source's products and stock into the ledger (the live sync source Medusa pulls), AFTER the
     CSVs are written; the learned aliases; the diagnostics and the product checklist. Fills the manifest's
     write-backs. A failed write-through fails the run (exit 2) once everything else is written, so the operator can

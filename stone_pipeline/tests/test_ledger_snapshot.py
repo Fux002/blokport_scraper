@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from stone_pipeline.aliases import migrate_learned
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.ledger.db import Ledger, now_iso
 
@@ -275,37 +274,6 @@ def test_await_file_releases_when_the_one_restorer_puts_the_ledger_in_place(tmp_
 def test_await_file_times_out_loud(tmp_path):
     with pytest.raises(TimeoutError, match="sync server"):
         snapshot.await_file(tmp_path / "development.db", timeout=0.2, poll=0.05)
-
-
-# -- P3: the learned-alias write-back (state/alias_writeback.csv) is durable across a roll ----------------
-
-def test_state_writeback_snapshot_round_trip(tmp_path, monkeypatch):
-    fake = _FakeS3()
-    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
-    wb = tmp_path / "alias_writeback.csv"
-    monkeypatch.setattr(snapshot, "_writeback_path", lambda env=None: wb)
-    wb.write_text("variation_id,alias,method\nV1,Calacatta Oro,fuzzy\n", encoding="utf-8")
-    assert snapshot.save_state(env="development") is True
-    wb.unlink()                                    # a fresh, EMPTY task volume (the roll dropped state/)
-    assert snapshot.restore_state(env="development") is True
-    assert wb.read_text(encoding="utf-8").strip().endswith("V1,Calacatta Oro,fuzzy")
-
-
-def test_save_state_is_a_noop_without_a_writeback(tmp_path, monkeypatch):
-    monkeypatch.setattr(snapshot, "_s3", lambda: _FakeS3())
-    monkeypatch.setattr(snapshot, "_writeback_path", lambda env=None: tmp_path / "absent.csv")
-    assert snapshot.save_state(env="development") is False   # nothing learned yet -> nothing to snapshot
-
-
-def test_restore_state_never_clobbers_a_warm_writeback(tmp_path, monkeypatch):
-    fake = _FakeS3()
-    fake.store[(snapshot.S3_BUCKET, migrate_learned.writeback_key("development"))] = b"variation_id,alias,method\nV1,Old,fuzzy\n"
-    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
-    wb = tmp_path / "alias_writeback.csv"
-    monkeypatch.setattr(snapshot, "_writeback_path", lambda env=None: wb)
-    wb.write_text("variation_id,alias,method\nV2,Warm,fuzzy\n", encoding="utf-8")   # a live local copy wins
-    assert snapshot.restore_state(env="development") is False
-    assert "Warm" in wb.read_text(encoding="utf-8")
 
 
 def test_an_unchanged_db_is_not_uploaded_again(tmp_path, monkeypatch):

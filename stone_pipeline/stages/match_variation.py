@@ -34,7 +34,7 @@ from stone_pipeline.matching.engine import VariationEngine, VariationMatch
 from stone_pipeline.matching.index import build_variation_index
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
-from stone_pipeline.state.writeback import WriteBack, is_learned
+from stone_pipeline.aliases.learned import is_learned
 
 log = logfmt.get_logger("match_variation")
 
@@ -85,6 +85,35 @@ def _build_suggester(index):
             cids.append(cid)
     embedder = sentence_transformer_embedder(SETTINGS.matching.semantic_model)
     return SemanticSuggester(names, cids, embedder)
+
+
+@dataclass
+class WriteBack:
+    """The run's learned guesses (aliases.learned.is_learned), proposed at the run's end as config.db learned_alias
+    rows (P2-10 C2): keyed by the variety's identity Key, with the match METHOD and the vendor as provenance. A
+    proposal is not a matcher input: only an operator decision makes it active (decisions_store.learned)."""
+
+    aliases: list[tuple] = field(default_factory=list)  # (identity Key, alias, method, source, score)
+    seen_aliases: set[tuple[str, str]] = field(default_factory=set)
+
+    def add_alias(self, identity_key: str, alias: str, method: str = "", source: str = "",
+                  score: float | None = None) -> None:
+        alias = (alias or "").strip()
+        if not identity_key or not alias:
+            return
+        key = (identity_key, alias.casefold())
+        if key in self.seen_aliases:
+            return
+        self.seen_aliases.add(key)
+        self.aliases.append((identity_key, alias, (method or "").strip(), (source or "").strip(), score))
+
+    def flush(self) -> int:
+        """Propose this run's learned guesses (decisions_store.propose_learned_aliases: a Key and norm already holding
+        a row is left as it is). Returns the number of new proposals."""
+        from stone_pipeline.config import decisions_store
+        return decisions_store.propose_learned_aliases(
+            {"identity_key": key, "value": alias, "method": method, "source": source, "score": score}
+            for key, alias, method, source, score in self.aliases)
 
 
 @dataclass
@@ -288,7 +317,7 @@ class VariationStage:
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = match.method
-            # write-back: a confirmed GUESS (phonetic/fuzzy, writeback.is_learned) PROPOSES the scraped spelling
+            # write-back: a confirmed GUESS (phonetic/fuzzy, aliases.learned.is_learned) PROPOSES the scraped spelling
             # as a learned alias of the variety's Key (P2-10 C2): only once a review makes it active does it reach
             # the index. A bind the seed already decides (exact, narrowed by name/type/colour/origin, projection,
             # override) is re-derived every run, so it is never proposed: a saved pick would outlive a later seed
