@@ -37,6 +37,7 @@ CARDS = {
         "unit": {"class": "sale-unit", "text": True, "pattern": r"per\s+(\S+)"},
         "currency_symbols": {"$": "USD"},
     },
+    "number": {"decimal": ".", "thousands": ","},
     "specs": {"Material": {"json": ["data-ms-tracking-item", "item_category2"]}},
 }
 ROWS = {
@@ -48,6 +49,7 @@ ROWS = {
         "price": {"class": "price-m2-col", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
         "currency_symbols": {"£": "GBP"},
     },
+    "number": {"decimal": ".", "thousands": ","},
     "specs": {"Thickness": {"json": ["data-variation-product-vars", "title"], "pattern": r"(\d+\s*mm)"},
               "Price ex VAT": {"json": ["data-variation-product-vars", "regular_price_exvat"]}},
 }
@@ -58,10 +60,10 @@ SALE = {
         "listing_key": {"class": "card-link", "attr": "href"},
         "listing_text": {"class": "card-title", "text": True},
         "url": {"class": "card-link", "attr": "href"},
-        "price": {"class": "starel-loop-card-price__row--sqm", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})",
-                  "thousands": ","},
+        "price": {"class": "starel-loop-card-price__row--sqm", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
         "currency_symbols": {"£": "GBP"},
     },
+    "number": {"decimal": ".", "thousands": ","},
     "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True},
               # Mas's sale rule (14 Nov): the struck "was" price is kept, read explicitly, never as the price
               "Regular price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True}},
@@ -220,6 +222,45 @@ def test_a_card_not_on_sale_has_no_regular_price_and_no_sale_flag():
             '<div class="starel-loop-card-price__row--sqm">£295.00 per m²</div></article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/bianco/"]
     assert (row.price_amount, row.stated_specs) == ("295.00", {})
+
+
+def test_a_class_lookup_skips_struck_subtrees_so_the_current_amount_is_read():
+    # the manager's ruling 2: a price whose struck and current amounts carry one class reads the current one
+    declaration = {**SALE, "fields": {**SALE["fields"], "price": {"class": "amount", "text": True,
+                                                                  "pattern": r"£\s*([\d,]+\.\d{2})"}},
+                   "specs": {"Regular price": {"class": "amount", "text": True, "struck": True}}}
+    card = ('<article class="starel-loop-card"><a class="card-link" href="/p/nero/">x</a>'
+            '<h3 class="card-title">Nero Marquina Marble Slab</h3><p class="price">'
+            '<del><span class="amount">£1,450.00</span></del> <ins><span class="amount">£1,040.00</span></ins></p>'
+            '</article>')
+    row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(declaration)))["/p/nero/"]
+    assert (row.price_amount, row.price_text) == ("1040.00", "£1,040.00")
+    assert row.stated_specs == {"Regular price": "£1,450.00", "On sale": "yes"}
+
+
+def test_a_price_is_read_in_the_declared_notation_and_one_that_does_not_parse_is_unpriced():
+    # the manager's ruling 5: the declared separators read a grouped price; another notation is no price
+    euro = {**SALE, "fields": {**SALE["fields"], "price": {"class": "starel-loop-card-price__row--sqm", "text": True,
+                                                           "pattern": r"([\d.,]+)\s*€"},
+                               "currency_symbols": {"€": "EUR"}},
+            "number": {"decimal": ",", "thousands": "."}}
+    cards = ('<article class="starel-loop-card"><a class="card-link" href="/p/a/">x</a>'
+             '<h3 class="card-title">A Marble Slab</h3><div class="starel-loop-card-price__row--sqm">1.040,50 € / m²'
+             '</div></article><article class="starel-loop-card"><a class="card-link" href="/p/b/">x</a>'
+             '<h3 class="card-title">B Marble Slab</h3><div class="starel-loop-card-price__row--sqm">1,040.50 € / m²'
+             '</div></article>')
+    rows = _rows(_run({f"{BASE}/collections/slabs/": _page(cards)}, _site(euro)))
+    assert (rows["/p/a/"].price_amount, rows["/p/a/"].currency) == ("1040.50", "EUR")
+    assert (rows["/p/b/"].price_amount, rows["/p/b/"].price_status, rows["/p/b/"].price_text) == (
+        None, PriceStatus.none, "1,040.50 € / m²")
+
+
+def test_a_spec_whose_pattern_does_not_match_is_left_empty_never_a_refusal():
+    # the manager's ruling 3: only the required fields refuse a listing; a spec not in its declared form is not stated
+    product = _page(_variation(9, "Offcut", "£120.00", "100.00"))
+    listing = _page('<a href="/product/offcut/">Offcut</a>')
+    row = _rows(_run({f"{BASE}/collections/slabs/": listing, f"{BASE}/product/offcut/": product}, _site(ROWS)))["9"]
+    assert row.stated_specs == {"Price ex VAT": "100.00"}
 
 
 # --- refusals: one record's problem, never the site's ----------------------------------------------------------------
