@@ -113,7 +113,7 @@ def test_the_register_file_is_byte_identical_on_a_rewrite(tmp_path):
 
 def test_a_run_folder_is_written_once_and_a_second_publish_is_refused_before_anything_is_written(tmp_path):
     # CONTRACT.md: after its manifest no file in a run folder changes; a correction is a new run (M22's car 3)
-    from market_prices.publish import RunAlreadyPublished
+    from stone_pipeline.io.deliverables import RunAlreadyPublished
     run_dir = write_run(collect_run(_register(), _shop(_page([_listing()])), MOMENT, _no_pause), tmp_path)
     s3 = _S3()
     publish_run(s3, "bucket", "blokport", run_dir)

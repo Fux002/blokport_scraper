@@ -6,16 +6,13 @@ import json
 import re
 from pathlib import Path
 
-from stone_pipeline.io.deliverables import MANIFEST_NAME, published_manifest, publish_deliverables
+from stone_pipeline.io.deliverables import (MANIFEST_NAME, published_manifest, publish_deliverables,
+                                            refuse_published_run)
 
 from market_prices import config
 from market_prices.brand import SLUG, output_key
 
 _RUN_ID = re.compile(r"\d{8}T\d{6}Z")
-
-
-class RunAlreadyPublished(RuntimeError):
-    """The run folder already has its manifest: a run folder is written once, and a correction is a new run."""
 
 
 def move_latest(client, bucket: str, brand: str, run_id: str, rows: int) -> bool:
@@ -40,12 +37,8 @@ def publish_run(client, bucket: str, brand: str, run_dir: Path) -> dict:
     if not SLUG.fullmatch(brand) or not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
         raise ValueError(f"{run_dir} is not a run folder of brand {brand!r}")
     manifest_key = output_key(brand, run_id, MANIFEST_NAME)
-    # A brand has two producers, the fetching run and the intake, each one run at a time; an id is a second, so an id
-    # both reach is refused here, never overwritten. The check is read-then-write: only two publishes of one id inside
-    # the same moment pass it together, which no S3 conditional write is spent on (the manager, 14 Nov)
-    if published_manifest(client, bucket, manifest_key):
-        raise RunAlreadyPublished(f"s3://{bucket}/{manifest_key} exists: a run folder is written once, so run "
-                                  f"{run_id} is not published again (a correction is a new run)")
+    # a brand has two producers, the fetching run and the intake, so an id both reach is refused, never overwritten
+    refuse_published_run(client, bucket, manifest_key, run_id)
     published = publish_deliverables(client, bucket, run_dir, output_key(brand, run_id), run_id, brand=brand,
                                      only={config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE, config.REGISTER_FILE})
     rows = published["manifest"]["files"][config.OBSERVATIONS_FILE]["rows"]

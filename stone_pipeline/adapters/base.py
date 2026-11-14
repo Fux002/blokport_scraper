@@ -62,6 +62,10 @@ class AdapterBase:
     field_map: dict[str, FieldRule] = {}
     # canonical fields that must be non-empty after mapping, else the row is bad
     required_canonical: tuple[str, ...] = ("src_natural_key",)
+    # a supplier whose scraper reads its prices (supplier_prices): the price pass's price column and the VAT basis its
+    # page states ("incl" / "excl"); blank = the source's prices are not read
+    supplier_price_field: str = ""
+    supplier_vat_basis: str = ""
     # explicit acquisition override ("" -> infer). Set to ACQ_FILE_DROP for a source whose export an
     # operator drops in with no fetcher; load_frame sources are inferred, so no config is needed for them.
     acquisition: str = ""
