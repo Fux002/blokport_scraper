@@ -13,12 +13,14 @@ from typing import Callable, Iterable
 from pydantic import BaseModel, ValidationError
 
 from market_prices import config
-from market_prices.brand import require_run_brand
+from market_prices.brand import BrandError, require_run_brand
 from market_prices.collectors import COLLECTORS
 from market_prices.fetching import (
     SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse,
 )
+from market_prices.layouts import load_layouts
 from market_prices.register import Register, Site
+from market_prices.register_file import register_document, register_sources
 from market_prices.schema import (
     DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source,
     VatBasis, columns, csv_values,
@@ -52,6 +54,8 @@ class RunResult:
     run_id: str
     observations: tuple[Observation, ...]
     statuses: tuple[SiteStatus, ...]
+    # contract v4: the brand's register as the run started (register_file.register_sources), written as register.json
+    sources: tuple[dict, ...]
 
 
 def stamp_for(moment: datetime) -> Stamp:
@@ -86,7 +90,8 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
         listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
         stated_specs={label: value for label, value in facts.stated_specs.items() if label not in specs.used},
         **specs.columns(), grade_text=facts.grade_text, price_text=facts.price_text,
-        price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
+        price_amount=facts.price_amount, regular_price_text=facts.regular_price_text,
+        regular_price_amount=facts.regular_price_amount, currency=facts.currency, price_status=facts.price_status,
         min_qty_text=facts.min_qty_text, availability_text=facts.availability_text, provenance=provenance,
         observed_at=stamp.observed_at, run_id=stamp.run_id, collector_version=version, **stated,
     )
@@ -190,6 +195,7 @@ def collect_run(register: Register, transport: Transport, moment: datetime,
     stamp = stamp_for(moment)
     vocabulary = load_vocabulary(register.brand)
     countries = load_countries()
+    sources = register_sources(register, load_layouts(register.brand))
     if uncovered := sorted(site.site_id for site in register.sites
                            if site.collectable and not vocabulary.covers(site.served_market)):
         raise VocabularyError(f"{register.brand}'s scope vocabulary declares no market for sites {uncovered}")
@@ -197,7 +203,7 @@ def collect_run(register: Register, transport: Transport, moment: datetime,
                for site in sorted(register.sites, key=lambda site: site.site_id)]
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),
-                     statuses=tuple(result.status for result in results))
+                     statuses=tuple(result.status for result in results), sources=sources)
 
 
 def _write_csv(path: Path, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
@@ -212,8 +218,11 @@ def write_run(result: RunResult, root: Path) -> Path:
     run's brand (brand_required), checked before anything is written."""
     require_run_brand(result.brand, result.observations, "observations")
     require_run_brand(result.brand, result.statuses, "site_status rows")
+    if foreign := sorted({row["brand"] for row in result.sources if row["brand"] != result.brand}):
+        raise BrandError(f"register rows of brand(s) {foreign} in a {result.brand!r} run")
     run_dir = root / result.brand / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(run_dir / config.OBSERVATIONS_FILE, Observation, result.observations)
     _write_csv(run_dir / config.SITE_STATUS_FILE, SiteStatus, result.statuses)
+    (run_dir / config.REGISTER_FILE).write_bytes(register_document(result.brand, result.run_id, result.sources))
     return run_dir

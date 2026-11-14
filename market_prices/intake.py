@@ -37,6 +37,7 @@ from market_prices.collect import RunResult, Stamp, counted_reasons, invalid_rea
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
 from market_prices.publish import publish_run
 from market_prices.register import load_register
+from market_prices.register_file import register_sources
 from market_prices.run_input import run_brand
 from market_prices.schema import (
     DeliveryIncluded, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source, VatBasis,
@@ -80,13 +81,14 @@ class _Matched:
 
 # --- one file -> one run ---------------------------------------------------------------------------------------------
 def absorb_file(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
-                brand: str) -> RunResult:
-    """The file's rows and one status per competitor in it. Raises FileRefused when the whole file cannot be read."""
-    return _absorb(file, layouts, vocabulary, countries, bucket, brand)[1]
+                brand: str, *, sources: tuple[dict, ...]) -> RunResult:
+    """The file's rows and one status per competitor in it, with the brand's register rows (`sources`, written as
+    register.json). Raises FileRefused when the whole file cannot be read."""
+    return _absorb(file, layouts, vocabulary, countries, bucket, brand, sources)[1]
 
 
 def _absorb(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
-            brand: str) -> tuple[Layout, RunResult]:
+            brand: str, sources: tuple[dict, ...]) -> tuple[Layout, RunResult]:
     matched = _match_layout(file.key, read_tables(PurePosixPath(file.key).name, file.data), layouts)
     layout, rows = matched.layout, matched.table.rows
     stamp = stamp_for(file.last_modified)
@@ -125,7 +127,8 @@ def _absorb(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countrie
     statuses = tuple(_status(site_id, brand, len(kept[site_id]), malformed.get(site_id, 0),
                              duplicates.get(site_id, 0), reasons.get(site_id, collections.Counter()),
                              unstated.get(site_id, 0), stamp) for site_id in sorted(kept))
-    return layout, RunResult(brand=brand, run_id=stamp.run_id, observations=observations, statuses=statuses)
+    return layout, RunResult(brand=brand, run_id=stamp.run_id, observations=observations, statuses=statuses,
+                             sources=sources)
 
 
 def _match_layout(key: str, tables: list[Table], layouts: Layouts) -> _Matched:
@@ -240,6 +243,7 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
         source_url=_source_url(bucket, file, table.name, index), listing_text=text, stated_specs=kept,
         **specs.columns(),
         grade_text=grade, price_text=price.text, price_amount=price.amount,
+        regular_price_text=None, regular_price_amount=None,             # a sheet states no regular price apart
         currency=listed_currency or said.currency, price_status=price.status,
         vat_basis=said.vat_basis or VatBasis.unknown, unit_text=listed_unit or said.unit_text,
         delivery_text=said.delivery_text, delivery_included=said.delivery_included or DeliveryIncluded.unknown,
@@ -296,6 +300,7 @@ def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int
 def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dry_run: bool) -> IntakeOutcome:
     """Every intake file of the brand, in key order, each isolated: a refused file never stops the others."""
     vocabulary, countries = load_vocabulary(brand), load_countries()
+    sources = register_sources(load_register(brand), layouts)
     record_key = output_key(brand, config.ABSORBED_FILE)
     record = read_absorbed(client, bucket, record_key)
     seen = set(record)
@@ -314,7 +319,7 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
             continue
         seen.add(sha)
         try:
-            layout, result = _absorb(file, layouts, vocabulary, countries, bucket, brand)
+            layout, result = _absorb(file, layouts, vocabulary, countries, bucket, brand, sources)
         except FileRefused as exc:
             refused.append((key, str(exc)))
             continue

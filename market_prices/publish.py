@@ -28,13 +28,13 @@ def _move_latest(client, bucket: str, brand: str, run_id: str, rows: int) -> boo
 
 
 def publish_run(client, bucket: str, brand: str, run_dir: Path) -> dict:
-    """Both files, then their manifest (carrying the brand), then latest, so a reader never sees a run that is not
-    complete. The folder must be what write_run made for this brand: its name becomes the run id, and a stray one would
-    freeze latest."""
+    """The run's files (observations, site status, register), then their manifest (carrying the brand), then latest,
+    so a reader never sees a run that is not complete. The folder must be what write_run made for this brand: its name
+    becomes the run id, and a stray one would freeze latest."""
     run_id = run_dir.name
     if not SLUG.fullmatch(brand) or not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
         raise ValueError(f"{run_dir} is not a run folder of brand {brand!r}")
     published = publish_deliverables(client, bucket, run_dir, output_key(brand, run_id), run_id, brand=brand,
-                                     only={config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE})
+                                     only={config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE, config.REGISTER_FILE})
     rows = published["manifest"]["files"][config.OBSERVATIONS_FILE]["rows"]
     return {**published, "latest_moved": _move_latest(client, bucket, brand, run_id, rows)}

@@ -4,9 +4,9 @@ the row's `html` names the pages to read, what one listing is on them (a record)
 
 What a page shows is what is read. A price is the price element's text as shown; its amount is read in the site's
 declared number notation, and a card that shows no price is unpriced with its words kept, whatever a script or an
-analytics attribute holds. Struck text is never the price (Mas's sale rule: a declared spec may read it, and the record
-says "On sale"). A required field the record does not hold is that listing's problem, counted with its reason, never
-the site's; a spec not stated in its declared form is simply not stated."""
+analytics attribute holds. Struck text is never the price: Mas's sale rule reads it, where the row declares it, as
+the regular price (contract v4). A required field the record does not hold is that listing's problem, counted with
+its reason, never the site's; a spec not stated in its declared form is simply not stated."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ from market_prices import config
 from market_prices.discovery import listing_pages, normal, product_urls
 from market_prices.fetching import SiteFetcher, UnexpectedResponse, UnexpectedStatus
 from market_prices.html_declaration import HtmlDeclaration, HtmlSource
-from market_prices.html_tree import (Element, PageTooLarge, collapse, descendants, first, has_struck, labelled,
-                                     locate, matches, parse, text)
+from market_prices.html_tree import (Element, PageTooLarge, collapse, descendants, first, labelled, locate, matches,
+                                     parse, text)
 from market_prices.numbers import parse_number
 from market_prices.schema import ListingFacts, MalformedListing, PriceStatus
 from market_prices.text import on_site
@@ -130,10 +130,10 @@ def _url(record: _Record, source: Optional[HtmlSource], base_url: str) -> str:
     return absolute
 
 
-def _amount(price_text: str, declaration: HtmlDeclaration) -> Optional[str]:
-    """The price's amount: the pattern's group read in the site's declared notation, a positive exact decimal; any
-    other form is no amount (the price text is kept)."""
-    captured = _narrowed(price_text, declaration.fields.price)
+def _amount(price_text: str, source: HtmlSource, declaration: HtmlDeclaration) -> Optional[str]:
+    """A price's amount: its source's pattern group read in the site's declared notation, a positive exact decimal;
+    any other form is no amount (the price text is kept)."""
+    captured = _narrowed(price_text, source)
     number = parse_number(captured, declaration.number) if captured is not None else None
     return format(number, "f") if number is not None and number > 0 else None
 
@@ -166,21 +166,9 @@ def _currency(record: Element, declaration: HtmlDeclaration, price_text: str) ->
     return next(iter(codes), None), ()
 
 
-def _on_sale(record: Element, declaration: HtmlDeclaration, specs: dict[str, str]) -> bool:
-    """Mas's sale rule: the record's price element holds struck text, or a declared struck spec was read."""
-    price = declaration.fields.price
-    found = _element(record, price) if price is not None and price.json_ is None else None
-    if found is not None and has_struck(found[0]):
-        return True
-    return any(source.struck and label in specs for label, source in declaration.specs.items())
-
-
 def _specs(record: Element, declaration: HtmlDeclaration) -> dict[str, str]:
-    specs = {label: value for label, source in declaration.specs.items()
-             if (value := _optional(record, source, label)) is not None}
-    if _on_sale(record, declaration, specs):
-        specs[config.SALE_FLAG_LABEL] = config.SALE_FLAG_VALUE
-    return specs
+    return {label: value for label, source in declaration.specs.items()
+            if (value := _optional(record, source, label)) is not None}
 
 
 def _grade(specs: dict[str, str], labels: tuple[str, ...]) -> Optional[str]:
@@ -254,7 +242,10 @@ class DeclaredHtmlCollector:
         declaration = site.html
         fields, record = declaration.fields, raw.element
         price_text = _read(record, fields.price, "price") if fields.price is not None else None
-        amount = _amount(price_text, declaration) if price_text is not None else None
+        amount = _amount(price_text, fields.price, declaration) if price_text is not None else None
+        regular_text = _read(record, fields.regular_price, "regular_price") if fields.regular_price else None
+        regular_amount = (_amount(regular_text, fields.regular_price, declaration) if regular_text is not None
+                          else None)
         on_request = (amount is None and price_text is not None
                       and match_key(price_text) in {match_key(word) for word in fields.on_request})
         specs = _specs(record, declaration)
@@ -267,6 +258,8 @@ class DeclaredHtmlCollector:
             grade_text=_grade(specs, site.grade_labels),
             price_text=price_text,
             price_amount=amount,
+            regular_price_text=regular_text,
+            regular_price_amount=regular_amount,
             currency=currency,
             price_status=(PriceStatus.priced if amount is not None
                           else PriceStatus.on_request if on_request else PriceStatus.none),

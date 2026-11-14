@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-CONTRACT_VERSION = "3"
+CONTRACT_VERSION = "4"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
@@ -12,6 +12,8 @@ COUNTRIES_FILE = Path(__file__).resolve().parent / "countries.yaml"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
+# contract v4: the brand's register as the run started (approved sites and sheet competitors), in every run folder
+REGISTER_FILE = "register.json"
 SITE_STATUS_FILE = "site_status.csv"
 LATEST_FILE = "latest.json"
 S3_BRAND_PREFIX = "{env_segment}/market_prices/{brand}"
@@ -75,9 +77,6 @@ MALFORMED_REASONS_SHOWN = 3
 # The generic declared-HTML collector (collectors/declared_html.py) walks the same entry points under the same caps. A
 # page parsed into more elements than this is not read (the response itself is already capped by MAX_RESPONSE_BYTES).
 DECLARED_HTML_MAX_ELEMENTS = 200_000
-# Mas's sale rule (14 Nov): when a record's price element holds struck text, stated_specs carries this label and value
-SALE_FLAG_LABEL = "On sale"
-SALE_FLAG_VALUE = "yes"
 
 # The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
 # with the first rows. It refuses a pilot site the register has not approved, and any environment but development.

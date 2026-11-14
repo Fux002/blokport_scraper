@@ -104,6 +104,9 @@ class Observation(BaseModel):
     grade_text: Optional[str]
     price_text: Optional[str]
     price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
+    # contract v4 (Mas's sale rule): the regular price shown beside the current one; on sale exactly when it is set
+    regular_price_text: Optional[str]
+    regular_price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
     currency: Optional[str] = Field(pattern=r"^[A-Z]{3}$")
     price_status: PriceStatus
     vat_basis: VatBasis
@@ -133,6 +136,12 @@ class Observation(BaseModel):
                 raise ValueError(f"{column} is not stated whole (its value, {text}, spec_labels and provenance)")
         if unknown := sorted(set(self.spec_labels) - set(SPEC_TEXTS)):
             raise ValueError(f"spec_labels names {unknown}, not a spec column")
+        return self
+
+    @model_validator(mode="after")
+    def _regular_amount_has_its_text(self) -> "Observation":
+        if self.regular_price_amount is not None and self.regular_price_text is None:
+            raise ValueError("regular_price_amount is set only with the regular_price_text it is read from")
         return self
 
     @model_validator(mode="after")
@@ -182,6 +191,9 @@ class ListingFacts:
     grade_text: Optional[str] = None
     price_text: Optional[str] = None
     price_amount: Optional[str] = None
+    # the regular price shown beside the current one (contract v4)
+    regular_price_text: Optional[str] = None
+    regular_price_amount: Optional[str] = None
     currency: Optional[str] = None
     price_status: PriceStatus = PriceStatus.none
     min_qty_text: Optional[str] = None

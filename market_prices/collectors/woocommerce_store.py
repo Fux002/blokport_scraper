@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from market_prices import config
 from market_prices.fetching import SiteFetcher, UnexpectedResponse
 from market_prices.schema import ListingFacts, MalformedListing, PriceStatus
+from market_prices.html_tree import Element, parse, text
 from market_prices.text import clean_text, on_site
 
 if TYPE_CHECKING:
@@ -60,6 +61,22 @@ def _amount(prices: Mapping) -> Optional[str]:
         return None
     whole, fraction = divmod(value, 10 ** minor)
     return f"{whole}.{fraction:0{minor}d}" if minor else str(whole)
+
+
+def _regular_amount(prices: Mapping, amount: Optional[str]) -> Optional[str]:
+    """The Store API's own regular_price, when the listing has one price and its regular price differs (it is on
+    sale); read as the price is (integer minor units)."""
+    if amount is None or prices.get("regular_price") in (None, ""):
+        return None
+    regular = _amount({**prices, "price": prices.get("regular_price"), "price_range": None})
+    return regular if regular is not None and regular != amount else None
+
+
+def _regular_text(shown: Optional[Element], regular_amount: str, currency: Optional[str]) -> str:
+    """The regular price as the shop writes it: the struck "was" text of its price_html, or, where the html shows
+    none, the API's own statement of it (amount and code)."""
+    struck = text(shown, struck=True) if shown is not None else None
+    return struck or " ".join(part for part in (regular_amount, currency) if part)
 
 
 def _listing_key(value: object) -> str:
@@ -212,6 +229,9 @@ class WooCommerceStoreCollector:
             raise MalformedListing(f"permalink is not on {site.base_url}")
         prices = _mapping(listing.get("prices"), "prices")
         amount = _amount(prices)
+        shown = parse(listing.get("price_html")) if isinstance(listing.get("price_html"), str) else None
+        regular_amount = _regular_amount(prices, amount)
+        currency = _currency(prices)
         attributes = _attributes(listing)
         stock = listing.get("stock_availability") or {}
         return ListingFacts(
@@ -220,9 +240,12 @@ class WooCommerceStoreCollector:
             listing_text=text,
             stated_specs=_stated_specs(listing, attributes),
             grade_text=_grade(attributes, site.grade_labels),
-            price_text=clean_text(listing.get("price_html")),
+            price_text=text(shown) if shown is not None else None,
             price_amount=amount,
-            currency=_currency(prices),
+            regular_price_text=(_regular_text(shown, regular_amount, currency) if regular_amount is not None
+                                else None),
+            regular_price_amount=regular_amount,
+            currency=currency,
             price_status=PriceStatus.priced if amount is not None else PriceStatus.none,
             min_qty_text=_min_qty(listing),
             availability_text=clean_text(_mapping(stock, "stock_availability").get("text")),

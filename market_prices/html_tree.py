@@ -138,11 +138,6 @@ def collapse(value: str) -> Optional[str]:
     return _SPACE.sub(" ", value).strip() or None
 
 
-def has_struck(element: Element) -> bool:
-    """Whether the element holds struck text (a former price shown beside the current one)."""
-    return element.tag in _STRUCK or any(found.tag in _STRUCK and text(found, struck=True)
-                                         for found in descendants(element))
-
 
 _PAIRED_CELLS = {"th": ("td", "th"), "td": ("td",), "dt": ("dd",)}
 

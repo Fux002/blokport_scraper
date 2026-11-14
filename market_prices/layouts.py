@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
 from market_prices.numbers import NumberFormat
-from market_prices.register import Country, Register, Words, supplier_keys, supplier_problem
+from market_prices.register import Country, Day, PriceTerms, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 from market_prices.specs import SpecLabels
 
@@ -43,8 +43,9 @@ def cell_position(ref: str) -> tuple[int, int]:
     return int(match.group(2)) - 1, column - 1
 
 
-class Competitor(BaseModel):
-    """A seller a sheet can name, with the seller fields every row needs."""
+class Competitor(PriceTerms):
+    """A seller a sheet can name, with the seller fields every row needs, its price terms and who decided it
+    (register.json, contract v4)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -57,6 +58,14 @@ class Competitor(BaseModel):
     # suppliers: checked both ways against the suppliers at load (load_layouts), by the register's rule.
     site_domain: Host
     supplier_key: Optional[Words] = None
+    decided_by: Words
+    decided_on: Day
+
+    @model_validator(mode="after")
+    def _declares_its_basis(self) -> "Competitor":
+        if self.price_basis is None:
+            raise ValueError(f"competitor {self.competitor_id} declares its price_basis (list or net); never defaulted")
+        return self
 
     @field_validator("competitor_id")
     @classmethod

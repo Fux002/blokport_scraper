@@ -6,7 +6,7 @@ import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -110,7 +110,35 @@ class Discovery(BaseModel):
         return self
 
 
-class Site(BaseModel):
+# An exact decimal rate in (0, 1): "0.2", "0.24". A share, never a percentage.
+Rate = Annotated[str, StringConstraints(pattern=r"^0\.\d*[1-9]$")]
+StatedBy = Literal["site", "owner"]
+
+
+class PriceTerms(BaseModel):
+    """A source's price terms for register.json (contract v4), each with who stated it, never defaulted or inferred:
+    whether its prices are list or net prices, a net source's discount below list, and its VAT rate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    price_basis: Optional[Literal["list", "net"]] = None
+    net_discount: Optional[Annotated[str, StringConstraints(pattern=r"^0(\.\d+)?$")]] = None   # in [0, 1)
+    net_discount_stated_by: Optional[StatedBy] = None
+    vat_rate: Optional[Rate] = None
+    vat_rate_stated_by: Optional[StatedBy] = None
+
+    @model_validator(mode="after")
+    def _terms_whole(self) -> "PriceTerms":
+        if (self.price_basis == "net") != (self.net_discount is not None):
+            raise ValueError("a net price_basis needs its net_discount, and only a net one has one")
+        if (self.net_discount is None) != (self.net_discount_stated_by is None):
+            raise ValueError("net_discount_stated_by is set exactly when net_discount is")
+        if (self.vat_rate is None) != (self.vat_rate_stated_by is None):
+            raise ValueError("vat_rate_stated_by is set exactly when vat_rate is")
+        return self
+
+
+class Site(PriceTerms):
     """One storefront. A site selling into several markets is one entry per market."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -174,6 +202,8 @@ class Site(BaseModel):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
             self._require_full_record(collector.needs_discovery)
+            if self.price_basis is None:
+                raise ValueError("an approved site declares its price_basis (list or net); it is never defaulted")
             if collector.needs_html and self.html is None:
                 raise ValueError(f"an approved {self.platform} site needs its html declaration")
         return self
