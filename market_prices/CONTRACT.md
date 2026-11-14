@@ -62,7 +62,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | min_qty_text | The minimum order as stated |
 | availability_text | The stock wording as written |
 | provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency, min_qty_text, thickness_mm, finish, material_type and origin_iso_2: `listing`, `site_statement` (said once for the whole site) or `unknown`. The four spec columns are `listing` when stated and `unknown` when empty. A listing that states its own VAT basis (schema.org `valueAddedTaxIncluded`) gives `vat_basis` provenance `listing`, over any site statement, and a listing that states its own selling unit (a `declared_html` unit source) gives `unit_text` provenance `listing` the same way; site_status `detail` counts the listings where the two differ |
-| observed_at, run_id | When this run started, UTC |
+| observed_at, run_id | When this run started, UTC: `observed_at` as `YYYY-MM-DDTHH:MM:SSZ`, `run_id` as `YYYYMMDDTHHMMSSZ` (a price sheet's are when S3 received it, see "Price sheets") |
 | collector_version | Which collector read it |
 
 **Supplier prices** are not in market_prices: they are delivered under `<env>/supplier_prices/<brand>/`, a separate contract. A register site whose host is one of the product scraper's suppliers' domains is refused at load, named, and so is a sheet competitor whose `site_domain` is one (the same host matching).
@@ -135,7 +135,7 @@ A listing that cannot be read or delivered (for example a cell over 100,000 char
 
 A listing outside the run brand's scope (its vocabulary, `market_prices/vocabulary/<brand>.yaml`) is left out and counted in `detail` as `listings out of scope xN`. A site read whole stays `ok`, including when no listing on it is in scope.
 
-Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_checked_on`, `decision`, `observed_at`, `run_id`, `contract_version`, `brand`, `site_id`.
+Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_checked_on`, `decision`, `observed_at` (`YYYY-MM-DDTHH:MM:SSZ`, UTC, as in observations.csv), `run_id`, `contract_version`, `brand`, `site_id`.
 
 ## Running
 
