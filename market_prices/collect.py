@@ -31,7 +31,7 @@ from market_prices.vocabulary import Vocabulary, VocabularyError, load_vocabular
 _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
                           "delivery_included": DeliveryIncluded.unknown}
 _LISTING_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
-# A statement a listing may make for itself; it wins over the site's, being the more specific (manager's ruling 13 Nov)
+# A statement a listing may make for itself; it wins over the site's, being the more specific
 _LISTING_STATEMENT_FIELDS = ("vat_basis", "unit_text")
 _VAT_CONFLICT = "listing VAT differs from the site statement"
 

@@ -1,4 +1,4 @@
-"""A site whose listings are read where its register row DECLARES them (platform declared_html; Mas approved 14 Nov):
+"""A site whose listings are read where its register row DECLARES them (platform declared_html):
 the row's `html` names the pages to read, what one listing is on them (a record) and where each fact sits in a record
 (market_prices/html_declaration.py). One logic for every such site; a new one is config only, never per-site code.
 
@@ -114,8 +114,7 @@ def _required(record: Element, source: HtmlSource, field: str) -> str:
 
 
 def _optional(record: Element, source: Optional[HtmlSource], field: str) -> Optional[str]:
-    """A value the listing may leave out: not held, or not in its declared form, is not stated (the manager's
-    ruling 3), never a refusal."""
+    """A value the listing may leave out: not held, or not in its declared form, is not stated, never a refusal."""
     if source is None:
         return None
     value = _read(record, source, field)
@@ -145,7 +144,7 @@ def _amount(price_text: str, source: HtmlSource, field: str,
     """(a price's amount, notes): its source's pattern group read in the site's declared notation, a positive exact
     decimal; any other form is no amount (the price text is kept). A capture must be a whole number: one that
     continues into more digits (directly or across a declared separator) is part of a number, never its amount, so a
-    row's pattern can never read "50" out of "120.50" (reviewer 2 on SC #785); the note says so and is counted."""
+    row's pattern can never read "50" out of "120.50"; the note says so and is counted."""
     if source.pattern is not None:
         found = re.search(source.pattern, price_text)
         if found is not None and found.group(1) and (
@@ -159,7 +158,7 @@ def _amount(price_text: str, source: HtmlSource, field: str,
 
 def _whole(symbol: str, text: str) -> bool:
     """Whether the symbol occurs in the text whole: not joined to a letter on either side, so "R$" and "CA$" never
-    count as a declared "$" (f8's must, 14 Nov)."""
+    count as a declared "$"."""
     at = text.find(symbol)
     while at != -1:
         before, after = text[at - 1:at], text[at + len(symbol):at + len(symbol) + 1]

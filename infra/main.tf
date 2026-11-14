@@ -25,7 +25,7 @@ data "aws_ssm_parameter" "scraper_proxy" {
   name  = var.scraper_proxy_ssm_name
 }
 
-# Polonine's customer login (the owner, 14 Nov: "Yes, store it"), read by the PRODUCT scraper's separate price pass
+# Polonine's customer login, read by the PRODUCT scraper's separate price pass
 # (scrapers/polonine.py). Least privilege: injected ONLY into the sync service's produce (its config container runs the
 # live scrape), never into the ad-hoc scraper task, which does not scrape. Only for a brand that switches the login on
 # (polonine_login): dev by its KNOWN /${var.brand}-dev/ names (they must exist before the plan), prod by explicit
@@ -42,7 +42,7 @@ data "aws_ssm_parameter" "polonine_username" {
   count = var.polonine_username_ssm_name == "" ? 0 : 1
   name  = var.polonine_username_ssm_name
   lifecycle {
-    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    # half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
     precondition {
       condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
       error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."
@@ -53,7 +53,7 @@ data "aws_ssm_parameter" "polonine_password" {
   count = var.polonine_password_ssm_name == "" ? 0 : 1
   name  = var.polonine_password_ssm_name
   lifecycle {
-    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    # half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
     precondition {
       condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
       error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."

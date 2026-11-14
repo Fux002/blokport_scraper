@@ -95,7 +95,7 @@ prod_photos_nightly = false
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
 fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # texture generation + the photo process
 scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY" # residential proxy
-# Polonine's customer login for its price pass (the owner, 14 Nov): the produce only. Dev by the known /blokport-dev/ names.
+# Polonine's customer login for its price pass: the produce only. Dev by the known /blokport-dev/ names.
 polonine_login             = true
 polonine_username_ssm_name = "/blokport-prod/SCRAPER_POLONINE_USERNAME"
 polonine_password_ssm_name = "/blokport-prod/SCRAPER_POLONINE_PASSWORD"

@@ -102,7 +102,7 @@ class Observation(BaseModel):
     grade_text: Optional[str]
     price_text: Optional[str]
     price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
-    # contract v4 (Mas's sale rule): the regular price shown beside the current one; on sale exactly when it is set
+    # the regular price shown beside the current one: on sale exactly when it is set
     regular_price_text: Optional[str]
     regular_price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
     currency: Optional[str] = Field(pattern=r"^[A-Z]{3}$")
