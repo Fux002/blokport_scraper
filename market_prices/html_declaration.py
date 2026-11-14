@@ -74,7 +74,8 @@ class HtmlRecord(BaseModel):
 
 class HtmlFields(BaseModel):
     """The listing's facts. The price's element text is price_text as shown; its amount is the pattern's group read in
-    the site's declared number notation. `currency_symbols` names the code a symbol in the price text stands for;
+    the site's declared number notation. `currency_symbols` names the code a symbol in the price text stands for (a
+    symbol counts only whole, not joined to a letter, so "R$" is never "$"; two currencies in one text give none);
     `on_request` is the price texts that mean the price is on request, as the page states them."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -87,6 +88,15 @@ class HtmlFields(BaseModel):
     currency: Optional[HtmlSource] = None
     currency_symbols: dict[Word, Currency] = {}
     on_request: tuple[Word, ...] = ()
+
+    @model_validator(mode="after")
+    def _price_is_visible_text(self) -> "HtmlFields":
+        """F1: what a page shows is what is read. A JSON or attribute value (an analytics or data attribute) is never
+        the price; they stay for identity and specs."""
+        if self.price is not None and not self.price.text:
+            raise ValueError("the price is the page's visible text: a price source takes text, never json, attr or "
+                             "label")
+        return self
 
     @model_validator(mode="after")
     def _struck_is_never_a_fact(self) -> "HtmlFields":

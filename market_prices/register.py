@@ -10,7 +10,8 @@ from typing import Annotated, Optional
 from urllib.parse import urlparse
 
 from pydantic import (
-    AfterValidator, BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator, model_validator,
+    AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator,
+    model_validator,
 )
 
 from market_prices import config
@@ -110,6 +111,19 @@ class Discovery(BaseModel):
         return self
 
 
+class ScrapeColumns(BaseModel):
+    """Where a supplier_scrape row's facts are in the rows the product scraper wrote for its supplier: the scraper's
+    own column names. Its listings' text is the text columns joined; the spec columns become its stated_specs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: Words
+    url: Words
+    price: Words
+    text: tuple[Words, ...] = Field(min_length=1)
+    specs: tuple[Words, ...] = ()
+
+
 class Site(BaseModel):
     """One storefront. A site selling into several markets is one entry per market."""
 
@@ -127,6 +141,7 @@ class Site(BaseModel):
     discovery: Optional[Discovery] = None
     # declared_html: where its pages hold each listing's facts (market_prices/html_declaration.py)
     html: Optional[HtmlDeclaration] = None
+    scrape: Optional[ScrapeColumns] = None
     terms: Terms
     decision: Decision
     decided_by: Optional[Words] = None
@@ -168,17 +183,21 @@ class Site(BaseModel):
         if self.html is not None and self.html.read == "listing_pages" and (
                 self.discovery is None or not self.discovery.listing_pages):
             raise ValueError("html read: listing_pages needs discovery listing_pages to read")
+        if not collector.needs_scrape and self.scrape is not None:
+            raise ValueError(f"platform {self.platform} takes no scrape columns")
+        if not collector.fetches and self.supplier_key is None:
+            raise ValueError(f"platform {self.platform} reads its supplier's scrape: supplier_key is required")
         if self.query and not collector.takes_query:
             raise ValueError(f"platform {self.platform} takes no query")
         if reserved := sorted(collector.reserved_query & set(self.query)):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
-            self._require_full_record(collector.needs_discovery)
+            self._require_full_record(collector.needs_discovery, collector.needs_scrape)
             if collector.needs_html and self.html is None:
                 raise ValueError(f"an approved {self.platform} site needs its html declaration")
         return self
 
-    def _require_full_record(self, needs_discovery: bool) -> None:
+    def _require_full_record(self, needs_discovery: bool, needs_scrape: bool) -> None:
         """What a site needs before any request: only an approved row is ever fetched, so a row never requested (a
         blocked or excluded site) carries none of it, and nothing about it is invented."""
         if not self.terms.complete:
@@ -193,6 +212,8 @@ class Site(BaseModel):
             raise ValueError("approved needs seller_country and served_market")
         if needs_discovery and self.discovery is None:
             raise ValueError(f"approved needs discovery: platform {self.platform} reads the site's entry points")
+        if needs_scrape and self.scrape is None:
+            raise ValueError(f"approved needs scrape: platform {self.platform} reads its supplier's scrape columns")
 
     @property
     def collectable(self) -> bool:
