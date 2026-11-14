@@ -258,6 +258,15 @@ def alias_classification() -> tuple[dict, int]:
         return {"error": str(exc)}, 500
 
 
+def _wipe_product_images(ledger, sync) -> dict:
+    """The factory reset's image wipe, inside the reset's ledger op (`ledger` and `sync` are the op's): it spares every
+    photo of the records the reset spares (sync.kept_photos over db.KEPT_SKUS_SQL: the gone and the delisted listings),
+    whose assets are permanent (Mas, table 505) and which no re-scrape would bring back."""
+    from stone_pipeline.io import image_wipe
+    keep = {(source, sha) for source, shas in sync.kept_photos(ledger).items() for sha in shas}
+    return image_wipe.wipe_all_product_images(keep=keep)
+
+
 def _ledger_op(name: str, work):
     """Run `work(ledger, sync)` under the exclusive slot + the ledger lease guard, mapping the standard
     failures to http codes. `work` returns the success dict (paired with 200). _Busy -> 409, an in-flight
@@ -513,16 +522,18 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
                 # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
-                # variation content (type/name/aliases) from the freshly-clean base -- upserts
-                # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
-                # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
+                # variation content from the freshly-clean base: populate upserts type and name, SETS alias_rows and
+                # codes NULL (the base carries no alias sidecar, so no stale spelling is served: they are held until
+                # the next produce computes them from the stores, P2-10 C4), preserves medusa_id, and flips a changed
+                # row 'dirty' so the update pull corrects Medusa. Best-effort + LOUD (the ledger/base are already
+                # reset).
                 try:
                     from stone_pipeline.config.settings import SETTINGS as _S
                     from stone_pipeline.ledger.populate import populate_variations_full
                     out["base_reseed_content"] = populate_variations_full(lg, _S.paths.variants_export_base_csv)
                 except Exception as exc:
                     log.exception("reset: re-deriving variation content from the clean base FAILED; a seed "
-                                  "variety may keep stale aliases")
+                                  "variety may keep stale alias_rows")
                     out["base_reseed_content"] = {"error": f"content re-derive failed: {exc}"}
                 # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots) unless
                 # keep_scrape: a factory reset returns to the seed, and without the cache a cold boot cannot
@@ -551,8 +562,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
             # Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails the reset
             # (catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
             try:
-                from stone_pipeline.io.image_wipe import wipe_all_product_images
-                out["images_wiped"] = wipe_all_product_images()
+                out["images_wiped"] = _wipe_product_images(lg, sync)
             except Exception as exc:
                 log.exception("reset: product-image wipe FAILED; images were kept")
                 out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
@@ -578,13 +588,12 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
 
 def remove_source(name: str) -> tuple[dict, int]:
     """Stage 2 vendor removal (Remove permanently): guarded 409 while the source still has live (qty>0)
-    products (take it offline first), then purge its qty-0 products (tombstoned) and delete its config
-    row. Returns {removed_source, config_removed, purged, external_ids}.
+    products (take it offline first), then unpublish EVERY one of its products, sold-out ones included (reason
+    'delisted': hidden on Blokport, records, photos and textures kept, no tombstone; table 505) and delete its config
+    row. Returns {removed_source, config_removed, unpublished, external_ids}.
 
-    ISS-4: removal tombstones the products; to bring the source BACK, re-add it AND run a `reset` (soft)
-    before the next produce. A plain re-run + re-pull does NOT rebuild -- the removed products are already
-    acked/synced, so nothing re-serves until a reset re-marks them dirty. The re-serve happens via reset,
-    never automatically off a re-scrape."""
+    To bring the source BACK, re-add it: its next scrape restocks the products it still sells (a normal stock write
+    clears 'delisted'), under the same records."""
     from stone_pipeline.config import store
     # ISS-5: resolve via the ONE store-based _resolve (same as reset/purge/delist), so a config-only
     # source (no coded adapter) is removable. Every store row carries a source_code (SourceConfig
@@ -597,8 +606,8 @@ def remove_source(name: str) -> tuple[dict, int]:
         live = sync.live_products(lg, source_codes=codes)
         if live:
             raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")
-        out = sync.purge_discontinued(lg, source_codes=codes, reason="vendor_removed")
-        # the config row goes INSIDE the slot: a produce starting between the purge and this delete would
+        out = sync.unpublish_source(lg, source_codes=codes)
+        # the config row goes INSIDE the slot: a produce starting between the unpublish and this delete would
         # still list the source and re-scrape it
         out["config_removed"] = store.delete_source(name)
         return out
@@ -607,11 +616,11 @@ def remove_source(name: str) -> tuple[dict, int]:
     if code != 200:
         return result, code
     config_removed = result.pop("config_removed")
-    log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
-        "source": name, "purged": result["product"], "config_removed": config_removed}})
+    log.warning("source REMOVED (unpublish + delete config)", extra={"extra_fields": {
+        "source": name, "unpublished": result["unpublished"], "config_removed": config_removed}})
     snapshot_config()
     return {"removed_source": name, "config_removed": config_removed,
-            "purged": result["product"], "external_ids": result["external_ids"]}, 200
+            "unpublished": result["unpublished"], "external_ids": result["external_ids"]}, 200
 
 
 # -- variation verbs: retire / un-retire (explicit operator removal of a variety) ---
@@ -628,11 +637,17 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
         live = sync.variation_live_products(lg, key)
         if live and not force:
             raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
-        out = sync.retire_variation(lg, key, force=force)
+        try:
+            out = sync.retire_variation(lg, key, force=force)
+        except sync.KeptListingsShowVariety as exc:
+            raise _Busy(str(exc)) from exc
         # exclusion memory (never re-mint a retired variety, E8/E10), written INSIDE the slot: a produce
         # starting between the ledger op and this write would read the old memory and re-mint the Key.
+        from stone_pipeline.config import decisions_store
         from stone_pipeline.stages import decisions
         decisions.add_retired(key)
+        # the Key's learned aliases go with it (P2-10 C6); un_retire does not restore them, the matcher re-proposes
+        out["learned_aliases_cleared"] = decisions_store.clear_learned_for_keys([key])
         return out
 
     return _ledger_op("retire_variation", work)
@@ -686,11 +701,20 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
                     f"variety {siblings[0][1]!r} has {live} live product(s); delist or move them first "
                     f"(or force)")})
                 continue
+            # a kept record (gone or delisted) is never deleted (table 505): checked for the whole variety first
+            if kept := [sku for sk, _ in siblings for sku in sync.variation_kept_listings(lg, sk)]:
+                out["skipped"].append({"key": k, "code": 409, "error": (
+                    f"variety {siblings[0][1]!r} is shown by gone or delisted listing(s) {', '.join(kept)}: their "
+                    "records stay; move them to another variety first")})
+                continue
             targets.append(siblings)
         # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.
         # by (type, name): the type-slug from the variety's Key keeps a same-name variety of another type intact
         out["mint_decisions_cleared"] = sum(decisions_store.clear_for_variety(sibs[0][1], ident_of[sibs[0][0]][0])
                                             for sibs in targets)
+        # every Key's learned aliases go with the variety (P2-10 C6), in the same config.db-first step
+        out["learned_aliases_cleared"] = decisions_store.clear_learned_for_keys(
+            sk for sibs in targets for sk, _ in sibs)
         for sibs in targets:
             for sk, _ in sibs:
                 sync.retire_variation(lg, sk, force=force, reason="variation_unminted")

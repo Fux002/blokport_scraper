@@ -22,6 +22,7 @@ from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.reference.loaders import existing_varieties_file
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.run import run_source
+from stone_pipeline.stages import images
 
 
 
@@ -48,6 +49,7 @@ def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_d
     out = tmp_path / "outputs"
     ledger_path = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
     _seed_ledger_like_the_sync_server(ledger_path, tmp_path)
 
@@ -68,7 +70,7 @@ def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_d
     )
 
 
-def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_data_dir):
+def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_data_dir, seeded_config_store):
     """The run gate consults writethrough.enabled() and, when the NEUTRAL SCRAPER_ flag is set, invokes
     record_source. Verifies the env-prefix consolidation end-to-end through the real run_source gate;
     record_source is spied so the from_medusa export is not required."""
@@ -76,6 +78,7 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_d
 
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
                         lambda *a, **k: (modes.append(k.get("mode")), True)[1])
@@ -84,13 +87,14 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_d
     assert modes == [OutputMode.FULL], "write-through enabled: a full run calls record_source exactly once, as a full run"
 
 
-def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch, scrape_data_dir):
+def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch, scrape_data_dir, seeded_config_store):
     """A failed record_source means Medusa never receives this source: the run must exit non-zero (run_all
     then omits it from results and `all` returns 1), AFTER the CSVs, diagnostics and steps are written so the
     operator can read why."""
     from stone_pipeline.ledger import writethrough
 
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: False)
     out = tmp_path / "fail"
     with pytest.raises(SystemExit):
@@ -99,7 +103,7 @@ def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_pat
     assert glob.glob(str(out / "**" / "diagnostics" / "health.json"), recursive=True), "diagnostics still written"
 
 
-def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch, scrape_data_dir):
+def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch, scrape_data_dir, seeded_config_store):
     """With neither prefix set, enabled() is False and the gate must not touch the ledger."""
     from stone_pipeline.ledger import writethrough
 

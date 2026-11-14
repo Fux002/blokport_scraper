@@ -135,6 +135,24 @@ class NoConflictSet(RuntimeError):
     source, an empty one too), so nothing can tell which of its photos are conflicts."""
 
 
+class NoKeptSet(RuntimeError):
+    """No produce has stored the kept-photo set yet (imagestore.kept_key): nothing can tell which photos belong to
+    listings that left sale and keep their records, so nothing is published or removed."""
+
+
+def read_kept(client):
+    """{(source, sha)} of the produce's kept-photo set (stages.images.save_kept): the photos of the listings that left
+    sale and keep their records (table 505), left exactly as published. NoKeptSet when none is stored: never read as
+    "nothing kept"."""
+    try:
+        body = client.get_object(Bucket=S3_BUCKET, Key=imagestore.kept_key())["Body"].read()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in MISSING:
+            raise NoKeptSet("no kept-photo set yet: run a produce first") from exc
+        raise
+    return {(source, sha) for source, shas in json.loads(body).items() for sha in shas}
+
+
 def read_conflicts(client, sources):
     """{(source, sha): listing handles} of the produce's stored conflict sets (imagestore.conflicts_key): the one set the
     photo process, the owner's decisions and the review page work with. NoConflictSet when one of `sources` (the sheet's)
@@ -539,7 +557,7 @@ def publish(client, root, sheet, photos, say=print, *, assigned, held):
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = excluded()
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
-    folders = [*map(imagestore.standard_prefix, (*imagestore.STANDARD_VIEWS, imagestore.CUTOUT_SUBDIR, imagestore.TILE_SUBDIR))]
+    folders = imagestore.published_prefixes()
     published = {k: t for prefix in folders for k, t in _objects(client, prefix).items()}
     fresh = unpublished(plan, made, published)
     stamps = dict(zip(todo, pool_map(C.STORE_WORKERS, lambda s: _stamp(client, s, published), todo)))
@@ -562,6 +580,7 @@ def publish(client, root, sheet, photos, say=print, *, assigned, held):
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
     kept = [imagestore.standard_key(*photo, view) for photo in held for view in imagestore.STANDARD_VIEWS]
     kept += [k for photo in held for k in cutout_keys(photo)]
+    kept += [imagestore.tile_record_key(*photo) for photo in held]     # a held tile listing's record of its renders
     gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"] + kept)
     pool_map(C.STORE_WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
     unassigned = [k for k in unassigned if k not in {imagestore.assigned_key(*photo) for photo in held}]

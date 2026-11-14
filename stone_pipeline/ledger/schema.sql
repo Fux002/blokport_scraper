@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS ledger_meta (
 -- (Medusa external_id). A type or canonical-name correction is a NEW Key (a
 -- re-key, design section 5C), not an update of this row.
 --
--- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: type, name, aliases and the
+-- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: type, name, alias_rows, codes and the
 --   variety's category images, each pair's S3 key and ETag). fill_variation_types re-hashes the row when it fills
 --   the type.
 -- ---------------------------------------------------------------------------
@@ -58,7 +58,11 @@ CREATE TABLE IF NOT EXISTS variation (
     key           TEXT PRIMARY KEY,                    -- {slug(type)}__{slug(name)}_{uuid5} (phase1.variety_key)
     type          TEXT NOT NULL,                       -- canonical type name
     name          TEXT NOT NULL,                       -- canonical variety name
-    aliases       TEXT,                                -- JSON array of strings
+    -- the scraper's WHOLE alias set, JSON [{value, method}] (method seed | operator | learned, by match_key), and its
+    -- codes, JSON [string] (P2-10 C4). NULL = not computed yet, never "empty" ('[]' is the empty channel): a row
+    -- with either NULL is held from the serve until a produce computes both (ledger v18).
+    alias_rows    TEXT,
+    codes         TEXT,
     medusa_id     TEXT,                                -- null until synced
     -- 1 when this variation is in the produced 1_variants_full set (the catalog
     -- output), 0 for export-only rows kept for ids/FK (junk, consolidated-away).
@@ -76,6 +80,9 @@ CREATE TABLE IF NOT EXISTS variation (
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     retry_after   TEXT,                                 -- after a failed apply: not served again before this time
+    -- a reserve (POST /sync/v1/reserve, an un-archive) not yet leased: an ack leaves the row dirty while it is set,
+    -- so no lease issued before the reserve can sync it away. The next lease clears it.
+    reserved_at   TEXT,
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -175,6 +182,12 @@ CREATE TABLE IF NOT EXISTS product (
     -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
     -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
     photo_ready          INTEGER NOT NULL DEFAULT 1,
+    -- the standardised files the product links that the photos side has not published
+    -- (populate.mark_unpublished_photos, recomputed for every product of the source on every produce): a sorted JSON
+    -- array of object keys, null = none.
+    -- A product with any is never served (sync._ELIGIBLE_PRODUCT). A content fact, not a sync state: a requeue or a
+    -- reset never clears it, only a produce that finds the files published. Not served, so not in payload_hash.
+    photo_unpublished    TEXT,
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids
@@ -216,10 +229,17 @@ CREATE TABLE IF NOT EXISTS inventory (
     made_to_order    INTEGER NOT NULL DEFAULT 0,
     last_synced_qty  INTEGER,
     last_synced_made_to_order INTEGER,                  -- null until first inventory sync
-    reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
-                                                        -- hides it), 'replaced_by_lot' (a bundle split into its
-                                                        -- pieces) vs null (ordinary out-of-stock, stays listed)
+    reason           TEXT,                              -- why qty is 0: 'sold_out' (gone at its supplier: stays
+                                                        -- published, not buyable), 'delisted' (admin take-offline
+                                                        -- or vendor removal, Medusa hides it), 'no_photo' (hidden
+                                                        -- until its standardised photo), 'replaced_by_lot' (a bundle
+                                                        -- split into its pieces) vs null (a plain stock 0: Blokport
+                                                        -- hides it, M4 measured; table 505)
     replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
+    gone_at          TEXT,                              -- the first run its supplier no longer had it (UTC ISO), kept
+                                                        -- while it stays gone (one gone before v18: the first v18
+                                                        -- run's date); null when listed. A gone listing's record is
+                                                        -- never deleted (table 505)
     updated_at       TEXT NOT NULL,
     last_synced_reason   TEXT,                          -- the reason Medusa last acked (null until first sync)
     last_synced_lot_code TEXT,                          -- the lot code Medusa last acked
@@ -306,6 +326,18 @@ CREATE TABLE IF NOT EXISTS removed (
 -- this index does not reference `kind` (it is added by migrate AFTER schema.sql runs on old ledgers).
 CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, external_id);
 CREATE INDEX IF NOT EXISTS idx_removed_serve_kind ON removed (state, kind, created_at, external_id);
+
+-- ---------------------------------------------------------------------------
+-- variation_deleted (v20, table 575 / G5): every variety Medusa acked deleted ('done' on its variation
+-- tombstone, which deletes both the tombstone and the variation row). Emit's live-export union skips these Keys,
+-- so a stale export cannot re-create a deleted variety. A Key that re-enters from the base or curate's delta (a real
+-- re-mint) loses its row in populate (E5). Never served.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS variation_deleted (
+    key        TEXT PRIMARY KEY,                        -- the deleted variation Key
+    reason     TEXT,                                    -- the tombstone's reason
+    deleted_at TEXT NOT NULL                            -- when Medusa's 'done' ack landed
+);
 
 -- ---------------------------------------------------------------------------
 -- sync_run: the audit ledger, one row per reconcile pass. `counts` is a JSON blob

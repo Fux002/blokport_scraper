@@ -223,6 +223,13 @@ source whose images aren't staged yet shows blank product images until its image
 then a re-`build` fills them in. (Variant textures — `{Key}.png` under `<env>/variations/` — are a
 separate generated lane.)
 
+**Rollout of the kept-photo set (table 505): on each environment, a produce first, then photos.** A photos run
+refuses to start ("no kept-photo set yet: run a produce first", exit 2) until a produce has stored
+`<env>/products/standard/kept.json`: the photos of the listings that left sale and keep their records (gone at their
+supplier, or delisted). Without that set it could not tell which photos it must leave exactly as published. A
+factory reset without `keep_images` deletes that file with the other product images (the kept photos themselves
+stay), so after one, again: produce, then photos.
+
 ## Key concepts
 
 - **Variant** = a stone (e.g. "Carrara"). Lives in the variant files; uploaded to

@@ -34,7 +34,7 @@ def _run(tmp_path, name, scrape_data_dir, export):
     return out / m.run_id
 
 
-def test_sold_history_does_not_block_a_real_delist(tmp_path, scrape_data_dir, caplog):
+def test_sold_history_does_not_block_a_real_delist(tmp_path, scrape_data_dir, caplog, seeded_config_store):
     first = _run(tmp_path, "first", scrape_data_dir, _export(tmp_path / "none.csv", []))
     live = sorted(_skus(first / "4_products_import" / "medusa_import.csv"))
     assert len(live) >= 10
@@ -45,10 +45,10 @@ def test_sold_history_does_not_block_a_real_delist(tmp_path, scrape_data_dir, ca
     second = _run(tmp_path, "second", scrape_data_dir, export)
 
     assert not any("delist refused" in r.getMessage() for r in caplog.records)
-    assert _skus(second / "review" / "products_discontinued.csv") == {"MAR-GONE-1"} | {s for s, _ in sold}
+    assert _skus(second / "review" / "products_discontinued.csv") == {"MAR-GONE-1"}   # sold history: reported once
 
 
-def test_a_partial_scrape_is_still_refused(tmp_path, scrape_data_dir, caplog):
+def test_a_partial_scrape_is_still_refused(tmp_path, scrape_data_dir, caplog, seeded_config_store):
     first = _run(tmp_path, "first", scrape_data_dir, _export(tmp_path / "none.csv", []))
     live = sorted(_skus(first / "4_products_import" / "medusa_import.csv"))
     missing = [(f"MAR-MISSING-{i}", 2) for i in range(len(live))]    # half the live catalogue absent
@@ -60,7 +60,7 @@ def test_a_partial_scrape_is_still_refused(tmp_path, scrape_data_dir, caplog):
     assert _skus(second / "review" / "products_discontinued.csv") == set()
 
 
-def test_a_mistyped_collection_country_holds_the_source_and_keeps_the_last_good_run(tmp_path, scrape_data_dir, monkeypatch, caplog):
+def test_a_mistyped_collection_country_holds_the_source_and_keeps_the_last_good_run(tmp_path, scrape_data_dir, monkeypatch, caplog, seeded_config_store):
     import dataclasses
     from stone_pipeline import run as run_module
     from stone_pipeline.config.sources import load_source

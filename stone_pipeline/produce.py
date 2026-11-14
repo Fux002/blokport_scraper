@@ -177,6 +177,17 @@ def _migrate_learned_aliases() -> None:
     migrate_learned.run_once()
 
 
+def _carry_alias_sets() -> None:
+    """P2-10 C4: carry each variety's acked alias set into ledger v18's alias_rows and codes, ONCE (aliases.carry),
+    after the learned-alias migration (a learned owner is active by then) and before any scrape, build or populate
+    reads or writes them. A value no store owns RAISES with nothing written: the produce stops here."""
+    from stone_pipeline.ledger import writethrough
+    if not writethrough.enabled():
+        return
+    from stone_pipeline.aliases import carry
+    carry.run_produce_step()
+
+
 def _frozen_waiting() -> int:
     """New products waiting on a frozen (archived) variety -- counted from the ledger for a visible log line."""
     from stone_pipeline.ledger import sync, writethrough
@@ -294,6 +305,7 @@ def run(sources: list[str] | None, stage: str, verify: bool = False) -> int:
     _fetch_inputs()
     _mirror_archived()   # VE2: freeze archived varieties from the FRESH export before any source is recorded
     _migrate_learned_aliases()
+    _carry_alias_sets()
     # Stages that REUSE the last scrape instead of re-fetching suppliers: `catalog` (consolidate only) and
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
@@ -346,7 +358,6 @@ def _persist_and_publish(stage: str, rc: int) -> int:
         return rc
     from stone_pipeline.ledger import snapshot
     snapshot.save_artifacts()
-    snapshot.save_state()       # persist the learned-alias write-back so a roll does not re-review spellings
     if stage in _CATALOG_STAGES:
         from stone_pipeline.io import deliverables
         try:

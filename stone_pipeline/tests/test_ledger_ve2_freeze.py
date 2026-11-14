@@ -21,7 +21,7 @@ def _variation(ledger, key, *, state="synced", medusa_id="V", archived=0, in_ful
     """A variation row; with `icon`, its slab icon too (the product gate needs an icon in the product's category)."""
     now = now_iso()
     ledger.upsert("variation", {
-        "key": key, "type": type_, "name": "x", "aliases": "[]",
+        "key": key, "type": type_, "name": "x", "alias_rows": "[]", "codes": "[]",
         "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "", "state": state,
         "archived": archived, "first_seen": now, "last_synced": now if medusa_id else None,
         "created_at": now, "updated_at": now}, pk=("key",))
@@ -41,10 +41,10 @@ def _product(ledger, sku, variation_key, *, state="pending", medusa_id=None, las
 def _export_csv(tmp_path, rows, *, with_status=True):
     """rows: (Id, Key, Name, status). Writes variants_export.csv and returns its Path."""
     p = tmp_path / "variants_export.csv"
-    header = "Id,Key,Name,Type,Aliases" + (",status" if with_status else "")
+    header = "Id,Key,Name,AdminAliases,AdminCodes,Type" + (",status" if with_status else "")   # Medusa's (P2-7)
     lines = [header]
     for _id, key, name, status in rows:
-        cells = [_id, key, name, "Marble", ""] + ([status] if with_status else [])
+        cells = [_id, key, name, "", "", "Marble"] + ([status] if with_status else [])
         lines.append(",".join(cells))
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p
@@ -86,6 +86,70 @@ def test_mirror_touches_only_changed_rows(tmp_path):
         assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 0
         after = ledger.get("variation", "key", "marble__v1")
         assert after["archived"] == 1 and after["updated_at"] == before   # no spurious write
+
+
+def test_an_unarchived_synced_row_is_served_exactly_once(tmp_path):
+    # P2-10 / 173 F18e: an archived variety was never served, so the consumer may hold it without its current payload.
+    # Lowering archived (1 to 0) marks the row dirty in the same UPDATE, so it re-serves once with its whole payload.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", archived=1)
+        _variation(ledger, "slab_v2", state="synced", archived=0)            # never archived: untouched
+        assert sync.ready(ledger, "variations") == []
+        exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "active"), ("i2", "slab_v2", "B", "active")])
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 1
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "dirty"
+        assert ledger.get("variation", "key", "slab_v2")["state"] == "synced"
+        served = sync.ready(ledger, "variations")
+        assert [i["external_id"] for i in served] == ["slab_v1"]
+        sync.ack(ledger, "variations", "slab_v1", "V", payload_hash=served[0]["payload_hash"])
+        assert sync.ready(ledger, "variations") == []                         # once, not on every pull
+        before = [dict(r) for r in ledger.execute("SELECT * FROM variation ORDER BY key")]
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 0   # a second run: no change
+        assert [dict(r) for r in ledger.execute("SELECT * FROM variation ORDER BY key")] == before
+        assert sync.ready(ledger, "variations") == []
+
+
+def test_unarchive_outranks_a_lease_issued_before_it(tmp_path):
+    # the #591 review's race on the mirror: the produce runs it in another process than the pulls, so a lease can be
+    # in flight across an archive and un-archive. That lease's ack, echoing the same hash, records what Medusa did
+    # but must not consume the un-archive's re-serve: the row stays dirty and the next pull serves it once.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="dirty", archived=0)
+        leased = sync.ready(ledger, "variations")                             # the lease, before the flip
+        assert [i["external_id"] for i in leased] == ["slab_v1"]
+        for status in ("archived", "active"):                                 # archive, then un-archive
+            writethrough.mirror_archived_variations(
+                ledger, export_path=_export_csv(tmp_path, [("i1", "slab_v1", "A", status)]))
+        assert sync.ack(ledger, "variations", "slab_v1", "V-2", payload_hash=leased[0]["payload_hash"]) == 1
+        row = ledger.get("variation", "key", "slab_v1")
+        assert row["state"] == "dirty" and row["medusa_id"] == "V-2"           # recorded, not synced
+        served = sync.ready(ledger, "variations")
+        assert [i["external_id"] for i in served] == ["slab_v1"]
+        sync.ack(ledger, "variations", "slab_v1", "V-2", payload_hash=served[0]["payload_hash"])
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "synced"
+        assert sync.ready(ledger, "variations") == []                         # once
+
+
+def test_unarchive_never_revives_an_operator_abandoned_row(tmp_path):
+    # the same re-mark rule as a reserve: an abandoned dead-letter is the operator's terminal verdict, kept as it is
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="gap_held", archived=1)
+        ledger.execute("UPDATE variation SET abandoned_at = '2000-01-01T00:00:00+00:00'")
+        exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "active")])
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 1
+        row = ledger.get("variation", "key", "slab_v1")
+        assert row["archived"] == 0 and row["state"] == "gap_held" and row["abandoned_at"]
+        assert sync.ready(ledger, "variations") == []
+
+
+def test_unarchive_never_resurrects_a_retiring_row_or_demotes_a_pending_one(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="retiring", archived=1)
+        _variation(ledger, "slab_v2", state="pending", medusa_id=None, archived=1)
+        exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "active"), ("i2", "slab_v2", "B", "active")])
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 2
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "retiring"
+        assert ledger.get("variation", "key", "slab_v2")["state"] == "pending"
 
 
 def test_mirror_is_a_noop_when_the_export_is_absent(tmp_path):

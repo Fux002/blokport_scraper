@@ -33,7 +33,7 @@ from stone_pipeline.core.text import match_key
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import curate, match_variation
-from stone_pipeline.state import writeback as wb
+from stone_pipeline.stages.match_variation import WriteBack
 from stone_pipeline.tests._existing_index import existing_index
 from stone_pipeline.tests.test_origin_aware_matching import _stage
 
@@ -164,7 +164,7 @@ def test_the_active_reader_is_sorted_and_creates_no_store(tmp_path, monkeypatch,
 # --- the matcher: active rows only, proposals from its guesses -------------------------------------------------------
 
 def _built_stage(monkeypatch):
-    """VariationStage.build over one hand-built index (candidate 'a' = KEY), so the learned rows it applies are seen."""
+    """VariationStage.build over one hand-built index (candidate 'a' = KEY)."""
     index = CandidateIndex()
     index.add("a", "Kashmir Golda", surfaces=[], block_type="granite")
     monkeypatch.setattr(match_variation, "build_variation_index", lambda table, backbone, origin_map=None: index)
@@ -174,15 +174,26 @@ def _built_stage(monkeypatch):
     return index
 
 
-def test_a_proposed_learned_alias_is_not_a_matcher_input(config_db, monkeypatch):
+def _table_aliases(tmp_path) -> list[str]:
+    """KEY's aliases in the matcher's variety table, its surfaces from the alias stores (P2-10 C3: the learned rows
+    reach the matcher through aliases.stores, the one place every store is read)."""
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.reference.loaders import load_variants
+    from stone_pipeline.reference.loaders.backbone import Backbone
+    path = tmp_path / "variants_export_base.csv"
+    path.write_text(f"Key,Name,Type\n{KEY},Kashmir Golda,Granite\n", encoding="utf-8")
+    return load_variants(path, alias_stores.scraper_stores(Backbone())).by_id[KEY].aliases
+
+
+def test_a_proposed_learned_alias_is_not_a_matcher_input(config_db, tmp_path):
     decisions_store.propose_learned_aliases([_proposal("Totally Other Name")])
-    assert "Totally Other Name" not in _built_stage(monkeypatch).candidates["a"].surfaces
+    assert "Totally Other Name" not in _table_aliases(tmp_path)
 
 
-def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, monkeypatch):
+def test_an_active_learned_alias_reaches_its_variety_by_key(config_db, tmp_path):
     decisions_store.propose_learned_aliases([_proposal("Totally Other Name")])
     decisions_store.decide_learned_alias(KEY, "Totally Other Name", "active", "operator")
-    assert "Totally Other Name" in _built_stage(monkeypatch).candidates["a"].surfaces
+    assert "Totally Other Name" in _table_aliases(tmp_path)
 
 
 def test_the_matcher_no_longer_reads_the_alias_writeback_csv(config_db, monkeypatch, tmp_path):
@@ -200,7 +211,7 @@ def test_a_fuzzy_bind_is_proposed_on_its_variety_key(config_db):
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(_stage().ref), "variants": {"slab": SimpleNamespace(
             by_id={"a": SimpleNamespace(key=KEY, archived=False)})}}),
-        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=wb.WriteBack(),
+        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Goldx",
                        raw_type="Granite", raw_format="Slab")
@@ -424,6 +435,7 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     monkeypatch.setattr(produce, "_mirror_archived", lambda: None)
     monkeypatch.setattr(writethrough, "enabled", lambda: True)
     monkeypatch.setattr(migrate_learned, "run_once", lambda **k: calls.append("migrate"))
+    monkeypatch.setattr(produce, "_carry_alias_sets", lambda: None)     # C4's carry: test_p2_10_alias_carry pins it
     monkeypatch.setattr(produce, "_live_scrape", lambda s: 0)
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append("build") or 1)
     monkeypatch.setattr(produce, "_finalize_control_plane", lambda stage: None)

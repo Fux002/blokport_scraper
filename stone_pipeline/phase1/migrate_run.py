@@ -34,6 +34,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.io import storage
 from stone_pipeline.io.variety_icons import VARIATIONS_PREFIX
 from stone_pipeline.ledger import snapshot
+from stone_pipeline.ledger.db import SCHEMA_VERSION as LEDGER_SCHEMA_VERSION
 from stone_pipeline.phase1 import store_writer
 from stone_pipeline.phase1.migrate_stores import (MigrationRefused, read_key_map, read_retired_keys,
                                                   read_survivor_map)
@@ -45,6 +46,9 @@ log = logfmt.get_logger("phase1.migrate_run")
 
 # --- config ---------------------------------------------------------------------------------------------------------
 INPUTS_ENV, WRITE_ENV = "MIGRATE_INPUTS", "MIGRATE_WRITE"
+# The last ledger version this migration may write (P2-10 C4, Mas 13 Nov): from v18 its ledger keeps no `aliases`, so
+# the v18 carry would have no acked set to move. The migration runs on the pre-C4 image; on later code it refuses.
+PRE_C4_LEDGER_VERSION = 17
 _MISSING = ("NoSuchKey", "404", "NotFound")
 # the step-1 stores: name -> (old S3 key, kind). sqlite stores digest by content, the rest by bytes.
 STORES = {
@@ -268,6 +272,10 @@ def run(client, inputs: dict, write: bool) -> dict:
 
 
 def main() -> int:
+    if LEDGER_SCHEMA_VERSION > PRE_C4_LEDGER_VERSION:
+        raise MigrationRefused(f"the phase 1 store migration runs on the pre-C4 image only (ledger "
+                               f"v{PRE_C4_LEDGER_VERSION}): this code writes ledger v{LEDGER_SCHEMA_VERSION}, which "
+                               "keeps no `aliases` for the v18 carry; nothing was read or written")
     write = os.environ.get(WRITE_ENV, "0").strip()
     if write not in ("0", "1"):
         raise SystemExit(f"{WRITE_ENV} must be 0 (dry run) or 1 (write), not {write!r}")

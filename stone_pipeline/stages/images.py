@@ -157,6 +157,17 @@ def _list_objects(prefix: str) -> dict[str, str]:
             for obj in page.get("Contents", [])}
 
 
+def published_keys(cfg=None) -> frozenset[str]:
+    """Every object key the photos publish keeps (imagestore.published_prefixes), listed once per folder: the set the
+    ledger write checks each product's linked standardised files against (populate.mark_unpublished_photos). Empty in
+    local mode, where nothing is published (link_standard links nothing standardised there either). Raises on any S3
+    failure: unlike linking, which keeps today's images, the check must never pass a product it could not verify."""
+    cfg = cfg or SETTINGS.images
+    if getattr(cfg, "mode", None) == "local":
+        return frozenset()
+    return frozenset(key for prefix in imagestore.published_prefixes() for key in _list_objects(prefix))
+
+
 def _by_sha(objects: dict[str, str], suffix: str = "") -> dict[str, str]:
     """{content sha256: ETag} of the keys ending in `suffix` that carry a sha."""
     return {sha: etag for key, etag in objects.items() if key.endswith(suffix) and (sha := imagestore.sha_from_url(key))}
@@ -403,6 +414,19 @@ def save_conflicts(by_source: dict[str, dict[str, list[str]]]) -> None:
         key, body = imagestore.conflicts_key(source), json.dumps(photos, sort_keys=True).encode()
         if _stored_object(key) != body:
             _put_object(key, body)
+
+
+def save_kept(kept: dict[str, list[str]]) -> None:
+    """Store the produce's kept-photo set (imagestore.kept_key, from ledger.sync.kept_photos) whole, only when it
+    changed, and only from a run that writes the bucket, as save_conflicts. Raises on any S3 failure: the photo
+    process must never work from a set this produce did not store."""
+    if SETTINGS.images.mode != "s3" or SETTINGS.s3.dry_run:
+        log.info("kept-photo set not stored: this run does not write the bucket", extra={"extra_fields": {
+            "image_mode": SETTINGS.images.mode, "s3_dry_run": SETTINGS.s3.dry_run}})
+        return
+    key, body = imagestore.kept_key(), json.dumps(kept, sort_keys=True).encode()
+    if _stored_object(key) != body:
+        _put_object(key, body)
 
 
 def _skus(rows: list[CanonicalRow]) -> dict[int, str]:

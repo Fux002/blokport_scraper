@@ -29,7 +29,6 @@ def _stub(monkeypatch):
     from stone_pipeline.ledger import snapshot
     from stone_pipeline.io import deliverables as upload_artifacts
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
-    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
     monkeypatch.setattr(upload_artifacts, "upload_all", lambda run_id=None: 0)
     return calls
 

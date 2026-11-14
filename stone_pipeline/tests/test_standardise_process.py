@@ -34,6 +34,13 @@ def _judged_by_inputs(monkeypatch):
     is paid), so a fake judge receives (original, result, fmt) and a fake check (original, copy)."""
     monkeypatch.setattr(select.judge, "judging", lambda original, result, fmt: (original, result, fmt))
     monkeypatch.setattr(select.judge, "checking", lambda original, copy: (original, copy))
+
+
+@pytest.fixture(autouse=True)
+def _nothing_kept(monkeypatch):
+    """No listing here left sale keeping its record: the produce's kept-photo set is empty (table 505; its reading and
+    its refusal are test_sold_out_keeps_photos's)."""
+    monkeypatch.setattr(pub, "read_kept", lambda s3: frozenset(), raising=False)
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
 NO_TILES = "Product Handle,Product Category 1\n"            # a product sheet without tile listings
@@ -529,6 +536,17 @@ def test_a_view_no_longer_chosen_is_removed_and_that_is_a_change():
     s3._store(imagestore.standard_key("sentas", B, "main"), b"old")
     out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held=frozenset())
     assert out["removed"] == 1 and imagestore.standard_key("sentas", B, "main") not in s3.objects
+
+
+def test_publish_keeps_exactly_the_folders_published_prefixes_names(monkeypatch):
+    # one notion of "published": the folders publish keeps are imagestore.published_prefixes, the set the produce checks
+    # every product's linked standardised files against (populate.mark_unpublished_photos)
+    s3 = _published_bucket()
+    real, extra = imagestore.published_prefixes, imagestore.standard_prefix("extra")
+    s3._store(f"{extra}sentas/{B}.jpg", b"old")
+    monkeypatch.setattr(imagestore, "published_prefixes", lambda: (*real(), extra))
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held=frozenset())
+    assert out["removed"] == 1 and f"{extra}sentas/{B}.jpg" not in s3.objects
 
 
 def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):

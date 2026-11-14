@@ -29,8 +29,10 @@ from stone_pipeline.stages import tree_build
 CATALOG = rewrite_committed.REPO_ROOT / "catalog_source"
 VARIETIES = CATALOG / "backbone_varieties.json"
 ADDITIONS = CATALOG / "backbone_additions" / "varieties.json"
-POST_FIELDS = {"key", "variant", "stone_type", "color", "finishes", "qualities", "aliases", "merged_from"}
-ADDITION_FIELDS = POST_FIELDS | {"categories"}
+# P2-10's seed rewrite adds `codes` to every backbone post (the seed store's code set); curate's additions keep theirs
+ADDITION_FIELDS = {"key", "variant", "stone_type", "color", "finishes", "qualities", "aliases", "merged_from",
+                   "categories"}
+POST_FIELDS = ADDITION_FIELDS - {"categories"} | {"codes"}
 # D7: block's own finish set, as the finish vocabulary spells it
 BLOCK_FINISHES = ["Brushed", "Chain Sawn & Squared", "Chain Sawn & Un-squared", "Diamond Wire Sawn & Squared",
                   "Diamond Wire Sawn & Un-squared", "Drill, Split & Squared", "Drill, Split & Un-squared",
@@ -107,6 +109,15 @@ def test_an_identitys_three_posts_merge_into_one(key_map):
     assert post == {"key": _K, "variant": "Absolute Black", "stone_type": "Granite", "color": ["Black", "Grey"],
                     "finishes": ["Polished", "Honed"], "qualities": ["A"],            # the slab post's (D7)
                     "aliases": ["Shanxi Black", "Nero Assoluto", "Tile Black"], "merged_from": []}
+
+
+def test_a_copy_with_another_name_lands_as_an_alias_of_the_survivor_post(key_map):
+    # a loser name (a copy whose name is not the survivor's) reaches the seed as an alias of the survivor post by this
+    # merge, never through the ledger (P2-10 C4 drops the ledger's alias union; manager, 11-12)
+    slab = _post(key="slab_granite_absolute_black_a", aliases=["Shanxi Black"])
+    tile = _post(key="tile_granite_absolute_black_c", category="Tiles", variant="Absolute Black Premium")
+    (post,) = rewrite_committed.merge_backbones([slab], [], [tile], key_map)
+    assert (post["variant"], post["aliases"]) == ("Absolute Black", ["Shanxi Black", "Absolute Black Premium"])
 
 
 def test_a_post_the_map_does_not_carry_refuses(key_map):

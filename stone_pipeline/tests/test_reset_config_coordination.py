@@ -21,6 +21,9 @@ def _fake_ledger_op(name, work):
 
         def reconcile_variations_to_seed(self, lg, seed_keys, protected=None, seed_identities=None):
             return {}
+
+        def kept_photos(self, lg):
+            return {}                                  # no listing left sale keeping its record (table 505)
     return work(None, _Sync()), 200
 
 
@@ -353,6 +356,9 @@ def _stub_ledger_and_sync(monkeypatch, captured, live=0):
         def variation_live_products(self, lg, key):
             return live
 
+        def variation_kept_listings(self, lg, key):
+            return []                                  # no kept record (gone or delisted) shows these varieties (505)
+
         def retire_variation(self, lg, key, force=False, reason="variation_removed"):
             captured.setdefault("retired", []).append(key)
             captured["reason"] = reason
@@ -530,7 +536,7 @@ def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key
 
     def _var(ledger, key, name):
         ledger.upsert("variation", {"key": key, "type": "Granite", "name": name,
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "V", "in_full": 1,
                                     "payload_hash": "", "state": "synced", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))

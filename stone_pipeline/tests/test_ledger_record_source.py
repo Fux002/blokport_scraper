@@ -20,16 +20,16 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import bootstrap, writethrough
 from stone_pipeline.ledger.db import Ledger
 
-_EXPORT_HEADER = "Id,Key,Name,Type,Aliases"
+_EXPORT_HEADER = "Id,Key,Name,AdminAliases,AdminCodes,Type"   # Medusa's export (P2-7)
 _VARIATION_KEY = "marble__carrara_0001"
 
 
 def _write_export(path):
-    # the exact columns seed_variations reads; two rows, one with piped aliases
+    # the columns seed_variations reads; two rows, one with piped hand aliases (never the scraper's)
     path.write_text(
         _EXPORT_HEADER + "\n"
-        f"V1,{_VARIATION_KEY},Carrara,Marble,Statuario|Bianco\n"
-        "V2,granite__preto_0002,Preto,Granite,\n",
+        f"V1,{_VARIATION_KEY},Carrara,Statuario|Bianco,,Marble\n"
+        "V2,granite__preto_0002,Preto,,,Granite\n",
         encoding="utf-8",
     )
     return path
@@ -38,15 +38,13 @@ def _write_export(path):
 def _open_seeded(ledger_path):
     """Open the ledger the same way record_source's open_ledger does (matching fingerprint) and pre-seed
     one variation, so a later record_source sees a non-empty variation table and skips its own seeding."""
-    import json
-
     from stone_pipeline.ledger.db import now_iso
     ledger = Ledger.open(ledger_path, env=ENV_NAME,
                          backend_id_fingerprint=writethrough.backend_fingerprint())
     now = now_iso()
     ledger.upsert("variation", {
         "key": _VARIATION_KEY, "type": "Marble", "name": "Carrara",
-        "aliases": json.dumps([]),
+        "alias_rows": "[]", "codes": "[]",
         "medusa_id": "V1", "payload_hash": "", "state": "synced",
         "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now,
     }, pk=("key",))
@@ -68,12 +66,13 @@ def test_seed_variations_loads_synthetic_export(tmp_path):
         n = bootstrap.seed_variations(ledger, path=export)
         assert n == 2
         row = ledger.execute(
-            "SELECT name, type, aliases, medusa_id FROM variation WHERE key = ?",
+            "SELECT name, type, alias_rows, codes, medusa_id FROM variation WHERE key = ?",
             (_VARIATION_KEY,)).fetchone()
     assert row["name"] == "Carrara"
     assert row["medusa_id"] == "V1"
     assert row["type"] == "Marble"                                     # the export's Type column
-    assert "Statuario" in row["aliases"] and "Bianco" in row["aliases"]   # piped -> json list
+    # the export carries no scraper alias (P2-7): alias_rows and codes wait for the next produce (NULL, held)
+    assert (row["alias_rows"], row["codes"]) == (None, None)
 
 
 def test_record_source_disabled_is_a_noop(tmp_path, monkeypatch):
@@ -82,7 +81,7 @@ def test_record_source_disabled_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setattr(writethrough, "open_ledger",
                         lambda *a, **k: pytest.fail("open_ledger called while disabled"))
-    assert writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL,
+    assert writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL, published=frozenset(),
                                       path=tmp_path / "dev.ledger") is True
 
 
@@ -92,7 +91,8 @@ def test_record_source_enabled_records_products(tmp_path, monkeypatch):
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()          # pre-seed the linked variation, matching fingerprint
 
-    ok = writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
+    ok = writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL,
+                                    published=frozenset(), path=ledger_path)
     assert ok is True
 
     with Ledger.open(ledger_path, env=ENV_NAME,
@@ -115,7 +115,7 @@ def test_record_source_returns_false_on_failure_without_raising(tmp_path, monkey
     monkeypatch.setattr(writethrough, "open_ledger", _boom)
 
     result = writethrough.record_source(_rows(), [], load_source("polonine"), mode=OutputMode.FULL,
-                                        path=tmp_path / "dev.ledger")
+                                        published=frozenset(), path=tmp_path / "dev.ledger")
     assert result is False, "a write failure must return False, not raise and not report success"
 
 
@@ -129,7 +129,8 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
     _open_seeded(ledger_path).close()
     first = [*_rows(), CanonicalRow(src_site="polonine", surrogate_key="DDD", variation_key=_VARIATION_KEY,
                                     handle="h-ddd", title="Carrara Three")]
-    assert writethrough.record_source(first, [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
+    assert writethrough.record_source(first, [], load_source("polonine"), mode=OutputMode.FULL,
+                                      published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_b' WHERE sku = 'POL-BBB'")
         ledger.execute("UPDATE product SET state = 'syncing' WHERE sku = 'POL-DDD'")
@@ -139,7 +140,8 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
 
     later = [CanonicalRow(src_site="polonine", surrogate_key="EEE", variation_key=_VARIATION_KEY,
                           handle="h-eee", title="Carrara Four")]
-    assert writethrough.record_source(later, [], load_source("polonine"), mode=OutputMode.FULL, path=ledger_path)
+    assert writethrough.record_source(later, [], load_source("polonine"), mode=OutputMode.FULL,
+                                      published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         skus = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"] for r in ledger.execute("SELECT sku FROM inventory")}
@@ -176,7 +178,8 @@ def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, 
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
-    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL, path=ledger_path)
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL,
+                                      published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_a' WHERE sku = 'POL-AAA'")
         ledger.execute("UPDATE inventory SET last_synced_qty = qty, last_synced_made_to_order = made_to_order "
@@ -184,7 +187,8 @@ def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, 
         ledger.conn.commit()
         before = dict(ledger.get("product", "sku", "POL-AAA"))
 
-    assert writethrough.record_source([_stock_only("AAA", 9)], [], cfg, mode=OutputMode.STOCK, path=ledger_path)
+    assert writethrough.record_source([_stock_only("AAA", 9)], [], cfg, mode=OutputMode.STOCK,
+                                      published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         after = dict(ledger.get("product", "sku", "POL-AAA"))
         stock = dict(ledger.get("inventory", "sku", "POL-AAA"))
@@ -200,10 +204,11 @@ def test_stock_only_record_leaves_a_product_new_to_the_ledger_to_the_full_run(tm
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
-    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL, path=ledger_path)
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, mode=OutputMode.FULL,
+                                      published=frozenset(), path=ledger_path)
 
     assert writethrough.record_source([_stock_only("AAA", 9), _stock_only("NEW", 3)], [], cfg,
-                                      mode=OutputMode.STOCK, path=ledger_path)
+                                      mode=OutputMode.STOCK, published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}
@@ -219,13 +224,13 @@ def test_stock_only_record_still_delists_and_withdraws(tmp_path, monkeypatch):
     _open_seeded(ledger_path).close()
     cfg = load_source("polonine")
     full = [_photographed("AAA", 5), _photographed("BBB", 4), _photographed("CCC", 2)]
-    assert writethrough.record_source(full, [], cfg, mode=OutputMode.FULL, path=ledger_path)
+    assert writethrough.record_source(full, [], cfg, mode=OutputMode.FULL, published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_' || sku WHERE sku != 'POL-CCC'")
         ledger.conn.commit()
 
     assert writethrough.record_source([_stock_only("AAA", 5)], [("POL-BBB", "h-bbb")], cfg,
-                                      mode=OutputMode.STOCK, path=ledger_path)
+                                      mode=OutputMode.STOCK, published=frozenset(), path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}

@@ -63,7 +63,7 @@ def _known_products_export(tmp_path):
     return p
 
 
-def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape_data_dir):
+def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape_data_dir, seeded_config_store):
     # the core guarantee: an inventory refresh writes NO product import and NO canonical (so it
     # neither re-imports products nor feeds the catalog), yet the run completes.
     manifest = run_source("marenostone", mode=OutputMode.STOCK, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
@@ -74,12 +74,14 @@ def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape
     assert (run_dir / "diagnostics" / "manifest.json").exists()  # but it did run
 
 
-def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scrape_data_dir, monkeypatch):
+def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scrape_data_dir, monkeypatch, seeded_config_store):
     # the stock refresh skips the image stage, so its rows carry no photos: the ledger write must know it is a
     # stock-only run, or it would rewrite every product without its photos and 3D.
     from stone_pipeline.ledger import writethrough
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    from stone_pipeline.stages import images
+    monkeypatch.setattr(images, "published_keys", lambda *a, **k: frozenset())   # the fixtures publish no photo
     modes: list = []
     monkeypatch.setattr(writethrough, "record_source",
                         lambda *a, **k: (modes.append(k.get("mode")), True)[1])
@@ -120,7 +122,6 @@ def test_a_failed_stock_refresh_fails_the_produce_the_run_record_reads(monkeypat
     monkeypatch.setattr(produce, "_live_scrape", lambda sources: 0)
     persisted = []
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: persisted.append("artifacts"))
-    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: persisted.append("state"))
     assert produce.run(["marenostone", "polonine"], "inventory") == 1
     assert persisted == []
 

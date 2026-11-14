@@ -4,6 +4,7 @@ result counts. Every mint edge (type-less, already-exists, retired) is enforced 
 
 from __future__ import annotations
 
+from stone_pipeline.aliases.stores import operator_alias
 from stone_pipeline.config.categories import active_categories
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.core import logfmt
@@ -15,7 +16,7 @@ from stone_pipeline.reference.loaders import field_kinds, restricted_values
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, human_join, named_with_types,
                                                  review_card, review_evidence)
-from stone_pipeline.state.writeback import is_learned
+from stone_pipeline.aliases.learned import is_learned
 
 log = logfmt.get_logger("curate")
 
@@ -29,7 +30,8 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
     its alias, so the product binds on the next produce through the alias surface exactly like every alias
     does. Two different spellings renamed to ONE name mint one variety: the second only adds its spelling."""
     name = spelling_of(row)
-    renamed = c.decisions.seed_name(row.src_site, name, clean) or ""
+    statement = c.decisions.renaming(row.src_site, name, clean)      # the mint statement naming the variety, if any
+    renamed = statement.name if statement else ""
     try:
         # the stated name whenever there is one: a spelling with no ASCII form keys like its stated ASCII name
         display = field_kinds.display(field_kinds.VARIATION_NAME, renamed or clean)
@@ -41,11 +43,13 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
             review_evidence(row), stone_type=stone_type, color=title_case(attr_surface(row, "color"))))
         return
     owner = (proj.norm(display), proj.norm(stone_type))
-    if proj.norm(display) != proj.norm(clean) and not c.decisions.scope(row.src_site, name, clean):
-        # the scraped spelling rides onto the mint row as its own alias (owner[0] == norm(title)); for a
-        # variety that does not exist yet emit_alias_rows finds no existing row and skips it, as intended.
-        # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
-        c.alias_new.setdefault(owner, {}).setdefault(clean, (row.src_site, None))   # the mint row carries it (W3)
+    alias = operator_alias(statement.display, statement.stone_type or "") if statement else ""
+    if alias and proj.norm(display) != proj.norm(alias) and not c.decisions.scope(row.src_site, name, clean):
+        # the operator's rename rides onto the mint row as its own alias (owner[0] == norm(title)), the SAME value the
+        # operator store states for it (aliases.stores.operator_alias), so it lives on after this run; for a variety
+        # that does not exist yet emit_alias_rows finds no existing row and skips it, as intended. A rename made FOR
+        # one vendor attaches nothing here: that vendor's scoped alias binds its products.
+        c.alias_new.setdefault(owner, {}).setdefault(alias, (row.src_site, None))   # the mint row carries it (W3)
     if owner in c.minted_display:
         return                          # a second spelling of the same renamed variety: alias only
     c.minted_display.add(owner)

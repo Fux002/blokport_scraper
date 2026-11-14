@@ -1,7 +1,8 @@
 """The scraper's variety base is a listed deliverable (Blokport D7: its "restore base" import verifies every file
-against the manifest). The catalog copies the base THIS produce settled (from_medusa/<env>/, after
-sync_variants_base) into to_upload/<env>/ byte for byte, so the manifest lists it like 1_variants_full.csv:
-sha256 of those bytes, CSV rows, uploaded only when changed. A produce that runs no catalog publishes nothing. A
+against the manifest). The catalog writes the base THIS produce settled (from_medusa/<env>/, after
+sync_variants_base) into to_upload/<env>/ WITHOUT its Aliases column (P2-10 C4: aliases reach the backend only as
+alias_rows), so the manifest lists it like 1_variants_full.csv: sha256 of its bytes, CSV rows, uploaded only when
+changed. A produce that runs no catalog publishes nothing. A
 factory reset publishes the seed base through the same publisher under a manifest listing only it."""
 
 from __future__ import annotations
@@ -21,10 +22,18 @@ from stone_pipeline.config import settings
 from stone_pipeline.config.settings import SETTINGS, VARIANTS_BASE_FILE
 from stone_pipeline.reference import sync_variants_base as svb
 
-# BOM, CRLF, a quoted newline and a non-ASCII header: any re-encoding or newline translation changes the bytes.
+# a BOM, a quoted newline and a non-ASCII header and value: every column but Aliases, every row, read whole
 _BASE = ("﻿Key,Name,Image,Aliases,Volume per kg (m³/kg)\r\n"
-         'marble__a_1,Árabescato,,"A\nB",0.00037\r\n'
+         'marble__a_1,"Árabescato\nViola",,"A|B",0.00037\r\n'
          "granite__b_2,Bianco,,,\r\n").encode("utf-8")
+_PUBLISHED = [["Key", "Name", "Image", "Volume per kg (m³/kg)"], ["marble__a_1", "Árabescato\nViola", "", "0.00037"],
+              ["granite__b_2", "Bianco", "", ""]]
+
+
+def _published(path: Path) -> list[list[str]]:
+    import csv
+    with path.open(encoding="utf-8", newline="") as h:
+        return list(csv.reader(h))
 
 
 class _S3:
@@ -63,20 +72,22 @@ class _S3:
         return self._store(Key, data)
 
 
-def test_the_deliverable_is_the_settled_base_byte_for_byte(tmp_path):
+def test_the_deliverable_is_the_settled_base_without_its_aliases(tmp_path):
     base, deliverable = tmp_path / "from_medusa" / VARIANTS_BASE_FILE, tmp_path / "to_upload" / VARIANTS_BASE_FILE
     base.parent.mkdir()
     base.write_bytes(_BASE)
     svb.write_deliverable(base, deliverable)
-    assert deliverable.read_bytes() == _BASE
+    assert _published(deliverable) == _PUBLISHED
+    assert list(deliverable.parent.iterdir()) == [deliverable]                                       # no temp left
 
 
-def test_the_copy_is_raw_bytes_never_decoded(tmp_path):
-    base, deliverable = tmp_path / "base.csv", tmp_path / "out" / VARIANTS_BASE_FILE
-    raw = b"Key,Name\r\nslab_marble_a_1,\xff\xfe not utf-8\r\n"
-    base.write_bytes(raw)
-    svb.write_deliverable(base, deliverable)
-    assert deliverable.read_bytes() == raw and list(deliverable.parent.iterdir()) == [deliverable]   # no temp left
+def test_a_base_that_is_not_utf8_fails_loud_and_leaves_no_stale_deliverable(tmp_path):
+    base, deliverable = tmp_path / "base.csv", tmp_path / VARIANTS_BASE_FILE
+    base.write_bytes(b"Key,Name\r\nmarble__a_1,\xff\xfe not utf-8\r\n")
+    deliverable.write_bytes(b"Key,Name\nmarble__old_9,Old\n")
+    with pytest.raises(UnicodeDecodeError):
+        svb.write_deliverable(base, deliverable)
+    assert not deliverable.exists()
 
 
 def test_a_stale_deliverable_from_an_earlier_produce_is_replaced(tmp_path):
@@ -85,7 +96,7 @@ def test_a_stale_deliverable_from_an_earlier_produce_is_replaced(tmp_path):
     deliverable.write_bytes(b"Key,Name\nslab_old_gone_9,Old\n")
     base.write_bytes(_BASE)
     svb.write_deliverable(base, deliverable)
-    assert deliverable.read_bytes() == _BASE
+    assert _published(deliverable) == _PUBLISHED
 
 
 def test_an_absent_base_fails_loud_and_leaves_no_stale_deliverable(tmp_path):
@@ -135,7 +146,7 @@ def test_the_catalog_copies_the_base_after_the_sync_settles_it(tmp_path, monkeyp
     monkeypatch.setattr(catalog, "_record_catalog", lambda: order.append("record"))
     monkeypatch.setattr(catalog, "_consistency_gate", lambda: order.append("gate"))
     catalog.run(tmp_path)
-    assert deliverable.read_bytes() == _BASE
+    assert _published(deliverable) == _PUBLISHED
     assert order == ["tree", "record", "gate"]
 
 
@@ -145,26 +156,26 @@ def _full(path: Path, keys: list[str]) -> None:
 
 
 def _produce(tmp_path: Path, keys: list[str]) -> Path:
-    """One catalog's base half: base := 1_variants_full (the real sync), then the deliverable from it."""
+    """One catalog's base half: base := 1_variants_full (the real sync), then the deliverable from it (returned)."""
     to_upload, base = tmp_path / "to_upload", tmp_path / "from_medusa" / VARIANTS_BASE_FILE
     to_upload.mkdir(exist_ok=True)
     base.parent.mkdir(exist_ok=True)
     _full(to_upload / "1_variants_full.csv", keys)
     svb.sync(full_path=to_upload / "1_variants_full.csv", base_path=base, publish=False)
     svb.write_deliverable(base, to_upload / VARIANTS_BASE_FILE)
-    return base
+    return to_upload / VARIANTS_BASE_FILE
 
 
 def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_path):
-    base = _produce(tmp_path, ["marble__a_1", "marble__b_2", "granite__c_3"])
+    deliverable = _produce(tmp_path, ["marble__a_1", "marble__b_2", "granite__c_3"])
     s3 = _S3()
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "dev/scraper/to_upload", run_id="r1", brand="blokport")
     entry = out["manifest"]["files"][VARIANTS_BASE_FILE]
     assert VARIANTS_BASE_FILE not in out["manifest"].get("side_files", {})
-    assert entry["sha256"] == hashlib.sha256(base.read_bytes()).hexdigest()
-    assert entry["rows"] == 3 and entry["bytes"] == base.stat().st_size
+    assert entry["sha256"] == hashlib.sha256(deliverable.read_bytes()).hexdigest()
+    assert entry["rows"] == 3 and entry["bytes"] == deliverable.stat().st_size
     assert entry["version_id"] == s3.versions[f"dev/scraper/to_upload/{VARIANTS_BASE_FILE}"]
-    assert s3.objects[f"dev/scraper/to_upload/{VARIANTS_BASE_FILE}"] == base.read_bytes()
+    assert s3.objects[f"dev/scraper/to_upload/{VARIANTS_BASE_FILE}"] == deliverable.read_bytes()
     assert json.loads(s3.objects["dev/scraper/to_upload/manifest.json"])["files"][VARIANTS_BASE_FILE] == entry
 
 
@@ -177,9 +188,9 @@ def test_an_unchanged_base_is_not_re_uploaded_and_a_changed_one_is(tmp_path):
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r2", brand="blokport")
     assert VARIANTS_BASE_FILE in out["unchanged"] and key not in s3.uploads
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[key]
-    base = _produce(tmp_path, ["marble__a_1", "marble__b_2", "onyx__c_3"])   # a mint grows it
+    deliverable = _produce(tmp_path, ["marble__a_1", "marble__b_2", "onyx__c_3"])   # a mint grows it
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r3", brand="blokport")
-    assert VARIANTS_BASE_FILE in out["uploaded"] and s3.objects[key] == base.read_bytes()
+    assert VARIANTS_BASE_FILE in out["uploaded"] and s3.objects[key] == deliverable.read_bytes()
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["rows"] == 3
 
 
@@ -194,7 +205,6 @@ def test_a_produce_without_a_catalog_publishes_nothing(stage, monkeypatch):
     monkeypatch.setattr(produce, "_finalize_control_plane", lambda stage: None)
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: 0)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
-    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
     monkeypatch.setattr(ua, "upload_all", lambda run_id=None: published.append(run_id) or 0)
     assert produce.run(None, stage) == 0
     assert published == []
@@ -239,9 +249,11 @@ def test_a_factory_reset_publishes_a_manifest_listing_only_the_seed_base(tmp_pat
     manifest = json.loads(s3.objects[f"{prefix}/{ua.MANIFEST_NAME}"])
     assert list(manifest["files"]) == [VARIANTS_BASE_FILE] and manifest["side_files"] == {}
     entry = manifest["files"][VARIANTS_BASE_FILE]
-    assert entry["sha256"] == hashlib.sha256(_BASE).hexdigest() and entry["rows"] == 2
+    published = (to_upload / VARIANTS_BASE_FILE).read_bytes()                  # the seed without its Aliases
+    assert _published(to_upload / VARIANTS_BASE_FILE) == _PUBLISHED
+    assert entry["sha256"] == hashlib.sha256(published).hexdigest() and entry["rows"] == 2
     assert entry["version_id"] == s3.versions[f"{prefix}/{VARIANTS_BASE_FILE}"]    # the version holding the seed
-    assert s3.objects[f"{prefix}/{VARIANTS_BASE_FILE}"] == _BASE              # the key holds the seed's bytes
+    assert s3.objects[f"{prefix}/{VARIANTS_BASE_FILE}"] == published          # the key holds the seed's copy
     assert s3.objects[f"{ENV_SEGMENT}/scraper/from_medusa/{VARIANTS_BASE_FILE}"] == _BASE
     assert f"{prefix}/1_variants_full.csv" in s3.objects                       # stale, kept, no longer listed
 

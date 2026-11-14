@@ -22,7 +22,7 @@ def _variation(ledger, key, state, medusa_id=None, type_="Marble", icon=True, in
     """A variation row; with `icon`, its slab icon too (the product gate needs an icon in the product's category)."""
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": type_, "name": "x",
-                                "aliases": "[]", "medusa_id": medusa_id,
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": medusa_id,
                                 "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
@@ -43,7 +43,7 @@ def _seed(ledger: Ledger) -> None:
                   pk=("category", "value"))
     for key, state in [("marble__a_1", "synced"), ("marble__b_2", "pending")]:
         ledger.upsert("variation", {"key": key, "type": "", "name": "x",
-                                    "aliases": "[]", "medusa_id": None,
+                                    "alias_rows": "[]", "codes": "[]", "medusa_id": None,
                                     "in_full": 1, "payload_hash": "", "state": state,
                                     "first_seen": now, "last_synced": None,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -229,32 +229,33 @@ def test_reset_scoped_to_one_source_leaves_the_others(tmp_path):
         assert ledger.get("variation", "key", "marble__v1")["state"] == "synced"   # shared layer untouched
 
 
-def test_purge_discontinued_deletes_only_qty0_products(tmp_path):
-    # dead stock (qty 0) is hard-deleted so the graveyard stops growing; in-stock products stay; the
-    # returned external_ids are exactly what Medusa deletes (the ②③ half). A purged sku, having no
-    # prior ledger row, recreates as NEW on reappearance (the prev-is-None rule, covered by cold_start).
+def test_purge_discontinued_deletes_only_bundles_replaced_by_their_lot(tmp_path):
+    # the purge hard-deletes only a bundle its lot replaced; a gone listing (any other stock 0) stays published as sold
+    # out (owner 11-11, table 505); in-stock products stay; the returned external_ids are exactly what Medusa deletes
     from stone_pipeline.ledger.sync import purge_discontinued
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         _variation(ledger, "marble__v1", state="synced", medusa_id="V1")
-        for sku, src, qty in (("POL-1", "pol", 0), ("POL-2", "pol", 5), ("ZUC-1", "zuc", 0)):
+        for sku, src, qty, reason in (("POL-1", "pol", 0, "replaced_by_lot"), ("POL-2", "pol", 5, None),
+                                      ("POL-3", "pol", 0, "sold_out"), ("ZUC-1", "zuc", 0, "replaced_by_lot")):
             ledger.upsert("product", {"category": "slabs", "sku": sku, "source": src, "variation_key": "marble__v1",
                                       "medusa_id": "M-" + sku, "state": "synced",
                                       "created_at": now, "updated_at": now}, pk=("sku",))
-            ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
+            ledger.upsert("inventory", {"sku": sku, "qty": qty, "reason": reason, "last_synced_qty": qty,
                                         "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
 
         out = purge_discontinued(ledger)
-        assert set(out["external_ids"]) == {"POL-1", "ZUC-1"} and out["product"] == 2   # both qty-0 sources
+        assert set(out["external_ids"]) == {"POL-1", "ZUC-1"} and out["product"] == 2   # both sources' replaced bundles
         assert ledger.get("product", "sku", "POL-1") is None and ledger.get("inventory", "sku", "POL-1") is None
         assert ledger.get("product", "sku", "POL-2") is not None                       # in-stock kept
+        assert ledger.get("product", "sku", "POL-3") is not None                       # sold out: stays published
 
         # scoped purge touches only that source's dead stock
         for sku in ("POL-1", "ZUC-1"):   # re-seed both qty-0 again
             ledger.upsert("product", {"category": "slabs", "sku": sku, "source": sku[:3].lower(), "variation_key": "marble__v1",
                                       "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
-            ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": 0, "last_synced_made_to_order": 0,
-                                        "updated_at": now}, pk=("sku",))
+            ledger.upsert("inventory", {"sku": sku, "qty": 0, "reason": "replaced_by_lot", "last_synced_qty": 0,
+                                        "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
         out = purge_discontinued(ledger, source_codes=["pol"])
         assert out["external_ids"] == ["POL-1"]                  # zuc untouched by a pol-scoped purge
         assert ledger.get("product", "sku", "ZUC-1") is not None
@@ -267,7 +268,7 @@ def test_serve_isolates_a_row_with_corrupt_json(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "marble__good", state="pending")
         _variation(ledger, "marble__bad", state="pending")
-        ledger.execute("UPDATE variation SET aliases = '{corrupt' WHERE key = 'marble__bad'")
+        ledger.execute("UPDATE variation SET alias_rows = '{corrupt' WHERE key = 'marble__bad'")
         served = ready_variations(ledger)                       # must NOT raise
         keys = {v["external_id"] for v in served}
         assert "marble__good" in keys and "marble__bad" not in keys   # good served, bad dropped
@@ -283,7 +284,7 @@ def test_variation_payload_is_type_name_aliases_and_icons(tmp_path):
         _variation(ledger, "marble__v", state="pending")
         payload = ready_variations(ledger)[0]["payload"]
     assert "volume" not in payload
-    assert set(payload) == {"type", "name", "aliases", "category_images"}
+    assert set(payload) == {"type", "name", "alias_rows", "codes", "category_images"}
 
 
 def test_serve_in_flight_detects_a_lease(tmp_path):
@@ -722,7 +723,7 @@ def test_product_payload_empty_ports_is_empty_list_not_missing(tmp_path):
 def _named_variation(ledger, key, name, in_full=1, medusa_id=None):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "type": variety_key_type(key).title(), "name": name,
-                                "aliases": "[]", "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "",
+                                "alias_rows": "[]", "codes": "[]", "medusa_id": medusa_id, "in_full": in_full, "payload_hash": "",
                                 "state": "pending", "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
 

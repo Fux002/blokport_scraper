@@ -50,7 +50,7 @@ def _row(sku: str, *, made_to_order: bool, count: str = "5") -> CanonicalRow:
 def _seed(ledger: Ledger) -> None:
     now = now_iso()
     ledger.upsert("variation", {
-        "key": KEY, "type": "Marble", "name": "Pietra Grey", "aliases": "[]",
+        "key": KEY, "type": "Marble", "name": "Pietra Grey", "alias_rows": "[]", "codes": "[]",
         "medusa_id": "V1", "payload_hash": "", "state": "synced", "first_seen": now,
         "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
     add_icon(ledger, KEY)
@@ -166,7 +166,8 @@ def test_a_hidden_or_discontinued_shape_is_a_plain_stock_zero(cfg, tmp_path):
         populate_discontinued(ledger, [("POL-B", "h-b")])
         lane = _lane(ledger)
         assert lane["POL-A"] == {"sku": "POL-A", "quantity": 0, "made_to_order": False, "reason": "no_photo"}
-        assert lane["POL-B"] == {"sku": "POL-B", "quantity": 0, "made_to_order": False}
+        assert lane["POL-B"] == {"sku": "POL-B", "quantity": 0, "made_to_order": False, "reason": "sold_out",
+                                 "gone_at": ledger.get("inventory", "sku", "POL-B")["gone_at"]}
 
 
 def test_a_soft_reset_re_serves_a_made_to_order_shape(cfg, tmp_path):

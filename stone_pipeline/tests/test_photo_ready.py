@@ -9,7 +9,6 @@ from __future__ import annotations
 from stone_pipeline.core.schema import OutputMode
 
 import dataclasses
-import json
 import sqlite3
 
 import pytest
@@ -37,7 +36,7 @@ def ledger_path(tmp_path, monkeypatch):
     with _open(path) as ledger:                     # a synced variety with a slab icon, so its products serve
         now = now_iso()
         ledger.upsert("variation", {
-            "key": KEY, "type": "Marble", "name": "Carrara", "aliases": json.dumps([]),
+            "key": KEY, "type": "Marble", "name": "Carrara", "alias_rows": "[]", "codes": "[]",
             "medusa_id": "V1",
             "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
             "created_at": now, "updated_at": now}, pk=("key",))
@@ -63,7 +62,7 @@ def _row(standard_photo, qty="5"):
 
 def _record(path, rows, *, mode=OutputMode.FULL, discontinued=(), replaced=None):
     assert writethrough.record_source(rows, list(discontinued), load_source("polonine"),
-                                      mode=mode, replaced=replaced, path=path)
+                                      mode=mode, published=frozenset(), replaced=replaced, path=path)
 
 
 def _acked(path):
@@ -153,7 +152,7 @@ def test_a_hidden_product_dropped_and_back_in_a_run_that_cannot_tell_stays_hidde
     _acked(ledger_path)
     _record(ledger_path, [], discontinued=[(SKU, "h-aaa")],
             replaced={SKU: "L1"} if drop == "replaced_by_lot" else None)
-    assert _state(ledger_path)[1:3] == (False, None if drop == "discontinued" else "replaced_by_lot")
+    assert _state(ledger_path)[1:3] == (False, "no_photo" if drop == "discontinued" else "replaced_by_lot")   # 505
     _record(ledger_path, [_row(None)])              # back, in a run whose photo pool was unread
     assert _state(ledger_path)[1:3] == (False, "no_photo")
 

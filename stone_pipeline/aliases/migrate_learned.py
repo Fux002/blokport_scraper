@@ -3,8 +3,8 @@ ruling 11-12: automatic, exactly once per env, at the produce's start).
 
 A record's variation_id is a variety's Medusa id (the phase 1 migration moved every record onto its survivor's id) or
 its Key, so it resolves through the ledger's (medusa_id, key). A record becomes an ACTIVE learned alias, decided_by
-'migration', when it is a learned guess (writeback.is_learned, the rule the matcher applied it under), resolves to a
-LIVE Key (in the produced set, not retiring), passes the alias boundary (core.alias_problem.alias_refusal: never a
+'migration', when it is a learned guess (aliases.learned.is_learned, the rule the matcher applied it under), resolves
+to a LIVE Key (in the produced set, not retiring), passes the alias boundary (core.alias_problem.alias_refusal: never a
 code, never the variety's own name, another same-type variety's name or a bare vocabulary word) and is the first of
 its (Key, norm). Every other record is dropped and listed in review/<env>/learned_alias_migration_dropped.csv with
 its reason. The marker in config.db's `migration` table is written in the same transaction as the rows, so every
@@ -36,7 +36,7 @@ from stone_pipeline.core.csvio import atomic_write
 from stone_pipeline.core.text import alias_key
 from stone_pipeline.io import storage
 from stone_pipeline.ledger import snapshot
-from stone_pipeline.state.writeback import is_learned
+from stone_pipeline.aliases.learned import is_learned
 
 log = logfmt.get_logger("aliases.migrate_learned")
 

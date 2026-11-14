@@ -21,6 +21,8 @@ Layout (under the env segment, e.g. dev/):
     products/standard/tile/<src>/<listing hash>.json  what that listing's files were made from (written last)
     products/standard/assigned/<src>/<hash>.json  a published photo listings of several stones show: the SKUs it is for
     products/standard/conflicts/<src>.json  the produce's conflict set: {sha: [handles]} of its emitted products
+    products/standard/kept.json             the produce's kept-photo set: {src: [sha, ...]} of the listings that left
+                                            sale and keep their records (table 505): never removed or wiped
     standardise-test/removed/<SKU>.json     a listing the owner removed (SKU percent-encoded)
 """
 
@@ -46,10 +48,29 @@ CONFLICTS_SUBDIR = "conflicts"               # under standard/: the produce's co
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a hosted image's S3 url/key contains this substring
+STANDARD_MARKER = f"/products/{STANDARD_SUBDIR}/"   # so does a standardised file a product links (its views, its 3D)
 
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
 # hosted url or key -- the one identity the photo process (filename) and Stage 7 (improved url) share.
 _SHA_RE = re.compile(r"([0-9a-f]{64})\.[a-z0-9]+$", re.IGNORECASE)
+
+
+def photo_of(link: str) -> Optional[tuple[str, str]]:
+    """The (source, sha) of the photo an image link or object key holds: every image object ends <source>/<sha>.<ext>
+    (_SHA_RE), whatever its folder (raw, scraped, improved, a standardised view, a 3D slab, an assignment, a tile
+    record). None for any other object (a manifest, a conflict set)."""
+    match = _SHA_RE.search(link or "")
+    if not match:
+        return None
+    source = link[:match.start()].rstrip("/").rsplit("/", 1)[-1]
+    return (source, match.group(1).lower()) if source else None
+
+
+def kept_key() -> str:
+    """The produce's kept-photo set (stages.images.save_kept): {source: [sha, ...]} of the photos of the listings that
+    left sale and keep their records, gone at their supplier or delisted (table 505). The photo process leaves them
+    exactly as published and the factory wipe never deletes them."""
+    return f"{_PRODUCTS}/{STANDARD_SUBDIR}/kept.json"
 
 
 def raw_prefix(source: str) -> str:
@@ -71,6 +92,21 @@ def standard_key(source: str, sha256: str, view: str) -> str:
 
 def cutout_prefix() -> str:
     return standard_prefix(CUTOUT_SUBDIR)
+
+
+def published_prefixes() -> tuple[str, ...]:
+    """The folders the photos publish keeps (stone_pipeline.photos.publish): each standardised view, the 3D cut-outs and
+    the tile records. The one notion of "published": publish removes what it no longer chooses under exactly these,
+    and the produce never lets a product serve a standardised file that is not under them
+    (populate.mark_unpublished_photos)."""
+    return tuple(standard_prefix(folder) for folder in (*STANDARD_VIEWS, CUTOUT_SUBDIR, TILE_SUBDIR))
+
+
+def standard_object_key(url: str) -> Optional[str]:
+    """The object key of a standardised file a product links (a view, a 3D cut-out), or None for any other image (a
+    scraped or improved photo): the files the produce checks against the published set."""
+    i = url.find(STANDARD_MARKER) if url else -1
+    return f"{_PRODUCTS}/{STANDARD_SUBDIR}/{url[i + len(STANDARD_MARKER):]}" if i >= 0 else None
 
 
 def cutout_key(source: str, sha256: str, ext: str) -> str:

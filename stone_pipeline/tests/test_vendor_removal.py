@@ -1,7 +1,7 @@
-"""Two-stage vendor removal: delist (Take offline) then purge + delete config (Remove permanently).
-Covers the ledger mechanics -- source-scoped delist to qty 0, the qty-0 delta being served so Medusa
-takes them out of sale, the live-products guard, and source-scoped purge that never touches another
-vendor."""
+"""Two-stage vendor removal: delist (Take offline) then unpublish + delete config (Remove permanently; a removal
+unpublishes every listing and deletes none, table 505). Covers the ledger mechanics -- source-scoped delist to qty 0,
+the qty-0 delta being served so Medusa takes them out of sale, the live-products guard, and the purge, which deletes
+only bundles replaced by their lot and never touches another vendor."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _prod(ledger, sku, source, qty, last):
     already a pending delta), so a later qty change is a clean, observable delta."""
     now = now_iso()
     ledger.upsert("variation", {"key": f"marble__{sku}", "type": "", "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "V", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
@@ -55,15 +55,15 @@ def test_delist_takes_a_source_offline_and_scopes(tmp_path):
         assert live_products(ledger, source_codes=["bbb"]) == 1
 
 
-def test_remove_after_delist_purges_only_that_source(tmp_path):
+def test_a_purge_after_take_offline_keeps_the_delisted_records(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _prod(ledger, "AAA-1", "aaa", qty=5, last=5)
         _prod(ledger, "BBB-1", "bbb", qty=7, last=7)
-        delist_source(ledger, source_codes=["aaa"])                   # aaa -> qty 0
+        delist_source(ledger, source_codes=["aaa"])                   # aaa -> qty 0, reason delisted
 
         purged = purge_discontinued(ledger, source_codes=["aaa"])
-        assert purged["product"] == 1 and purged["external_ids"] == ["AAA-1"]
-        assert ledger.get("product", "sku", "AAA-1") is None          # gone from the ledger
+        assert purged["product"] == 0 and purged["external_ids"] == []
+        assert ledger.get("product", "sku", "AAA-1") is not None      # hidden, its record kept
         assert ledger.get("product", "sku", "BBB-1") is not None      # other vendor intact
 
 
@@ -80,15 +80,15 @@ def test_delist_is_idempotent_and_reversible(tmp_path):
 
 def test_purge_records_tombstones_served_on_the_removed_lane(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _prod(ledger, "AAA-1", "aaa", qty=5, last=5)
-        delist_source(ledger, source_codes=["aaa"])
-        out = purge_discontinued(ledger, source_codes=["aaa"], reason="vendor_removed")
+        _prod(ledger, "AAA-1", "aaa", qty=0, last=0)
+        ledger.execute("UPDATE inventory SET reason = 'replaced_by_lot' WHERE sku = 'AAA-1'")   # a replaced bundle
+        out = purge_discontinued(ledger, source_codes=["aaa"])
         assert out["external_ids"] == ["AAA-1"]
         # the delete is delivered to Medusa as a pulled tombstone, not a call-response
         served = ready(ledger, "removed")
         assert served == [{"external_id": "AAA-1",
                            "payload": {"kind": "product", "sku": "AAA-1", "source": "aaa",
-                                       "reason": "vendor_removed"}}]
+                                       "reason": "discontinued"}}]
 
 
 def test_variation_tombstone_lane_orders_before_products_and_deletes_the_row(tmp_path):
@@ -98,7 +98,7 @@ def test_variation_tombstone_lane_orders_before_products_and_deletes_the_row(tmp
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "marble__x_1", "type": "Marble",
-                                    "name": "X", "aliases": "[]",
+                                    "name": "X", "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 0,
                                     "payload_hash": "", "state": "retiring", "first_seen": now,
                                     "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
@@ -120,7 +120,7 @@ def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -153,7 +153,7 @@ def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 0, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -177,7 +177,7 @@ def test_retire_never_synced_variety_drops_it_without_a_tombstone(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "NS", "type": "Marble", "name": "Y",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": None, "in_full": 1, "payload_hash": "",
                                     "state": "pending", "first_seen": now, "last_synced": None,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -192,7 +192,7 @@ def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("variation", {"key": "K", "type": "Marble", "name": "X",
-                                    "aliases": "[]",
+                                    "alias_rows": "[]", "codes": "[]",
                                     "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                     "state": "synced", "first_seen": now, "last_synced": now,
                                     "created_at": now, "updated_at": now}, pk=("key",))
@@ -207,9 +207,9 @@ def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
 
 def test_tombstone_done_retires_blocked_retries_and_dead_letters(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _prod(ledger, "AAA-1", "aaa", qty=5, last=5)
-        _prod(ledger, "AAA-2", "aaa", qty=5, last=5)
-        delist_source(ledger, source_codes=["aaa"])
+        _prod(ledger, "AAA-1", "aaa", qty=0, last=0)
+        _prod(ledger, "AAA-2", "aaa", qty=0, last=0)
+        ledger.execute("UPDATE inventory SET reason = 'replaced_by_lot'")      # the purge's dead stock
         purge_discontinued(ledger, source_codes=["aaa"])
 
         # 'done' retires the tombstone -> no longer served
@@ -244,8 +244,8 @@ def test_repopulating_a_sku_clears_its_tombstone(tmp_path):
 
 
 def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
-    # Medusa hides (status->draft) a qty-0 that carries reason='delisted'; a qty-0 with no reason is an
-    # ordinary out-of-stock and stays listed. The marker rides the inventory delta, scoped by SKU.
+    # Medusa hides a qty-0 that carries reason='delisted'. A qty-0 with no reason carries no reason key (Blokport hides
+    # it today, measured by M4; table 505). The marker rides the inventory delta, scoped by SKU.
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _prod(ledger, "DEL-1", "aaa", qty=5, last=5)          # will be delisted (take offline)
         _prod(ledger, "OOS-1", "bbb", qty=0, last=5)          # ordinary out-of-stock (no reason)
@@ -253,7 +253,7 @@ def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
         served = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
         assert served["DEL-1"] == {"sku": "DEL-1", "quantity": 0, "made_to_order": False,
                                     "reason": "delisted"}
-        assert served["OOS-1"] == {"sku": "OOS-1", "quantity": 0, "made_to_order": False}   # no reason key -> stays listed
+        assert served["OOS-1"] == {"sku": "OOS-1", "quantity": 0, "made_to_order": False}   # no reason key
 
         # a re-scrape restocks (qty>0) and clears the marker -> Medusa republishes
         ledger.execute("UPDATE inventory SET qty = 8, reason = NULL WHERE sku = 'DEL-1'")
