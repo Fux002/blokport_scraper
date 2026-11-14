@@ -89,7 +89,7 @@ def test_first_publish_uploads_everything_then_writes_the_manifest_last(tmp_path
     s3 = _S3()
     _write(tmp_path, "2_valid_combinations.csv", "h\n1\n2\n")
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
-    out = ua.publish_deliverables(s3, "b", tmp_path, "prod/scraper/to_upload", run_id="r1")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "prod/scraper/to_upload", run_id="r1", brand="blokport")
     assert out["uploaded"] == ["2_valid_combinations.csv", "3_products_all.csv"] and out["unchanged"] == []
     assert s3.calls[-1] == ("put", "prod/scraper/to_upload/manifest.json")         # manifest LAST
     m = json.loads(s3.objects["prod/scraper/to_upload/manifest.json"])
@@ -102,10 +102,10 @@ def test_unchanged_content_is_not_re_uploaded_but_the_manifest_is_rewritten(tmp_
     s3 = _S3()
     _write(tmp_path, "2_valid_combinations.csv", "h\n1\n2\n")
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
-    first = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    first = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     s3.calls.clear()
     _write(tmp_path, "3_products_all.csv", "h\n1\n9\n")                              # one file changes
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2", brand="blokport")
     assert out["uploaded"] == ["3_products_all.csv"] and out["unchanged"] == ["2_valid_combinations.csv"]
     assert s3.calls == [("put", "p/3_products_all.csv"), ("put", "p/manifest.json")]
     m = json.loads(s3.objects["p/manifest.json"])
@@ -113,7 +113,7 @@ def test_unchanged_content_is_not_re_uploaded_but_the_manifest_is_rewritten(tmp_
     assert m["files"]["2_valid_combinations.csv"] == first["manifest"]["files"]["2_valid_combinations.csv"]
     # a produce that changes nothing: no upload at all, manifest rewritten with the same hashes
     s3.calls.clear()
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r3")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r3", brand="blokport")
     assert out["uploaded"] == [] and s3.calls == [("put", "p/manifest.json")]
     assert json.loads(s3.objects["p/manifest.json"])["files"] == m["files"]
 
@@ -121,7 +121,7 @@ def test_unchanged_content_is_not_re_uploaded_but_the_manifest_is_rewritten(tmp_
 def test_the_manifest_names_the_version_holding_the_hashed_bytes_while_a_publish_overwrites_them(tmp_path):
     s3 = _S3()
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
-    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     published = json.loads(s3.objects["p/manifest.json"])["files"]["3_products_all.csv"]
     _write(tmp_path, "3_products_all.csv", "h\n1\n9\n")
     s3.put_object("b", "p/3_products_all.csv", (tmp_path / "3_products_all.csv").read_bytes())  # mid-publish
@@ -135,7 +135,7 @@ def test_an_entry_from_before_the_version_id_is_uploaded_once_to_gain_it(tmp_pat
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
     entry = ua.file_entry(tmp_path / "3_products_all.csv")
     s3.put_object("b", "p/manifest.json", json.dumps({"files": {"3_products_all.csv": entry}}).encode())
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     assert out["uploaded"] == ["3_products_all.csv"]
     assert json.loads(s3.objects["p/manifest.json"])["files"]["3_products_all.csv"]["version_id"]
 
@@ -144,7 +144,7 @@ def test_an_unversioned_bucket_fails_loud_before_the_manifest(tmp_path):
     s3 = _S3(versioned=False)
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
     with pytest.raises(RuntimeError, match="versioning"):
-        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     assert "p/manifest.json" not in s3.objects
 
 
@@ -155,7 +155,7 @@ def test_side_files_are_published_outside_the_deliverables(tmp_path):
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
     for name in UPLOAD_SIDE_FILES:
         _write(tmp_path, name, "{}")
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     assert sorted(out["side"]) == sorted(UPLOAD_SIDE_FILES)
     manifest = json.loads(s3.objects["p/manifest.json"])
     assert set(manifest["files"]) == {"3_products_all.csv"}
@@ -163,7 +163,7 @@ def test_side_files_are_published_outside_the_deliverables(tmp_path):
     assert all(f"p/{name}" in s3.objects for name in UPLOAD_SIDE_FILES)                 # the photo process reads it
     s3.calls.clear()
     _write(tmp_path, "SYNC_STEPS.md", "changed")
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")                    # only the changed one
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2", brand="blokport")                    # only the changed one
     assert out["side"] == ["SYNC_STEPS.md"] and s3.calls == [("put", "p/SYNC_STEPS.md"), ("put", "p/manifest.json")]
 
 
@@ -171,12 +171,12 @@ def test_side_files_are_published_outside_the_deliverables(tmp_path):
 def test_unchanged_bytes_are_re_uploaded_when_the_fixed_name_no_longer_holds_that_version(tmp_path, disturb):
     s3 = _S3()
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
-    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")
     if disturb == "overwrite":                            # a publish that died after its upload, before its manifest
         s3.put_object("b", "p/3_products_all.csv", b"h\n1\n9\n")
     else:                                                 # a prune of the fixed name (a delete marker)
         s3.delete_object("b", "p/3_products_all.csv")
-    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2", brand="blokport")
     assert out["uploaded"] == ["3_products_all.csv"]
     entry = json.loads(s3.objects["p/manifest.json"])["files"]["3_products_all.csv"]
     assert s3.current["p/3_products_all.csv"] == entry["version_id"]
@@ -189,7 +189,7 @@ def test_a_manifest_read_error_other_than_missing_raises(tmp_path):
             raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
     _write(tmp_path, "a.csv", "h\n1\n")
     with pytest.raises(ClientError):
-        ua.publish_deliverables(_Broken(), "b", tmp_path, "p", run_id=None)
+        ua.publish_deliverables(_Broken(), "b", tmp_path, "p", run_id=None, brand="blokport")
 
 
 def test_a_head_error_other_than_missing_raises_before_the_manifest(tmp_path):
@@ -198,8 +198,8 @@ def test_a_head_error_other_than_missing_raises_before_the_manifest(tmp_path):
             raise ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
     s3 = _NoHead()
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
-    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")                 # first publish: no head needed
+    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1", brand="blokport")                 # first publish: no head needed
     before = s3.objects["p/manifest.json"]
     with pytest.raises(ClientError):
-        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")             # unchanged: the head is required
+        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2", brand="blokport")             # unchanged: the head is required
     assert s3.objects["p/manifest.json"] == before                               # no manifest written

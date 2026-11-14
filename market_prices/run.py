@@ -1,6 +1,7 @@
-"""One market-price run for this deployment's brand: `python -m market_prices.run` (RUN_MODE=market-prices on the
-ad-hoc task). No arguments: the brand, environment, bucket and S3 dry run come from settings (SCRAPER_BRAND,
-SCRAPER_ENV, SCRAPER_S3_BUCKET, SCRAPER_S3_DRY_RUN), and every tunable from market_prices/config.py.
+"""One market-price run for the run input's brand: `python -m market_prices.run` (RUN_MODE=market-prices on the
+ad-hoc task). No arguments: the brand is the required run input SCRAPER_MARKET_PRICES_BRAND (market_prices/run_input.py),
+never the deployment's own brand; the environment, bucket and S3 dry run come from settings (SCRAPER_ENV,
+SCRAPER_S3_BUCKET, SCRAPER_S3_DRY_RUN), and every tunable from market_prices/config.py.
 
 It loads the brand's register (a register that does not validate stops the run before any request), collects every
 site in it over the live transport (only an approved site is requested at all), writes the run folder and publishes it
@@ -21,8 +22,9 @@ from market_prices.collect import RunResult, collect_run, write_run
 from market_prices.fetching import Transport
 from market_prices.publish import publish_run
 from market_prices.register import Register, load_register
+from market_prices.run_input import run_brand
 from market_prices.transport import LiveTransport
-from stone_pipeline.config.settings import BRAND, ENV_NAME, S3_BUCKET, SETTINGS
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, SETTINGS
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
 
@@ -84,7 +86,7 @@ def run_live(register: Register) -> RunOutcome:
 
 
 def main() -> None:
-    print(summary(run_live(load_register(BRAND))))
+    print(summary(run_live(load_register(run_brand()))))
 
 
 if __name__ == "__main__":
