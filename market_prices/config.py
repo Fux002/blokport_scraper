@@ -78,6 +78,10 @@ MALFORMED_REASONS_SHOWN = 3
 # page parsed into more elements than this is not read (the response itself is already capped by MAX_RESPONSE_BYTES).
 DECLARED_HTML_MAX_ELEMENTS = 200_000
 
+# WooCommerce core's visually hidden classes: its sale price_html announces "Original price was: X." and "Current
+# price is: Y." for screen readers outside the struck price, never shown to a buyer, so never part of a price text.
+WOOCOMMERCE_HIDDEN_CLASSES = frozenset({"screen-reader-text"})
+
 # The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
 # with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
 PILOT_SAMPLE_ROWS = 5

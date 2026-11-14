@@ -44,8 +44,8 @@ competitors:
     served_market: EU
     site_domain: ceresermarmi.com
     price_basis: net
-    net_discount: "0.2"                 # the owner: "Gross up the Cereser prices by 20% so they are all list prices"
-    net_discount_stated_by: owner
+    net_markup: "0.20"                  # the owner: "Gross up the Cereser prices by 20%": EUR 100 net is EUR 120 list
+    net_markup_stated_by: owner
     decided_by: "owner (supplied workbook) via Mas"
     decided_on: 2026-11-13                # Mas's mapping ruling
 

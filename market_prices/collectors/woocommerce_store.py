@@ -75,7 +75,7 @@ def _regular_amount(prices: Mapping, amount: Optional[str]) -> Optional[str]:
 def _regular_text(shown: Optional[Element], regular_amount: str, currency: Optional[str]) -> str:
     """The regular price as the shop writes it: the struck "was" text of its price_html, or, where the html shows
     none, the API's own statement of it (amount and code)."""
-    struck = text(shown, struck=True) if shown is not None else None
+    struck = text(shown, struck=True, hidden=config.WOOCOMMERCE_HIDDEN_CLASSES) if shown is not None else None
     return struck or " ".join(part for part in (regular_amount, currency) if part)
 
 
@@ -240,7 +240,7 @@ class WooCommerceStoreCollector:
             listing_text=text,
             stated_specs=_stated_specs(listing, attributes),
             grade_text=_grade(attributes, site.grade_labels),
-            price_text=text(shown) if shown is not None else None,
+            price_text=text(shown, hidden=config.WOOCOMMERCE_HIDDEN_CLASSES) if shown is not None else None,
             price_amount=amount,
             regular_price_text=(_regular_text(shown, regular_amount, currency) if regular_amount is not None
                                 else None),

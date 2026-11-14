@@ -15,8 +15,8 @@ from market_prices.schema import Source
 
 
 def _terms(terms: PriceTerms) -> dict:
-    return {"price_basis": terms.price_basis, "net_discount": terms.net_discount,
-            "net_discount_stated_by": terms.net_discount_stated_by, "vat_rate": terms.vat_rate,
+    return {"price_basis": terms.price_basis, "net_markup": terms.net_markup,
+            "net_markup_stated_by": terms.net_markup_stated_by, "vat_rate": terms.vat_rate,
             "vat_rate_stated_by": terms.vat_rate_stated_by}
 
 

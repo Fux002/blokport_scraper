@@ -117,22 +117,23 @@ StatedBy = Literal["site", "owner"]
 
 class PriceTerms(BaseModel):
     """A source's price terms for register.json (contract v4), each with who stated it, never defaulted or inferred:
-    whether its prices are list or net prices, a net source's discount below list, and its VAT rate."""
+    whether its prices are list or net prices, a net source's markup up to list (list = net x (1 + net_markup)),
+    and its VAT rate."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     price_basis: Optional[Literal["list", "net"]] = None
-    net_discount: Optional[Annotated[str, StringConstraints(pattern=r"^0(\.\d+)?$")]] = None   # in [0, 1)
-    net_discount_stated_by: Optional[StatedBy] = None
+    net_markup: Optional[Annotated[str, StringConstraints(pattern=r"^\d+(\.\d+)?$")]] = None   # exact, 0 or more
+    net_markup_stated_by: Optional[StatedBy] = None
     vat_rate: Optional[Rate] = None
     vat_rate_stated_by: Optional[StatedBy] = None
 
     @model_validator(mode="after")
     def _terms_whole(self) -> "PriceTerms":
-        if (self.price_basis == "net") != (self.net_discount is not None):
-            raise ValueError("a net price_basis needs its net_discount, and only a net one has one")
-        if (self.net_discount is None) != (self.net_discount_stated_by is None):
-            raise ValueError("net_discount_stated_by is set exactly when net_discount is")
+        if (self.price_basis == "net") != (self.net_markup is not None):
+            raise ValueError("a net price_basis needs its net_markup, and only a net one has one")
+        if (self.net_markup is None) != (self.net_markup_stated_by is None):
+            raise ValueError("net_markup_stated_by is set exactly when net_markup is")
         if (self.vat_rate is None) != (self.vat_rate_stated_by is None):
             raise ValueError("vat_rate_stated_by is set exactly when vat_rate is")
         return self
