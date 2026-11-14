@@ -296,6 +296,36 @@ def test_a_label_matches_whole_so_another_label_is_never_read_and_the_spec_stays
     assert row.stated_specs == {}
 
 
+# --- the currency: never a silent wrong one (f8's must and should, 14 Nov) -------------------------------------------
+SYMBOLS = {**CARDS, "fields": {**CARDS["fields"],
+                               "price": {"class": "items-loop__item-price", "text": True, "pattern": r"([\d,]+\.\d{2})"},
+                               "currency_symbols": {"$": "USD", "R$": "BRL", "€": "EUR"}}}
+MANY_SYMBOLS = "price text holds more than one declared currency symbol"
+
+
+@pytest.mark.parametrize("shown, currency, noted", [
+    ("R$ 59.00", "BRL", False),                 # "R$" is its own symbol: the "$" inside it is not a dollar
+    ("$ 59.00", "USD", False),
+    ("CA$ 59.00", None, False),                 # an undeclared "CA$" is never read as the declared "$"
+    ("$ 59.00 / € 52.00", None, True),          # two declared currencies: none is picked
+])
+def test_a_currency_symbol_counts_only_whole_and_two_currencies_give_none(shown, currency, noted):
+    page = _page(_card("SL9", "Rosso Levanto Slab", f'<span class="p">{shown}</span>'))
+    result = _run({f"{BASE}/collections/slabs/": page}, _site(SYMBOLS))
+    row = _rows(result)["SL9"]
+    assert (row.price_amount, row.currency) == ("59.00", currency)
+    assert (MANY_SYMBOLS in _status(result).detail) is noted
+
+
+def test_a_currency_source_that_is_not_an_iso_code_gives_no_currency_with_a_note():
+    declaration = {**CARDS, "fields": {**CARDS["fields"], "currency": {"class": "cur", "text": True}}}
+    page = _page(_card("SL8", "Verde Alpi Slab", PRICED.replace("Order Swatch", '<span class="cur">eur</span>')))
+    result = _run({f"{BASE}/collections/slabs/": page}, _site(declaration))
+    row = _rows(result)["SL8"]
+    assert (row.price_amount, row.currency) == ("39.20", None)
+    assert "currency 'eur' is not an ISO 4217 code x1" in _status(result).detail
+
+
 # --- refusals: one record's problem, never the site's ----------------------------------------------------------------
 def test_a_record_without_its_key_or_with_unparsable_json_is_refused_with_its_reason():
     no_key = ('<div class="items-loop__item" data-ms-tracking-item="' + _attr({"item_name": "No id slab"}) + '">'
