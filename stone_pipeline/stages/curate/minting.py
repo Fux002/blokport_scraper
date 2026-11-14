@@ -16,7 +16,7 @@ from stone_pipeline.reference.loaders import field_kinds, restricted_values
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, human_join, named_with_types,
                                                  review_card, review_evidence)
-from stone_pipeline.state.writeback import is_learned
+from stone_pipeline.aliases.learned import is_learned
 
 log = logfmt.get_logger("curate")
 
