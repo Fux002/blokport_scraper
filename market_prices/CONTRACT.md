@@ -45,7 +45,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | delivery_text, delivery_included | As written; `yes`, `no` or `unknown` |
 | min_qty_text | The minimum order as stated |
 | availability_text | The stock wording as written |
-| provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency and min_qty_text: `listing`, `site_statement` (said once for the whole site) or `unknown` |
+| provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency and min_qty_text: `listing`, `site_statement` (said once for the whole site) or `unknown`. A listing that states its own VAT basis (schema.org `valueAddedTaxIncluded`) gives `vat_basis` provenance `listing`, over any site statement; site_status `detail` counts the listings where the two differ |
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
 
@@ -60,19 +60,20 @@ One row per site in the register, every run.
 | status | Meaning |
 |---|---|
 | ok | Every page the site advertised was read, and every listing on them |
-| partial | Some rows delivered: a page failed or listings were malformed. `detail` says why |
+| partial | Some rows delivered: a page failed, a cap was reached, or listings were malformed. `detail` says why, naming the most common reasons listings were skipped with their counts |
 | unavailable_blocked | The site refused this client (401, 403, 406, 429, 451, a challenge page). 0 rows, and collection of that site stopped at once. Never worked around |
 | unavailable_error | No usable answer. 0 rows |
 | disabled_terms | No approved decision. No page fetched, 0 rows |
 | disallowed_robots | robots.txt forbids the collection or asks for a slower pace than we can run. 0 rows |
 
-A listing that cannot be read or delivered (for example a cell over 100,000 characters) is counted in `malformed_listings` and left out.
+A listing that cannot be read or delivered (for example a cell over 100,000 characters, or a product page with no schema.org Product) is counted in `malformed_listings` and left out; `detail` names the reasons, as `<reason> x<count>`, the most common first and the rest summed as `other reasons x<count>`.
 
 Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_checked_on`, `decision`, `observed_at`, `run_id`, `contract_version`, `brand`, `site_id`.
 
 ## Running
 
 - **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for that deployment's brand (`SCRAPER_BRAND`), env and bucket. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
+- **Collectors:** a site names its platform. `woocommerce_store` reads the shop's public Store API. `schema_org_product` reads each product page's schema.org Product/Offer structured data (JSON-LD), reached through the entry points the register names (see "Adding a site"): one listing per product, or per variant of a ProductGroup. Only what the structured data states is read: a price is `priced` only as one exact decimal in schema.org's form (a dot, no grouping), and a span, a zero or any other form is `none` with `price_text` kept as stated. Offers stating prices in several currencies are not one price either: `none`, every stated price in `price_text` (`10 EUR | 10 GBP`), `currency` empty, and `detail` counts them (`offers state several currencies x<n>`); the listing is still delivered. `listing_key` is the product's `sku`, else its `productID`, else its page's path; a variant shares its page, so without a `sku` or `productID` it is keyed by its own `@id` or `url` on the site, and one with no identity of its own is a malformed listing (`variant has no id of its own`), never merged into another. A site that states no structured price (prices loaded by script, or a browser needed) gives no rows, and `detail` says why; it is never worked around.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
 - **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand, the register's own `pilot_site` (`market_prices/sites/<brand>.yaml`), against development's bucket and prints a summary with the first rows. It refuses any other environment, a register naming no pilot site, and a pilot site the register has not approved, before a single request.
 
@@ -96,3 +97,14 @@ One `competitors` entry (id, the names the sheet uses, seller type, country, mar
 ## Adding a site
 
 One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
+
+An approved `schema_org_product` site needs `discovery` (another platform refuses it; a site never requested, such as a blocked one registered unapproved, may leave it out, so nothing about it is invented), and takes no `query`:
+
+```yaml
+discovery:
+  sitemaps: ["/sitemap-products.xml"]        # paths on base_url; a sitemap index (and a gzipped file) is followed
+  listing_pages: ["/sheet-materials/plywood"]  # paths; their links and rel="next" pages are followed
+  product_path: "^/p/[^/]+/?$"                # regular expression on a URL's path that marks a product page
+```
+
+At least one sitemap or listing page. The entry points are the in-scope part of the site (for example its sheet-material categories), never its whole catalogue: nothing is guessed from a link before a page is fetched. Product pages are read in sorted order, each only where robots.txt allows it (a forbidden one is skipped unrequested and counted in `malformed_listings`, `detail` reason `robots.txt disallows the product page`; a query is never dropped to reach an allowed URL); a page that answers with an error is its listing's problem, while a block or no answer ends the site. Caps (`SCHEMA_ORG_*` in `config.py`) bound the sitemaps, listing pages and product pages of one site; reaching one is reported in `detail`.
