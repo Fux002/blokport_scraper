@@ -152,3 +152,19 @@ def test_real_woocommerce_sale_markup_gives_the_current_price_text_without_its_h
     (row,) = collect_run(_register(), _shop(_page([on_sale])), MOMENT, _no_pause).observations
     assert (row.price_text, row.price_amount) == ("€ 21,25", "21.25")
     assert (row.regular_price_text, row.regular_price_amount) == ("€ 25,00", "25.00")
+
+
+
+def test_a_store_api_price_text_drops_control_characters_as_every_text_cell_does():
+    (row,) = collect_run(_register(), _shop(_page([_listing(1, price_html="<span>&euro;\x07&nbsp;21,25\x00</span>")])),
+                         MOMENT, _no_pause).observations
+    assert row.price_text == "€ 21,25"
+
+
+def test_a_price_html_over_the_element_cap_is_that_listings_problem_alone(monkeypatch):
+    monkeypatch.setattr(config, "DECLARED_HTML_MAX_ELEMENTS", 3)
+    flood = _listing(2, price_html="<span>" * 5 + "&euro; 9,00")
+    result = collect_run(_register(), _shop(_page([_listing(1), flood])), MOMENT, _no_pause)
+    assert [row.listing_key for row in result.observations] == ["1"]
+    (status,) = result.statuses
+    assert (status.status.value, status.malformed_listings) == ("partial", 1)

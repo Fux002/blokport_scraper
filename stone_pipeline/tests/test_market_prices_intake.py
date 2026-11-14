@@ -619,8 +619,9 @@ def test_a_file_is_absorbed_published_and_recorded_once(tmp_path):
     s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
     outcome = _intake(s3, tmp_path)
     assert outcome.absorbed == ((f"{PREFIX}/intake/stonecorp.csv", RUN_ID),) and outcome.refused == ()
-    assert s3.puts == [f"{PREFIX}/{RUN_ID}/observations.csv", f"{PREFIX}/{RUN_ID}/site_status.csv",
-                       f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}", f"{PREFIX}/latest.json", RECORD]
+    assert s3.puts == [f"{PREFIX}/{RUN_ID}/observations.csv", f"{PREFIX}/{RUN_ID}/register.json",
+                       f"{PREFIX}/{RUN_ID}/site_status.csv", f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}",
+                       f"{PREFIX}/latest.json", RECORD]
     assert _record(s3) == [{"sha256": hashlib.sha256(STONECORP).hexdigest(), "key": f"{PREFIX}/intake/stonecorp.csv",
                             "version_id": "v1", "layout_id": "stonecorp_csv", "run_id": RUN_ID}]
     s3.puts.clear()

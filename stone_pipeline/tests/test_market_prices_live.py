@@ -190,6 +190,7 @@ def test_a_register_with_no_approved_site_runs_cleanly_and_publishes_only_eviden
     prefix = "dev/market_prices/blokport"
     assert sorted(s3.objects) == [f"{prefix}/20261108T123005Z/manifest.json",
                                   f"{prefix}/20261108T123005Z/observations.csv",
+                                  f"{prefix}/20261108T123005Z/register.json",
                                   f"{prefix}/20261108T123005Z/site_status.csv"]
     assert outcome.published["manifest"]["files"]["observations.csv"]["rows"] == 0
     assert outcome.published["latest_moved"] is False

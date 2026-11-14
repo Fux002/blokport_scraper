@@ -662,8 +662,9 @@ def test_a_run_is_delivered_files_then_manifest_then_latest(tmp_path):
     s3 = _S3()
     outcome = _published(tmp_path, s3)
     prefix = "dev/market_prices/blokport"
-    assert s3.order == [f"{prefix}/20261108T123005Z/observations.csv", f"{prefix}/20261108T123005Z/site_status.csv",
-                        f"{prefix}/20261108T123005Z/manifest.json", f"{prefix}/latest.json"]
+    assert s3.order == [f"{prefix}/20261108T123005Z/observations.csv", f"{prefix}/20261108T123005Z/register.json",
+                        f"{prefix}/20261108T123005Z/site_status.csv", f"{prefix}/20261108T123005Z/manifest.json",
+                        f"{prefix}/latest.json"]
     assert outcome["latest_moved"] is True
     assert outcome["manifest"]["files"]["observations.csv"]["rows"] == 1
     latest = json.loads(s3.objects[f"{prefix}/latest.json"])
