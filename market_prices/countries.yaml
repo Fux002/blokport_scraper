@@ -1,0 +1,39 @@
+# The one brand-neutral country table a stated origin is read through (market_prices/specs.py, CONTRACT.md "Specs").
+# Each ISO 3166 country: its alpha-2 and alpha-3 codes as ISO writes them, and the names sources state it by. Every
+# entry comes from a source's evidence (first: the countries the owner's competitor tabs name, 14 Nov); a stated
+# origin the table does not hold refuses its row until the country is added here, at the source. Codes are quoted:
+# YAML reads a bare NO as false.
+countries:
+  - {iso2: "AL", iso3: "ALB", names: [Albania]}
+  - {iso2: "AO", iso3: "AGO", names: [Angola]}
+  - {iso2: "BE", iso3: "BEL", names: [Belgium]}
+  - {iso2: "BR", iso3: "BRA", names: [Brazil]}
+  - {iso2: "CA", iso3: "CAN", names: [Canada]}
+  - {iso2: "CH", iso3: "CHE", names: [Switzerland]}
+  - {iso2: "CN", iso3: "CHN", names: [China]}
+  - {iso2: "DE", iso3: "DEU", names: [Germany]}
+  - {iso2: "EG", iso3: "EGY", names: [Egypt]}
+  - {iso2: "ES", iso3: "ESP", names: [Spain]}
+  - {iso2: "FI", iso3: "FIN", names: [Finland]}
+  - {iso2: "FR", iso3: "FRA", names: [France]}
+  - {iso2: "GR", iso3: "GRC", names: [Greece]}
+  - {iso2: "HR", iso3: "HRV", names: [Croatia]}
+  - {iso2: "IE", iso3: "IRL", names: [Ireland]}
+  - {iso2: "IN", iso3: "IND", names: [India]}
+  - {iso2: "IR", iso3: "IRN", names: [Iran]}
+  - {iso2: "IT", iso3: "ITA", names: [Italy]}
+  - {iso2: "MA", iso3: "MAR", names: [Morocco]}
+  - {iso2: "MG", iso3: "MDG", names: [Madagascar]}
+  - {iso2: "MK", iso3: "MKD", names: [North Macedonia]}
+  - {iso2: "NA", iso3: "NAM", names: [Namibia]}
+  - {iso2: "NO", iso3: "NOR", names: [Norway]}
+  - {iso2: "PK", iso3: "PAK", names: [Pakistan]}
+  - {iso2: "PT", iso3: "PRT", names: [Portugal]}
+  - {iso2: "SE", iso3: "SWE", names: [Sweden]}
+  - {iso2: "TN", iso3: "TUN", names: [Tunisia]}
+  - {iso2: "TR", iso3: "TUR", names: [Turkey]}
+  - {iso2: "US", iso3: "USA", names: [United States]}
+  - {iso2: "VN", iso3: "VNM", names: [Vietnam]}
+  - {iso2: "ZA", iso3: "ZAF", names: [South Africa]}
+  - {iso2: "ZM", iso3: "ZMB", names: [Zambia]}
+  - {iso2: "ZW", iso3: "ZWE", names: [Zimbabwe]}

@@ -51,6 +51,11 @@ layouts:
     price: "Price (EUR/m² ex VAT)"          # each size row's own price, its adjustment already applied
     number: {decimal: ".", thousands: ""}
     statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
+    specs:                                  # contract v3: the columns stating each spec
+      thickness: {labels: ["Thickness (cm)"], unit: cm}
+      finish: {labels: [Finish]}
+      material_type: {labels: ["Stone type"]}
+      origin: {labels: [Origin]}             # the English names; the code columns are not ISO-clean
 
   - layout_id: owner_tuytelaers_tab
     sheet: Tuytelaers Prices
@@ -67,6 +72,11 @@ layouts:
     price: "Price (EUR/m² ex VAT)"
     number: {decimal: ".", thousands: ""}
     statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
+    specs:                                  # contract v3: the columns stating each spec
+      thickness: {labels: ["Thickness (cm)"], unit: cm}
+      finish: {labels: [Finish]}
+      material_type: {labels: ["Stone type"]}
+      origin: {labels: [Origin]}             # the English names; the code columns are not ISO-clean
 
   - layout_id: owner_cereser_tab
     sheet: Cereser Prices
@@ -87,3 +97,8 @@ layouts:
     number: {decimal: ".", thousands: ""}
     # VAT excluded on the owner's word (13 Nov)
     statements: {currency: EUR, vat_basis: excl, unit_text: "m²"}
+    specs:                                  # contract v3: the columns stating each spec
+      thickness: {labels: ["Thickness (cm)"], unit: cm}
+      finish: {labels: [Finish]}
+      material_type: {labels: ["Stone type"]}
+      origin: {labels: [Origin]}             # the English names; the code columns are not ISO-clean

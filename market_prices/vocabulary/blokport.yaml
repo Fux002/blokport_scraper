@@ -2,3 +2,36 @@
 # site's own query already scopes what the collector reads. Declared here so every brand's scope is a visible file.
 brand: blokport
 scope: all
+
+# Contract v3 (CONTRACT.md "Specs"): each canonical word is the seed's own (a backbone finish or stone type, so the
+# pricing module matches on its own names); the words under it are how sources state it, each from a source's evidence
+# (first: the owner's competitor tabs, Brachot / Tuytelaers / Cereser, measured 14 Nov). A stated value no word here
+# names refuses its row with its reason, until a word is added at the source; nothing is guessed.
+finishes:
+  Polished: [gepolijst]
+  Sawn Cut: [gezaagd]
+  # verzoet is honed; the shade words (donker, blauw, licht) are the stone's colour, kept in finish_text
+  Honed: [verzoet, donker verzoet, blauw verzoet, donkerblauw verzoet, licht verzoet]
+  Honed and Filled: ["verzoet, gestopt"]
+  Brushed and Unfilled: ["geborsteld, ongestopt"]
+  Flamed: [gevlamd, blauw gevlamd]
+  Sanded: [geschuurd]
+  Leathered: [leather]
+  Antique: [anticato]
+  Waterjet: [gewaterstraald]
+  Split Face: [a spacco]
+materials:
+  Granite: [graniet]
+  Marble: [marmer]
+  Limestone: [kalksteen]
+  Quartzite: [kwartsiet]
+  Travertine: [travertin]
+  Slate: [leisteen]
+  Soapstone: [speksteen]
+  Bluestone: [blauwe hardsteen]
+  # the owner collapsed Dolomite Marble into Dolomite (13 Nov)
+  Dolomite: [dolomietmarmer]
+  Onyx: []
+  Basalt: []
+# what a source writes when it states nothing for a spec
+unstated: [Not defined in catalog legend]

@@ -23,6 +23,7 @@ from market_prices.schema import (
     DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source,
     VatBasis, columns, csv_values,
 )
+from market_prices.specs import UNSTATED_NOTE, Countries, Specs, load_countries, read_specs
 from market_prices.vocabulary import Vocabulary, VocabularyError, load_vocabulary
 
 _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "delivery_text": None,
@@ -61,8 +62,8 @@ def stamp_for(moment: datetime) -> Stamp:
     return Stamp(run_id=utc.strftime("%Y%m%dT%H%M%SZ"), observed_at=utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
-def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, version: str) -> Observation:
-    """The one place a listing's facts meet the site's identity and statements."""
+def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, version: str, specs: Specs) -> Observation:
+    """The one place a listing's facts meet the site's identity and statements, and its specs (read_specs)."""
     stated: dict[str, object] = {}
     provenance: dict[str, Provenance] = {}
     for name, unknown in _SITE_STATEMENT_FIELDS.items():
@@ -76,13 +77,15 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
             stated[name], provenance[name] = unknown, Provenance.unknown
     for name in _LISTING_FIELDS:
         provenance[name] = Provenance.listing if getattr(facts, name) is not None else Provenance.unknown
+    provenance.update(specs.provenance())
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
         seller_name=site.seller_name, seller_type=site.seller_type, seller_country=site.seller_country,
         served_market=site.served_market, seller_is_our_supplier=site.supplier_key is not None,
         supplier_key=site.supplier_key,
         listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
-        stated_specs=facts.stated_specs, grade_text=facts.grade_text, price_text=facts.price_text,
+        stated_specs={label: value for label, value in facts.stated_specs.items() if label not in specs.used},
+        **specs.columns(), grade_text=facts.grade_text, price_text=facts.price_text,
         price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
         min_qty_text=facts.min_qty_text, availability_text=facts.availability_text, provenance=provenance,
         observed_at=stamp.observed_at, run_id=stamp.run_id, collector_version=version, **stated,
@@ -94,13 +97,13 @@ def _vat_conflict(facts: ListingFacts, site: Site) -> bool:
     return facts.vat_basis is not None and stated is not None and facts.vat_basis != stated
 
 
-def _invalid(exc: ValidationError) -> str:
+def invalid_reason(exc: ValidationError) -> str:
     """A row that does not validate, named by its first field and not its value (the value is the seller's)."""
     first = exc.errors()[0]
     return f"{'.'.join(str(part) for part in first['loc']) or 'row'} does not validate"
 
 
-def _counted(reasons: collections.Counter) -> str:
+def counted_reasons(reasons: collections.Counter) -> str:
     """The most common reasons with their counts, the rest summed: '<reason> x<n>; ...; other reasons x<n>'."""
     ranked = sorted(reasons.items(), key=lambda item: (-item[1], item[0]))
     shown = [f"{reason} x{count}" for reason, count in ranked[:config.MALFORMED_REASONS_SHOWN]]
@@ -108,10 +111,10 @@ def _counted(reasons: collections.Counter) -> str:
     return "; ".join(shown + ([f"other reasons x{rest}"] if rest else []))
 
 
-def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Transport, stamp: Stamp,
-                 pause: Callable[[float], None]) -> SiteResult:
+def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Countries, transport: Transport,
+                 stamp: Stamp, pause: Callable[[float], None]) -> SiteResult:
     """One site, isolated. A listing is kept only when the run brand's vocabulary has it in scope; one out of scope
-    is counted in `detail`, never dropped silently."""
+    is counted in `detail`, never dropped silently. Its specs are read through the site's spec_labels."""
     malformed = duplicates = vat_conflicts = out_of_scope = 0
     reasons: collections.Counter = collections.Counter()
     notes: collections.Counter = collections.Counter()
@@ -143,14 +146,15 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Tran
                 if not vocabulary.in_scope(facts.listing_text, site.served_market):
                     out_of_scope += 1
                     continue
-                row = _observation(facts, site, brand, stamp, collector.version)
+                specs = read_specs(facts.stated_specs, site.spec_labels, vocabulary, countries)
+                row = _observation(facts, site, brand, stamp, collector.version, specs)
             except MalformedListing as exc:
                 malformed += 1
                 reasons[str(exc)] += 1
                 continue
             except ValidationError as exc:
                 malformed += 1
-                reasons[_invalid(exc)] += 1
+                reasons[invalid_reason(exc)] += 1
                 continue
             if row.listing_key in rows:
                 duplicates += 1     # a listing that moved between pages while they were read
@@ -158,21 +162,23 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Tran
             rows[row.listing_key] = row
             vat_conflicts += _vat_conflict(facts, site)
             notes.update(facts.notes)
+            if specs.unstated:
+                notes[UNSTATED_NOTE] += specs.unstated
     except SiteBlocked as exc:
         return finish(SiteRunStatus.unavailable_blocked, str(exc))
     except SiteDisallowed as exc:
         return finish(SiteRunStatus.disallowed_robots, str(exc))
     except (TransportError, UnexpectedResponse) as exc:
-        skipped = f"; {malformed} malformed listings skipped: {_counted(reasons)}" if malformed else ""
+        skipped = f"; {malformed} malformed listings skipped: {counted_reasons(reasons)}" if malformed else ""
         if rows:
             return finish(SiteRunStatus.partial, f"stopped early: {exc}{skipped}", rows.values())
         return finish(SiteRunStatus.unavailable_error, f"{exc}{skipped}")
     # a site read whole with every listing out of scope is ok with no rows; nothing readable at all is an error
     if not rows and (malformed or not out_of_scope):
-        why = f": {_counted(reasons)}" if malformed else ""
+        why = f": {counted_reasons(reasons)}" if malformed else ""
         return finish(SiteRunStatus.unavailable_error, f"no readable listings ({malformed} malformed{why})")
     if malformed:
-        return finish(SiteRunStatus.partial, f"{malformed} malformed listings skipped: {_counted(reasons)}",
+        return finish(SiteRunStatus.partial, f"{malformed} malformed listings skipped: {counted_reasons(reasons)}",
                       rows.values())
     return finish(SiteRunStatus.ok, "", rows.values())
 
@@ -181,10 +187,11 @@ def collect_run(register: Register, transport: Transport, moment: datetime,
                 pause: Callable[[float], None] = time.sleep) -> RunResult:
     stamp = stamp_for(moment)
     vocabulary = load_vocabulary(register.brand)
+    countries = load_countries()
     if uncovered := sorted(site.site_id for site in register.sites
                            if site.collectable and not vocabulary.covers(site.served_market)):
         raise VocabularyError(f"{register.brand}'s scope vocabulary declares no market for sites {uncovered}")
-    results = [collect_site(site, register.brand, vocabulary, transport, stamp, pause)
+    results = [collect_site(site, register.brand, vocabulary, countries, transport, stamp, pause)
                for site in sorted(register.sites, key=lambda site: site.site_id)]
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),
