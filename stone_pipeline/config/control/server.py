@@ -1118,6 +1118,7 @@ _SOURCE_INT_FIELDS = ("default_bundle_size", "min_expected_rows")
 _SOURCE_STR_FIELDS = ("source_code", "vendor", "company_id", "origin_default", "primary_origin",
                       "collection_country", "collection_city")
 _SOURCE_BOOL_FIELDS = ("image_pipeline", "emit_on_review")
+_SOURCE_COUNTRY_FIELDS = ("origin_default", "primary_origin", "collection_country")
 # The run state POST /pause, /resume and /delist own, as a source that has none yet starts: active.
 _SOURCE_STATE_FIELDS = ("enabled", "lifecycle")
 _NEW_SOURCE_STATE = {"enabled": True, "lifecycle": "active"}
@@ -1204,6 +1205,12 @@ def _validate_source_put(name: str, body: dict, stored: dict | None) -> tuple[in
     city = body["collection_city"]          # stripped above (_SOURCE_STR_FIELDS)
     if city and (err := _name_refusal(field_kinds.PRODUCT_COLLECTION_CITY, city)):
         return err
+    # a country is stored as its ISO-2 code ('Italy' -> 'IT'): the pipeline accepts nothing else
+    for field in _SOURCE_COUNTRY_FIELDS:
+        if raw := body[field]:
+            if not (iso := _resolve_origin_iso(raw)):
+                return 400, {"error": f"{field} {raw!r} is not a real ISO-3166 country"}
+            body[field] = iso
     # the integer fields are validated HERE, so a malformed value is the client's 400 (it used to reach
     # int() in the store and answer 500)
     for field in _SOURCE_INT_FIELDS:

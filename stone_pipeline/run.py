@@ -383,10 +383,11 @@ def preflight(ctx: RunContext, frame: pl.DataFrame, known_products_path: Optiona
         # keep an auto source auto-loading on a catastrophic empty scrape).
         raise RunAborted(stamp_failed=True)
 
-    # COLLECTION-LOCATION GUARD (before any stage): a mistyped country would otherwise emit null, and the backend clears
-    # a product's location on a stated null, so one typo would clear this whole source's locations on its next sync.
-    # Held like the floor above: no canonical is written, so the last good run stays in force.
+    # SOURCE-COUNTRY GUARD (before any stage): a mistyped country would otherwise be dropped or emitted as null, and the
+    # backend clears a product's location on a stated null. Held like the floor above: no canonical is written, so the
+    # last good run stays in force.
     try:
+        derive.require_source_countries(ctx.ref, source_cfg)
         derive.collection_location(ctx.ref, source_cfg)
     except ValueError as exc:
         run_log.error(f"source configuration error, holding this source (last good run stays in force): {exc}")

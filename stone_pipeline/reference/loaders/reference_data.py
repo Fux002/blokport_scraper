@@ -14,8 +14,9 @@ from stone_pipeline.reference.loaders.attributes import VOCAB_CATEGORIES, Attrib
 from stone_pipeline.reference.loaders.backbone import Backbone, load_backbone
 from stone_pipeline.reference.loaders.common import env, log, norm
 from stone_pipeline.reference.loaders.identity import type_slug_from_key
-from stone_pipeline.reference.loaders.origins import (OriginMap, OriginOverrides, load_country_codes,
-                                                      load_origin_map, load_origin_overrides, resolve_iso)
+from stone_pipeline.reference.loaders.origins import (OriginMap, OriginOverrides, country_list,
+                                                      load_country_codes, load_origin_map, load_origin_overrides,
+                                                      require_iso2, resolve_iso)
 from stone_pipeline.reference.loaders.ports import Ports, load_ports
 from stone_pipeline.reference.loaders.units import Units, load_units
 from stone_pipeline.reference.loaders.variants import VariantTable, load_existing_variants
@@ -136,6 +137,20 @@ def existing_varieties_file() -> Path:
         f"no existing-variety file: neither {paths.export_file} nor {paths.variants_export_base_csv} exists")
 
 
+def _require_origin_countries(ref: ReferenceData, origin_edits: dict[tuple[str, str], str]) -> None:
+    """Every origin source holds only ISO-2 codes, checked before any overlay so the error names the source."""
+    sources = (
+        ("origin_map.csv", [r.country_iso for r in ref.origin_map.rules]),
+        ("origin_supplier_overrides.csv", ref.origin_overrides.rules.values()),
+        ("mint origins", ref.decisions.mint_origin_rules().values()),
+        ("origin edits", origin_edits.values()),
+        ("widened origins", ref.decisions.widened.values()),
+        ("vendor origin confirmations", ref.decisions.vendor_origins.values()),
+    )
+    for where, values in sources:
+        require_iso2(where, [c for v in values for c in country_list(v)], ref.valid_iso_codes)
+
+
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
     from stone_pipeline.config import categories, decisions_store, store
@@ -205,12 +220,13 @@ def load_all() -> ReferenceData:
     # a statement's colour is a documented colour of its variety (mint or bind alike): the same leaf overlay
     # as an approved leaf, so a variety minted from a colourless listing has a colour to give its listings
     ref.backbone.apply_leaf_overlay(ref.decisions.colour_leaves())
+    origin_edits = decisions_store.variety_origins() if _have_config_db else {}
+    _require_origin_countries(ref, origin_edits)
     ref.origin_map.apply_origin_overlay(ref.decisions.mint_origin_rules())
-    if _have_config_db:
-        # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
-        # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
-        # machinery as the mint origin above, keyed by (name, type), country_iso may be a comma-list.
-        ref.origin_map.apply_origin_overlay(decisions_store.variety_origins())
+    # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
+    # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
+    # machinery as the mint origin above, keyed by (name, type), country_iso may be a comma-list.
+    ref.origin_map.apply_origin_overlay(origin_edits)
     # a widened decision ADDS its country to the stone's documented list (union), after every list edit
     ref.origin_map.widen(ref.decisions.widened)
     ref.origin_overrides.apply_overlay(ref.decisions.vendor_origins)
