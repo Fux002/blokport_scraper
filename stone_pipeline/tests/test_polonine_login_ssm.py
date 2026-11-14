@@ -60,3 +60,16 @@ def test_prod_takes_the_names_from_the_brand_and_only_blokport_sets_them():
 def test_the_produce_secrets_are_value_from_only():
     sync = (_INFRA / "modules" / "sync_service" / "main.tf").read_text(encoding="utf-8")
     assert re.search(r"\[for k, v in var\.produce_secret_arns : \{ name = k, valueFrom = v \}\]", sync)
+
+
+def test_the_prod_login_is_wired_whole_or_not_at_all():
+    """f8's should: one prod name without the other would wire half a login, silent at plan time. Each prod data source
+    refuses the plan unless both names are set and the brand switches the login on."""
+    main = _main()
+    for which in ("username", "password"):
+        block = re.search(rf'data "aws_ssm_parameter" "polonine_{which}" \{{(.*?)^\}}', main, flags=re.S | re.M)
+        assert block, which
+        body = block.group(1)
+        assert "precondition" in body, which
+        assert 'var.polonine_username_ssm_name != ""' in body and 'var.polonine_password_ssm_name != ""' in body, which
+        assert "var.polonine_login" in body, which
