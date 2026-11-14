@@ -58,11 +58,9 @@ ADDITIONS_FILES = {name: CATALOG / "backbone_additions" / f"{name}.json" for nam
 VARIETIES_FILE = CATALOG / "backbone_varieties.json"
 ADDITIONS_FILE = CATALOG / "backbone_additions" / "varieties.json"
 DELETED_FILES = (CATALOG / "image_model.csv", CATALOG / "missing_variants.csv")
-# sha256 of the sorted Keys of the backbone posts this wrote, every one through the map: CI pins it
-# The rewrite's Keys (ba047a47...) with the Brazilian White undo applied (owner 11-11, #635): marble__super_white and
-# onyx__super_white leave, and marble, onyx and quartzite Brazilian White join (new_key of their identity); and
-# marble__volakas leaves, folded into Volocas (owner 11-05 'Volakas = Volocas', Mas 11-12).
-MAPPED_BACKBONE_KEYS_SHA256 = "abcd48a17c792e7b28b963eab81b48876ce9681bceb67a4371c07a4ccbe5a039"
+# sha256 of the sorted Keys of the committed backbone's posts, every one a Key of the map: CI (which has no map)
+# pins it, so a post added or removed re-pins it only after the map is read to carry that Key
+MAPPED_BACKBONE_KEYS_SHA256 = "58241cb46be2f9aa098fe3b79bed43958ad8c4567f33f630b5e53d540b265a6e"
 BASE_FILES = (
     REPO_ROOT / "from_medusa" / "development" / "variants_export_base.csv",
     REPO_ROOT / "from_medusa" / "production" / "variants_export_base.csv",

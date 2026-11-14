@@ -135,7 +135,7 @@ def _ledger_product(source_code: str) -> None:
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
         lg.upsert("variation", {"key": "marble__v1", "type": "Marble", "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": None, "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))

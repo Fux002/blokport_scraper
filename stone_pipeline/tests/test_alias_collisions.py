@@ -66,6 +66,17 @@ def test_no_committed_alias_names_another_variety():
                             + "\n".join(str(c) for c in collisions))
 
 
+def _seed(monkeypatch, seed: dict) -> None:
+    """The alias stores emit reads (P2-10 C4: a variety's aliases come from the stores, never from the base file): the
+    given backbone seed, for a produce build and for the hermetic seed projection alike."""
+    from stone_pipeline.aliases import stores as alias_stores
+    from stone_pipeline.aliases.surfaces import Stores
+    from stone_pipeline.reference.loaders import backbone
+    monkeypatch.setattr(alias_stores, "scraper_stores", lambda backbone=None: Stores(seed=seed))
+    monkeypatch.setattr(alias_stores, "seed_of", lambda _backbone: seed)
+    monkeypatch.setattr(backbone, "load_backbone", lambda path=None: backbone.Backbone())
+
+
 def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produce_completes(tmp_path, monkeypatch):
     # the seed's marble Casa Blue carries 'Calcite Blue'; the operator mints marble 'Calcite Blue' (curate's delta). The
     # emit keeps both varieties, drops the colliding alias from Casa Blue, and lists it for the operator.
@@ -76,8 +87,9 @@ def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produc
     monkeypatch.setattr(emit_catalog, "SETTINGS",
                         dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, review_dir=review)))
     casa, calcite = new_key("Marble", "Casa Blue"), new_key("Marble", "Calcite Blue")
+    _seed(monkeypatch, {casa: (["Calcite Blue", "Casa Blue Marble"], [])})
     base, delta = tmp_path / "variants_export_base.csv", tmp_path / "curate_delta.csv"
-    for path, rows in ((base, [[casa, "Casa Blue", "Marble", "Calcite Blue|Casa Blue Marble"]]),
+    for path, rows in ((base, [[casa, "Casa Blue", "Marble", ""]]),
                        (delta, [[calcite, "Calcite Blue", "Marble", ""]])):
         with path.open("w", newline="", encoding="utf-8") as h:
             csv.writer(h).writerows([emit_catalog._COLS, *rows])
@@ -98,8 +110,8 @@ def test_an_alias_equal_to_a_minted_variety_is_dropped_and_listed_and_the_produc
 
 
 def _emit_with_a_collision(tmp_path, monkeypatch, *, stamp, collide=True, seed_only=False):
-    """One build over a base with marble Casa Blue carrying 'Calcite Blue' and, when `collide`, marble Calcite Blue
-    in the same base; the review dir is tmp and the per-run stamp is `stamp`. Returns (emit_catalog, review dir)."""
+    """One build over a base with marble Casa Blue (its seed carrying 'Calcite Blue') and, when `collide`, marble
+    Calcite Blue in the same base; the review dir is tmp and the per-run stamp is `stamp`. Returns (emit_catalog, review dir)."""
     from stone_pipeline.config.settings import SETTINGS
     from stone_pipeline.phase1.variety_key import new_key
     from stone_pipeline.stages import emit_catalog
@@ -109,7 +121,8 @@ def _emit_with_a_collision(tmp_path, monkeypatch, *, stamp, collide=True, seed_o
     monkeypatch.setattr(emit_catalog, "SETTINGS", dataclasses.replace(SETTINGS, paths=paths))
     monkeypatch.setattr(emit_catalog, "_run_stamp", lambda: stamp)
     base = tmp_path / f"base_{stamp}.csv"
-    rows = [[new_key("Marble", "Casa Blue"), "Casa Blue", "Marble", "Calcite Blue|Casa Blue Marble"]]
+    _seed(monkeypatch, {new_key("Marble", "Casa Blue"): (["Calcite Blue", "Casa Blue Marble"], [])})
+    rows = [[new_key("Marble", "Casa Blue"), "Casa Blue", "Marble", ""]]
     if collide:
         rows.append([new_key("Marble", "Calcite Blue"), "Calcite Blue", "Marble", ""])
     with base.open("w", newline="", encoding="utf-8") as h:

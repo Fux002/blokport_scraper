@@ -8,8 +8,8 @@ the repo's ledger schema) applies these decisions to the step-1 snapshot copies 
 Rules, each from the spec:
 - A variety's copies collapse to ONE row under its new Key: the copy whose own `medusa_id` is the survivor id, set
   dirty so it re-serves once (C4, D2). That is the survivor's record, not necessarily the slab copy C4 names (D2 makes
-  the survivor per env). Its aliases are every copy's, unioned case-insensitively with the slab copy's casing first;
-  its in_full is the max over the copies. An identity the backend has no record of (an unpulled mint) keeps its first
+  the survivor per env). Its alias_rows and codes are NULL, not computed until the first produce computes them from
+  the alias stores (P2-10 C4); its in_full is the max over the copies. An identity the backend has no record of (an unpulled mint) keeps its first
   copy by category rank as one pending row (G8).
 - A copy in `retiring` or `gap_held`, or with `abandoned_at`, aborts (section 3); so does a Key outside the key map.
 - Products point at their variety's new Key.
@@ -156,23 +156,14 @@ def plan_variations(rows: list[dict], key_map: KeyMap, survivors: dict[str, str]
                 _abort(plan.aborts, "no_survivor_but_synced", new)
                 continue
             kept, state = copies[0], PENDING_STATE
-        plan.rows[new] = {**kept, "key": new, "state": state, "aliases": _alias_union(copies, kept),
+        # alias_rows and codes NULL: not computed yet, so held until the first produce computes them from the alias
+        # stores (P2-10 C4). The copies' old unowned aliases are not carried: a loser name reaches the seed by the
+        # backbone merge (rewrite_committed._merged_post)
+        plan.rows[new] = {**kept, "key": new, "state": state, "alias_rows": None, "codes": None,
                           "in_full": max(int(r.get("in_full") or 0) for r in copies)}
         plan.collapsed[new] = [r["key"] for r in copies]
     plan.aborts = _sorted_aborts(plan.aborts)
     return plan
-
-
-def _alias_union(copies: list[dict], kept: dict):
-    """The copies' aliases (JSON arrays), case-insensitively unioned in category-rank order, so the slab copy's casing
-    wins (spec section 3, Aliases); the kept row's own value when no copy has any."""
-    seen, out = set(), []
-    for row in copies:
-        for alias in json.loads(row["aliases"]) if row.get("aliases") else []:
-            if alias.casefold() not in seen:
-                seen.add(alias.casefold())
-                out.append(alias)
-    return json.dumps(out) if out else kept.get("aliases")
 
 
 def remap_products(products: list[dict], key_map: KeyMap) -> tuple[list[dict], dict]:

@@ -3,7 +3,7 @@ restored Keys once, so each comes back with its whole payload. The answer is {re
 external_ids are disjoint and together exactly the deduped external_ids sent. `reserved` WILL serve on a coming
 pull (a retry wait only delays it); an unknown Key is reported, never created; a frozen Key exists but the scraper
 does not serve it, so it is never marked: {external_id, reason}, reason the first of abandoned | archived |
-retiring | not_in_full | no_type. A reserve outranks every lease issued before it (the reserved_at stamp). At most
+retiring | not_in_full | no_type | uncomputed. A reserve outranks every lease issued before it (the reserved_at stamp). At most
 SETTINGS.sync.max_reserve_ids distinct Keys per call; a call over the bound is refused whole with nothing marked.
 """
 
@@ -23,7 +23,7 @@ _OLD = "2000-01-01T00:00:00+00:00"
 
 def _variation(ledger, key, state="synced", *, archived=0, in_full=1, type_="Marble", payload_hash="h"):
     ledger.upsert("variation", {
-        "key": key, "type": type_, "name": "x", "aliases": "[]",
+        "key": key, "type": type_, "name": "x", "alias_rows": "[]", "codes": "[]",
         "medusa_id": "V" if state != "pending" else None, "in_full": in_full, "payload_hash": payload_hash,
         "state": state, "archived": archived, "first_seen": _OLD, "last_synced": None,
         "created_at": _OLD, "updated_at": _OLD}, pk=("key",))
@@ -231,13 +231,15 @@ def test_the_lists_are_disjoint_and_exactly_the_deduped_ids_sent(tmp_path):
         _variation(ledger, "marble__untyped_6", type_="")
         _variation(ledger, "marble__dead_7")
         _abandon(ledger, "marble__dead_7")
+        _variation(ledger, "marble__uncomputed_8")
+        ledger.execute("UPDATE variation SET alias_rows = NULL WHERE key = 'marble__uncomputed_8'")
         sent = ["marble__zz_9", "marble__a_1", "marble__arch_3", "marble__a_1", "marble__ret_4", "marble__b_2", "marble__out_5",
-                "marble__untyped_6", "marble__dead_7", "marble__zz_9"]
+                "marble__untyped_6", "marble__dead_7", "marble__uncomputed_8", "marble__zz_9"]
         code, answer = _reserve(ledger, sent)
         assert code == 200 and set(answer) == {"reserved", "unknown", "frozen"}
         assert all(set(f) == {"external_id", "reason"} for f in answer["frozen"])
         assert {f["reason"] for f in answer["frozen"]} == {"abandoned", "archived", "retiring", "not_in_full",
-                                                         "no_type"}
+                                                         "no_type", "uncomputed"}
         lists = [answer["reserved"], answer["unknown"], [f["external_id"] for f in answer["frozen"]]]
         flat = [k for lst in lists for k in lst]
         assert len(flat) == len(set(flat))                       # disjoint, and no Key twice within a list

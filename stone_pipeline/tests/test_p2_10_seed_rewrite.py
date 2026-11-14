@@ -26,8 +26,8 @@ LIVE_ADDITIONS = REPO / "catalog_source" / "seed_live_additions_development.csv"
 BASES = [REPO / "from_medusa" / env / "variants_export_base.csv" for env in ("development", "production")] + \
     [LIVE_ADDITIONS]
 IS_CODE = code_matcher(r"[Gg]\d+[A-Za-z]?")
-# Keys with no backbone post (SC-3 rev 2.3), measured 11-12: 67 in both committed bases, plus 46 dev minted since
-NO_POST_KEYS = 113
+# Keys with no backbone post: 66 in both committed bases, plus 46 dev minted since
+NO_POST_KEYS = 112
 
 
 def _posts() -> dict[str, dict]:
