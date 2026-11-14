@@ -92,7 +92,7 @@ def _file(data: bytes = STONECORP, key: str = f"{PREFIX}/intake/stonecorp.csv", 
 
 
 def _absorb(data: bytes = STONECORP, layouts: Layouts | None = None, key: str = f"{PREFIX}/intake/stonecorp.csv"):
-    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport")
+    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport", sources=())
 
 
 def _words():
@@ -875,7 +875,8 @@ def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
     headers = _OWNER_TABS[tab]
     data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
     key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
-    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport")
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport",
+                                sources=())
     return {row.listing_key: row for row in result.observations}
 
 
@@ -923,7 +924,7 @@ def test_an_owner_row_with_no_honest_spec_mapping_is_refused_with_its_reason_and
             {**base, "Finish": "Gepolijst", "Origin": "Not defined in catalog legend"},
             {**base, "Finish": "Letano", "Catalog page": 11}))]})
     result = intake.absorb_file(_file(data, f"{PREFIX}/intake/owner_brachot.xlsx"), load_layouts("blokport"),
-                                *_words(), "bucket", "blokport")
+                                *_words(), "bucket", "blokport", sources=())
     (row,) = result.observations
     assert (row.finish, row.origin_iso_2, row.stated_specs["Origin"]) == ("Polished", None,
                                                                          "Not defined in catalog legend")

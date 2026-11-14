@@ -234,7 +234,7 @@ def test_a_sheet_row_copies_its_competitors_supplier_flag():
                                                   else "ferraz-rival.example"))
         from market_prices.specs import load_countries     # v3; here so a red run fails this test only
         (row,) = intake.absorb_file(file, layouts, load_vocabulary("blokport"), load_countries(), "bucket",
-                                    "blokport").observations
+                                    "blokport", sources=()).observations
         assert (row.seller_is_our_supplier, row.supplier_key) == (flag, key)
 
 
