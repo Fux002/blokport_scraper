@@ -110,6 +110,24 @@ variable "scraper_proxy_ssm_name" {
   description = "SSM SecureString name for the residential proxy URL. Empty = not injected."
 }
 
+variable "polonine_login" {
+  type        = bool
+  default     = false
+  description = "This brand's produce reads Polonine's prices with its customer login: the dev produce gets /<brand>-dev/SCRAPER_POLONINE_USERNAME and _PASSWORD (which must exist before the plan). The produce only, never the ad-hoc task."
+}
+
+variable "polonine_username_ssm_name" {
+  type        = string
+  default     = ""
+  description = "SSM SecureString name for the PROD produce's Polonine login username. Empty = not injected."
+}
+
+variable "polonine_password_ssm_name" {
+  type        = string
+  default     = ""
+  description = "SSM SecureString name for the PROD produce's Polonine login password. Empty = not injected."
+}
+
 variable "dev_auto_texture" {
   type        = bool
   default     = true
