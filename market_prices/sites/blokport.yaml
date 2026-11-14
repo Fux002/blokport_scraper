@@ -31,3 +31,208 @@ sites:
       summary: robots.txt blocks nothing relevant; no clause on copying, scraping or image rights was found.
     decision: pending
     statements: {vat_basis: incl}
+  # Mas for the owner, 14 Nov (owner's BlokPort source list): approved on worker 74's measure of the site (24/24 page-one
+  # listings priced per m2 by thickness). One listing = one thickness row of a product page (seed's declared_html).
+  # Scope: the site's own natural stone slab collection (stone-slabs; its porcelain is a separate collection,
+  # porcelain-slabs, never listed), the manager's ruling 14 Nov: no name parsing, material empty unless stated.
+  - brand: blokport
+    site_id: mandarinstone
+    seller_name: Mandarin Stone
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: declared_html
+    base_url: https://www.mandarinstone.com
+    discovery:
+      listing_pages: [/collections/stone-slabs/]
+      product_path: "^/product/[^/]+/?$"
+    html:
+      read: product_pages
+      record: {attribute: data-variation-product-vars}
+      fields:
+        listing_key: {json: [data-variation-product-vars, variation_id]}
+        listing_text: {json: [data-variation-product-vars, full_title]}
+        price: {class: price-m2-col, text: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
+        currency_symbols: {"£": GBP}
+      number: {decimal: ".", thousands: ","}
+      specs:
+        Thickness: {json: [data-variation-product-vars, title], pattern: "(\\d+\\s*mm)"}
+        Price ex VAT per m2: {json: [data-variation-product-vars, regular_price_exvat]}
+        Regular price: {class: price-m2-col, text: true, struck: true}
+    spec_labels:
+      thickness: {labels: [Thickness]}
+    terms:
+      terms_url: https://www.mandarinstone.com/our-company/terms-conditions/
+      checked_on: 2026-11-14
+      summary: robots.txt blocks only account, basket, checkout and search; the terms have no clause on copying, scraping
+        or commercial use. The terms define the price as excluding VAT, but every product page shows the VAT-inclusive
+        price (regular_price 342.00 = regular_price_exvat 285.00 x 1.2), so the page's statement is the one recorded.
+    decision: approved
+    decided_by: Mas for the owner (owner's 14 Nov BlokPort source list)
+    decided_on: 2026-11-14
+    statements:
+      vat_basis: incl
+      unit_text: per m²
+      delivery_text: delivery charged in addition to the price (terms cl. 5.1, 5.2)
+      delivery_included: "no"
+  # Mas for the owner, 14 Nov: approved on worker 74's measure (74 of 116 slab listings show a list price per sq ft).
+  # The visible price only: the analytics JSON price is tracking data, never a stated price (manager's F1 ruling).
+  - brand: blokport
+    site_id: countryfloors
+    seller_name: Country Floors
+    seller_type: merchant
+    seller_country: US
+    served_market: US
+    platform: declared_html
+    base_url: https://www.countryfloors.com
+    discovery:
+      listing_pages: [/designers-choice/]
+      product_path: "^/product/[^/]+/?$"
+    html:
+      read: listing_pages
+      record: {class: items-loop__item}
+      fields:
+        listing_key: {json: [data-ms-tracking-item, item_id]}
+        listing_text: {json: [data-ms-tracking-item, item_name]}
+        url: {class: stretched-link, attr: href}
+        price: {class: items-loop__item-price, text: true, pattern: "\\$\\s*([\\d,]+\\.\\d{2})"}
+        unit: {class: sale-unit, text: true, pattern: "per\\s+(\\S+)"}
+        currency_symbols: {"$": USD}
+      number: {decimal: ".", thousands: ","}
+      specs:
+        Material: {json: [data-ms-tracking-item, item_category2]}
+    spec_labels:
+      material_type: {labels: [Material]}
+    terms:
+      terms_url: https://www.countryfloors.com/terms-and-conditions/
+      checked_on: 2026-11-14
+      summary: robots.txt allows the collection and product pages (it disallows /wp-json, so the shop API is never
+        read); the terms have no clause on copying, scraping or commercial use. Prices are list prices; trade pricing
+        exists on request.
+    decision: approved
+    decided_by: Mas for the owner (owner's 14 Nov BlokPort source list)
+    decided_on: 2026-11-14
+    statements:
+      vat_basis: excl
+  # Mas for the owner, 14 Nov: approved on worker 74's measure (32/32 listings state GBP per slab and per m2), natural
+  # stone only (engineered quartz and porcelain have no material word, so v3 refuses them), the current price only
+  # (struck sale prices are never read), VAT as the site displays it by default.
+  - brand: blokport
+    site_id: starelstones
+    seller_name: Starel Stones
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: declared_html
+    base_url: https://starelstones.co.uk
+    discovery:
+      listing_pages: [/product-category/slabs/]
+      product_path: "^/product/[^/]+/?$"
+    # Product pages: the material is stated there only ("Material: Marble"), and the vocabulary refuses what it cannot
+    # name (engineered quartz, porcelain). The title is the text before the price in the purchase block (its h1 has no
+    # class).
+    html:
+      read: product_pages
+      record: {tag: div, class: starel-pdp-product}
+      fields:
+        listing_key: {attr: id}
+        listing_text: {class: starel-pdp-purchase, text: true, pattern: "^\\s*(.+?)\\s+(?:from\\s+)?£"}
+        price: {class: starel-slab-price__item--sqm, text: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
+        unit: {class: starel-slab-price__item--sqm, text: true, pattern: "/\\s*(m²)"}
+        currency_symbols: {"£": GBP}
+      number: {decimal: ".", thousands: ","}
+      specs:
+        Material: {label: Material, class: starel-pdp-specs}
+        Price per slab: {class: starel-slab-price__item--slab, text: true}
+        Regular price per slab: {class: starel-slab-price__item--slab, text: true, struck: true}
+    spec_labels:
+      material_type: {labels: [Material]}
+    terms:
+      terms_url: https://starelstones.co.uk/terms-conditions/
+      checked_on: 2026-11-14
+      summary: robots.txt allows the slab pages; the terms (cl. 7.1) forbid copying, reproducing or republishing the
+        site's content without written consent, a copying ban only (Mas, the holzland family). The site shows prices
+        including VAT by default (its VAT toggle, data-current-vat-mode incl).
+    decision: approved
+    decided_by: Mas for the owner (owner's 14 Nov BlokPort source list)
+    decided_on: 2026-11-14
+    statements:
+      vat_basis: incl
+  # Mas for the owner, 14 Nov ~13:30Z: approved on worker 74's measure (24/24 sampled granite and marble listings priced
+  # per m2 of stone). The price is the stone only: edges, cut-outs, measuring, transport and installation are separate
+  # quote lines (its price list).
+  - brand: blokport
+    site_id: stoneks
+    seller_name: Stoneks
+    seller_type: merchant
+    seller_country: EE
+    served_market: EE
+    platform: declared_html
+    base_url: https://stoneks.com
+    discovery:
+      listing_pages: [/en/category/granite/, /en/category/marble/, /en/category/quartzite/, /en/category/limestone/]
+      product_path: "^/en/product/[^/]+/?$"
+    html:
+      read: product_pages
+      record: {tag: div, class: type-product}
+      fields:
+        listing_key: {attr: id}
+        listing_text: {class: fusion-title-heading, text: true}
+        price: {class: woocommerce-Price-amount, text: true, pattern: "(\\d+)\\s*€"}
+        unit: {class: stx-unit, text: true}
+        currency_symbols: {"€": EUR}
+      number: {decimal: ".", thousands: ""}
+      specs:
+        Material: {label: Material, class: woocommerce-product-attributes}
+        Regular price: {class: woocommerce-Price-amount, text: true, struck: true}
+        VAT statement: {class: stx-vat, text: true}
+        Sale until: {class: stx-until, text: true}
+    spec_labels:
+      material_type: {labels: [Material]}
+    terms:
+      terms_url: https://stoneks.com/en/privacy-policy/
+      checked_on: 2026-11-14
+      summary: the site publishes no terms of use (a privacy policy only); robots.txt allows the catalogue and blocks only
+        cart, checkout, account, the fi and sv sections and sort or filter query strings. Prices are per m2 of stone
+        including 24% VAT, the ex-VAT figure stated beside them.
+    decision: approved
+    decided_by: Mas for the owner (owner's 14 Nov BlokPort source list)
+    decided_on: 2026-11-14
+    statements:
+      vat_basis: incl
+  # Mas for the owner, 14 Nov ~13:30Z: approved on worker 74's measure (13/13 Terra natural stone products priced per
+  # m2). The Terra page states the basis: "Prices below are per m2 including VAT, for the material only. Your quote
+  # depends on layout, edges, cut-outs and installation." Only the Terra (natural) collection is read.
+  - brand: blokport
+    site_id: mosstonex_terra
+    seller_name: Mo's Stonex
+    seller_type: merchant
+    seller_country: GB
+    served_market: GB
+    platform: declared_html
+    base_url: https://granite-and-quartz-worktops.co.uk
+    discovery:
+      listing_pages: [/Terra/]
+      product_path: "^/product/[^/]+/?$"
+    html:
+      read: product_pages
+      record: {class: elementor-location-single}
+      fields:
+        listing_key: {class: elementor-heading-title, text: true}
+        listing_text: {class: elementor-heading-title, text: true}
+        price: {class: woocommerce-Price-amount, text: true, pattern: "£\\s*([\\d,]+)"}
+        currency_symbols: {"£": GBP}
+      number: {decimal: ".", thousands: ","}
+      specs:
+        Regular price: {class: woocommerce-Price-amount, text: true, struck: true}
+    terms:
+      terms_url: https://granite-and-quartz-worktops.co.uk/terms-and-conditions/
+      checked_on: 2026-11-14
+      summary: robots.txt allows the product pages; the terms are sales terms with no clause on copying, scraping or
+        commercial use of the website.
+    decision: approved
+    decided_by: Mas for the owner (owner's 14 Nov BlokPort source list)
+    decided_on: 2026-11-14
+    statements:
+      vat_basis: incl
+      unit_text: per m²
