@@ -72,8 +72,8 @@ def test_an_existing_product_backed_pair_is_queued_only_without_an_icon(tmp_path
 
 def test_product_backed_is_decided_per_pair_from_the_products_category(tmp_path, monkeypatch):
     export = tmp_path / "variants_export.csv"
-    export.write_text(f"Id,Key,Name,Aliases,status,Type,owner\nvar_1,{_K},Absolute Black,,active,Granite,scraper\n",
-                      encoding="utf-8")
+    export.write_text("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"
+                      f"var_1,{_K},Absolute Black,,,active,Granite,scraper\n", encoding="utf-8")
     products = tmp_path / "3_products_all.csv"
     products.write_text("STN Variation Id,Product Category 1\nvar_1,pcat_blocks\nvar_1,pcat_blocks\n", encoding="utf-8")
     monkeypatch.setattr(ip, "_products_file", lambda: products)
@@ -163,8 +163,8 @@ def test_the_intake_renames_an_inbox_image_to_its_pair(tmp_path, monkeypatch):
     # the variety; the copy lands as renamed/{Key}/{category}.png, and a product-backed pair with no icon is reported
     from stone_pipeline.stages import image_intake
     export = tmp_path / "variants_export.csv"
-    export.write_text(f"Id,Key,Name,Aliases,status,Type,owner\nvar_1,{_K},Absolute Black,,active,Granite,scraper\n",
-                      encoding="utf-8")
+    export.write_text("Id,Key,Name,AdminAliases,AdminCodes,status,Type,owner\n"
+                      f"var_1,{_K},Absolute Black,,,active,Granite,scraper\n", encoding="utf-8")
     monkeypatch.setattr(image_intake, "_variant_files", lambda: [export])
     monkeypatch.setattr(image_intake, "_existing_icons", lambda: {f"{_K}/slab"})
     monkeypatch.setattr(image_intake, "product_backed_pairs", lambda: {(_K, "slab"), (_K, "block"), (_K, "tile")})

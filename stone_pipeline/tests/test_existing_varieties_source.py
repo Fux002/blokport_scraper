@@ -13,6 +13,7 @@ import csv
 import dataclasses
 from pathlib import Path
 
+from stone_pipeline.aliases.surfaces import Stores
 import pytest
 
 from stone_pipeline.reference import loaders
@@ -59,7 +60,7 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
     imp = curate.load_existing()
     assert imp.by_name_type[("alpine", "granite")]["Aliases"] == "Alpine Granite"
     # the matcher's table reads the same file
-    table = loaders.load_variants(loaders.existing_varieties_file())
+    table = loaders.load_variants(loaders.existing_varieties_file(), Stores())
     assert [v.key for v in table.by_id.values()] == [KEY]
 
 
