@@ -551,7 +551,8 @@ def _ack_removed(ledger: Ledger, external_id: str, failed: bool, reason: str | N
     """A tombstone ack. 'done' = Medusa deleted it -> retire the tombstone. 'blocked' (an open reservation blocks the
     hard-delete) or 'failed' -> keep it, count the attempt and wait (_block_tombstone). Returns the rows changed: 0
     for an unknown tombstone, or a 'done' the ledger refuses (below)."""
-    row = ledger.execute("SELECT kind, sync_attempts FROM removed WHERE external_id = ?", (external_id,)).fetchone()
+    row = ledger.execute("SELECT kind, reason, sync_attempts FROM removed WHERE external_id = ?",
+                         (external_id,)).fetchone()
     if row is None:
         return 0
     if failed:
@@ -570,7 +571,20 @@ def _ack_removed(ledger: Ledger, external_id: str, failed: bool, reason: str | N
                              "done refused: the variety has products in the ledger again")
             return 0
         ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
+        # table 575 / G5: remember the acked delete, so a stale live export never re-creates the variety
+        ledger.upsert("variation_deleted", {"key": external_id, "reason": row["reason"], "deleted_at": now_iso()},
+                      pk=("key",))
     return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
+
+
+def tombstoned_variations(ledger: Ledger) -> dict[str, tuple[str, str]]:
+    """{Key: (tombstone, reason)} for every variety the scraper is deleting or Medusa has deleted: a variation tombstone
+    in any state ('pending', or 'dead' after repeated blocks; the scraper's decision stands either way) and every acked
+    delete ('done', variation_deleted). Emit's live-export union never re-adds these (table 575 / G5)."""
+    out = {r["key"]: ("done", r["reason"] or "") for r in ledger.execute("SELECT key, reason FROM variation_deleted")}
+    out.update({r["external_id"]: (r["state"], r["reason"] or "") for r in ledger.execute(
+        "SELECT external_id, state, reason FROM removed WHERE kind = 'variation'")})
+    return out
 
 
 def _block_tombstone(ledger: Ledger, external_id: str, attempts_before: int, error: str) -> int:
