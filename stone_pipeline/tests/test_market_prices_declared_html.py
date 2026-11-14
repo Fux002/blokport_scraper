@@ -391,3 +391,49 @@ def test_another_platform_takes_no_html_declaration():
     woo = {**_site(CARDS), "platform": "woocommerce_store", "discovery": None}
     with pytest.raises(ValidationError, match="takes no html"):
         _register(woo)
+
+
+# --- a declared capture is a whole number (reviewer 2 on SC #785, the manager) ---------------------------------------
+def _sale_card(key: str, shown: str, struck: str = "") -> str:
+    was = f"<del>{struck}</del> " if struck else ""
+    return (f'<article class="starel-loop-card"><a class="card-link" href="/p/{key}/">x</a>'
+            f'<h3 class="card-title">{key.title()} Marble Slab</h3>'
+            f'<div class="starel-loop-card-price__row--sqm">{was}{shown}</div></article>')
+
+
+def _with_price(pattern: str, **extra) -> dict:
+    return {**SALE, "fields": {**SALE["fields"], "price": {"class": "starel-loop-card-price__row--sqm", "text": True,
+                                                           "pattern": pattern}}, **extra}
+
+
+@pytest.mark.parametrize("pattern, shown", [
+    (r"(\d+)\s*/", "£120.50 / m²"),                 # "50": the decimal separator and more digits before it
+    (r"£(\d+)", "£120.50 / m²"),                    # "120": the decimal separator and more digits after it
+    (r"(\d{3}\.\d{2})", "£1,250.00 / m²"),          # "250.00": a thousands group before it
+    (r"(\d{2}\.\d{2})", "£1250.00 / m²"),           # "50.00": a digit right before it
+])
+def test_a_price_capture_that_is_part_of_a_longer_number_is_no_amount_and_its_note_is_counted(pattern, shown):
+    result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", shown))}, _site(_with_price(pattern)))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.price_status, row.currency, row.price_text) == (None, PriceStatus.none, None, shown)
+    assert row.notes == ("price capture is part of a longer number",)
+    assert "price capture is part of a longer number x1" in _status(result).detail
+
+
+def test_a_whole_capture_reads_even_beside_a_separator_that_joins_no_digits():
+    # a space thousands separator before the capture, with no digit beyond it, joins nothing: the capture is whole
+    spaced = _with_price(r"€\s*([\d ]+,\d{2})", number={"decimal": ",", "thousands": " "})
+    spaced["fields"] = {**spaced["fields"], "currency_symbols": {"€": "EUR"}}
+    result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", "€ 1 250,00 / m²"))}, _site(spaced))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.currency, row.notes) == ("1250.00", "EUR", ())
+
+
+def test_a_regular_price_capture_that_is_part_of_a_longer_number_is_no_regular_amount():
+    declaration = {**SALE, "fields": {**SALE["fields"], "regular_price": {
+        "class": "starel-loop-card-price__row--sqm", "text": True, "struck": True, "pattern": r"£(\d+)"}}}
+    page = _page(_sale_card("nero", "£1,040.00 / m²", struck="£1,450.00"))
+    result = _run({f"{BASE}/collections/slabs/": page}, _site(declaration))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.regular_price_text, row.regular_price_amount) == ("1040.00", "£1,450.00", None)
+    assert row.notes == ("regular_price capture is part of a longer number",)
