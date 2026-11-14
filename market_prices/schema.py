@@ -10,6 +10,10 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from market_prices import config
+from market_prices.brand import SLUG
+
+# A row's brand is the run's (brand_required): a slug, never empty; write_run refuses any but the run's own.
+BRAND_PATTERN = f"^{SLUG.pattern}$"
 
 
 class MalformedListing(ValueError):
@@ -70,7 +74,7 @@ class Observation(BaseModel):
 
     contract_version: str
     source: Source
-    brand: str
+    brand: str = Field(pattern=BRAND_PATTERN)
     site_id: str
     seller_name: str
     seller_type: SellerType
@@ -127,7 +131,7 @@ class SiteStatus(BaseModel):
 
     contract_version: str
     source: Source
-    brand: str
+    brand: str = Field(pattern=BRAND_PATTERN)
     site_id: str
     status: SiteRunStatus
     rows: int
