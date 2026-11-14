@@ -281,7 +281,7 @@ def test_the_pilot_summary_names_status_rows_malformed_and_the_first_rows(tmp_pa
 
 def test_the_pilot_publishes_to_the_deployments_bucket(monkeypatch, tmp_path, capsys):
     s3 = _S3()
-    monkeypatch.setattr(pilot, "pilot_register", lambda brand, site_id: _register())
+    monkeypatch.setattr(pilot, "pilot_register", lambda brand: _register())
     monkeypatch.setattr(pilot.run, "_dry_run", lambda: False)
     monkeypatch.setattr(pilot.run, "_s3_client", lambda: s3)
     monkeypatch.setattr(pilot.run, "_runs_root", lambda: tmp_path)
