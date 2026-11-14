@@ -14,8 +14,9 @@ s3://<bucket>/<env>/market_prices/<brand>/latest.json
 ```
 
 - `run_id` is the run's UTC start, `YYYYMMDDTHHMMSSZ`. Run folders are kept, so they are the price history.
-- `manifest.json` has the sha256, row count and S3 version of each file and is written after them. A folder without a manifest is not a delivered run.
-- `latest.json` names the newest run with at least one observation (`run_id`, `manifest_key`, `rows`, `contract_version`). A run with no rows is delivered as evidence but does not move it.
+- `manifest.json` has the run's `brand` and the sha256, row count and S3 version of each file, and is written after them. A folder without a manifest is not a delivered run.
+- `latest.json` names the newest run with at least one observation (`brand`, `run_id`, `manifest_key`, `rows`, `contract_version`). A run with no rows is delivered as evidence but does not move it.
+- Brands never mix: every row, manifest and pointer carries the run's brand, every key is under `<env>/market_prices/<brand>/`, and a site sits in one brand's register unless both registers declare it shared (`shared_with`). The rules are named in `market_prices/brand.py`.
 - The newest run may hold only some sites: `site_status.csv` says which. For a site missing from it, the consumer looks back through the run folders, and decides how old a price may be.
 
 ## observations.csv
@@ -75,7 +76,7 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 
 - **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for that deployment's brand (`SCRAPER_BRAND`), env and bucket. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
-- **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (`PILOT_BRAND`, `PILOT_SITE_ID` in `config.py`) against development's bucket and prints a summary with the first rows. It refuses any other environment, and any site the register has not approved, before a single request.
+- **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand, the register's own `pilot_site` (`market_prices/sites/<brand>.yaml`), against development's bucket and prints a summary with the first rows. It refuses any other environment, a register naming no pilot site, and a pilot site the register has not approved, before a single request.
 
 ## Price sheets (`source` = `file`)
 
@@ -96,4 +97,4 @@ One `competitors` entry (id, the names the sheet uses, seller type, country, mar
 
 ## Adding a site
 
-One entry in `market_prices/sites/<brand>.yaml`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
+One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
