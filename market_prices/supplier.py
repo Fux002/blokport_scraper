@@ -5,7 +5,6 @@ sources (supplier_key), never a source named in code."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Callable, Iterable, Optional, TypeVar
 
@@ -26,22 +25,22 @@ def supplier_sources(register: Register, scraped: Optional[Iterable[str]]) -> li
 
 
 def newest_scrape(source_dir: Path, since: str) -> Optional[Path]:
-    """The source's newest scrape folder stamped at or after `since` (written by this produce) whose completion marker
-    states it complete; None when there is none. An older folder is a previous produce's, never read as this one's."""
+    """The source's newest run folder stamped at or after `since` (written by this produce) whose price pass ran (its
+    marker is there, whatever it states); None when there is none. An older folder is a previous produce's, never read
+    as this one's."""
     if not source_dir.is_dir():
         return None
     for folder in sorted((path for path in source_dir.iterdir() if path.is_dir() and path.name >= since),
                          key=lambda path: path.name, reverse=True):
-        marker = folder / config.SCRAPE_MARKER_FILE
-        if marker.is_file() and json.loads(marker.read_text(encoding="utf-8")).get("complete") is True:
+        if (folder / config.SCRAPE_MARKER_FILE).is_file():
             return folder
     return None
 
 
 def emit(register: Register, scraped: Optional[Iterable[str]], data_dir: Path, since: str,
          deliver: Callable[[RunResult], Delivered]) -> list[Delivered]:
-    """Each fed source's run from this produce's scrape of it, delivered; a source this produce left no complete scrape
-    of delivers nothing (no price was seen)."""
+    """Each fed source's run from this produce's price pass of it, delivered; a source whose price pass did not run in
+    this produce delivers nothing (no price was seen)."""
     delivered = []
     for source in supplier_sources(register, scraped):
         folder = newest_scrape(data_dir / source, since)
@@ -62,7 +61,7 @@ def emit_live(scraped: Optional[Iterable[str]], since: str) -> list[str]:
     for source in supplier_sources(register, scraped):
         outcomes = emit(register, [source], SETTINGS.paths.data_dir, since, run.deliver)
         if not outcomes:
-            lines.append(f"{source}: no complete scrape by this produce, no supplier prices delivered")
+            lines.append(f"{source}: no price pass in this produce, no supplier prices delivered")
         for outcome in outcomes:
             sites = ", ".join(f"{status.site_id} {status.status.value} ({status.rows} rows)"
                               for status in outcome.result.statuses)

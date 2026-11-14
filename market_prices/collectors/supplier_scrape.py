@@ -1,7 +1,8 @@
 """A supplier's prices read from the product scraper's own fetch of that supplier: one fetch, one transport. This
-collector requests nothing. Its listings are the rows the scraper wrote for the register row's supplier_key, and the
-scraper's completion marker states whether it read prices (a supplier whose prices need its customer login says why
-not). Prices the scrape did not read are reported, never delivered as unpriced listings. A price is read as stated:
+collector requests nothing. Its listings are the rows of the scraper's separate price pass for the register row's
+supplier_key (prices.csv, never products.csv: the product scrape never depends on the prices), and the pass's marker
+states whether it read prices (a supplier whose prices need its customer login says why not). Prices the pass did not
+read are reported, never delivered as unpriced listings. A price is read as stated:
 its currency only from a declared symbol, its amount exact, its unit as written; nothing is converted."""
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ _UNDECLARED_SYMBOL = "price in a currency symbol not declared"
 
 @dataclass(frozen=True)
 class ScrapeFolder:
-    """One run of the product scraper for one source: its rows, its folder's UTC stamp, and what its completion marker
+    """One run of a supplier scraper's price pass: its price rows, its run folder's UTC stamp, and what its marker
     states about prices ("ok", why they were not read, or None when it states nothing)."""
 
     source: str
@@ -40,10 +41,14 @@ class ScrapeFolder:
 
 
 def read_scrape(folder: Path) -> ScrapeFolder:
-    """The scraper's run folder <data>/<source>/<stamp>: its rows and its marker's statement about prices."""
+    """The price pass in the scraper's run folder <data>/<source>/<stamp>: its rows (none when it read no prices, so
+    wrote no prices.csv) and its marker's statement about prices."""
     marker = json.loads((folder / config.SCRAPE_MARKER_FILE).read_text(encoding="utf-8"))
-    with (folder / config.SCRAPE_ROWS_FILE).open(encoding="utf-8", newline="") as handle:
-        rows = tuple(csv.DictReader(handle))
+    rows_file = folder / config.SCRAPE_ROWS_FILE
+    rows: tuple = ()
+    if rows_file.is_file():
+        with rows_file.open(encoding="utf-8", newline="") as handle:
+            rows = tuple(csv.DictReader(handle))
     prices = marker.get(config.SCRAPE_PRICES_KEY)
     return ScrapeFolder(source=folder.parent.name, timestamp=folder.name, rows=rows,
                         prices=prices if isinstance(prices, str) else None)

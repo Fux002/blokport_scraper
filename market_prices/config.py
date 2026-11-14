@@ -78,10 +78,11 @@ MALFORMED_REASONS_SHOWN = 3
 # is counted, never guessed. A price that states one of these words is on request.
 CURRENCY_SYMBOLS = {"US$": "USD"}
 ON_REQUEST_TEXTS = ("call for price",)
-# The product scraper's run folder (scrapers/base.py): its rows, its completion marker, the marker's statement of
-# whether it read prices ("ok" or why not), and the UTC stamp its folder is named by.
-SCRAPE_ROWS_FILE = "products.csv"
-SCRAPE_MARKER_FILE = "scrape_complete.json"
+# A supplier scraper's separate price pass, in its run folder (scrapers/base.py write_price_pass, whose PRICES_CSV and
+# PRICES_MARKER these equal): its rows, its marker with the statement of whether it read prices ("ok" or why not), and
+# the UTC stamp the run folder is named by. The products.csv beside them is never read here.
+SCRAPE_ROWS_FILE = "prices.csv"
+SCRAPE_MARKER_FILE = "prices_complete.json"
 SCRAPE_PRICES_KEY = "prices"
 SCRAPE_STAMP_FORMAT = "%Y%m%d_%H%M%S"
 

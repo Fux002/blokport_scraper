@@ -32,10 +32,10 @@ sites:
     decision: pending
     statements: {vat_basis: incl}
   # Polonine is also one of the owner's suppliers (supplier_key polonine). Its slab prices are shown only to a logged-in
-  # customer; the PRODUCT scraper logs in with the owner's own account (scrapers/polonine.py, credentials from the
-  # environment) and this row reads that scrape (platform supplier_scrape): one fetch, one transport, no request of its
-  # own. Spec labels wait for pilot evidence of how its stone types and finishes map; until then the four spec columns
-  # are empty and every listed column is in stated_specs.
+  # customer: after its anonymous product scrape, the product scraper runs a separate price pass with the owner's own
+  # login (scrapers/polonine.py, credentials from the environment), and this row reads that pass's prices.csv (platform
+  # supplier_scrape): one fetch path, no request of its own. Spec labels wait for pilot evidence of how its stone types
+  # and finishes map; until then the four spec columns are empty and every listed column is in stated_specs.
   - brand: blokport
     site_id: polonine
     seller_name: Polonine
@@ -50,7 +50,7 @@ sites:
       url: detail_url
       price: price1
       text: [material, stone_type, thickness, finish]
-      specs: [material, stone_type, color, finish, quality, thickness, price2, area_sqmt, area_sqft, slab_count, origin]
+      specs: [material, stone_type, finish, quality, thickness, block, bundle_no, average_size, price2]
     terms:
       terms_url: https://polonine.slabware.com/Terms-conditions.aspx
       checked_on: 2026-11-14

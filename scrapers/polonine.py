@@ -24,13 +24,13 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 import json
 import re
+from pathlib import Path
 from typing import Any, Iterable, Optional
 
 try:
     from scrapers.base import ScraperBase
 except ImportError:
     import sys
-    from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
 from stone_pipeline.core import env
@@ -51,8 +51,9 @@ LOGOUT_API = f"{BASE}/ajax/Ajax.aspx/LogOut_Head"
 LOGIN_USER_ENV = "SCRAPER_POLONINE_USERNAME"
 LOGIN_PASSWORD_ENV = "SCRAPER_POLONINE_PASSWORD"
 LOGIN_OK = "ok"
-# how much of the site's refusal message the completion marker keeps (its own words, never the secret)
-LOGIN_REFUSAL_CHARS = 120
+# The price pass's rows (prices.csv): the bundle's own list fields, the same values the product row takes from the list.
+PRICE_COLUMNS = ["product_id", "material", "stone_type", "finish", "quality", "thickness", "block", "bundle_no",
+                 "average_size", "price1", "price2", "detail_url"]
 
 
 def _as_the_login_form_sends(value: str) -> str:
@@ -63,6 +64,24 @@ def _as_the_login_form_sends(value: str) -> str:
 def _g(d, key, default=""):
     v = (d or {}).get(key)
     return v if v not in (None, "") else default
+
+
+def _list_fields(item: dict) -> dict:
+    """The bundle's fields as the LIST states them: the product row's and the price row's one mapping."""
+    return {
+        "product_id": _g(item, "id"),
+        "material": _g(item, "nomeMaterial"),
+        "stone_type": _g(item, "nomeComposicao"),
+        "finish": _g(item, "acabamento"),
+        "quality": _g(item, "nomeQualidade"),
+        "thickness": _g(item, "nomeEspessura"),
+        "block": _g(item, "bloco"),
+        "bundle_no": _g(item, "cavalete"),
+        "average_size": _g(item, "averageSize"),
+        "price1": _g(item, "preco1"),
+        "price2": _g(item, "preco2"),
+        "detail_url": f"{BASE}/Product-Details.aspx?ID={_g(item, 'id')}",
+    }
 
 
 def _join(chapas, key):
@@ -135,7 +154,8 @@ class PolonineScraper(ScraperBase):
             answer = (self.post(LOGIN_API, headers=API_HEADERS, content=body).json() or {}).get("d")
         except (RuntimeError, ValueError) as exc:    # no answer after the retries; an answer that is not JSON
             return f"login request failed: {type(exc).__name__}"
-        return LOGIN_OK if answer == LOGIN_OK else f"login refused: {str(answer)[:LOGIN_REFUSAL_CHARS]}"
+        # a refusal is stated by its length, never the site's words: they could echo the username back
+        return LOGIN_OK if answer == LOGIN_OK else f"login refused ({len(str(answer))} characters)"
 
     def _logout(self) -> None:
         """End the customer session. A logout that gets no answer is logged, not fatal: the session expires."""
@@ -148,17 +168,32 @@ class PolonineScraper(ScraperBase):
         # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
         # accepting the end (a transient empty must not truncate the tail -> silent delist).
         self._warm_up()
-        # logged in, the list carries the prices (price1/price2); the completion marker states whether they were read,
-        # which the supplier price emission reads. A failed login never stops the product and stock scrape: it is
-        # logged loudly, recorded, and the prices are reported missing (never a silent unpriced run).
-        prices = self._login()
-        self.run_facts["prices"] = prices
-        if prices != LOGIN_OK:
-            self.log.error("price login failed, scraping products without prices: %s", prices)
-            self.record_failure("price_login", error=prices)
         yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
+
+    def run(self) -> Path:
+        """The anonymous product and stock scrape exactly as before, then the separate logged-in price pass. The product
+        set never depends on the login, by design (the Scraper manager's ruling, 14 Nov): the pass writes only its own
+        files, after the products and their completion marker are written."""
+        products = super().run()
+        self._price_pass()
+        return products
+
+    def _price_pass(self) -> None:
+        """Log in, read the list again (it carries the prices to a logged-in customer), log out, and write the prices
+        with the pass's statement ("ok" or why not). A missing, refused or failing login reads no prices and is logged
+        loudly; nothing of the product scrape changes."""
+        prices = self._login()
+        rows: list[dict] = []
         if prices == LOGIN_OK:
-            self._logout()
+            try:
+                rows = [_list_fields(item) for item in self.paginate_offset(self._fetch_page, PAGE_SIZE)]
+            except RuntimeError as exc:      # the list got no answer after the retries
+                prices, rows = f"price list failed: {type(exc).__name__}", []
+            finally:
+                self._logout()
+        if prices != LOGIN_OK:
+            self.log.error("price pass read no prices: %s", prices)
+        self.write_price_pass(rows, PRICE_COLUMNS, prices)
 
     def parse_product(self, item: dict) -> Optional[dict]:
         fetched = self._fetch_detail(item.get("id"))
@@ -172,16 +207,9 @@ class PolonineScraper(ScraperBase):
             "sqft": _g(c, "TotalSqft"), "sqmt": _g(c, "TotalSqmt"),
         } for c in chapas], ensure_ascii=False)
         row = {
-            "product_id": _g(item, "id"),
-            "material": _g(item, "nomeMaterial"),
-            "stone_type": _g(item, "nomeComposicao"),
+            **_list_fields(item),
             "color": _g(detail, "cor") or _g(item, "cor"),
-            "finish": _g(item, "acabamento"),
-            "quality": _g(item, "nomeQualidade"),
             "classification": _g(detail, "classificacao"),
-            "thickness": _g(item, "nomeEspessura"),
-            "block": _g(item, "bloco"),
-            "bundle_no": _g(item, "cavalete"),
             "slab_numbers": _join(chapas, "Numero"),
             # qtdChapas is often null in the feed; the chapas array is the real count
             "slab_count": _g(item, "qtdChapas") or _g(detail, "qtdChapas") or (str(len(chapas)) if chapas else ""),
@@ -189,18 +217,14 @@ class PolonineScraper(ScraperBase):
             "dimension_length": _g(first, "Largura"),
             "height_in": _g(first, "Height"),
             "length_in": _g(first, "Length"),
-            "average_size": _g(item, "averageSize"),
             "area_sqft": _g(detail, "totalSqft"),
             "area_sqmt": _g(detail, "totalSqmt"),
             "weight": "",
             "origin": _g(detail, "nomePais") or _g(item, "nomePais"),
             "country_code": _g(detail, "siglaPais") or _g(item, "siglaPais"),
             "location": _g(detail, "localizacao"),
-            "price1": _g(item, "preco1"),
-            "price2": _g(item, "preco2"),
             "currency": _g(detail, "moeda") or _g(item, "moeda"),
             "status_flag": _status(item.get("displayProduct", "")),
-            "detail_url": f"{BASE}/Product-Details.aspx?ID={_g(item, 'id')}",
             "slabs_detail": slabs_detail,
             "image_urls": _photos(detail.get("fotos")),  # base keeps these as source links
         }
