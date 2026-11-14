@@ -34,11 +34,19 @@ class _R:
         return self._data
 
 
+class _Html:
+    """An answer that is a page, not JSON (a session page or a redirect target after the login)."""
+
+    def json(self):
+        return json.loads("<html><body>Session expired</body></html>")
+
+
 class _Site:
     """Polonine's SlabWare API: the list carries prices only to a logged-in session."""
 
-    def __init__(self, answer="ok", login_raises=None, list_raises_logged_in=None):
+    def __init__(self, answer="ok", login_raises=None, list_raises_logged_in=None, list_html_logged_in=False):
         self.answer, self.login_raises, self.list_raises_logged_in = answer, login_raises, list_raises_logged_in
+        self.list_html_logged_in = list_html_logged_in
         self.logged_in = False
         self.posts: list[tuple[str, str, bool]] = []
 
@@ -49,13 +57,16 @@ class _Site:
             if self.login_raises is not None:
                 raise self.login_raises
             self.logged_in = self.answer == "ok"
-            return _R({"d": self.answer})
+            # a list answer is the whole JSON body (not an object), as a misbehaving endpoint could send
+            return _R(self.answer if isinstance(self.answer, list) else {"d": self.answer})
         if url == logout_api:
             self.logged_in = False
             return _R({"d": None})
         if url == LIST_API:
             if self.logged_in and self.list_raises_logged_in is not None:
                 raise self.list_raises_logged_in
+            if self.logged_in and self.list_html_logged_in:
+                return _Html()
             offset = json.loads(content)["inicio"]
             item = {**BUNDLE, **(PRICED if self.logged_in else {"preco1": "", "preco2": ""})}
             return _R({"d": {"Bundles": json.dumps([item] if offset == 0 else [])}})
@@ -174,3 +185,41 @@ def test_the_price_files_are_the_names_the_supplier_price_reader_reads():
     from market_prices import config
     from scrapers import base
     assert (base.PRICES_CSV, base.PRICES_MARKER) == (config.SCRAPE_ROWS_FILE, config.SCRAPE_MARKER_FILE)
+
+
+# --- the price pass can never abort the product scrape (f8's must, 14 Nov) -------------------------------------------
+def _identical_products_beside(tmp_path, monkeypatch, site, prepare=None):
+    """Run once with the login and the given site, once without any login, and return both scrapers."""
+    monkeypatch.setenv("SCRAPER_POLONINE_USERNAME", USER)
+    monkeypatch.setenv("SCRAPER_POLONINE_PASSWORD", SECRET)
+    with_login = _scraper(tmp_path / "on", monkeypatch, site)
+    if prepare is not None:
+        prepare(with_login)
+    assert with_login.run() == with_login.products_csv
+    monkeypatch.delenv("SCRAPER_POLONINE_USERNAME")
+    without = _scraper(tmp_path / "off", monkeypatch, _Site())
+    without.run()
+    assert _products(with_login) == _products(without)
+    assert json.loads(with_login.complete_marker.read_text())["complete"] is True
+    return with_login
+
+
+def test_a_logged_in_list_that_answers_a_page_reads_no_prices_and_leaves_the_products(tmp_path, monkeypatch):
+    site = _Site(list_html_logged_in=True)
+    scraper = _identical_products_beside(tmp_path, monkeypatch, site)
+    assert _price_marker(scraper) == {"prices": "price list failed: JSONDecodeError", "rows": 0}
+    assert site.posts[-1][0] == _api()[1]                       # logged out all the same
+
+
+def test_a_login_answer_that_is_not_an_object_reads_no_prices_and_leaves_the_products(tmp_path, monkeypatch):
+    scraper = _identical_products_beside(tmp_path, monkeypatch, _Site(answer=["ok"]))
+    assert _price_marker(scraper)["prices"] == "login request failed: AttributeError"
+
+
+def test_price_files_that_cannot_be_written_never_fail_the_product_scrape(tmp_path, monkeypatch):
+    def unwritable(scraper):
+        def refuse(rows, columns, prices):
+            raise OSError("disk full")
+        monkeypatch.setattr(scraper, "write_price_pass", refuse)
+    scraper = _identical_products_beside(tmp_path, monkeypatch, _Site(), unwritable)
+    assert not (scraper.run_dir / "prices_complete.json").exists()
