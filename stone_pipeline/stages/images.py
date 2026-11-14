@@ -416,6 +416,19 @@ def save_conflicts(by_source: dict[str, dict[str, list[str]]]) -> None:
             _put_object(key, body)
 
 
+def save_kept(kept: dict[str, list[str]]) -> None:
+    """Store the produce's kept-photo set (imagestore.kept_key, from ledger.sync.kept_photos) whole, only when it
+    changed, and only from a run that writes the bucket, as save_conflicts. Raises on any S3 failure: the photo
+    process must never work from a set this produce did not store."""
+    if SETTINGS.images.mode != "s3" or SETTINGS.s3.dry_run:
+        log.info("kept-photo set not stored: this run does not write the bucket", extra={"extra_fields": {
+            "image_mode": SETTINGS.images.mode, "s3_dry_run": SETTINGS.s3.dry_run}})
+        return
+    key, body = imagestore.kept_key(), json.dumps(kept, sort_keys=True).encode()
+    if _stored_object(key) != body:
+        _put_object(key, body)
+
+
 def _skus(rows: list[CanonicalRow]) -> dict[int, str]:
     """{id(row): its product's SKU} (the key of the owner's removals and of the conflict assignments)."""
     from stone_pipeline.config.sources import load_source
