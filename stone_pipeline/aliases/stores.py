@@ -44,16 +44,27 @@ def seed_of(backbone) -> dict[str, tuple[Sequence[str], Sequence[str]]]:
     return {key: (tuple(v.aliases), tuple(v.codes)) for key, v in backbone.by_key.items()}
 
 
+def operator_alias(spelling: str, stated_type: str) -> str:
+    """THE value an operator rename makes an alias of: the stated spelling's variety identity under the stated type
+    (clean_variety: format and type words dropped). Curate's mint (minting.py) and this store both take it from here,
+    so a renamed mint's own spelling and the operator store's alias can never differ."""
+    from stone_pipeline.adapters.tokens import clean_variety
+    return clean_variety(spelling, stated_type)
+
+
 def operator_aliases(rows: Iterable[Mapping]) -> list[OperatorAlias]:
-    """The operator's aliases in `statement` rows: a GLOBAL (vendor '') `is` statement whose stated name is not the
-    spelling. A vendor's binding is match-only (the matcher's override tier), never an alias of the variety."""
+    """The operator's aliases in `statement` rows: a GLOBAL (vendor '') `is` statement whose stated name is not its
+    alias value (operator_alias), so a mint's own spelling lives on in this store after its run. A vendor's binding
+    is match-only (the matcher's override tier), never an alias of the variety."""
     out = []
     for r in rows:
         name, spelling = (r.get("name") or "").strip(), (r.get("spelling") or r.get("spelling_norm") or "").strip()
         if (r.get("source") or "").strip() or r.get("verdict") != "is" or not name or not spelling:
             continue
-        if match_key(name) != alias_key(spelling):   # a name keys by match_key, an alias value by alias_key
-            out.append(OperatorAlias(name, (r.get("stone_type") or "").strip(), spelling))
+        stone_type = (r.get("stone_type") or "").strip()
+        value = operator_alias(spelling, stone_type)
+        if match_key(name) != alias_key(value):     # a name keys by match_key, an alias value by alias_key
+            out.append(OperatorAlias(name, stone_type, value))
     return out
 
 

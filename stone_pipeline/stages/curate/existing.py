@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.aliases import stores as alias_stores
+from stone_pipeline.aliases.surfaces import Stores, Variety, surfaces_by_key
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import existing_varieties_file, type_slug_from_key, variants_status_required
 from stone_pipeline.reference.medusa_files import read_variants_export
@@ -20,7 +22,9 @@ class ImportFile:
     # collapsed them to one arbitrary type (last row wins), so a type-less scrape was silently tied to the
     # wrong type and the mint-dedup went blind to the hidden types. Keep every variety and index by
     # (norm name, norm type); `type` on each variety is derived from its Key (the authority).
-    varieties: list[dict] = field(default_factory=list)              # each: {Key,Name,Type,Aliases,type,archived}
+    # each: {Key,Name,Type,Aliases,Codes,type,archived}; Aliases and Codes = the variety's surfaces from the alias
+    # stores and the export's hand rows (the matcher's set), never a file's own column
+    varieties: list[dict] = field(default_factory=list)
     by_name_type: dict[tuple[str, str], dict] = field(default_factory=dict)  # (norm name, norm type) -> variety
     by_name: dict[str, dict] = field(default_factory=dict)           # norm name -> variety (name-only lookup)
 
@@ -34,14 +38,19 @@ def load_existing() -> ImportFile:
     raises too (type_slug_from_key): its type is never guessed."""
     path = existing_varieties_file()
     imp = ImportFile(path=path)
-    for r in read_variants_export(path, require_status=variants_status_required(path)):
-        if not r.name:
-            continue
+    records = [r for r in read_variants_export(path, require_status=variants_status_required(path)) if r.name]
+    scraper = alias_stores.scraper_stores()
+    surfaces, _ = surfaces_by_key([Variety(r.key, r.name, r.type) for r in records],
+                                  Stores(seed=scraper.seed, operator=scraper.operator, learned=scraper.learned,
+                                         admin=alias_stores.admin_of(records)), alias_stores.is_code())
+    for r in records:
+        found = surfaces[r.key]
         v = {
             "Key": r.key,
             "Name": r.name,
             "Type": r.type,                                     # the canonical type NAME a variety row carries
-            "Aliases": "|".join(r.aliases),
+            "Aliases": "|".join(value for value, _ in found.aliases),
+            "Codes": "|".join(value for value, _ in found.codes),   # found by compact key (context.surface_owners)
             "type": proj.norm(type_slug_from_key(r.key)),       # the identity's stone type, from its Key
             # VE2 PR5: the export's archived flag. An archived variety STAYS in the index (a scrape still
             # recognizes it, no re-mint); classify uses the flag to surface a card when a gapped scrape

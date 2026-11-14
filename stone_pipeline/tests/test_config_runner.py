@@ -179,7 +179,7 @@ def test_soft_reset_preserves_a_retiring_variety(tmp_path, monkeypatch):
     from stone_pipeline.ledger.sync import retire_variation
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
-        lg.upsert("variation", {"key": "K", "type": "Marble", "name": "X", "aliases": "[]",
+        lg.upsert("variation", {"key": "K", "type": "Marble", "name": "X", "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "VID", "in_full": 0, "payload_hash": "", "state": "synced",
                                 "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now},
                   pk=("key",))
@@ -221,7 +221,7 @@ def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         now = now_iso()
         lg.upsert("variation", {"key": "marble__v1", "type": "Marble", "name": "x",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "VID", "in_full": 1, "payload_hash": "",
                                 "state": "synced", "first_seen": now, "last_synced": now,
                                 "created_at": now, "updated_at": now}, pk=("key",))

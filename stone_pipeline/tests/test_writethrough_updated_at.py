@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 
+from stone_pipeline.tests._alias_sidecar import write_alias_sidecar
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -29,7 +30,7 @@ def _write_full(d, name):
         w = csv.writer(h)
         w.writerow(_COLS)
         w.writerow([{"Key": KEY, "Name": name}.get(c, "") for c in _COLS])
-    return p
+    return write_alias_sidecar(p)
 
 
 def _row(title="Arabescato Polished Slab"):
@@ -44,7 +45,7 @@ def _row(title="Arabescato Polished Slab"):
 def _seed_variation(ledger):
     now = now_iso()
     ledger.upsert("variation", {"key": KEY, "type": "Marble", "name": "Arabescato",
-                                "aliases": "[]",
+                                "alias_rows": "[]", "codes": "[]",
                                 "medusa_id": "V1", "in_full": 1,
                                 "payload_hash": "", "state": "synced", "first_seen": now,
                                 "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))

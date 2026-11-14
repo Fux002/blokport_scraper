@@ -39,14 +39,20 @@ def payload_hash_of(payload: Mapping[str, Any], *versions: Any) -> str:
 def variation_payload(v: Mapping[str, Any], icons: Iterable[Mapping[str, Any]]) -> dict:
     """The variation payload Blokport receives (GET /sync/v1/variations): a variety has no category (phase 1, D3);
     its icons are its `variation_category_image` rows, one per category handle, in handle order so the same pairs
-    always serve (and hash) the same."""
+    always serve (and hash) the same. `alias_rows` [{value, method}] and `codes` [string] are the scraper's WHOLE set
+    (table 173 F9, 189 C7); a stored NULL stays None, a row the serve holds (never sent, sync._ELIGIBLE_VARIATION)."""
     return {
         "type": v["type"],
         "name": v["name"],
-        "aliases": json.loads(v["aliases"] or "[]"),
+        "alias_rows": _json_or_none(v["alias_rows"]),
+        "codes": _json_or_none(v["codes"]),
         "category_images": [{wire: i[col] for col, wire in _ICON_WIRE}
                             for i in sorted(icons, key=lambda i: i["category_handle"])],
     }
+
+
+def _json_or_none(stored: str | None):
+    return None if stored is None else json.loads(stored)
 
 
 def variation_hash(v: Mapping[str, Any], icons: Iterable[Mapping[str, Any]]) -> str:
