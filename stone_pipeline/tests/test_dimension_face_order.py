@@ -1,8 +1,8 @@
-"""The flat-dims convention, enforced (Mas's word, 10 Nov): length is the LONGER plan face and width the shorter one;
-height stays the thickness. derive orders the two faces once, after the unit correction and after an operator
-override (an override is ordered too), so a vendor that lists the short side first (prod POL-536, 2.03 x 2.84)
-ships 2.84 x 2.03. The provenance follows the values: each face keeps its own method label and flags, and the swap
-itself is recorded as `faces:ordered`.
+"""The flat-dims convention, enforced: length is the LONGER plan face and width the shorter one; height stays the
+thickness. derive orders the two faces once, after the unit correction and after an operator override (an override
+is ordered too), so a vendor that lists the short side first (prod POL-536, 2.03 x 2.84) ships 2.84 x 2.03.
+The provenance follows the values: each face keeps its own method label and flags, and the swap itself is recorded as
+`faces:ordered`.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def test_a_face_whose_fetch_failed_is_never_ordered(ref):
 
 
 def test_the_unit_correction_comes_before_the_order(ref):
-    # review L1: the case that tells the two orders apart. The unit-less '203' is centimetres read as metres. Corrected
+    # The case that tells the two orders apart. The unit-less '203' is centimetres read as metres. Corrected
     # first it is 2.03 m, the SHORTER face, so there is no swap: L 2.5, W 2.03. Ordered first it would sort as the
     # longer (203 > 2.5), be swapped into length and then corrected, leaving L 2.03 < W 2.5.
     row = _derive(ref, _slab(raw_dimensions="length=2.5;height=203"))

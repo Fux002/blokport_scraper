@@ -93,7 +93,7 @@ def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypat
 
 def _marble_imports():
     """Two SAME-TYPE marbles share the with-type alias 'Absolute Black Marble'; only ONE of them also carries
-    the type-stripped form 'Absolute Black' the cleaner produces (dev, 2026-09-17: Toros Black and Alaska
+    the type-stripped form 'Absolute Black' the cleaner produces (on dev: Toros Black and Alaska
     White). So the cleaned surface has a single marble owner while the matcher's verdict names two."""
     return existing_index(("marble__toros_black_T", "Toros Black", "Absolute Black Marble"),
                           ("marble__alaska_white_A", "Alaska White", "Absolute Black Marble|Absolute Black"))

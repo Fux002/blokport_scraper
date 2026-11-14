@@ -17,8 +17,8 @@ AN = {
     "type": {"Agate", "Alabaster", "Amethyst", "Andesite", "Onyx"},
     "color": {"Ivory", "Orange", "Orchid"},
 }
-# the vocabulary this spec was written against; types are the PACK's (table 569): dev's 31 less Dolomite Marble, which
-# has no combination and no seed variety (it takes "a", so AN is unchanged)
+# the vocabulary this spec was written against; types are the PACK's: dev's 31 less Dolomite Marble, which has no
+# combination and no seed variety (it takes "a", so AN is unchanged)
 COUNTS = {"finish": 51, "type": 30, "color": 25}
 
 

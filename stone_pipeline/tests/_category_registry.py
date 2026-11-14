@@ -1,6 +1,6 @@
-"""Test helpers for the category registry (table 577): a category's pcat is the registry's, keyed by its exact handle,
-so a test that prices or renders under its own pcat ids sets them on the registry (conftest's tree_category_pcats
-and slab_category_pcat use set_category_pcats), and a test that writes an attributes.csv gives each category row its
+"""Test helpers for the category registry: a category's pcat is the registry's, keyed by its exact handle, so a
+test that prices or renders under its own pcat ids sets them on the registry (conftest's tree_category_pcats and
+slab_category_pcat use set_category_pcats), and a test that writes an attributes.csv gives each category row its
 handle. No em dashes.
 """
 
@@ -14,7 +14,7 @@ from stone_pipeline.config import categories
 TREE_PCATS = {"slab": "cat_slab", "block": "cat_block", "tile": "cat_tile"}
 # the pcat ids test_ledger_products' canonical rows carry (its _fixture_rows), shared by the modules that import them
 LEDGER_PRODUCT_PCATS = {"slab": "PC1", "block": "PC2"}
-# the stone pack's category label -> its handle (D11), for writing a category row the way T1 does
+# the stone pack's category label -> its handle, for writing a category row the way the attributes export does
 HANDLE_OF_LABEL = {c.label: c.handle for c in categories.CATEGORIES}
 
 

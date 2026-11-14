@@ -1,9 +1,8 @@
 """Every keyed post in the committed backbones states its Key's type: the Key `{category}_{type}_{name}_{uuid}` begins
 with the post's own category and the slug of the post's stated type. A post that carries the Key of another type makes
-one Key mean two types (the Phase 1 SC-1 key map aborts on that as a type_conflict). On 8 Nov six block Keys sat on the
-same-named post of the type that sorts first (Ocean Blue: the Marble block Key on the Granite post), owner ruling
-"move the Keys". A post that states no type (stone_type '') has no type to compare: SC-1 holds it as untyped, so it is
-listed here, not checked."""
+one Key mean two types (the Phase 1 SC-1 key map aborts on that as a type_conflict). Six block Keys once sat on the
+same-named post of the type that sorts first (Ocean Blue: the Marble block Key on the Granite post). A post that states
+no type (stone_type '') has no type to compare: SC-1 holds it as untyped, so it is listed here, not checked."""
 
 from __future__ import annotations
 

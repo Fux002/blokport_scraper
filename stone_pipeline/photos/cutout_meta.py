@@ -1,6 +1,6 @@
 """Add what each published 3D slab is made from to its outline (RUN_MODE=cutout-meta, the ad-hoc task on :core): the
-meta-only republish of the 3D slabs publish made before their meta said it (Mas, 2026-11-10). Once, per environment, on
-the word of the one who owns it (dev: Mas; prod: the owner).
+meta-only republish of the 3D slabs publish made before their meta said it. Once, per environment, on the word of the
+one who owns that environment.
 
 For each published 3D slab's outline under imagestore.cutout_prefix() with its made-from stamp (a tile's 3D has none and
 is left): when the slab it was made from is still the one stamped (its ETag; otherwise publish makes it again, with the

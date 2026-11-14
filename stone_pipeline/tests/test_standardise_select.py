@@ -197,7 +197,7 @@ def test_a_listing_with_no_good_photo_has_its_first_fixable_photo_cleaned_model_
 
 
 def test_the_cheapest_and_most_successful_edit_model_is_tried_first():
-    # prod 2026-11-02: Nano Banana 2 ($0.12) passed 55% even on photos Kontext ($0.15) had failed, Kontext 31%, FLUX 3 37%
+    # on prod: Nano Banana 2 ($0.12) passed 55% even on photos Kontext ($0.15) had failed, Kontext 31%, FLUX 3 37%
     assert [name for name, _, _ in C.CLEAN_MODELS] == ["nano2", "kontext", "flux3"]
 
 
@@ -210,7 +210,7 @@ def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
 
 
 def test_an_edit_is_reserved_with_its_check_so_the_cap_never_sends_one_it_cannot_check(monkeypatch):
-    # owner 2026-11-05: the cleaning has its own cap; a copy paid for and then left unchecked would be money for nothing
+    # the cleaning has its own cap; a copy paid for and then left unchecked would be money for nothing
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     spend = sel.Spend(C.CLEAN_PRICE_USD["nano2"] + C.JUDGE_PRICE_USD - 0.01)       # covers the edit, not its check too
     with pytest.raises(sel.SpendCapReached):
@@ -231,7 +231,7 @@ def test_every_paid_clean_up_call_is_listed_for_the_listing_that_asked_for_it(mo
 
 
 def test_an_edit_with_no_usable_answer_counts_at_its_price_and_is_never_sent_again(monkeypatch):
-    # review of #530: an edit that may have been billed was sent again next run (paid twice); it is a failed attempt
+    # an edit that may have been billed was sent again next run (paid twice); it is a failed attempt
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     sent = []
 
@@ -287,7 +287,7 @@ def test_what_a_cleaned_copy_would_fix_is_named():
 
 def test_a_mark_on_the_stone_is_cleaned_without_asking_anything_else_only_on_the_owner_s_click(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", True)
-    # owner 2026-11-05: logos, labels, stickers, tape, straps and film are cleaned automatically; the rest by click
+    # logos, labels, stickers, tape, straps and film are cleaned automatically; the rest by click
     assert sel.authorised({"kinds": ["leftover_mark"]}, A, None) == "auto"
     assert sel.authorised({"kinds": ["leftover_mark", "light_reflection"]}, A, None) == "auto"   # the edit removes both
     assert sel.authorised({"held": "retouch: a strap"}, A, None) == "auto"
@@ -337,7 +337,7 @@ def _all_models_failed(s3, rounds, sha):
 
 
 def test_the_clicked_photo_is_cleaned_before_an_earlier_mark(monkeypatch):
-    # review of #525: one photo per listing is cleaned, and an earlier mark photo always took the slot from the click
+    # one photo per listing is cleaned, and an earlier mark photo always took the slot from the click
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "leftover_mark")
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
@@ -399,7 +399,7 @@ def test_a_click_that_cannot_be_used_is_never_paid_for_and_the_listing_says_why(
 
 
 def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
-    # review of #525: only listings on the review list said so; a listing not fully judged said nothing
+    # only listings on the review list said so; a listing not fully judged said nothing
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]   # A not judged
     s = _selection(_S3(), [_listing(A)], rounds)
     s.root, s.clicks = "r/", {"SEN-1": _click(D)}
@@ -409,7 +409,7 @@ def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
 
 
 def test_an_edit_paid_before_the_gate_is_always_collected_and_checked_and_nothing_new_is_sent(monkeypatch):
-    # review of #525: a request sent before the gate, for a photo that now needs a click, was never collected
+    # a request sent before the gate, for a photo that now needs a click, was never collected
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")       # no click: not authorised now
     s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
@@ -461,7 +461,7 @@ class _Bucket:
 
 
 def test_a_round_read_for_a_few_photos_holds_exactly_what_the_whole_folder_says_of_them():
-    # review of #555: a click listed the source's whole run folder (dev v2/zucchi: 56,840 keys) for one listing's photos
+    # a click listed the source's whole run folder (dev v2/zucchi: 56,840 keys) for one listing's photos
     from stone_pipeline.photos.source import LOGO_STEP, REDRAW
     keys = []
     for sha in (A, B, D):
@@ -519,7 +519,6 @@ def test_a_photo_with_a_cleaned_copy_is_still_retouched():
 
 
 
-# --- review fixes -------------------------------------------------------------------------------------------------------
 def test_a_photo_with_no_standardiser_result_leaves_the_listing_open_not_without_a_good_photo():
     s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})
     rounds = [("v9", {"sentas": _round(GPU, finished=(B,), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
@@ -569,7 +568,7 @@ def test_a_sent_edit_is_paid_even_when_collecting_it_fails_and_a_rerun_collects_
 
 
 def test_a_paid_request_the_queue_no_longer_has_is_a_failed_attempt_never_sent_again(monkeypatch):
-    # review of #530: a 404/410 at collect deleted the request, so the next run paid for the same edit again
+    # a 404/410 at collect deleted the request, so the next run paid for the same edit again
     import httpx
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     gone = httpx.HTTPStatusError("gone", request=httpx.Request("GET", "https://q"), response=httpx.Response(404))
@@ -806,7 +805,7 @@ def test_a_check_that_cannot_be_prepared_after_its_edit_was_sent_frees_only_the_
 
 
 def test_a_judge_request_that_cannot_be_prepared_costs_nothing_and_is_loud(monkeypatch):
-    # review of #540: the judge encoded its images inside the paid call, so an undecodable photo was charged every run
+    # the judge encoded its images inside the paid call, so an undecodable photo was charged every run
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     monkeypatch.setattr(sel.judge, "judging", lambda o, r, f: (_ for _ in ()).throw(ValueError("undecodable")))
     monkeypatch.setattr(sel.judge, "judge", lambda job: pytest.fail("asked"))
@@ -859,7 +858,7 @@ def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(mon
     assert f"{CL}attempts/{B}.nano2.json" not in s3.objects and edits == ["nano2"]   # retried next run, not given up
 
 
-# --- one refusal rule (review 2026-11-06, A2.2) ----------------------------------------------------------------------
+# --- one refusal rule ------------------------------------------------------------------------------------------------
 # A model that refused the photo at submit (nothing billed) was counted at its list price, paid again by the step's
 # second pass, and never let the next model try: phantom spend against the cleaning cap.
 def _refused_at_submit(monkeypatch, code, model="nano2"):
@@ -921,7 +920,7 @@ def test_a_judge_call_refused_with_a_4xx_costs_nothing(monkeypatch):
 
 
 def test_a_judge_timeout_after_upstream_work_counts_at_its_price(monkeypatch):
-    # review of #530: only statuses known to come before any work are free; a 408 (OpenRouter's request timeout) may
+    # only statuses known to come before any work are free; a 408 (OpenRouter's request timeout) may
     # follow upstream work, so it counts as billed
     import httpx
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
@@ -951,7 +950,7 @@ def test_a_listing_the_owner_chose_reads_nothing_of_its_click(monkeypatch):
 
 
 def test_a_photo_that_cannot_be_prepared_for_an_edit_costs_nothing_and_is_loud(monkeypatch):
-    # review of #540: an undecodable photo, a missing key or an unknown model failed inside the billed scope, so all
+    # an undecodable photo, a missing key or an unknown model failed inside the billed scope, so all
     # three models were burnt as paid and the photo could never be cleaned, even by a click
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     monkeypatch.setattr(sel.clean, "prepare", lambda name, encoded: (_ for _ in ()).throw(ValueError("undecodable")))
@@ -982,10 +981,9 @@ def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch)
     assert spend.spent == pytest.approx(sum(C.CLEAN_PRICE_USD.values()))               # each model once, never again
 
 
-# --- one click state (review 2026-11-06, A2.5) -----------------------------------------------------------------------
-# A click's state was decided in three places: admitted as finished while its listing awaited an outline recheck (dev
-# run 20261106082352439, MAR-P/24/04), "owner's click: clean" on the review list while it waited, and admitted every run
-# with no model left.
+# --- one click state -------------------------------------------------------------------------------------------------
+# A click's state was decided in three places: admitted as finished while its listing awaited an outline recheck,
+# "owner's click: clean" on the review list while it waited, and admitted every run with no model left.
 def _state(s3, rounds, listing, click, owner=None):
     return sel.click_state(s3, rounds, listing, set(), click, sel.listing_state(s3, rounds, listing, set(), owner))
 
@@ -1031,7 +1029,7 @@ def test_a_click_s_state_is_one_answer_and_the_plan_sends_only_a_ready_one(monke
 
 
 def test_a_click_whose_edits_are_paid_but_not_checked_still_leads_its_plan(monkeypatch):
-    # review of #546: the clicked photo's paid edits were only collected, so the plan lost its click priority
+    # the clicked photo's paid edits were only collected, so the plan lost its click priority
     monkeypatch.setattr(C, "CLEAN_ENABLED", True)
     s3, _, rounds = _reflection_on_a(monkeypatch)
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "leftover_mark")
@@ -1146,7 +1144,7 @@ def test_a_review_row_carries_the_owner_s_click_in_its_one_state(monkeypatch):
         "sha": None, "at": None, "state": "blocked", "why": "its file cannot be read: not json"}
 
 
-# --- a clicks-only run merges its listings into the review list (manager ruling C1, 2026-11-07) -----------------------
+# --- a clicks-only run merges its listings into the review list -------------------------------------------------------
 OLD_TRACKED = ("source,listing,format,photos,what_happened\r\n"
                'sentas,other,slab,2,"x: v9: judge fail (light_reflection) | y, z"\r\n'
                "sentas,slab-1,slab,2,an older run's notes\r\n"
@@ -1175,7 +1173,7 @@ def test_a_merging_report_before_any_review_list_writes_its_own_rows(monkeypatch
     assert s3.objects["r/tracked.csv"].decode().split("\r\n")[1].startswith("sentas,slab-1,")
 
 
-# --- an unparsed verdict is asked again (review 2026-11-06, A2.6) -----------------------------------------------------
+# --- an unparsed verdict is asked again -------------------------------------------------------------------------------
 def _unparsed(asks):
     return json.dumps({"verdict": "unparsed", "raw": "I think", "version": C.JUDGE_VERSION, "asks": asks}).encode()
 
@@ -1189,7 +1187,7 @@ def test_an_unparsed_verdict_is_not_final_and_is_asked_again(monkeypatch):
 
 
 def test_an_answer_that_never_parses_is_a_named_fail_after_its_asks(monkeypatch):
-    # review of #546: a permanently garbled answer was paid again every run and its listing stayed pending for ever
+    # a permanently garbled answer was paid again every run and its listing stayed pending for ever
     s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(C.JUDGE_UNPARSED_ASKS - 1),
               f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     asked = []
@@ -1224,7 +1222,7 @@ def test_a_selection_keeps_what_it_asked_across_reading_its_rounds_again(monkeyp
     assert A in s.rounds[0][1]["sentas"].asked and A in s.only([], {}).rounds[0][1]["sentas"].asked
 
 
-# --- the clicked photo is the unit (review 2026-11-06, A2.1) ---------------------------------------------------------
+# --- the clicked photo is the unit -----------------------------------------------------------------------------------
 def test_a_clicked_photo_is_cleaned_though_another_photo_of_the_listing_has_a_cleaned_copy(monkeypatch):
     # a copy of another photo (an earlier mark) made the listing count as cleaned: the click was never paid
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
@@ -1559,7 +1557,7 @@ def test_a_new_whole_slab_is_noted_as_drawn_under_the_current_outline_rule_and_a
     assert close.written == [f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg"] and src.finished(close, GPU, A)
 
 
-# --- review D1: a failing completion never holds a judged, published result ---------------------------------------------
+# --- a failing completion never holds a judged, published result ------------------------------------------------------
 class _Slice(_Written):
     """A bucket in a dict as the GPU job sees it: list, get, put, delete; put_object fails for the keys in `failing`."""
 
@@ -1737,7 +1735,7 @@ def test_a_listing_the_owner_decided_is_never_cleaned(monkeypatch):
 
 
 def test_a_review_photo_reads_its_judged_answer_once(monkeypatch):
-    # #555 review: review_photo read a photo's judged answer up to three times (its state, its kinds, whether a cleaned
+    # review_photo read a photo's judged answer up to three times (its state, its kinds, whether a cleaned
     # copy could fix it); it reads it once
     s3, _, rounds = _reflection_on_a(monkeypatch)
     reads = []

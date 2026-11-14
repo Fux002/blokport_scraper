@@ -1,6 +1,6 @@
-"""An alias never equals the name of another variety of the SAME type (Mas, 11-11 and 11-12): the rule on small cases;
-CI holds the WHOLE committed vocabulary (both bases and the backbones) at 0; and at emit an alias that collides with a
-live variety (an operator mint equal to a seed alias) is DROPPED and LISTED, the produce never stops. No em dashes."""
+"""An alias never equals the name of another variety of the SAME type: the rule on small cases; CI holds the WHOLE
+committed vocabulary (both bases and the backbones) at 0; and at emit an alias that collides with a live variety (an
+operator mint equal to a seed alias) is DROPPED and LISTED, the produce never stops. No em dashes."""
 from __future__ import annotations
 
 import csv
@@ -34,14 +34,14 @@ def test_its_own_name_and_its_own_copies_are_not_collisions():
 
 
 def test_a_post_under_the_same_key_is_the_same_variety_not_another():
-    # Scraper M2: the base row 'G562 Maple Red' and its backbone post spelt 'G562' share one Key; the post's spelling
-    # is that variety's own name, so the base row's alias 'G562' is not a collision
+    # the base row 'G562 Maple Red' and its backbone post spelt 'G562' share one Key; the post's spelling is that
+    # variety's own name, so the base row's alias 'G562' is not a collision
     key = "granite__g562_maple_red_8a0f2c3e-1b2c-5d6e-8f90-a1b2c3d4e5f6"
     assert ac.find([_v(key, "Granite", "G562 Maple Red", "G562", "G562 Granite"), _v(key, "Granite", "G562")]) == []
 
 
 def test_the_same_name_under_another_type_is_not_a_collision():
-    # a granite 'Silver Grey' alias and a slate 'Silver Grey' variety are two stones matching keeps apart (Mas, 11-11)
+    # a granite 'Silver Grey' alias and a slate 'Silver Grey' variety are two stones matching keeps apart
     assert ac.find([_v("g1", "Granite", "Bianco Sardo", "Silver Grey"), _v("s1", "Slate", "Silver Grey")]) == []
 
 
@@ -126,7 +126,7 @@ def _listed(path):
 
 def test_every_run_s_dropped_list_survives_the_next_run(tmp_path, monkeypatch):
     # the base keeps only the emitted aliases (base := 1_variants_full), so a dropped alias is gone for good: each
-    # run's list is kept under its own name, while the current list holds the latest run's (Scraper L2)
+    # run's list is kept under its own name, while the current list holds the latest run's
     emit_catalog, review = _emit_with_a_collision(tmp_path, monkeypatch, stamp="20261112T010000Z")
     emit_catalog, review = _emit_with_a_collision(tmp_path, monkeypatch, stamp="20261112T020000Z", collide=False)
     runs = review / emit_catalog.ALIAS_COLLISIONS_RUNS
@@ -136,7 +136,7 @@ def test_every_run_s_dropped_list_survives_the_next_run(tmp_path, monkeypatch):
 
 
 def test_the_seed_projection_drops_but_never_rewrites_the_review_list(tmp_path, monkeypatch):
-    # seed.verify's hermetic rebuild (seed_only) must leave the produce's review list as it is (Scraper L1)
+    # seed.verify's hermetic rebuild (seed_only) must leave the produce's review list as it is
     from stone_pipeline.stages import emit_catalog
     review = tmp_path / "review"
     review.mkdir()

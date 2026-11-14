@@ -1,10 +1,10 @@
-"""Tile listings' images (owner 2026-11-02): rendered from the same variety's judge-passed, published slab stone, never
-guessed. A tile listing without a published slab of its variety AND finish gets nothing; a slab cut-out with a
-crosshatch or at the wrong proportions is never used; one slab per variety, never a pool; every tile leads with the
-laid tiles (main), however few distinct faces its slab gives; every view at the listing's own size (a tile's size, never a defaulted one); the 3D
-tile at its listed length and proportions, CUTOUT_LONG_SIDE px; the tile step
-renders exactly when its inputs change and writes byte-identical files; the photo process never takes a tile listing,
-and the image stage links a tile product to the set named after it."""
+"""Tile listings' images: rendered from the same variety's judge-passed, published slab stone, never guessed. A tile
+listing without a published slab of its variety AND finish gets nothing; a slab cut-out with a crosshatch or at the
+wrong proportions is never used; one slab per variety, never a pool; every tile leads with the laid tiles (main),
+however few distinct faces its slab gives; every view at the listing's own size (a tile's size, never a defaulted
+one); the 3D tile at its listed length and proportions, CUTOUT_LONG_SIDE px; the tile step renders exactly when its
+inputs change and writes byte-identical files; the photo process never takes a tile listing, and the image stage
+links a tile product to the set named after it."""
 from __future__ import annotations
 
 import hashlib
@@ -50,7 +50,7 @@ def _fixture(name):
 
 def test_the_tiger_black_slab_with_a_mesh_over_its_face_is_never_cut_into_tiles():
     # a crop of the real published cut-out prod/products/standard/cutout/marenostone/805cf5ac...webp, read from prod S3
-    # 2026-11-02 (the whole file scores 17.6)
+    # (the whole file scores 17.6)
     rgba = _fixture("crosshatch_805cf5ac.webp")
     assert tile_stone.grid_score(rgba) > C.TILE_GRID_MAX
     with pytest.raises(tile_stone.Refused, match="crosshatch"):
@@ -339,8 +339,8 @@ def test_slabs_are_tried_the_tile_s_own_vendor_s_first_then_the_most_stone_and_n
 
 @pytest.mark.parametrize("size, faces", [((1.2, 1.2, 0.02), 2), ((2.0, 1.5, 0.02), 1)])   # straight, half-bond
 def test_every_tile_leads_with_the_laid_floor_and_has_the_single_tile_and_studio_as_extras_however_few_its_faces(size, faces):
-    # owner 2026-11-04: every tile's catalog image is the laid floor; the single tile on white, the studio view and the
-    # 3D tile are extras. These sizes fit only once or twice on this slab's stone: the floor repeats those faces, turned.
+    # every tile's catalog image is the laid floor; the single tile on white, the studio view and the 3D tile are
+    # extras. These sizes fit only once or twice on this slab's stone: the floor repeats those faces, turned.
     stone = _stone()
     product = tile_plan.Product("big", "marenostone", "tile", ("x", "y"), POLISHED, size)
     slab = tile_plan.Slab("s", "marenostone", A, (3.0, 2.0), "k", "e")

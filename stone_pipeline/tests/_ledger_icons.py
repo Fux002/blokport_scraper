@@ -1,8 +1,8 @@
 """Test helpers for the products lane's icon gate (phase 1, sync._ELIGIBLE_PRODUCT): a product is served once its
 variety has an icon in the product's own category. `add_icon` gives a ledger variety an icon in a category (the row
 populate writes from emit's listing); conftest's `slab_category_pcat` fixture gives the Slabs category the pcat
-SLAB_PCAT on the category registry (table 577: the one source of a category), so a canonical row with
-`category_pcat_id=SLAB_PCAT` is stored under the `slabs` handle."""
+SLAB_PCAT on the category registry (the one source of a category), so a canonical row with `category_pcat_id=SLAB_PCAT`
+is stored under the `slabs` handle."""
 from __future__ import annotations
 
 from stone_pipeline.config.categories import category_by_handle

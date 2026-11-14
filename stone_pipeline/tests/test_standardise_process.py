@@ -292,7 +292,7 @@ def test_the_cleaning_cap_is_its_own_monthly_budget_and_a_close_only_run_has_non
 
 
 def test_the_paid_calls_counted_leave_out_the_refused_ones():
-    # review of #530: a refused call is listed at $0 and is no paid call
+    # a refused call is listed at $0 and is no paid call
     cap = select.Spend(10)
     cap.record({"call": "edit", "usd": 0.0, "refused": 422})
     cap.record({"call": "edit", "usd": 0.12})
@@ -339,7 +339,7 @@ def test_an_unreadable_click_or_choice_record_fails_only_its_own_listing(capsys)
 
 @pytest.mark.parametrize("close_only", [False, True])
 def test_a_listing_whose_choice_record_cannot_be_read_stays_exactly_as_published(monkeypatch, close_only):
-    # review of #525: its conflict photo dropped out of the assignments, so publish unpublished it and removed the file
+    # its conflict photo dropped out of the assignments, so publish unpublished it and removed the file
     import time
     s3 = _S3({f"{RUN}{D}.main.jpg": b"m", f"{RUN}{D}.white.jpg": b"w", f"{ROOT}chosen/mine.json": _record("mine", D),
               imagestore.conflicts_key("sentas"): json.dumps({D: ["mine", "partner"]}).encode()})
@@ -378,7 +378,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
     assert worked == [] and any("mine" in p and "cannot be read" in p for p in stored["problem_list"])
 
 
-# --- one corrupt choice record (review 2026-11-06, A2.8) --------------------------------------------------------------
+# --- one corrupt choice record ----------------------------------------------------------------------------------------
 # A choice record that was not JSON crashed every run and every publish.
 def test_a_choice_record_that_cannot_be_read_fails_only_its_own_listing():
     s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": b"{broken"})
@@ -409,7 +409,7 @@ def test_a_listing_whose_own_choice_record_cannot_be_read_is_left_as_published_a
 
 
 def test_publish_keeps_exactly_the_held_listing_as_published_and_removes_the_rest(monkeypatch):
-    # review of #548: one unreadable record stopped every removal everywhere (an owner-removed listing stayed live)
+    # one unreadable record stopped every removal everywhere (an owner-removed listing stayed live)
     s3 = _published_bucket()
     s3._store(f"{ROOT}chosen/two.json", b"{broken")                                   # two: left exactly as published
     held = [imagestore.standard_key("sentas", B, view) for view in imagestore.STANDARD_VIEWS]
@@ -682,7 +682,7 @@ def test_a_close_only_run_leaves_the_review_list_as_it_is(monkeypatch):
 
 
 def test_a_clicks_only_run_works_only_the_clicked_listings_and_merges_them_into_the_review_list(monkeypatch):
-    # manager ruling C1 (2026-11-07): never rewrite the review list from a narrowed selection
+    # never rewrite the review list from a narrowed selection
     old_new = {"listing": "new", "source": "sentas", "format": "slab", "reason": "awaiting_click", "why": None,
                "click": None, "photos": []}
     other = {**old_new, "listing": "other", "reason": "not_fixable"}
@@ -955,7 +955,7 @@ def test_a_redraw_the_judge_fails_is_discarded_and_everything_live_stays_and_a_s
 
 
 def test_a_pending_redraw_of_a_listing_left_as_published_waits_then_settles_once_its_record_is_readable(monkeypatch):
-    # review of #525: settle promoted a redraw an earlier run left, changing the published outline of a listing whose
+    # settle promoted a redraw an earlier run left, changing the published outline of a listing whose
     # choice record cannot be read; it must wait (kept, never discarded) and settle normally once the record reads
     from stone_pipeline.photos import source as src
     s3, _ = _older_whole_slab_chosen(owner=False)
@@ -1337,7 +1337,7 @@ def test_a_run_at_the_budget_or_with_problems_still_succeeds_its_summary_says_so
 @pytest.mark.parametrize("changed, relink_rc, want", [(True, 0, ["relink", "idle"]), (True, 2, ["relink", "idle"]),
                                                        (False, 0, ["idle"])])
 def test_the_pool_is_set_back_to_idle_at_the_run_s_end_after_the_relink(monkeypatch, changed, relink_rc, want):
-    # a ceiling lowered while the round's instances still ran stays at what they held (prod 24 and 12, dev 32 on 3-4 Nov)
+    # a ceiling lowered while the round's instances still ran stays at what they held (prod 24 and 12, dev 32)
     steps = []
     _main(monkeypatch, changed=changed, relink_rc=relink_rc, steps=steps)
     assert steps == want

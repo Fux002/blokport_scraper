@@ -4,12 +4,12 @@ Every committed old Key maps through SC-1's key map by its old Key, never re-min
 The map is read once, by its VersionId, and only at its sha256 (`migrate_stores.read_key_map`, the one reader SC-3
 uses too).
 
-The variety backbone (`catalog_source/backbone_varieties.json`, spec rev 8 section 3 "Backbone result", D7): ONE
-post per (type, name), merged from the three per-category backbones.
+The variety backbone (`catalog_source/backbone_varieties.json`): ONE post per (type, name), merged from the three
+per-category backbones.
 - A keyed post (every slab and tile post, 327 block posts) joins by its old Key through the map. A keyless block
-  post joins its identity by (type, name). Anything else refuses: nothing is minted (measured 10 Nov: all 12,159
+  post joins its identity by (type, name). Anything else refuses: nothing is minted (measured: all 12,159
   block posts map, 327 by Key and 11,832 by (type, name)).
-- The post: the default form's copy's variant and type, the slab post's finishes and qualities (D7), and the
+- The post: the default form's copy's variant and type, the slab post's finishes and qualities, and the
   union of every copy's colours, aliases (the default form's casing first; another copy's differing name joins
   them) and merged_from. category, image_file, exists, in_csv and variant_id are dropped.
 - MAPPED_BACKBONE_KEYS_SHA256 is the digest of the sorted Keys this wrote, so CI (which has no map) pins it.
@@ -22,8 +22,7 @@ The base files (`from_medusa/<env>/variants_export_base.csv`): ONE row per new K
 columns (`medusa_files.VARIETY_FILE_COLUMNS`), sorted by Key.
 - The Name is the default form's copy's (the lowest category rank in the map: slab, then block, then tile).
 - Type is the map's canonical type name.
-- Aliases are the case-insensitive union of every copy's aliases, the default form's casing first (spec rev 8
-  section 3, Aliases).
+- Aliases are the case-insensitive union of every copy's aliases, the default form's casing first.
 - Image and Volume are dropped.
 
 Deterministic and idempotent: the same map and files give the same bytes, and a row already on a new Key passes
@@ -59,9 +58,9 @@ VARIETIES_FILE = CATALOG / "backbone_varieties.json"
 ADDITIONS_FILE = CATALOG / "backbone_additions" / "varieties.json"
 DELETED_FILES = (CATALOG / "image_model.csv", CATALOG / "missing_variants.csv")
 # sha256 of the sorted Keys of the backbone posts this wrote, every one through the map: CI pins it
-# The rewrite's Keys (ba047a47...) with the Brazilian White undo applied (owner 11-11, #635): marble__super_white and
-# onyx__super_white leave, and marble, onyx and quartzite Brazilian White join (new_key of their identity); and
-# marble__volakas leaves, folded into Volocas (owner 11-05 'Volakas = Volocas', Mas 11-12).
+# The rewrite's Keys (ba047a47...) with the Brazilian White undo applied: marble__super_white and onyx__super_white
+# leave, and marble, onyx and quartzite Brazilian White join (new_key of their identity); and marble__volakas leaves,
+# folded into Volocas (Volakas = Volocas).
 MAPPED_BACKBONE_KEYS_SHA256 = "abcd48a17c792e7b28b963eab81b48876ce9681bceb67a4371c07a4ccbe5a039"
 BASE_FILES = (
     REPO_ROOT / "from_medusa" / "development" / "variants_export_base.csv",
@@ -264,7 +263,7 @@ def run_backbones(key_map: KeyMap) -> tuple[dict[str, bool], str]:
     """Write the merged variety backbone and the merged additions, delete the per-category files they replace
     and the two dropped catalog files; ({file: changed}, the mapped-Keys digest to pin). A merged-in copy's name
     joins the aliases as written; `python -m stone_pipeline.reference.clean_committed_names` then makes the files
-    fixed points of the name rules (10 Nov: one alias re-cased), and a second run of this changes nothing."""
+    fixed points of the name rules (one alias was re-cased), and a second run of this changes nothing."""
     changed: dict[str, bool] = {}
     if VARIETIES_FILE.exists():
         posts = merge_backbones(_read_posts(VARIETIES_FILE), [], [], key_map)

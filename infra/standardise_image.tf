@@ -1,4 +1,4 @@
-# --- STD-IMAGE-BUILD (table 348): the standardise GPU image, built on demand on CodeBuild ---------------------------
+# --- STD-IMAGE-BUILD: the standardise GPU image, built on demand on CodeBuild ---------------------------------------
 # A dispatch of .github/workflows/standardise-image.yml (input: a main sha) starts one ephemeral CodeBuild build that
 # runs deploy/build_standardise_image.sh at that sha and pushes standardise-pin-<sha12>. One project for the shared
 # image repo, so it lives with the repo's owner: gated on create_ecr like the repo itself. New resources only; the
@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "std_build_service" {
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
-  # ECR has no tag-level IAM: a pin never moves only because the build script refuses an existing tag (C3).
+  # ECR has no tag-level IAM: a pin never moves only because the build script refuses an existing tag.
   statement {
     sid = "EcrPullPushDescribe"
     actions = [

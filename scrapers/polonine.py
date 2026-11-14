@@ -45,7 +45,8 @@ PAGE_SIZE = 40
 API_HEADERS = {"content-type": "application/json; charset=UTF-8",
                "x-requested-with": "XMLHttpRequest", "origin": BASE, "referer": PAGE_URL}
 # The customer login that shows prices ("Prices ... are available for logged in customers only"). Both values come from
-# the environment (SSM-backed when deployed), never from code or config: the username is a person's email. The endpoints are the site's own login and logout (slabware.js).
+# the environment (SSM-backed when deployed), never from code or config: the username is a person's email. The
+# endpoints are the site's own login and logout (slabware.js).
 LOGIN_API = f"{BASE}/ajax/Ajax.aspx/Modal_Login"
 LOGOUT_API = f"{BASE}/ajax/Ajax.aspx/LogOut_Head"
 LOGIN_USER_ENV = "SCRAPER_POLONINE_USERNAME"

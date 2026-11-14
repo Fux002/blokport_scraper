@@ -1,5 +1,5 @@
-"""The ONE-TIME move of state/alias_writeback.csv into config.db `learned_alias` (P2-10 C2; the scraper manager's
-ruling 11-12: automatic, exactly once per env, at the produce's start).
+"""The ONE-TIME move of state/alias_writeback.csv into config.db `learned_alias`: automatic, exactly once per env,
+at the produce's start.
 
 A record's variation_id is a variety's Medusa id (the phase 1 migration moved every record onto its survivor's id) or
 its Key, so it resolves through the ledger's (medusa_id, key). A record becomes an ACTIVE learned alias, decided_by
@@ -10,11 +10,11 @@ its (Key, norm). Every other record is dropped and listed in review/<env>/learne
 its reason. The marker in config.db's `migration` table is written in the same transaction as the rows, so every
 later produce returns at once and never reads the csv again.
 
-The migration owns its input (the scraper manager's ruling 11-12): it reads the csv from its phase 1 key on S3
-(writeback_key, which phase1/migrate_run writes from the pre-phase-1 key), never the task's disk, which only a
-best-effort boot restore filled. The key's absence is the one thing that reads as "nothing to migrate" (a new
-environment), and only while the pre-phase-1 key is absent too; any other S3 error raises and leaves no marker, so
-the next produce retries instead of recording an empty move.
+The migration owns its input: it reads the csv from its phase 1 key on S3 (writeback_key, which phase1/migrate_run
+writes from the pre-phase-1 key), never the task's disk, which only a best-effort boot restore filled. The key's
+absence is the one thing that reads as "nothing to migrate" (a new environment), and only while the pre-phase-1 key
+is absent too; any other S3 error raises and leaves no marker, so the next produce retries instead of recording an
+empty move.
 """
 
 from __future__ import annotations

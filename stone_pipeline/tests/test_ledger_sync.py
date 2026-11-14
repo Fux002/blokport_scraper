@@ -142,9 +142,9 @@ def test_reset_sync_state_clean_start(tmp_path):
 
 
 def test_restore_attribute_ids_restores_every_kind_from_the_export(tmp_path):
-    # L#17: a global reset nulls ALL attribute ids; restore re-stamps every color/finish/quality/type row in
+    # a global reset nulls ALL attribute ids; restore re-stamps every color/finish/quality/type row in
     # attributes.csv, so products don't emit empty attribute ids. A value NOT in the export (a scraped new colour)
-    # stays pending for normal sync. A category is not the ledger's (table 577: its pcat is the registry's), so
+    # stays pending for normal sync. A category is not the ledger's (its pcat is the registry's), so
     # a category row a live ledger still holds is inert and never restored.
     from stone_pipeline.ledger.bootstrap import restore_attribute_ids
     attrs = tmp_path / "attributes.csv"
@@ -172,8 +172,8 @@ def test_restore_attribute_ids_restores_every_kind_from_the_export(tmp_path):
 
 
 def test_global_reset_restores_attribute_ids_from_the_export(tmp_path):
-    # L#17: attribute ids (color/finish/quality/type) are pre-existing Medusa identity from attributes.csv, not
-    # scraper sync state. The global overlay reset nulls them, but reset_sync_state must restore every kind the
+    # attribute ids (color/finish/quality/type) are pre-existing Medusa identity from attributes.csv, not scraper
+    # sync state. The global overlay reset nulls them, but reset_sync_state must restore every kind the
     # export carries -- else products reverse-map to empty attributes. A value NOT in the export (a scraped-new
     # one) stays pending for sync. (Uses the committed real attributes.csv, which carries the base colour vocab.)
     from stone_pipeline.ledger.sync import reset_sync_state
@@ -772,7 +772,7 @@ def _synced_product(ledger, sku="S-1", vkey="marble__a_1", state="syncing", payl
 
 
 def test_product_ack_with_stale_hash_is_refused(tmp_path):
-    # F3: a produce re-dirtied the product to content B (payload_hash B) between the pull and the ack. An
+    # a produce re-dirtied the product to content B (payload_hash B) between the pull and the ack. An
     # ack echoing the OLD served hash A is stale -> refused (0 rows) -> the row stays unsynced and re-serves
     # content B, instead of being marked synced while Medusa still holds A.
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
@@ -794,7 +794,7 @@ def test_product_ack_without_hash_is_backward_compatible(tmp_path):
 
 
 def test_inventory_ack_with_stale_qty_is_refused(tmp_path):
-    # F4: stock moved from the served 5 to 8 between pull and ack. An ack echoing 5 is stale -> refused ->
+    # stock moved from the served 5 to 8 between pull and ack. An ack echoing 5 is stale -> refused ->
     # the 8-delta persists and re-serves, instead of snapping last_synced_qty to 8 and losing the change.
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _synced_product(ledger, state="synced")

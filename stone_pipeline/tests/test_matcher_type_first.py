@@ -1,4 +1,4 @@
-"""The matcher narrows by TYPE before anything else, and a guess between two stones is never made (owner, 2026-11-06).
+"""The matcher narrows by TYPE before anything else, and a guess between two stones is never made.
 
 Variety identity is (type, name). Two defects let a product bind to a stone the evidence did not name:
 

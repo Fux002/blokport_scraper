@@ -207,8 +207,8 @@ class _BlocksAll:
         return Response(status=403, text="")
 
 
-# The only sites a run of each shipped register may request, as Mas decided them: wudport on the owner's 13 Nov site list
-# (SC #750), blokport on the owner's 14 Nov source list (worker 74's measure, Mas's rulings 14 Nov).
+# The only sites a run of each shipped register may request: wudport on the owner's site list, blokport on the
+# owner's source list.
 APPROVED = {
     "wudport": {"beijerbygg", "byggmax", "holzhandel_deutschland", "jewson", "mkm", "originalmarquetry", "scbs",
                 "selcobw", "totemtimber"},

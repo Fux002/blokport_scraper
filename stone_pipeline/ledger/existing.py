@@ -14,16 +14,16 @@ from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.reference.loaders.common import norm
 
 # The product columns carrying a frozen-checkable VALUE: the controlled attributes (by canonical name) plus
-# `variation_key`, the variety Key (VE2 PR5: a product is exempt from a frozen variety only when Medusa already
-# holds it on the SAME Key). The category is stored by HANDLE (D11, populate._category_handle_for) and carried here
-# as that handle, the identity validate checks (table 577). All are folded through `norm` symmetrically for membership, so
-# the Key matches regardless of its slug separators.
+# `variation_key`, the variety Key (a product is exempt from a frozen variety only when Medusa already holds it on
+# the SAME Key). The category is stored by HANDLE (D11, populate._category_handle_for) and carried here as that
+# handle, the identity validate checks. All are folded through `norm` symmetrically for membership, so the Key
+# matches regardless of its slug separators.
 _VALUE_COLUMNS = ("color", "finish", "quality", "type", "category", "variation_key")
 
 
 def _value(column: str, stored: str) -> str:
-    """The value a stored cell carries: the cell itself, a category being its exact handle (table 577). A stored
-    handle no pack category has raises: never read as some value."""
+    """The value a stored cell carries: the cell itself, a category being its exact handle. A stored handle no pack
+    category has raises: never read as some value."""
     if column == "category" and category_by_handle(stored) is None:
         raise ValueError(f"product category handle {stored!r} is no pack category")
     return stored

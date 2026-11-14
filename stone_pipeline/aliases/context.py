@@ -1,4 +1,4 @@
-"""The alias boundary's context (core.alias_problem.AliasContext), built the scraper's way (table 171, R5 point 2: the
+"""The alias boundary's context (core.alias_problem.AliasContext), built the scraper's way (the
 two runtimes share the checks and differ only in how they build the context):
   * type_words: the scraper's clear single-word type words (adapters.tokens), match_key-keyed;
   * vocabulary_keys: match_key of every live (not archived, not internal) type, colour, finish and quality name;
@@ -16,7 +16,7 @@ from stone_pipeline.core.alias_problem import AliasContext
 from stone_pipeline.core.text import match_key
 from stone_pipeline.matching import projections as proj
 
-# The vocabulary an alias may not be a bare word of (171: stone-type, colour, finish and quality).
+# The vocabulary an alias may not be a bare word of: stone-type, colour, finish and quality.
 VOCABULARY_CATEGORIES = ("type", "color", "finish", "quality")
 
 

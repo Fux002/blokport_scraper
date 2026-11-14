@@ -1,8 +1,8 @@
 """ONE rule for a statement's colour: it is a documented colour of the variety the statement names, applied at
 reference load as a leaf overlay, for a mint and a bind alike. Before, the colour was read only at mint time
 (seed_color): a variety minted from a colourless listing kept an empty colour set that no later statement
-could fill, so its colourless listings rejected required_id_null forever with no card to act on (prod
-2026-09-17, Polonine 'Sparta White' Granite)."""
+could fill, so its colourless listings rejected required_id_null forever with no card to act on (seen on
+prod: Polonine 'Sparta White' Granite)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Sentas packing list: where a bundle has one, it is the stock source (agreed with the operator, 2026-10-13).
+"""Sentas packing list: where a bundle has one, it is the stock source.
 
 The vendor's own summary rows are read, never the detail rows: a sheet can carry stray rows copied from
 another block below the product's table, and only the summary is the product's figure. IN STOCK counts

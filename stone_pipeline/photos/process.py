@@ -470,9 +470,9 @@ def stop_on_signal(*spends):
 
 def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     """The GPU round for `todo`, then the stores re-read: (problems, stopped). Problems: failed jobs, a round stopped at
-    the work window or stuck, a round Batch refused or failed (review 2026-11-06, A2.7: never the run's end), a round
-    skipped (too little window left, or the budget left covers not one slice: the hosted steps still judge what is
-    finished, within their own reservations), listed photos left without a result.
+    the work window or stuck, a round Batch refused or failed (never the run's end), a round skipped (too little window
+    left, or the budget left covers not one slice: the hosted steps still judge what is finished, within their own
+    reservations), listed photos left without a result.
     stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts. A scoped run's round of
     the run tag also names its photos to re-standardise (sel.restandardise); any other round is called as it always was.
     """
@@ -512,8 +512,8 @@ NO_CAP = "no cleaning cap set"
 
 
 def admit(sel, plans, left, cap_left, window):
-    """(the plans the clean step pays, {listing key: why its new edits wait}) (review 2026-11-06, A2.3/A2.4: one
-    admission, nothing paid that cannot finish, the same listings whatever the threads do). Read-only, in a fixed order.
+    """(the plans the clean step pays, {listing key: why its new edits wait}) (one admission, nothing paid that cannot
+    finish, the same listings whatever the threads do). Read-only, in a fixed order.
     First every edit already paid for (a plan's collect): it is owed, so it always goes, its check and its copy counted.
     Then the new edits (a plan's send), the owner's clicks first, then the marks, each in sheet order: admitted while
     both budgets left cover them with everything counted before them: the process budget (`left`) the GPU round and
@@ -865,10 +865,10 @@ def tile_rows(tiles_hidden, tiles):
 
 
 def merge_review(s3, root, review, worked, tiles_hidden, tiles):
-    """A clicks-only run's rows merged into the review list (manager ruling C1, 2026-11-07): the rows of the SKUs it
-    worked replaced by its own (a listing now chosen loses its row), the tiles' rows by its publish's (publish renders
-    every tile in every run kind: a tile it rendered loses its row), every other row left as stored (the same bytes,
-    the file sorted by SKU). Inside the run lock, like every write of the process."""
+    """A clicks-only run's rows merged into the review list: the rows of the SKUs it worked replaced by its own (a
+    listing now chosen loses its row), the tiles' rows by its publish's (publish renders every tile in every run kind: a
+    tile it rendered loses its row), every other row left as stored (the same bytes, the file sorted by SKU). Inside the
+    run lock, like every write of the process."""
     gone = set(worked)
     kept = {sku: row for sku, row in read_review(s3, root).items()
             if sku not in gone and row["reason"] != "tile_no_stone"}
@@ -954,9 +954,9 @@ def unconfigured(close_only=False, scoped=False):
 
 
 def cleaning_cap(s3, run_id, close_only, run=None):
-    """This run's Spend against the month's cleaning cap (owner 2026-11-05: the hosted clean-up edits and their checks
-    have their own cap), or None when no edit can be paid: no cap set (said once, here), or a close-only run (it makes
-    no hosted call)."""
+    """This run's Spend against the month's cleaning cap (the hosted clean-up edits and their checks have their own
+    cap), or None when no edit can be paid: no cap set (said once, here), or a close-only run (it makes no hosted
+    call)."""
     if close_only:
         return None
     if C.CLEAN_BUDGET_USD is None:

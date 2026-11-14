@@ -4,7 +4,7 @@ the row's `html` names the pages to read, what one listing is on them (a record)
 
 What a page shows is what is read. A price is the price element's text as shown; its amount is read in the site's
 declared number notation, and a card that shows no price is unpriced with its words kept, whatever a script or an
-analytics attribute holds. Struck text is never the price: Mas's sale rule reads it, where the row declares it, as
+analytics attribute holds. Struck text is never the price: the sale rule reads it, where the row declares it, as
 the regular price (contract v4). A required field the record does not hold is that listing's problem, counted with
 its reason, never the site's; a spec not stated in its declared form is simply not stated."""
 

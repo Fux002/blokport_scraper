@@ -64,11 +64,11 @@ class Category:
 # prod run uses prod pcats and a dev run uses dev pcats -- the ids can never cross. The literals
 # below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
 class CategoryHandleError(ValueError):
-    """A T1 category row breaks the exact-handle rule (D11): named, never folded or skipped."""
+    """An attributes.csv category row breaks the exact-handle rule: named, never folded or skipped."""
 
 
 def category_pcats(values: Iterable[AttributeValue]) -> dict[str, str]:
-    """{handle: pcat} for every pack category among T1's category rows, keyed by the EXACT handle (table 577): the
+    """{handle: pcat} for every pack category among the attributes.csv category rows, keyed by the EXACT handle: the
     one reader of those rows. The label in `value` is never a key, so a renamed label changes nothing. A handle that
     differs from a pack handle only in case is refused by name (it would otherwise silently deactivate the
     category), and so is a second row on one handle; a handle no pack category has is another brand's, not ours."""
@@ -149,7 +149,7 @@ def category_by_handle(handle: str) -> "Category | None":
 
 def category_by_pcat(pcat_id: str) -> "Category | None":
     """The ACTIVE category whose pcat id (this env's, from the registry) is exactly `pcat_id`, or None. The one way a
-    stored pcat id goes back to its category (table 577): never through a label or the ledger."""
+    stored pcat id goes back to its category: never through a label or the ledger."""
     return next((c for c in _BY_NAME.values() if pcat_id and c.pcat_id == pcat_id), None)
 
 

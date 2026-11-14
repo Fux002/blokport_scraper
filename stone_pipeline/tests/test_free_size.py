@@ -1,6 +1,6 @@
 """Free size: a listing whose vendor sells a side 'Free' (cut to order) is offered in the pack's shapes.
 
-Owner, 2026-11-04: a square, a rectangle and a long thin one (long:short 1, 2, 4); a side the vendor states
+The shapes are a square, a rectangle and a long thin one (long:short 1, 2, 4); a side the vendor states
 is the short side; every side free -> the long side is 60 cm; a shape longer than 120 cm is not offered.
 Each shape is its own listing: own key, own size, own pictures, made-to-order stock.
 """
@@ -68,7 +68,7 @@ def test_a_malformed_free_size_shapes_entry_fails_loud_at_load(tmp_path, monkeyp
         domain.load_pack("bad")
 
 
-# --- the shapes (the owner's table) ---------------------------------------------------------------------
+# --- the shapes ---------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("dims, keys", [
     ("length=Free;height=40cm", ["K-40x40", "K-80x40"]),

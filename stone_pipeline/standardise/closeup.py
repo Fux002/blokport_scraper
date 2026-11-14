@@ -1,7 +1,7 @@
-"""A texture close-up of a slab, still put on the standard stand (the user's choice): the stone runs off all four
-edges of the photo (a whole-slab photo always shows background along a side). Sample cards and labels erased, lit,
-cropped to the slab product's proportions; skipped when blurred. Laid out by compose.compose, like every slab.
-Straps stay as shot (the user's choice, 2026-10-30): never erased.
+"""A texture close-up of a slab, still put on the standard stand: the stone runs off all four edges of the photo (a
+whole-slab photo always shows background along a side). Sample cards and labels erased, lit, cropped to the slab
+product's proportions; skipped when blurred. Laid out by compose.compose, like every slab.
+Straps stay as shot: never erased.
 """
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 import cv2
@@ -48,7 +48,7 @@ def closeup(rgb, size, seg, det, lama, esr):
         return "not a close-up: a floor shows below the stone (a whole slab or open book that was not found)"
     if _sharp(rgb) < C.SHARP_MIN:
         return "blurred close-up"
-    straps = openbook._straps(seg, det, rgb, (0, 0, w - 1, h - 1), emb)    # kept as shot (the user's choice)
+    straps = openbook._straps(seg, det, rgb, (0, 0, w - 1, h - 1), emb)    # kept as shot
     marks = proto.mark_mask(rgb) | (cv2.dilate(1 - raw, np.ones((15, 15), np.uint8)) & (straps == 0))
     rgb = proto.erase(rgb, marks, lama, raw)
     length, width = size or C.DEFAULT_SLAB

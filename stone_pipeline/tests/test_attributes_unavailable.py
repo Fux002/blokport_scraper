@@ -1,9 +1,9 @@
-"""A failed attributes.csv fetch at the config server's boot is RECORDED, never fatal (the manager's ruling on SC #663,
-12 Nov). With a thin S3 copy (Medusa mid-reset) or none (a new environment before BE's first export) a refusing boot
-would crash-loop and take the whole config API down, /reset and /run included. So the boot records why; the routes
-that read the type and colour vocabulary (decide, GET /types and /colors, the photos pages) answer 503 naming the
-cause; every other route serves; the produce's own fetch still refuses loud; and a later successful fetch (the boot's,
-a photos page's or the produce's) clears it. Hermetic: a tmp attributes.csv and a stand-in S3. No em dashes.
+"""A failed attributes.csv fetch at the config server's boot is RECORDED, never fatal. With a thin S3 copy (Medusa
+mid-reset) or none (a new environment before BE's first export) a refusing boot would crash-loop and take the whole
+config API down, /reset and /run included. So the boot records why; the routes that read the type and colour
+vocabulary (decide, GET /types and /colors, the photos pages) answer 503 naming the cause; every other route serves;
+the produce's own fetch still refuses loud; and a later successful fetch (the boot's, a photos page's or the
+produce's) clears it. Hermetic: a tmp attributes.csv and a stand-in S3. No em dashes.
 """
 
 from __future__ import annotations
@@ -95,8 +95,8 @@ def test_a_boot_with_a_malformed_copy_serves_and_names_it(attributes, tmp_path, 
 
 def test_every_read_of_attributes_csv_on_the_server_answers_503_while_its_fetch_stands_refused(
         attributes, tmp_path, monkeypatch):
-    # reviewer 2's LOW: the restricted (archived or internal) values and ids come from the same file; the id-paste route
-    # reads nothing else of it, so it served the stale file's restrictions
+    # the restricted (archived or internal) values and ids come from the same file; the id-paste route reads nothing
+    # else of it, so it would serve the stale file's restrictions
     _boot(monkeypatch, tmp_path, _S3(THIN))
     assert _unavailable(server.dispatch("PUT", ["review", "attributes", "Grey"],
                                         {"kind": "color", "medusa_id": "col_grey"}), "thin")
@@ -133,13 +133,13 @@ def test_the_produce_s_successful_fetch_clears_it(attributes, tmp_path, monkeypa
 
 
 def test_every_fetch_outside_the_boot_still_refuses_loud(attributes):
-    # one refusing path (34's rev 2): the photos run and a photos page raise; only the BOOT records instead of raising
+    # one refusing path: the photos run and a photos page raise; only the BOOT records instead of raising
     with pytest.raises(medusa_inputs.AttributesUnavailable, match="thin"):
         medusa_inputs.fetch_attributes(client=_S3(THIN))
 
 
 def test_the_produce_s_fetch_refuses_a_thin_copy_loud_and_leaves_the_local_file(attributes, monkeypatch):
-    # the manager's ruling (G10's attributes half): a produce never runs on the local vocab during a Medusa reset
+    # a produce never runs on the local vocab during a Medusa reset
     before = attributes.read_text(encoding="utf-8")
     monkeypatch.setattr(medusa_inputs, "aws_client", lambda *a, **k: _Listing(THIN))
     with pytest.raises(medusa_inputs.AttributesUnavailable, match=r"thin \(2 lines against 101 in the local copy\)"):

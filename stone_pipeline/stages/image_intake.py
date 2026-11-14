@@ -1,5 +1,5 @@
 """Image intake: take the variety icons you already have (old names) and bring them onto the icon-pair convention
-`{Key}/{category name}.png` (spec rev 8 section 4), then report what still needs generating.
+`{Key}/{category name}.png`, then report what still needs generating.
 
 You drop your current images into  images/inbox/{slabs,blocks,tiles}/  (the folder names the category) using the old
 naming ({branch}_rb_<id>_<type>_<name>.png) or the variety's Key. This:

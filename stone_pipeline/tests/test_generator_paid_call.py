@@ -1,7 +1,7 @@
-"""The texture generator pays FAL once per image (dev 2026-11-12, job 8ea6ac51: a missing {Key}/ folder made save_image
-fail, and generate_one re-bought the same FLUX.2 [max] image 4 times). The paid call is made ONCE per item and never
-retried; only the free half after it (the result's download and the local save) is retried, each retry reusing the
-one result. A failed paid call fails the item loud (logged, failures.jsonl, the job's non-zero exit) and the next
+"""The texture generator pays FAL once per image (on dev a missing {Key}/ folder made save_image fail, and
+generate_one re-bought the same FLUX.2 [max] image 4 times). The paid call is made ONCE per item and never retried;
+only the free half after it (the result's download and the local save) is retried, each retry reusing the one
+result. A failed paid call fails the item loud (logged, failures.jsonl, the job's non-zero exit) and the next
 produce re-queues it. Hermetic: fal_client and requests are stubbed, the backoff sleep is a no-op. No em dashes.
 """
 

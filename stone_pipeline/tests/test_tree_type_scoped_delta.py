@@ -1,10 +1,10 @@
-"""Combinations inherit only from the SAME (type, name), and the update delta never goes stale (owner, 2026-11-06).
+"""Combinations inherit only from the SAME (type, name), and the update delta never goes stale.
 
   * tree_build inherited colours/qualities from products keyed by variety NAME only, so one type's product
     colours leaked onto a same-name variety of another type (Gamma Quartzite sold Grey -> Gamma Marble Grey);
     the backbone post was also looked up by name only. Both are keyed by (type, name) now.
   * curate's update delta was written only when non-empty, but emit_catalog reads it as THIS run's delta, so in
-    a long-lived task a previous run's delta was re-applied. Since W26 the delta is curate_delta.csv (emit
+    a long-lived task a previous run's delta was re-applied. Now the delta is curate_delta.csv (emit
     publishes 1_variants_update.csv from it).
   (The multi-country origin hold is rule d in test_origin_multi_country.py.)
 Hermetic.
@@ -21,7 +21,7 @@ import pytest
 
 from stone_pipeline.tests.test_tree_build import COL, _attrs, _backbone, _export, _for, _post, _products, _prow
 
-# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+# the category pcats come from the registry: every test here prices under TREE_PCATS
 pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 

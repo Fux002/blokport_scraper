@@ -28,7 +28,7 @@ from stone_pipeline.core.text import alias_key
 
 log = logfmt.get_logger("config.store")
 
-# The retired enhancer's per-source settings (owner 2026-11-02): dropped from config.db, ignored when an admin sends them.
+# The retired enhancer's per-source settings: dropped from config.db, ignored when an admin sends them.
 _RETIRED_FIELDS = frozenset({"enhance", "fal_prompt", "watermarked"})
 
 _SCHEMA = """
@@ -77,11 +77,11 @@ SCHEMA_VERSION = 14    # 4: the decision `statement` table + its one-time migrat
 #                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
 #                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted);
 #                        11: backbone_leaf_decision.decided_by (operator | produce);
-#                        12: phase 1 (PHASE-1-SPEC rev 8): retired and protected Keys are new variety Keys. The
+#                        12: phase 1: retired and protected Keys are new variety Keys. The
 #                            tables are unchanged, so the version alone tells a migrated store from an old one:
 #                            ONLY the phase 1 store migration (phase1.migrate_stores) stamps 12, and a store at
-#                            1 to 11 is refused here (report 18 N3).
-#                        13: P2-10 C2: the learned_alias table (additive, so a phase 1 store opens in place).
+#                            1 to 11 is refused here.
+#                        13: the learned_alias table (additive, so a phase 1 store opens in place).
 #                        14: learned_alias norms rekeyed to core.text.alias_key, once (LEARNED_NORM_MIGRATION).
 # The version the phase 1 store migration writes (phase1/store_writer.py). It stays 12 whatever SCHEMA_VERSION
 # becomes: that migration copies an old store without running _migrate, so stamping the current version would mark
@@ -147,11 +147,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE source SET lifecycle = 'paused' "
                  "WHERE enabled = 0 AND (lifecycle IS NULL OR lifecycle = 'active')")
     conn.commit()
-    if "image_pipeline" not in cols:   # per-source switch of the photo process: ON for every existing source (owner
-        # 2026-11-02; the retired enhance is NOT carried over: its zeros only stopped the old enhancer's spend)
+    if "image_pipeline" not in cols:   # per-source switch of the photo process: ON for every existing source (the
+        # retired enhance is NOT carried over: its zeros only stopped the old enhancer's spend)
         conn.execute("ALTER TABLE source ADD COLUMN image_pipeline INTEGER NOT NULL DEFAULT 1")
         conn.commit()
-    for retired in sorted(_RETIRED_FIELDS & cols):   # the retired enhancer's settings (owner 2026-11-02)
+    for retired in sorted(_RETIRED_FIELDS & cols):   # the retired enhancer's settings
         conn.execute(f"ALTER TABLE source DROP COLUMN {retired}")
         conn.commit()
     if "primary_origin" not in cols:   # vendor primary quarry country (opt-in origin gate); older rows blank
@@ -166,7 +166,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "lots" in cols:   # the retired per-vendor lot switch: the loader decides lots from the data alone
         conn.execute("ALTER TABLE source DROP COLUMN lots")
         conn.commit()
-    # F8: source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
+    # source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
     # can't collide their SKU namespace -- the app-level read-then-write check races under the threading
     # server. Partial unique index, created idempotently. If a legacy DB already holds a duplicate code the
     # index can't be built: log LOUD and continue rather than brick the control plane on startup (the
@@ -292,12 +292,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "source TEXT NOT NULL, run_id TEXT NOT NULL, at TEXT NOT NULL, "
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
-    # Learned aliases (P2-10 C2; shape frozen by the scraper manager 11-12): a spelling the pipeline GUESSED for a
-    # variety, keyed by its identity Key and norm = core.text.alias_key(value). The matcher and curate write
-    # 'proposed'; only an 'active' row is a matcher input; a 'rejected' norm is never proposed again for that Key
-    # (the primary key holds it). `method` is how it was learned, `source` the vendor whose listing proposed it,
-    # `score` the proposing arm's own score on 0..100 for the review card (PHASE-2-SPEC:176), NULL where the arm has
-    # none and for a migrated row. No reset clears it: only a review decision changes a row.
+    # Learned aliases: a spelling the pipeline GUESSED for a variety, keyed by its identity Key and norm =
+    # core.text.alias_key(value). The matcher and curate write 'proposed'; only an 'active' row is a matcher input; a
+    # 'rejected' norm is never proposed again for that Key (the primary key holds it). `method` is how it was
+    # learned, `source` the vendor whose listing proposed it, `score` the proposing arm's own score on 0..100 for the
+    # review card, NULL where the arm has none and for a migrated row. No reset clears it: only a review decision
+    # changes a row.
     conn.execute("CREATE TABLE IF NOT EXISTS learned_alias ("
                  "identity_key TEXT NOT NULL, value TEXT NOT NULL, norm TEXT NOT NULL, method TEXT NOT NULL, "
                  "source TEXT NOT NULL, "
@@ -322,7 +322,7 @@ def learned_norms_to_rekey(conn: sqlite3.Connection) -> list[tuple[str, str, str
 
 
 def _rekey_learned_norms(conn: sqlite3.Connection) -> None:
-    """The alias_key migration (Mas, 13 Nov), ONCE (recorded in `migration`): each learned row's norm becomes its
+    """The alias_key migration, ONCE (recorded in `migration`): each learned row's norm becomes its
     stored value's alias_key, recomputed from the spelling. A target (Key, norm) that another row already holds, or
     that two rows would share, refuses the open with every clash named (a merge of two decisions is the operator's,
     never this step's); a refused open rolls back whole (_connect). Idempotent: after it every norm is its alias_key,
@@ -637,7 +637,7 @@ def upsert_source(cfg: SourceConfig, *, clear_removed: bool = False, path: str |
         conn.execute(
             f"INSERT INTO source ({cols}) VALUES ({placeholders}) "
             f"ON CONFLICT(source) DO UPDATE SET {updates}", p)
-        # F8: clear any prior removal tombstone in the SAME transaction as the source upsert, so a crash
+        # clear any prior removal tombstone in the SAME transaction as the source upsert, so a crash
         # can never leave the source inserted but still tombstoned (a re-added vendor stuck as removed).
         if clear_removed:
             conn.execute("DELETE FROM removed_source WHERE source = ?", (cfg.source,))

@@ -1,9 +1,9 @@
-"""Phase 1 SC-3: the scraper's store migration to the new variety Keys (PHASE-1-SPEC rev 8, section 5 step 5).
+"""Phase 1: the scraper's store migration to the new variety Keys (PHASE-1-SPEC section 5 step 5).
 
-This module is the PURE core: from the committed key map (SC-1: old Key -> new Key, category rank, type name) and the
-env's survivor map (P1-23: old Key -> the Medusa variation id the backend kept, D2), it decides what happens to every
-Key-bearing row. Nothing here reads or writes a store, S3 or the network. The writer (in the SC-4 PR, one DDL source:
-the repo's ledger schema) applies these decisions to the step-1 snapshot copies and writes the `.v2` stores.
+This module is the PURE core: from the committed key map (old Key -> new Key, category rank, type name) and the env's
+survivor map (old Key -> the Medusa variation id the backend kept, D2), it decides what happens to every Key-bearing
+row. Nothing here reads or writes a store, S3 or the network. The writer (one DDL source: the repo's ledger schema)
+applies these decisions to the step-1 snapshot copies and writes the `.v2` stores.
 
 Rules, each from the spec:
 - A variety's copies collapse to ONE row under its new Key: the copy whose own `medusa_id` is the survivor id, set
@@ -14,8 +14,8 @@ Rules, each from the spec:
 - A copy in `retiring` or `gap_held`, or with `abandoned_at`, aborts (section 3); so does a Key outside the key map.
 - Products point at their variety's new Key.
 - Variation tombstones on old Keys are DROPPED and listed (old Key, new Key, reason), never re-pointed: after the
-  collapse the new Key is a live variety, and a re-pointed tombstone would delete it (manager, 10 Nov). Product
-  tombstones are untouched.
+  collapse the new Key is a live variety, and a re-pointed tombstone would delete it. Product tombstones
+  are untouched.
 - config.db: a retirement of every copy becomes one variety retirement; a partial one aborts (D8 is not built:
   0 measured). Protected Keys move to the new Key; two on one new Key abort.
 - Learned aliases move to the survivor's id (or the new Key for a variety with no Medusa record), deduplicated.

@@ -119,9 +119,9 @@ def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:
 
 
 def _category_handle_for(pcat_id: str | None) -> str | None:
-    """The product's category HANDLE (D11): the row carries the pcat id, mapped back through the category registry
-    (table 577: the one source of a category, never the ledger's attribute rows, so a fresh ledger with none still
-    gives every product its handle). A pcat no active category has raises: a product is never stored under a
+    """The product's category HANDLE: the row carries the pcat id, mapped back through the category registry (the
+    one source of a category, never the ledger's attribute rows, so a fresh ledger with none still gives every
+    product its handle). A pcat no active category has raises: a product is never stored under a
     guessed category."""
     if not pcat_id:
         return None

@@ -24,9 +24,9 @@ def _drop_marks(text: str, form: str) -> str:
     return "".join(c for c in unicodedata.normalize(form, text) if not unicodedata.category(c).startswith("M"))
 
 
-# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names (report
-# 21, defect 1.3.2). The minus sign is a hyphen, a zero-width space marks a word break, and the micro sign is written
-# 'u' in ASCII ('120um'). Every other separator is decided by its category (_separator).
+# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names. The
+# minus sign is a hyphen, a zero-width space marks a word break, and the micro sign is written 'u' in ASCII ('120um').
+# Every other separator is decided by its category (_separator).
 _TYPOGRAPHIC = str.maketrans({
     "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
     "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
@@ -108,8 +108,7 @@ def match_key(text: str) -> str:
     and index in the pipeline keys on this -- and it agrees with matching.projections.norm:
     'Semi-Precious Stone' == 'semi_precious_stone' == 'Semi Precious Stone', and
     'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'. '&' reads 'and', exactly as a cleaned name
-    writes it (owner D1, 2026-11-04), so 'Black & Gold' == 'Black and Gold' and a scraped spelling keeps matching
-    its own cleaned display.
+    writes it, so 'Black & Gold' == 'Black and Gold' and a scraped spelling keeps matching its own cleaned display.
 
     Punctuation is folded BEFORE ascii_fold, so a unicode dash/punct becomes a space rather than
     being stripped to nothing (which would glue the two words together). Marks are dropped FIRST:
@@ -129,7 +128,7 @@ class UnfoldableName(ValueError):
     caller decides by context: an alias is dropped and reported, a variety name goes to review."""
 
 
-# The owner's two display rules (2026-11-03): a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
+# The two display rules: a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
 # an IDENTIFIER (a grade such as 'AA/BB', a finish or standard code, a title) keeps printable ASCII punctuation.
 _NOT_NAME = re.compile(r"[^A-Za-z0-9 '-]+")
 _HYPHEN_RUN = re.compile(r"\s*-[\s-]*")
@@ -167,9 +166,8 @@ def clean_identifier(text: str) -> str:
     return " ".join(_ascii_display(text).split())
 
 
-# The display rule for an ALIAS (field kind "alias", 34's OWNED-NAMES-CLEAN row; the owner's ruling, 13 Nov, with
-# Mas's refusal (b)): every letter of every script is kept as written (accents never folded, a non-Latin script never
-# dropped), so the stored class is the database's ^[[:alpha:]̀-ͯ0-9 '-]+$.
+# The display rule for an ALIAS (field kind "alias"): every letter of every script is kept as written (accents never
+# folded, a non-Latin script never dropped), so the stored class is the database's ^[[:alpha:]̀-ͯ0-9 '-]+$.
 _ALIAS_TYPOGRAPHIC = str.maketrans({
     "`": "'", "´": "'", "‘": "'", "’": "'", "‚": "'", "‛": "'", "ʼ": "'",
     "“": '"', "”": '"', "„": '"', "‟": '"', "−": "-",
@@ -180,8 +178,8 @@ _ASCII_DIGITS = frozenset("0123456789")
 
 
 class AliasRefused(ValueError):
-    """An alias that is not stored at all (Mas's ruling (b)): mojibake ('?' or U+FFFD between two letters, a lost
-    letter such as 'K?r?ehir'). The caller lists it for the owner (review/aliases_dropped.csv); where the real spelling
+    """An alias that is not stored at all: mojibake ('?' or U+FFFD between two letters, a lost letter such as
+    'K?r?ehir'). The caller lists it for the owner (review/aliases_dropped.csv); where the real spelling
     is recoverable the fix belongs at the alias's source, not in the cleaner."""
 
 
@@ -211,7 +209,7 @@ def _drop_loose_alias_apostrophes(text: str) -> str:
 
 
 def clean_alias(text: str) -> str:
-    """The display rule for an ALIAS, step for step (34's spec): REFUSED first (AliasRefused) when the raw value holds
+    """The display rule for an ALIAS, step for step: REFUSED first (AliasRefused) when the raw value holds
     mojibake (_mojibake); then (1) every format character removed (a zero-width space goes, never a space); (2) the
     alias typographic table (a backtick, an acute or a curly quote is an apostrophe) and every dash a hyphen; (3) NFC,
     accents kept; (4) '&' reads 'and'; (5) every character that is not a letter (any script), a combining mark in
@@ -234,7 +232,7 @@ _PROSE_WORD_RE = re.compile(r"[a-z']+")
 
 
 def clean_description(text: str, function_words, min_share: float) -> str | None:
-    """A supplier description as stored prose, or None when it is not plain English prose (owner decision O3): NFC,
+    """A supplier description as stored prose, or None when it is not plain English prose: NFC,
     format characters removed, line breaks unified to '\n', any other control character a space, spacing otherwise
     kept. None for an HTML tag or entity, or when the share of English `function_words` among its words is below
     `min_share` (another language, an internal note); the caller then uses the generated description."""
@@ -312,7 +310,7 @@ def _alias_key_char(c: str) -> bool:
 
 
 def alias_key(text: str) -> str:
-    """THE key of an alias value (Mas's ruling, 13 Nov; the backend's paired aliasKey, `alias_key` in the shared
+    """THE key of an alias value (the backend's paired aliasKey, `alias_key` in the shared
     name-key vectors): match_key when the RAW value has no letter outside the Latin script (Latin with diacritics
     keys as matching sees it, so every all-Latin key is unchanged). Otherwise the value keeps its script: every format
     character removed, NFKC, lower() (the default lowercase mapping JS toLowerCase also applies; NOT casefold, which

@@ -1,8 +1,7 @@
-"""Polonine's customer login (the owner, 14 Nov: "Yes, store it"), wired from SSM into the PRODUCE only: the sync
-service's config container runs the live scrape and its separate price pass, while the ad-hoc scraper task never
-scrapes, so it never receives the login (least privilege). Dev by its known name, prod by explicit SSM-name vars, both
-only for a brand that switches the login on; valueFrom only, never a plain value. Read from the Terraform text, as the
-other infra wiring tests do."""
+"""Polonine's customer login, wired from SSM into the PRODUCE only: the sync service's config container runs the
+live scrape and its separate price pass, while the ad-hoc scraper task never scrapes, so it never receives the login
+(least privilege). Dev by its known name, prod by explicit SSM-name vars, both only for a brand that switches the
+login on; valueFrom only, never a plain value. Read from the Terraform text, as the other infra wiring tests do."""
 
 from __future__ import annotations
 
@@ -63,7 +62,7 @@ def test_the_produce_secrets_are_value_from_only():
 
 
 def test_the_prod_login_is_wired_whole_or_not_at_all():
-    """f8's should: one prod name without the other would wire half a login, silent at plan time. Each prod data source
+    """One prod name without the other would wire half a login, silent at plan time. Each prod data source
     refuses the plan unless both names are set and the brand switches the login on."""
     main = _main()
     for which in ("username", "password"):

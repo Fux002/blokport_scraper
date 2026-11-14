@@ -1,8 +1,8 @@
-"""The per-source image pipeline switch (owner 2026-11-02; it replaces the retired enhancer's `enhance`, `fal_prompt` and
+"""The per-source image pipeline switch (it replaces the retired enhancer's `enhance`, `fal_prompt` and
 `watermarked`). On: a source's listings go through the photo process and the no_photo rule hides a product without a
-standardised photo. Off: its products show the scraped photos as re-hosted (size-reduced, no GPU, no hosted call), stay
-listed, and the photo process never picks them. A logo is a per-photo judge finding (leftover_mark) the clean step fixes,
-never a source setting."""
+standardised photo. Off: its products show the scraped photos as re-hosted (size-reduced, no GPU, no hosted call),
+stay listed, and the photo process never picks them. A logo is a per-photo judge finding (leftover_mark) the clean
+step fixes, never a source setting."""
 from __future__ import annotations
 
 from stone_pipeline.core.schema import OutputMode
@@ -184,7 +184,7 @@ def test_the_photo_process_never_picks_a_listing_of_an_off_source(config_db):
                 {"key": "v1", "sku": "VAR-1", "source": "varsha", "format": "slab", "photos": [B]}]
     pick = dict(exclude=set(), slabs=set(), removed=set(), conflicts=set(), picks={})
     assert [l["key"] for l in proc.todo(listings, {}, **pick)] == ["s1"]
-    # nor a chosen close-up of an off source (the whole-slab look-again, #486)
+    # nor a chosen close-up of an off source (the whole-slab look-again)
     records = {"s1": {"sha": A, "tag": "v2", "prefix": "p/"}, "v1": {"sha": B, "tag": "v2", "prefix": "p/"}}
     assert [l["key"] for l in proc.todo(listings, records, **pick)] == ["s1"]
 

@@ -25,7 +25,7 @@ def test_all_reference_files_load(ref):
     # attributes.csv is the LIVE Medusa vocab (refreshed by produce), so the counts move: guard the floor
     assert len(ref.attributes.by_category["color"]) >= 20
     assert len(ref.attributes.by_category["type"]) >= 25
-    # a category's pcat is the registry's, read from the same file by its exact handle (table 577)
+    # a category's pcat is the registry's, read from the same file by its exact handle
     assert category("slab").pcat_id and category("block").pcat_id
     assert len(ref.variants["slab"].by_id) > 300
     assert len(ref.backbone) > 10000

@@ -43,7 +43,7 @@ _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # The variant exports list every vendor's variants; the scraper keeps only its own: Medusa's export marks them
 # `owner = scraper` (PHASE-1-SPEC D5, from scraper_sync_ref), and the base, which the scraper writes whole, carries no
 # owner column. Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
-# dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
+# on dev, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
 OWNER_COLUMN, OWNER_SCRAPER = "owner", "scraper"
 # The reason of the last refused attributes.csv fetch, kept beside the file until a fetch succeeds (require_attributes).
@@ -53,7 +53,7 @@ ATTRIBUTES_UNAVAILABLE_SUFFIX = ".unavailable"
 # its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
 # file once S3 is fixed.
 _READERS = {
-    # table 569: a download without category_handles is refused HERE, so it never replaces the local file
+    # a download without category_handles is refused HERE, so it never replaces the local file
     "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED,
                                                    require_category_handles=True),
     "variants_export.csv": lambda path: read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED),
@@ -181,13 +181,13 @@ def require_attributes() -> None:
 
 def fetch_attributes(client=None, target=None) -> None:
     """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, by the produce fetch's own
-    checks: the thin-copy floor and check_readable (table 569's category_handles column included). Callers: the config
+    checks: the thin-copy floor and check_readable (the category_handles column included). Callers: the config
     server's boot (the review-decision endpoint validates against Medusa's CURRENT set from container start), the
-    photos run and the hidden-photos page. ONE refusing path (34's rev 2, F vs G10): an S3 failure, a thin copy and a
-    malformed copy each RAISE AttributesUnavailable, naming the file, and the local file is left as it was; it is never
-    kept and served as if it were the fresh vocab. The refusal is recorded (require_attributes) and a later success
-    clears it. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults to
-    the live attributes_csv path)."""
+    photos run and the hidden-photos page. ONE refusing path: an S3 failure, a thin copy and a malformed copy each
+    RAISE AttributesUnavailable, naming the file, and the local file is left as it was; it is never kept and served as
+    if it were the fresh vocab. The refusal is recorded (require_attributes) and a later success clears it. Downloads
+    to a temp then atomically replaces. `target` overrides the destination for tests (defaults to the live
+    attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +207,7 @@ def _take_attributes(tmp: Path, target: Path) -> None:
     """Swap the downloaded attributes.csv `tmp` in over `target`, by the ONE rule both fetches (fetch_attributes and the
     produce's fetch_all) follow: a thin copy (Medusa mid-reset) and a malformed one (a missing category_handles column
     included) each raise AttributesUnavailable with the local file left as it was, never kept quietly as if it were the
-    fresh vocab (G10's attributes half)."""
+    fresh vocab."""
     if target.exists() and _would_clobber(incoming := _line_count(tmp), current := _line_count(target)):
         raise _refuse_attributes(target, f"the S3 copy looks thin ({incoming} lines against {current} in the local "
                                          "copy); Medusa's export looks partial (mid-reset?). Re-export it.")

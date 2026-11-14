@@ -749,7 +749,7 @@ def test_only_the_live_transport_holds_an_http_client():
     assert holders == {"transport.py"}
 
 
-# --- the run's scope: its brand's vocabulary, asked once per listing after the fetch (W4, Mas 13 Nov) -----------------
+# --- the run's scope: its brand's vocabulary, asked once per listing after the fetch ----------------------------------
 def _wudport_register() -> Register:
     return Register.model_validate({"brand": "wudport", "sites": [_site(brand="wudport", served_market="GB")]})
 
@@ -764,7 +764,7 @@ def test_a_listing_outside_the_brands_scope_is_not_delivered_and_is_counted():
 
 
 def test_scope_is_decided_before_a_listing_is_read_so_an_out_of_scope_one_is_never_malformed():
-    """f8's note: an out-of-scope listing that would not read (prices not an object) is out of scope, not malformed,
+    """An out-of-scope listing that would not read (prices not an object) is out of scope, not malformed,
     so it can never turn a site partial; malformed counts in-scope listings only."""
     result = _run(_shop(_page([_listing(1, name="Birch plywood 18mm 2440 x 1220"),
                                _listing(2, name="Paint roller 9 inch", prices="unreadable")])), _wudport_register())

@@ -148,7 +148,7 @@ def _scrape(source: str) -> str | None:
 def run_many(order: list[str]) -> dict[str, str]:
     """{source: products file} of the distinct sources in `order` that scraped, in that order. Every source scrapes
     at once, a thread each: a scrape is waiting on one supplier's site, which it throttles itself, so side by side a
-    run takes its slowest source instead of the sum (2026-11-02: 79 min one after another, the slowest source 23)."""
+    run takes its slowest source instead of the sum (measured: 79 min one after another, the slowest source 23)."""
     if not order:
         return {}
     with ThreadPoolExecutor(max_workers=len(order), thread_name_prefix="scrape") as pool:

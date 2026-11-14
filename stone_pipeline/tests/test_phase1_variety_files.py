@@ -1,8 +1,8 @@
-"""SC-4 2b (plan SC-3-SC-4-PLAN.md section 2b, spec rev 8 section 6.2 Base files): the three published variety files
-(1_variants_full.csv, 1_variants_update.csv, variants_export_base.csv) and the curate delta share ONE column list,
-Key, Name, Type, Aliases. Image and Volume are gone: a variety's icons are per (Key, category) pairs on S3 (spec
-section 4), and the volume was never the scraper's. The type is the row's own canonical type NAME, the column the
-backend's new export carries (Id,Key,Name,Aliases,status,Type,owner), never un-slugged from the Key.
+"""The three published variety files (1_variants_full.csv, 1_variants_update.csv, variants_export_base.csv) and the
+curate delta share ONE column list, Key, Name, Type, Aliases. Image and Volume are gone: a variety's icons are per
+(Key, category) pairs on S3 (spec section 4), and the volume was never the scraper's. The type is the row's own
+canonical type NAME, the column the backend's new export carries (Id,Key,Name,Aliases,status,Type,owner), never
+un-slugged from the Key.
 """
 
 from __future__ import annotations

@@ -145,8 +145,8 @@ resource "aws_ecr_lifecycle_policy" "this" {
   #   prod-<sha12>            the prod service image (prod_image_tag = <sha>)
   #   standardise-pin-<sha12> the photo process's GPU image (the tfvars reference this tag itself)
   # After the pins: the build prefixes (gpu / imageproc / core and the standardise builds, never a hex git sha), then
-  # the per-commit <sha> churn. A single "keep last N, tagStatus=any" rule once expired the :gpu image and, on
-  # 2026-11-02, the prod GPU image mid-day and the previous prod image (CannotPullImageManifestError).
+  # the per-commit <sha> churn. A single "keep last N, tagStatus=any" rule once expired the :gpu image and,
+  # another time, the prod GPU image mid-day and the previous prod image (CannotPullImageManifestError).
   policy = jsonencode({
     rules = [
       # listed before prod- because prod-gpu-<sha12> also starts with prod-: the GPU pins keep their own count

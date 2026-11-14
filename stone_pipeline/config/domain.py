@@ -52,8 +52,8 @@ class DomainPack:
     # the category model: one dict per category (name/plural/label/base_image/flags/finish set/...).
     # settings.py maps these to Category objects (the pack stays agnostic to that dataclass); pcat is env.
     categories: tuple[dict, ...]
-    # the ONE variety backbone every category reads (spec rev 8 section 3), under the pack's catalog_source. A pack that
-    # names one must ship it (an absent file fails loud where it is read); a pack naming none (None) has no seed.
+    # the ONE variety backbone every category reads, under the pack's catalog_source. A pack that names one must ship
+    # it (an absent file fails loud where it is read); a pack naming none (None) has no seed.
     backbone_file: str | None
     ambiguous_type_words: frozenset[str]
     # words that, as the ONLY difference between two variety names, signal an alias not a distinct variety
@@ -144,7 +144,7 @@ _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_w
 _STOCK_WORD_LISTS = ("in_stock_words", "made_to_order_words", "out_of_stock_words")
 
 _CATEGORY_KEYS = ("name", "plural", "label", "base_image", "shares_variety_vocab", "fan_out")
-# the optional ones; any other key is refused (spec rev 8 D9: a leftover `mirror_of` fails loud, never ignored)
+# the optional ones; any other key is refused (a leftover `mirror_of` fails loud, never ignored)
 _CATEGORY_OPTIONAL = ("volume_per_kg", "pcat_env_var", "default_form", "bulk_form", "finishes", "finishes_from")
 
 
@@ -266,7 +266,7 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         bad(f"leaf_attributes {sorted(leaf - attrs)} are not in attributes {sorted(attrs)}")
     if data["disambiguator"] in leaf:
         bad(f"disambiguator {data['disambiguator']!r} must NOT be in leaf_attributes {sorted(leaf)}")
-    # V5 (spec rev 8 D7, D9): the default form's finishes are its variety posts'; every other category declares
+    # the default form's finishes are its variety posts'; every other category declares
     # exactly one of `finishes` (a list) or `finishes_from` (another category that does not itself borrow).
     for cat in data["categories"]:
         has_own, source = "finishes" in cat, cat.get("finishes_from")

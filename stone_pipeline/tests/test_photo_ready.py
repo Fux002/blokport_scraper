@@ -1,9 +1,9 @@
-"""The product payload carries the photo fact (owner 2026-11-03): Blokport publishes a new priced product straight from the
-catalog sync, before any stock delta can tell it the product has no standardised photo, so the product itself says
-`photo_ready`, which Blokport reads at create only (the stock lane owns visibility afterwards). It is the no-photo rule's
-one decision, stored on the product row: the same decision sends the stock out with reason 'no_photo'. It is outside the
-payload hash, so a change of it never re-serves an existing product, while a product not yet pulled is served with the
-current value. A stock-only refresh, which cannot tell whether a product has a photo, changes neither."""
+"""The product payload carries the photo fact: Blokport publishes a new priced product straight from the catalog sync,
+before any stock delta can tell it the product has no standardised photo, so the product itself says `photo_ready`,
+which Blokport reads at create only (the stock lane owns visibility afterwards). It is the no-photo rule's one decision,
+stored on the product row: the same decision sends the stock out with reason 'no_photo'. It is outside the payload hash,
+so a change of it never re-serves an existing product, while a product not yet pulled is served with the current value.
+A stock-only refresh, which cannot tell whether a product has a photo, changes neither."""
 from __future__ import annotations
 
 from stone_pipeline.core.schema import OutputMode
@@ -22,7 +22,7 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ready
 from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
 
-# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's (table 577)
+# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's
 pytestmark = pytest.mark.usefixtures("slab_category_pcat")
 
 KEY = "marble__carrara_0001"

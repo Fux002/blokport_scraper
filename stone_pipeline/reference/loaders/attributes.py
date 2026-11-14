@@ -1,5 +1,5 @@
 """attributes.csv: attribute names -> backend ids (colour, finish, quality, type). A category's pcat id is NOT read here:
-the category registry (config/categories.category_pcats) is the one reader of the category rows (table 577)."""
+the category registry (config/categories.category_pcats) is the one reader of the category rows."""
 
 from __future__ import annotations
 
@@ -56,10 +56,10 @@ class Attributes:
 def restricted_values(path: Path | None = None) -> dict[str, set[str]]:
     """{category: {norm(value), ...}} for every RESTRICTED value in attributes.csv: archived OR internal
     (`not AttributeValue.assignable`). Read through medusa_files.read_attributes, the single authority on
-    what is restricted (VE2 ruling: no ledger copy). Empty while attributes.csv carries no status/internal
+    what is restricted (no ledger copy). Empty while attributes.csv carries no status/internal
     columns (the expand phase, so nothing is restricted yet) or the file is absent. Values are keyed by
     `norm` so a caller matches a resolved value name regardless of separator/case/accent; a category is keyed by
-    its exact handle (table 577), the identity every category reader uses."""
+    its exact handle, the identity every category reader uses."""
     path = Path(path) if path is not None else env().SETTINGS.paths.attributes_csv
     if not Path(path).exists():
         return {}
@@ -99,7 +99,7 @@ def _seed_types() -> frozenset[str]:
     backbone reader). The pack's yaml decides: a pack naming no backbone_file (lime) holds no seed variety, so rule (ii)
     adds no type and its types are its combinations' alone; a pack that names one must ship it, and an absent file
     raises FileNotFoundError naming it (never read as "no seed types", which would quietly shrink the vocabulary).
-    Parsed once per file version (path, size, mtime), as C3's seed cache does: the config server loads the vocabulary
+    Parsed once per file version (path, size, mtime), as the seed cache does: the config server loads the vocabulary
     per request, and the backbone is 12,156 posts."""
     from stone_pipeline.reference.loaders import backbone
     if active_pack().backbone_file is None:
@@ -117,7 +117,7 @@ def _seed_types() -> frozenset[str]:
 
 def _in_pack(value: AttributeValue, pack_handles: frozenset[str], seed_types: frozenset[str]) -> bool:
     """A type is the PACK's iff (i) one of its valid combinations is in a pack category, OR (ii) the committed seed holds
-    a variety of that type (table 569, Mas's ruling 12 Nov; both read live, no type list anywhere). Anything else
+    a variety of that type (both read live, no type list anywhere). Anything else
     (BlokPort's Steel or Wine, a type with no combination and no seed variety) is never guessed in. A seed type that BE
     lists with ONLY non-pack handles raises, naming the type: the seed and BE disagree, and neither side wins quietly."""
     handles = value.category_handles or ()
@@ -143,7 +143,7 @@ def types_outside_pack(path: Path | None = None) -> list[dict]:
 
 def load_attributes(path: Path | None = None) -> Attributes:
     """The name->id tables of every value that has an id (an id-less value cannot be emitted), the type table
-    holding only the PACK's types. This is the one place the type vocabulary is scoped (table 569), so the type
+    holding only the PACK's types. This is the one place the type vocabulary is scoped, so the type
     words, the vocabulary words and the type resolution all read the same set; types_outside_pack lists the rest.
     An attributes.csv without the category_handles column is refused: without it no type can be placed in the pack.
     read_attributes guards conflicting duplicates."""

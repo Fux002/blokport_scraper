@@ -36,7 +36,7 @@ from stone_pipeline.reference.medusa_files import CATEGORY_KIND, read_attributes
 log = logfmt.get_logger("tree")
 
 # The categories a variety is priced in: every one a new variety fans out to (phase 1: a variety is ONE record per
-# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle (D11).
+# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle.
 _FAN_OUT_CATEGORIES = {c.name: c.handle for c in CATEGORIES if c.fan_out}
 COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
                        "finish_id", "color_id", "quality_id")
@@ -47,7 +47,7 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
     has an id. Keyed by match_key so a lookup matches regardless of separator/case/accent (a hyphenated
     'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way. The
     read_attributes guards conflicting duplicates. Category rows are skipped: a category's pcat is the registry's,
-    by its exact handle (table 577, _category_pcat)."""
+    by its exact handle (_category_pcat)."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
     for a in read_attributes(Path(path), require_status=attributes_status_required(Path(path))):
         if a.sourceid and a.category != CATEGORY_KIND:
@@ -56,7 +56,7 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
 
 
 def _category_pcat(handle: str) -> str | None:
-    """A category's pcat on this env, by its exact handle (the registry, table 577); None when it has none."""
+    """A category's pcat on this env, by its exact handle (the registry); None when it has none."""
     cat = category_by_handle(handle)
     return (cat.pcat_id or None) if cat is not None else None
 
@@ -82,7 +82,7 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict]:
 
 
 def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[str, list[str]]:
-    """Category name -> the finish ids it supports (spec rev 8 D7): the default form's are every finish its
+    """Category name -> the finish ids it supports: the default form's are every finish its
     variety posts carry; another category's are its declared `finishes`, or the set of the category named by its
     `finishes_from`. Any finish the category's products use this run is added. A declared finish the vocabulary
     does not hold fails loud (it would otherwise silently price nothing)."""
@@ -136,7 +136,7 @@ _PRODUCT_TUPLE_COLS = ("Product Category 1", "STN Type Id", "STN Variation Id",
 
 def _load_product_tuples(path: Path | None) -> set[tuple]:
     """The EXACT (category, type, variation, finish, colour, quality) id tuple of every emitted product, from
-    the same products sheet build_combinations already reads (VE2 PR5). Used to KEEP an emitted product's own
+    the same products sheet build_combinations already reads. Used to KEEP an emitted product's own
     combination when a value is restricted: the fan-out is filtered to assignable values, then these exact
     tuples are re-added ONLY where the fan-out already produced them (an intersection), so the result stays a
     subset of today's set. A row missing any id is skipped (it is not a priceable combination)."""
@@ -275,7 +275,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     retired_keys = retired_keys or set()
     by_key, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
-    # VE2 PR5: the restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
+    # The restricted (archived/internal) attribute ids and the exact emitted-product tuples. Both empty
     # in the expand phase (no status column), so the fan-out below is byte-identical until then.
     restricted_ids = {a.sourceid for a in read_attributes(
         Path(attributes_csv), require_status=attributes_status_required(Path(attributes_csv)))
@@ -309,7 +309,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         # EXISTS; read_variants_export fails loud on a missing Key or Name column, an absent Id reads empty).
         vid, key, name = r.id, r.key, r.name
         if r.archived and key:
-            archived_keys.add(key)   # VE2 PR5: a frozen variety is counted frozen, not uncovered (below)
+            archived_keys.add(key)   # a frozen variety is counted frozen, not uncovered (below)
         # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
         # combination references a variation that will not exist after the Medusa cleanup.
         if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
@@ -403,7 +403,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             missing = [n for n, v in (("type", typ), ("colour", colors), ("quality", quals)) if not v]
             premissing[vid] = "+".join(missing)
 
-    # VE2 PR5: fan out only to ASSIGNABLE values. Drop a fan-out tuple carrying a restricted attribute id
+    # Fan out only to ASSIGNABLE values. Drop a fan-out tuple carrying a restricted attribute id
     # (category pcat / type / finish / colour / quality; the variation-id position is a different namespace,
     # never matched). Then RE-ADD the keep-set INTERSECTED with the fan-out, so the result is always a SUBSET
     # of today's set and nothing new is ever added. The keep-set is the emitted products' exact tuples UNION
@@ -461,7 +461,7 @@ def write_combinations(combinations: set, path: Path) -> int:
 
 
 def _backbone_paths() -> list[Path]:
-    """The ONE variety backbone and the ONE additions file (curate's per-run new varieties), spec rev 8 section 3."""
+    """The ONE variety backbone and the ONE additions file (curate's per-run new varieties)."""
     return [SETTINGS.paths.backbone_json, SETTINGS.paths.backbone_additions_file]
 
 

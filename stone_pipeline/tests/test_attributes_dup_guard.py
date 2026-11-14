@@ -13,7 +13,7 @@ from stone_pipeline.stages.tree_build import _load_attributes
 
 def _write(tmp_path, rows):
     p = tmp_path / "attributes.csv"
-    # the download's shape since table 569: category_handles then handle (table 577) last, '' on these colour rows
+    # the download's shape: category_handles then handle last, '' on these colour rows
     body = "category,value,sourceid,category_handles,handle\n" + "".join(f"{c},{v},{i},,\n" for c, v, i in rows)
     p.write_text(body, encoding="utf-8")
     return p

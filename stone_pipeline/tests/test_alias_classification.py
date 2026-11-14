@@ -1,4 +1,4 @@
-"""P2-10 C5: the alias classification file (plan P2-10-SCRAPER-PLAN.md section 5; table 249 rev 3 "Definitions").
+"""The alias classification file.
 
 The file names every served Key and pending tombstone with its current acked set, one row per (Key, match_key(Value)),
 and gives each value one class: code, operator, removed, seed, learned, or the one `Key,,none` row for a Key with no
@@ -60,7 +60,7 @@ def _rows(classification):
 
 @pytest.fixture(autouse=True)
 def _vocabulary(monkeypatch):
-    """C2's one context builder (aliases.context), on a fixed vocabulary instead of this env's attributes export."""
+    """The one context builder (aliases.context), on a fixed vocabulary instead of this env's attributes export."""
     from stone_pipeline.aliases import context
     monkeypatch.setattr(context, "_clear_type_words", lambda: frozenset({"granite", "marble"}))
     monkeypatch.setattr(context, "vocabulary_keys", lambda: frozenset({"black", "white", "polished", "granite",
@@ -419,7 +419,7 @@ def test_csv_reads_back_as_written(ledger):
                                                                    [ABS, 'Say "Nero"', "seed"]]
 
 
-# --- the one `removed` judgement, shared with the seed rewrite (Scraper seed, 11-12) --------------------------------------
+# --- the one `removed` judgement, shared with the seed rewrite --------------------------------------------------------
 def test_seed_refusal_is_the_c1_reason_and_a_code_is_never_a_refusal():
     from stone_pipeline.aliases.context import build_contexts
     is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
@@ -444,7 +444,7 @@ def test_c5_judges_with_c2_s_builder_over_the_live_varieties(ledger):
     assert removed == expected == {(ABS, "Black"): "bare_vocabulary_word", (ABS, "Kashmir White"): "same_type_name"}
 
 
-# --- the open review items (alias_cleanup_open.csv; agreed with Scraper C6, 11-12) ---------------------------------------
+# --- the open review items (alias_cleanup_open.csv) -------------------------------------------------------------------
 def test_the_open_items_file_is_header_only_when_empty_and_sorted():
     from stone_pipeline.aliases import open_items
     assert open_items.open_items_bytes([]) == b"kind,Key,Value,reason\n"
@@ -512,7 +512,7 @@ def test_the_route_writes_the_open_items_and_reports_the_admin_rows(service, mon
 
 
 def test_a_non_latin_value_is_classed_on_its_own_row_never_merged_with_its_latin_part(ledger):
-    # Mas, 13 Nov: values key by alias_key. match_key reads a pure-CJK value as empty (the whole file refused) and a
+    # values key by alias_key. match_key reads a pure-CJK value as empty (the whole file refused) and a
     # mixed one as its Latin part (merged into that row); alias_key keeps the script, so each is its own row
     alias_key = getattr(text, "alias_key", match_key)
     values = ["Wratza 维纳多", "Wratza", "巴比伦金"]

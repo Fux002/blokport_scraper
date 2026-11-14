@@ -1,4 +1,4 @@
-"""Curation loop: emit import-format additions (new variants) and learned-alias proposals (P2-10 C2)
+"""Curation loop: emit import-format additions (new variants) and learned-alias proposals
 for every category, plus synonym-first attribute curation. Files are never
 rewritten; deterministic uuid5 keys match the existing format.
 """
@@ -31,7 +31,7 @@ def test_key_is_deterministic_and_matches_format():
 
 
 def test_a_guessed_bind_proposes_its_spelling_on_the_matched_key(ref):
-    # a confirmed non-exact match proposes the scraped spelling as a learned alias (P2-10 C2: a proposal, never an
+    # a confirmed non-exact match proposes the scraped spelling as a learned alias (a proposal, never an
     # import row). A real match carries the matched variety's stable Key ('Alpine' exists as BOTH Granite and
     # Marble, so the Key -- its type is the authority -- is what disambiguates which one the spelling attaches to).
     # Use a spelling not already on the live variant, so the test asserts the ADD path, not an idempotent no-op.
@@ -421,7 +421,7 @@ def test_review_evidence_falls_back_to_improved_key_when_no_supplier_url():
 
 
 def test_new_type_card_names_the_owner_when_the_match_is_an_alias(ref, monkeypatch):
-    # prod 2026-09-16: Zucchi lists 'Crystal Absolut' typed Crystal. No variety of that name exists; the name
+    # on prod, Zucchi lists 'Crystal Absolut' typed Crystal. No variety of that name exists; the name
     # is an ALIAS on the Onyx 'Absolut'. The card said "'Crystal Absolut' already exists as Onyx", which the
     # operator could not find anywhere. The card must name the owner and say it is an alias.
     monkeypatch.setattr(curate, "load_existing",

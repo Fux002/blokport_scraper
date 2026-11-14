@@ -329,7 +329,7 @@ def _cut_corner(w_px, h_px, right):
 
 
 def test_the_gate_measures_the_outline_s_bounding_box_not_the_cut_out_s_frame(monkeypatch):
-    # Mas (SEN-7074-30, a true lot-piece size with a cut corner): compare the outline's own extent with the listing
+    # a true lot-piece size with a cut corner (SEN-7074-30): compare the outline's own extent with the listing
     framed = _slab_row(1.8, 1.0)
     _link(monkeypatch, framed, _cut_corner(1800, 1000, right=0.8))          # frame 1.8:1 fits; outline 1.44:1 does not
     assert framed.model_3d_key is None
@@ -339,7 +339,7 @@ def test_the_gate_measures_the_outline_s_bounding_box_not_the_cut_out_s_frame(mo
     assert cutout.outline_size(_cut_corner(2000, 1000, right=0.9)) == pytest.approx((1800.0, 1000.0))
 
 
-# -- a lot piece's 3D: only from its own photo (Mas, 2a) ------------------------------------------------------------
+# -- a lot piece's 3D: only from its own photo ----------------------------------------------------------------------
 
 LOT = "SEN-B6372"
 OWN1, OWN2, SHARED = "d" * 64, "e" * 64, C3                 # each piece's own photo first, then the bundle's photo

@@ -1,5 +1,5 @@
-"""W4 (Mas, 13 Nov): each brand's scope vocabulary DECLARES which listings its runs keep, and W2's collector asks one
-question of it, Vocabulary.in_scope(listing_text, market), after the fetch, for every platform.
+"""Each brand's scope vocabulary DECLARES which listings its runs keep, and the collector asks one question of it,
+Vocabulary.in_scope(listing_text, market), after the fetch, for every platform.
 
 - `scope: all` keeps every listing the collector reads: BlokPort declares it, so its runs keep exactly what they keep
   today, by a visible declaration, never a missing-file branch.
@@ -19,10 +19,10 @@ import yaml
 from market_prices import vocabulary as vocab
 from market_prices.vocabulary import VocabularyError, load_vocabulary
 
-# the sheet-material categories the owner's research covered (Mas, 13 Nov)
+# the sheet-material categories the research covered
 SHEET_CATEGORIES = {"plywood", "film_faced_plywood", "packing_plywood", "mdf", "osb", "chipboard",
                     "hollow_core_chipboard", "lvl", "veneer", "core_veneer", "hdf_door_skin", "hardboard"}
-# his sites' markets (full-model-plan/owner-inputs/wudport-wood-sites-13nov.md) and their languages
+# the WudPort sites' markets and their languages
 WUDPORT_MARKETS = {"GB": ("en",), "DE": ("de",), "FR": ("fr",), "NL": ("nl",), "BE": ("nl", "fr"), "PL": ("pl",),
                    "SE": ("sv",)}
 

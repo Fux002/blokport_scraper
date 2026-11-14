@@ -15,7 +15,7 @@ import stone_pipeline.prepare_variant_images as pvi
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.io import variety_icons
 
-# icon pair ids (`{Key}/{category}`): a texture is one pair (spec rev 8 section 4)
+# icon pair ids (`{Key}/{category}`): a texture is one pair
 PA = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/slab"
 PB = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/block"
 PC = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/tile"
@@ -372,7 +372,7 @@ def test_an_unreadable_marker_makes_the_produce_queue_mints_only(tmp_path, monke
 
 
 def test_the_queue_build_fails_loud_on_a_bug_and_holds_on_an_unreadable_input(monkeypatch, caplog):
-    # #563 review: a broad except around the queue build swallowed a code bug as "queue build failed". Only an input
+    # a broad except around the queue build swallowed a code bug as "queue build failed". Only an input
     # that cannot be read (a missing or malformed export, products or backbone file) is that; a bug fails the produce.
     monkeypatch.setattr(pvi, "SETTINGS", types.SimpleNamespace(
         images=types.SimpleNamespace(upgrade_batch=0), auto_texture=types.SimpleNamespace(enabled=False)))
@@ -391,7 +391,7 @@ def test_the_queue_build_fails_loud_on_a_bug_and_holds_on_an_unreadable_input(mo
 
 
 def test_a_stale_local_texture_is_cleared_before_the_generator_runs(tmp_path, monkeypatch):
-    # #569 review: genetate_images resumes over an existing images/{Key}.png and BEN2 de-backgrounds it, so a PNG an
+    # genetate_images resumes over an existing images/{Key}.png and BEN2 de-backgrounds it, so a PNG an
     # earlier run left on a dev box would be uploaded as this run's texture. The queued keys' outputs go first.
     job = _Job(tmp_path, monkeypatch, [QA])
     job.leftovers(raw=[QA, QO], debackgrounded=[QA])       # an earlier run's leftovers

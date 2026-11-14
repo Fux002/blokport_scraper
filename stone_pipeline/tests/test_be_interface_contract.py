@@ -1,11 +1,11 @@
-"""Table 572 step 2, the SC half (S2, C5, C6): the scraper's REAL readers run on byte copies of the backend's goldens
-(BE-SCRAPER-INTERFACE.md section H; BE branch feat/572-interface-contract). BE's real writers made the goldens, so this
-tests the scraper against what the backend actually emits. A change to the schema, a golden or a reader is a PAIRED PR.
+"""The scraper's REAL readers run on byte copies of the backend's goldens (BE-SCRAPER-INTERFACE.md section H). BE's
+real writers made the goldens, so this tests the scraper against what the backend actually emits. A change to the
+schema, a golden or a reader is a PAIRED PR.
 
-Two levels of strictness (34 with the scraper manager, 12 Nov; the owner's "a missing or extra column fails"):
+Two levels of strictness:
 - THIS TEST: each golden's header is exactly the schema's columns, in order; a missing or extra one fails.
 - THE PRODUCTION READERS: a missing REQUIRED column refuses by name; an extra column is read by header and ignored, so
-  a writer ships an additive column first and the reader adopts it after (569 `category_handles`, 577 `handle`). The
+  a writer ships an additive column first and the reader adopts it after (as `category_handles` and `handle` were). The
   test pins both edges on every reader: its golden plus an extra column reads the same rows, and dropping each schema
   column refuses by name exactly when the schema marks it `required` (the reader's required set equals the schema's).
 No em dashes."""
@@ -84,7 +84,7 @@ def _rewrite(src: Path, dest: Path, *, drop: str | None = None, add: str | None 
     return dest
 
 
-# --- C5: every copy is the one the schema names, and the schema is the one the goldens were made with -----------------
+# --- every copy is the one the schema names, and the schema is the one the goldens were made with ---------------------
 def test_c5_every_golden_copy_has_the_schema_s_sha256_and_no_golden_is_extra_or_missing():
     expected = _schema()["goldens_sha256"]
     copies = {f"{GOLDEN_KEY_PREFIX}{p.name}": _sha(p) for p in GOLDEN_DIR.iterdir() if p != META_FILE}
@@ -95,7 +95,7 @@ def test_c5_the_schema_copy_is_the_one_the_goldens_were_made_with():
     assert _sha(SCHEMA_FILE) == json.loads(META_FILE.read_text(encoding="utf-8"))["schema_sha256"]
 
 
-# --- S2: the owner's rule, exact headers, on the goldens -------------------------------------------------------------
+# --- exact headers, on the goldens ------------------------------------------------------------------------------------
 @pytest.mark.parametrize("touchpoint", CSV_FILES)
 def test_each_golden_header_is_exactly_the_schema_s_columns_in_order(touchpoint):
     with _golden(touchpoint).open(encoding="utf-8", newline="") as h:
@@ -131,7 +131,7 @@ def test_the_real_field_kinds_parser_reads_each_brand_s_golden(monkeypatch, bran
     assert field_kinds.parse(path.read_bytes(), path) == json.loads(path.read_text(encoding="utf-8"))["fields"]
 
 
-# --- the production readers' two edges (34's condition) ---------------------------------------------------------------
+# --- the production readers' two edges --------------------------------------------------------------------------------
 @pytest.mark.parametrize("touchpoint", CSV_FILES)
 def test_an_extra_column_reads_the_same_rows(tmp_path, touchpoint):
     planted = _rewrite(_golden(touchpoint), tmp_path / "planted.csv", add=EXTRA_COLUMN)

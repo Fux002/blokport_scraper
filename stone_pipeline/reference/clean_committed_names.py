@@ -1,4 +1,4 @@
-"""One-off: bring every name the scraper COMMITS to its field's fixed point (report 21 step 4; plan section 3).
+"""One-off: bring every name the scraper COMMITS to its field's fixed point.
 
 Run once from the repo root, committed together with its output:
 
@@ -27,7 +27,7 @@ from stone_pipeline.reference.loaders.identity import type_slug_from_key
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "stone_pipeline" / "tests" / "fixtures" / "field-kinds.json"
 BASES = ["from_medusa/development/variants_export_base.csv", "from_medusa/production/variants_export_base.csv"]
-# the ONE variety backbone and the ONE committed additions file (spec rev 8 section 3)
+# the ONE variety backbone and the ONE committed additions file
 BACKBONES = ["catalog_source/backbone_varieties.json", "catalog_source/backbone_additions/varieties.json"]
 VARIETY_BACKBONE = "catalog_source/backbone_varieties.json"
 # (file, {column: (field, rule)}): rule "display" for a variety Name (title-cased as emit writes it), "clean" for a

@@ -1236,7 +1236,7 @@ def test_a_slab_shot_near_square_on_is_measured_from_its_sides():
 
 
 # Fitted quads of two strapped slabs shot with the camera tipped (top wider than bottom), from the dev outline diagnostic
-# (dev/standardise-test/diag/main/<sha>.json, 2026-11-02): POL-736 083354ab (top/bottom 1.18) and POL-649 3461a992 (1.19).
+# (dev/standardise-test/diag/main/<sha>.json): POL-736 083354ab (top/bottom 1.18) and POL-649 3461a992 (1.19).
 _KEYSTONES = (([[4.0, 14.0], [1128.3, 36.0], [1050.4, 610.9], [97.0, 626.9]], (2.85, 1.85)),
               ([[3.0, 163.0], [1013.9, 160.0], [947.0, 663.4], [96.9, 707.4]], (3.2, 1.95)))
 
@@ -1300,7 +1300,7 @@ def test_a_sure_card_must_go_and_a_small_weak_label_may_stay_when_its_fill_is_re
              (0, 0, 600, 400, 0.40),                                  # large and sure: counts
              (0, 0, 1000, 1000, 0.90)]                                # larger than any card: the slab itself
     sure, labels = retouch.card_boxes(found, w, h)
-    assert sure == [found[3][:4]] and labels == [found[0][:4]]        # a weak small one also fires on clean stone (2026-11-01)
+    assert sure == [found[3][:4]] and labels == [found[0][:4]]        # a weak small one also fires on clean stone
 
 
 def _two_slabs_one_box(monkeypatch, neighbour):
@@ -1543,7 +1543,7 @@ def test_a_close_up_shows_only_part_of_a_slab_so_it_has_no_3d_and_no_close_view(
     assert set(res.images) == {"main", "white"}
 
 
-# --- 2b: what SAM's proposals give as the slab, and a slab whose corner is cut (std-2b diag, 2026-11-10) --------------
+# --- what SAM's proposals give as the slab, and a slab whose corner is cut (std-2b diag) ------------------------------
 def _proposals_strapped(h=960, w=1280):
     """POL-473's shape (99892dbb, std-2b): SAM's widest proposal for a strapped slab is the whole slab in three pieces,
     the straps cutting it (its left 66k, middle 515k and right 81k px); the most confident is the middle alone."""

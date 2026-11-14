@@ -211,7 +211,7 @@ def test_a_run_writes_only_the_diag_files_of_the_listed_photos_and_fails_loud_on
     monkeypatch.setattr(source, "_get", lambda client, key: b"jpeg")
     monkeypatch.setattr(photo, "decode", lambda data: rgb)
     from unittest import mock
-    # review 2026-11-06: a fake with the wrong signature hid that the job called load(survey_only=True), a TypeError;
+    # A fake with the wrong signature hid that the job called load(survey_only=True), a TypeError;
     # an autospec takes exactly what the real load takes
     load = mock.create_autospec(models.load, return_value=models.Models(_SEG, None, None, None, None, None))
     monkeypatch.setattr(models, "load", load)

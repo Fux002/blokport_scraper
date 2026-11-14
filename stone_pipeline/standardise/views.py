@@ -1,8 +1,8 @@
-"""A close-up of a slab, made only from the real stone, never invented (the user: close-ups yes, corners no; the side
-view is studio.place). A crop of the photo's own pixels at most 1:1 (CLOSEUP_MAX_ENLARGE), never enlarged and never given
-a model's detail (the owner, 2026-11-02: a close-up must show only real detail): stored at its own size, in the canvas's
-3:2 shape (the storefront's frames show it whole; Medusa copies it and makes its own thumbnails), at most the canvas's
-2048 px wide, at least CLOSEUP_MIN_WIDTH; a photo without the pixels or the detail for one has none."""
+"""A close-up of a slab, made only from the real stone, never invented (close-ups yes, corners no; the side view is
+studio.place). A crop of the photo's own pixels at most 1:1 (CLOSEUP_MAX_ENLARGE), never enlarged and never given a
+model's detail (a close-up must show only real detail): stored at its own size, in the canvas's 3:2 shape (the
+storefront's frames show it whole; Medusa copies it and makes its own thumbnails), at most the canvas's 2048 px wide,
+at least CLOSEUP_MIN_WIDTH; a photo without the pixels or the detail for one has none."""
 import math
 from dataclasses import replace
 

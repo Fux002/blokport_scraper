@@ -1,7 +1,7 @@
-"""STD-IMAGE-BUILD (table 348): the standardise GPU image is built on CodeBuild from a dispatch with a `sha` input. The sha
-is checked at both ends (C1) before anything uses it: in the workflow, where the input reaches the check only through
-env, and again in the buildspec, before any git command, since StartBuild can be called by anything holding the
-workflow's role. These tests run both checks as written; nothing here reaches AWS or GitHub."""
+"""The standardise GPU image is built on CodeBuild from a dispatch with a `sha` input. The sha is checked at both
+ends before anything uses it: in the workflow, where the input reaches the check only through env, and again in
+the buildspec, before any git command, since StartBuild can be called by anything holding the workflow's role. These
+tests run both checks as written; nothing here reaches AWS or GitHub."""
 from __future__ import annotations
 
 import subprocess

@@ -1,8 +1,8 @@
-"""Polonine's prices, shown only to a logged-in customer (the owner's own account, 14 Nov): read by a SEPARATE price
-pass after the anonymous product and stock scrape, which stays exactly as it was (the manager's ruling 14 Nov: the
-product set never depends on the login). The price pass writes only its own files (prices.csv and its marker), takes
-both credentials from the environment and never writes them, and a missing, refused or failing login leaves the
-products identical. New names are imported inside the tests, so each spec fails for its own reason."""
+"""Polonine's prices, shown only to a logged-in customer (the owner's own account): read by a SEPARATE price pass
+after the anonymous product and stock scrape, which stays exactly as it was (the product set never depends on the
+login). The price pass writes only its own files (prices.csv and its marker), takes both credentials from the
+environment and never writes them, and a missing, refused or failing login leaves the products identical. New names
+are imported inside the tests, so each spec fails for its own reason."""
 
 from __future__ import annotations
 
@@ -181,7 +181,7 @@ def test_neither_the_secret_nor_the_username_is_ever_written(tmp_path, monkeypat
     assert SECRET not in written and "s3cretpw" not in written and USER not in written
 
 
-# --- the price pass can never abort the product scrape (f8's must, 14 Nov) -------------------------------------------
+# --- the price pass can never abort the product scrape ---------------------------------------------------------------
 def _identical_products_beside(tmp_path, monkeypatch, site, prepare=None):
     """Run once with the login and the given site, once without any login, and return both scrapers."""
     monkeypatch.setenv("SCRAPER_POLONINE_USERNAME", USER)

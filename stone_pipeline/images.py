@@ -8,7 +8,7 @@ then run this. It renames each to its icon pair, images/renamed/{Key}/{category}
 (matched, unmatched, and what still needs generating) under images/reports/.
 
 The pipeline owns image naming from here on: every variety icon is one (Key, category) pair at
-{Key}/{category}.png (spec rev 8 section 4).
+{Key}/{category}.png.
 """
 
 from __future__ import annotations

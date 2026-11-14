@@ -1,9 +1,7 @@
-"""SC-4 (plan SC-3-SC-4-PLAN.md section 2d): the phase 1 stores' versions. A brand-new ledger is created at v15 (one
-variation row per (type, name), no branch, the per-category icon table, no combination table; product.bundle_size
-stays, render-only, plan rev 2.3); a
-ledger from before phase 1 is refused, never migrated in place. A brand-new config.db is stamped at the current version
-(13 since P2-10 C2); one at 1 to 11 is refused (only the phase 1 store migration stamps 12, and a 12 upgrades in
-place)."""
+"""The phase 1 stores' versions. A brand-new ledger is created at v15 (one variation row per (type, name), no
+branch, the per-category icon table, no combination table; product.bundle_size stays, render-only); a ledger from
+before phase 1 is refused, never migrated in place. A brand-new config.db is stamped at the current version (13); one
+at 1 to 11 is refused (only the phase 1 store migration stamps 12, and a 12 upgrades in place)."""
 from __future__ import annotations
 
 import sqlite3

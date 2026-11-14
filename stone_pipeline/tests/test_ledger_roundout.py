@@ -30,7 +30,7 @@ from stone_pipeline.tests._category_registry import set_category_pcats
 
 @pytest.fixture(autouse=True)
 def _category_pcats(monkeypatch):
-    # the synthetic slab pcat, on the registry: a category is never the ledger's (table 577)
+    # the synthetic slab pcat, on the registry: a category is never the ledger's
     set_category_pcats(monkeypatch, {"slab": "PC1"})
 
 EXPORT = SETTINGS.paths.variants_export_csv
@@ -70,7 +70,7 @@ def test_seed_products_minimal_and_excluded_from_render(tmp_path):
     export = tmp_path / "products_export.csv"
     with export.open("w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        w.writerow(["Variant Sku", "Product Handle", "Inventory Quantity"])   # BE's header (table 572, T4)
+        w.writerow(["Variant Sku", "Product Handle", "Inventory Quantity"])   # BE's header
         w.writerow(["POLONINE-OLD1", "old-one", "5"])
         w.writerow(["POLONINE-OLD2", "old-two", "0"])
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:

@@ -1,4 +1,4 @@
-"""The one texture path, pinned (review wave C6). The produce queues the new-variant textures (plus the capped
+"""The one texture path, pinned. The produce queues the new-variant textures (plus the capped
 upgrade drip), publishes that queue to a unique S3 key and dispatches ONE GPU texture job bound to it; the job
 (prepare_variant_images.run) pulls the queue, drops the mints already on S3 (keeping upgrades), runs the generator,
 uploads and marks the best-model set only on a clean run. These tests pin exactly that, with every outside call
@@ -145,7 +145,7 @@ def test_the_upgrade_drip_reads_the_best_model_marker_and_its_cap(produce, tmp_p
     assert asked == {"refreshed": {"slab_done"}, "cap": 5} and produce["dispatched"][0][0] == 2
 
 
-# icon pair ids (`{Key}/{category}`): a texture is one pair (spec rev 8 section 4); NEW and OLD sort in queue order
+# icon pair ids (`{Key}/{category}`): a texture is one pair (spec section 4); NEW and OLD sort in queue order
 _K = "marble__carrara_00000000-1111-5222-8333-944455556666"
 NEW, EXISTS, OLD, UP = f"{_K}/block", f"{_K}/slab", f"{_K}/tile", "onyx__honey_11111111-1111-5222-8333-944455556666/slab"
 

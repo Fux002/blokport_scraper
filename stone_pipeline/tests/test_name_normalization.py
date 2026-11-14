@@ -58,8 +58,8 @@ def test_country_and_variety_keys_route_through_match_key():
 
 
 def test_a_names_display_is_ascii_and_identity_still_folds():
-    # DISPLAY of a name is its field's rule: cleaned to ASCII, then title-cased (owner O1). title_case itself is
-    # casing only and decides no alphabet; IDENTITY folds, so the accented and plain spellings are ONE stone.
+    # DISPLAY of a name is its field's rule: cleaned to ASCII, then title-cased. title_case itself is casing only and
+    # decides no alphabet; IDENTITY folds, so the accented and plain spellings are ONE stone.
     from stone_pipeline.reference.loaders import field_kinds as fk
     assert fk.display(fk.VARIATION_NAME, "AZUL MACA\u00daBAS") == "Azul Macaubas"
     assert fk.display(fk.VARIATION_NAME, "quartzo vitro ros\u00e9") == "Quartzo Vitro Rose"
@@ -76,8 +76,7 @@ def test_title_case_lowercases_connectors_except_leading():
 
 
 def test_alias_dedup_is_accent_and_case_insensitive():
-    # aliases differing only by accent/case collapse to one (alias_key), the first kept with its accent (the alias
-    # kind, Mas 13 Nov)
+    # aliases differing only by accent/case collapse to one (alias_key), the first kept with its accent (the alias kind)
     from functools import partial
     from stone_pipeline.core.text import clean_alias_list
     from stone_pipeline.reference.loaders import field_kinds as fk
@@ -114,8 +113,8 @@ def test_ascii_fold_keeps_a_transliteration_letter_that_carries_a_mark():
 
 
 def test_ampersand_reads_and_in_the_key_as_in_a_cleaned_name():
-    # Owner D1 (2026-11-04): clean_name writes '&' as 'and', so the key reads it the same way; a scraped
-    # 'Black & Gold' then still matches its own cleaned spelling 'Black and Gold'.
+    # clean_name writes '&' as 'and', so the key reads it the same way; a scraped 'Black & Gold' then still matches its
+    # own cleaned spelling 'Black and Gold'.
     assert match_key("Black & Gold") == match_key("Black and Gold") == "black and gold"
     assert match_key("Black\uff06Gold") == "black and gold"            # the fullwidth form too
     assert match_key("AT&T") == "at and t"
@@ -140,7 +139,7 @@ def test_the_ascii_fast_path_is_exact():
 
 
 def test_one_slug_rule_for_handles_keys_and_identity():
-    # A slug is the name's key words joined (W4), so a slug, a Key and the match key read a name one way: a curly
+    # A slug is the name's key words joined, so a slug, a Key and the match key read a name one way: a curly
     # and a straight apostrophe, and '&' and 'and', give one Key and one handle.
     from stone_pipeline.core.text import slugify
     from stone_pipeline.reference.loaders.identity import variety_identity

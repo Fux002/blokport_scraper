@@ -202,7 +202,7 @@ def test_a_gzipped_sitemap_is_read():
 
 
 def test_a_gzipped_sitemap_of_several_members_is_refused_not_read_in_part():
-    """f8 note: zlib reads one gzip member; a second would otherwise be dropped silently."""
+    """zlib reads one gzip member; a second would otherwise be dropped silently."""
     body = gzip.compress(_urlset("/p/a").text.encode()) + gzip.compress(_urlset("/p/b").text.encode())
     status = _status(_run({ROBOTS: ROBOTS_OPEN, SITEMAP: Response(200, "", {}, body)}))
     assert status.status.value == "unavailable_error" and "gzip member" in status.detail
@@ -343,8 +343,8 @@ def test_several_offers_are_one_price_only_when_they_agree():
 
 
 def test_offers_in_several_currencies_are_no_price_their_text_kept_and_counted():
-    """f8 M1, the manager's rule: the same as a span, not one price. The listing still delivers its text and specs,
-    with every stated price in price_text, and site_status counts it."""
+    """The same as a span, not one price. The listing still delivers its text and specs, with every stated price in
+    price_text, and site_status counts it."""
     product = _product()
     product["offers"] = [{"@type": "Offer", "price": "10", "priceCurrency": "GBP"},
                          {"@type": "Offer", "price": "10", "priceCurrency": "EUR"}]
@@ -388,8 +388,8 @@ def _variant(name, price, **ids):
 
 
 def test_variants_without_a_sku_are_keyed_by_their_own_id_on_the_page():
-    """f8 M2: every variant of a page shares its path, so a variant with no sku or productID is keyed by its own @id or
-    url on that page, never collapsed into the first as a duplicate."""
+    """Every variant of a page shares its path, so a variant with no sku or productID is keyed by its own @id or url on
+    that page, never collapsed into the first as a duplicate."""
     group = {"@context": "https://schema.org", "@type": "ProductGroup", "name": "OSB3 board",
              "hasVariant": [_variant("OSB3 11mm", "12.00", **{"@id": f"{BASE}/p/osb#v11"}),
                             _variant("OSB3 18mm", "19.00", url=f"{BASE}/p/osb?size=18")]}
@@ -407,7 +407,7 @@ def test_a_variant_with_no_id_of_its_own_is_malformed_not_a_duplicate():
 
 
 def test_out_of_scope_variants_are_never_malformed():
-    """f8's note: variants with no id of their own would be malformed, but out of scope they are counted as such."""
+    """Variants with no id of their own would be malformed, but out of scope they are counted as such."""
     group = {"@context": "https://schema.org", "@type": "ProductGroup", "name": "Paint roller",
              "hasVariant": [_variant("Paint roller 9 inch", "4.00"), _variant("Paint roller 12 inch", "5.00")]}
     status = _status(_run(_shop({"/p/a": _page(_product("A")), "/p/roller": _page(group)})))

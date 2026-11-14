@@ -1,4 +1,4 @@
-"""A RETIRED variety stays out of every later produce (Mas's condition before prod's pass 2, 12 Nov).
+"""A RETIRED variety stays out of every later produce.
 
 Retiring a variety (POST /config/v1/variations/<key>/retire) records its Key in config.db's retired memory, but the
 lagging live Medusa export keeps listing the variety until BlokPort's removed lane deletes it. Two filters keep it

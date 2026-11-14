@@ -1,8 +1,8 @@
-"""SC-4 2g (plan SC-3-SC-4-PLAN.md 2g; spec rev 8 section 3 "Backbone result", D7, D9): ONE variety backbone.
+"""ONE variety backbone.
 
 - `catalog_source/backbone_varieties.json` replaces the three per-category backbones: one post per (type, name) on
   its phase 1 Key, carrying the slab post's finishes and qualities and the union of every copy's colours and
-  aliases. Every post maps through SC-1's key map (f0e18346) except the one named mint (manager, 10 Nov).
+  aliases. Every post maps through the phase 1 key map except the one named mint.
 - The committed additions are ONE `backbone_additions/varieties.json`: each post keyed, with the sorted
   `categories` its copies sat in; an untyped post has no Key and is HELD (skipped by the one additions reader).
 - The pack: one pack-level backbone file; `mirror_of` becomes `finishes_from` and an unknown category key is

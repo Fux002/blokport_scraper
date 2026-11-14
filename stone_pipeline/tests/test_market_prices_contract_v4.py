@@ -1,7 +1,7 @@
-"""market_prices contract v4 (CONTRACT.md 285aedd1, read by M22 and P4): register.json in every run folder, so the
-consumer upserts its sources from the scraper's own register; and Mas's sale rule, the regular price columns. The
-register rows carry the owner's terms (price_basis, a net markup, a stated VAT rate), each with who stated it, never
-defaulted or inferred. Fixtures only."""
+"""market_prices contract v4 (CONTRACT.md): register.json in every run folder, so the consumer upserts its sources
+from the scraper's own register; and the sale rule, the regular price columns. The register rows carry the owner's
+terms (price_basis, a net markup, a stated VAT rate), each with who stated it, never defaulted or inferred. Fixtures
+only."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _layouts(*competitors: dict) -> Layouts:
     ({"price_basis": "net", "net_markup": "-0.2", "net_markup_stated_by": "owner"},   # an exact decimal, 0 or more
      r"net_markup\s+String should match pattern"),
     ({"price_basis": "net", "net_markup": "0.20"}, "net_markup_stated_by"),           # who stated it
-    # one concept (Mas): a discount is never stated beside or instead of the markup
+    # one concept: a discount is never stated beside or instead of the markup
     ({"price_basis": "net", "net_discount": "0.2", "net_discount_stated_by": "owner"}, "net_discount"),
     ({"vat_rate": "0.2"}, "vat_rate_stated_by"),
     ({"vat_rate": "20%", "vat_rate_stated_by": "owner"}, "vat_rate"),                 # an exact decimal
@@ -112,7 +112,7 @@ def test_the_register_file_is_byte_identical_on_a_rewrite(tmp_path):
 
 
 def test_a_run_folder_is_written_once_and_a_second_publish_is_refused_before_anything_is_written(tmp_path):
-    # CONTRACT.md: after its manifest no file in a run folder changes; a correction is a new run (M22's car 3)
+    # CONTRACT.md: after its manifest no file in a run folder changes; a correction is a new run
     from stone_pipeline.io.deliverables import RunAlreadyPublished
     run_dir = write_run(collect_run(_register(), _shop(_page([_listing()])), MOMENT, _no_pause), tmp_path)
     s3 = _S3()
@@ -122,7 +122,7 @@ def test_a_run_folder_is_written_once_and_a_second_publish_is_refused_before_any
         publish_run(s3, "bucket", "blokport", run_dir)            # the same bytes too: a folder is never re-written
     assert s3.order == written
 
-# --- the regular price (Mas's sale rule) -----------------------------------------------------------------------------
+# --- the regular price (the sale rule) -------------------------------------------------------------------------------
 def test_a_store_api_listing_on_sale_gives_its_current_and_its_regular_price():
     on_sale = _listing(1, price_html="<del>&euro;&nbsp;25,00</del> <ins>&euro;&nbsp;21,25</ins>",
                        prices={"price": "2125", "regular_price": "2500", "sale_price": "2125",
@@ -139,7 +139,7 @@ def test_a_store_api_listing_at_its_regular_price_has_no_regular_price():
 
 def test_real_woocommerce_sale_markup_gives_the_current_price_text_without_its_hidden_announcements():
     # WooCommerce core's sale price_html: the struck price, then visually hidden screen-reader announcements of both
-    # prices OUTSIDE <del> (reviewer 2, f8): price_text is the current price a buyer sees, nothing more
+    # prices OUTSIDE <del>: price_text is the current price a buyer sees, nothing more
     price_html = ('<del aria-hidden="true"><span class="woocommerce-Price-amount amount"><bdi>'
                   '<span class="woocommerce-Price-currencySymbol">&euro;</span>25,00</bdi></span></del> '
                   '<span class="screen-reader-text">Original price was: &euro;25,00.</span>'
@@ -172,9 +172,9 @@ def test_a_price_html_over_the_element_cap_is_that_listings_problem_alone(monkey
 
 
 def test_the_shipped_blokport_sites_declare_the_owners_terms():
-    # the manager, 14 Nov: every approved BlokPort site is LIST; a page-stated VAT rate is the site's, the owner's
-    # standard rate where the page states incl. without one; countryfloors is stated excl. (no rate). Polonine, one of
-    # the owner's suppliers, is not a market_prices site (Mas's split).
+    # every approved BlokPort site is LIST; a page-stated VAT rate is the site's, the owner's standard rate where the
+    # page states incl. without one; countryfloors is stated excl. (no rate). Polonine, one of the owner's suppliers,
+    # is not a market_prices site: supplier prices are a separate contract.
     from market_prices.register import load_register
     terms = {site.site_id: (site.price_basis, site.vat_rate, site.vat_rate_stated_by)
              for site in load_register("blokport").sites if site.decision.value == "approved"}

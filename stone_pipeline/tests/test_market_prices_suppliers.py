@@ -1,4 +1,4 @@
-"""Supplier prices are not in market_prices (Mas's split, 14 Nov; contract v4): they are a separate contract, delivered
+"""Supplier prices are not in market_prices (contract v4): they are a separate contract, delivered
 under <env>/supplier_prices/<brand>/. market_prices knows the product scraper's suppliers only to refuse them:
 
 - each of the 11 fetchers (the REGISTRY sources and the dormant ScraperBase modules) declares its `site_domain` once,

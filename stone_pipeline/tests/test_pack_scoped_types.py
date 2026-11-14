@@ -1,12 +1,12 @@
-"""The scraper's type vocabulary is its PACK's types (table 569; Mas's ruling, 12 Nov).
+"""The scraper's type vocabulary is its PACK's types.
 
 BlokPort trades every commodity, so its live attributes.csv also lists types like Steel, Wheat and Wine. Taken as
 stone types they made 'Dark Steel', 'Steel Grey', 'Summer Wheat', 'Wild Wine' and 'Wine Red' read as mistyped
 stones (adapters/tokens.explicit_type_word into identity.is_mistyped_variant), so catalog.write_variants_to_delete
 listed them and drop_deleted_variants cut them from 1_variants_full: on blokport-dev they were never served.
 
-The export now carries `category_handles` on every type row: the '|'-joined product_category handles (D11) the type
-has a valid combination in, '' when it has none. A type is the PACK's iff (i) its list holds one of the pack's
+The export now carries `category_handles` on every type row: the '|'-joined product_category handles the type has
+a valid combination in, '' when it has none. A type is the PACK's iff (i) its list holds one of the pack's
 category handles, OR (ii) the committed seed (backbone_varieties.json, read at runtime) holds a variety of that type.
 Everything else is EXCLUDED, never guessed, and LISTED in the run's review/<env>/types_outside_pack.csv. A seed
 variety whose type BE lists with ONLY non-pack handles fails loud, naming the type (the seed and BE disagree). Both
@@ -165,7 +165,7 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 def test_the_committed_dev_attributes_carry_blokport_dev_s_real_handles():
-    # SOURCE (never inferred): P1X's read of blokport-dev, full-model-plan/569-type-categories/runs/
+    # SOURCE (never inferred): a read of blokport-dev, full-model-plan/569-type-categories/runs/
     # 55988743-blokport-dev-20261112T1307Z.out (sha256 1d2bba1f582489752b2709835a86d7b48b1c974df4f17f38442381a50d3044a2):
     # 30 stone types in blocks|slabs|tiles, and Dolomite Marble with no live combination.
     path = _REPO / "from_medusa" / "development" / "attributes.csv"
@@ -189,8 +189,8 @@ def test_the_wood_fixture_s_handles_are_synthetic_test_data():
 
 
 def test_the_seed_s_types_are_read_once_per_backbone_file_version(tmp_path, monkeypatch):
-    # reviewer 2's L1: the config server loads the vocabulary per request (decide, GET /types); parsing the 12,156-post
-    # backbone on each was that request's cost. Read once per file version (path, size, mtime), as C3's seed is.
+    # the config server loads the vocabulary per request (decide, GET /types); parsing the 12,156-post backbone on
+    # each was that request's cost. Read once per file version (path, size, mtime), as the seed is.
     import json
     import os
     from stone_pipeline.reference.loaders import backbone
@@ -214,8 +214,8 @@ def test_the_seed_s_types_are_read_once_per_backbone_file_version(tmp_path, monk
 
 
 def test_a_seed_the_pack_names_but_does_not_ship_fails_loud_naming_it(tmp_path, monkeypatch):
-    # the manager's rule (reviewer 2's LOW): a pack whose yaml names a backbone_file must have it; reading the absent
-    # file as "no seed types" would quietly shrink stone's vocabulary on a broken image
+    # a pack whose yaml names a backbone_file must have it; reading the absent file as "no seed types" would
+    # quietly shrink stone's vocabulary on a broken image
     missing = tmp_path / "backbone_varieties.json"
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(backbone_json=missing)))
     with pytest.raises(FileNotFoundError, match="backbone_varieties.json"):

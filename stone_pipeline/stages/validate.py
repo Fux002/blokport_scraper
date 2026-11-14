@@ -95,7 +95,7 @@ class ValidationResult:
 
 
 def _category_handle(row: CanonicalRow) -> str | None:
-    """The row's category HANDLE, from its pcat id through the registry (table 577: the one source of a category,
+    """The row's category HANDLE, from its pcat id through the registry (the one source of a category,
     the same one format_resolve.category_pcat_for_branch set the pcat from). None for a pcat no active category has:
     such a row is already refused category_invalid, and has nothing to freeze."""
     cat = category_by_pcat(row.category_pcat_id or "")
@@ -108,7 +108,7 @@ def _frozen_value_pairs(row: CanonicalRow) -> tuple[tuple[str, str | None], ...]
     archived-but-still-active category (e.g. Tiles) would otherwise let new products emit into it."""
     return (("color", row.color_name), ("finish", row.finish_name), ("quality", row.quality_name),
             ("type", row.type_name), ("category", _category_handle(row)),
-            # VE2 PR5: the resolved variety Key is a frozen dimension too -- a product binding to an archived
+            # VE2: the resolved variety Key is a frozen dimension too -- a product binding to an archived
             # variety is HELD (exempt only when Medusa already holds this SKU on the SAME Key). This surfaces,
             # in validate's held_breakdown, what the sync lane would otherwise hold silently. The Key is
             # resolved upstream at match_variation (Stage 4), before this stage.
@@ -213,7 +213,7 @@ def _only_a_pending_multicolour_leaf(row: CanonicalRow) -> bool:
 
 
 def _archived_variation_keys() -> set[str]:
-    """The variety Keys the Medusa export marks archived (VE2 PR5), read through the one variants_export
+    """The variety Keys the Medusa export marks archived (VE2), read through the one variants_export
     reader. Empty when the export is absent or carries no status column (the expand phase), so the Key freeze
     is dormant until then. A frozen dimension sourced from the EXPORT, independent of attributes.csv."""
     export = SETTINGS.paths.export_file

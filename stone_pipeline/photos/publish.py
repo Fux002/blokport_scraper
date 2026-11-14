@@ -11,7 +11,7 @@ person turned down never stays live. Only a view that is missing or other than i
 bytes) and a cut-out is deterministic, so a re-run is safe and changes nothing. A photo on the reviewed exclude list
 (EXCLUDE_PATH, one sha per line) is never published, whatever chose it. No choice records at all is refused: the folder
 would be emptied. The last step of the photo process (stone_pipeline.photos.process), inside its lock.
-A tile listing is never shown from its own photos (owner 2026-11-02: warehouse racks): its views and 3D tile are rendered
+A tile listing is never shown from its own photos (they show warehouse racks): its views and 3D tile are rendered
 here from its variety's published slab stone (stone_pipeline.standardise.tile_plan), once the slabs' 3D cut-outs are
 made, under the listing's own name (imagestore.listing_sha), with a record of what they were made from written last
 (<env>/products/standard/tile/<src>/<listing>.json). They are rendered again exactly when that changed: the slab chosen or

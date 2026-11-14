@@ -63,7 +63,7 @@ def _leftovers(folder):
 
 
 def test_two_fetches_at_once_each_download_to_their_own_file_and_neither_fails(tmp_path):
-    # review of #556: every page GET fetches attributes.csv; two at once shared one .incoming path, so the second
+    # every page GET fetches attributes.csv; two at once shared one .incoming path, so the second
     # replace found the first one's file gone (FileNotFoundError, a 500)
     import threading
     target = _committed(tmp_path, 26)
@@ -131,10 +131,10 @@ def test_fetch_attributes_raises_an_unexpected_error(tmp_path):
 
 
 def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
-    # Medusa's export also lists other vendors' variants (dev 2026-11-01: non-stone test products, np-cattle-...,
+    # Medusa's export also lists other vendors' variants (on dev: non-stone test products, np-cattle-...,
     # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
     export = tmp_path / "variants_export.csv"
-    # the scraper's own are the export's `owner = scraper` rows (PHASE-1-SPEC D5)
+    # the scraper's own are the export's `owner = scraper` rows
     export.write_text("Id,Key,Name,Aliases,status,Type,owner\n"
                       "v1,marble__carrara_0001,Carrara,,active,Marble,scraper\n"
                       "v2,np-cattle-heifer-limousin-430,Heifer,,active,Cattle,\n"
@@ -231,7 +231,7 @@ _MALFORMED_ATTRIBUTES = {
     "conflicting duplicate": "category,value,sourceid,category_handles,handle\n" + "".join(
         f"color,c{i},id{i},,\n" for i in range(30)) + "color,C0,other,,\n",
     "no category_handles column": "category,value,sourceid,handle\n" + "".join(f"color,c{i},id{i},\n" for i in range(30)),
-    "no handle column": "category,value,sourceid,category_handles\n" + "".join(  # table 577
+    "no handle column": "category,value,sourceid,category_handles\n" + "".join(
         f"color,c{i},id{i},\n" for i in range(30)),
 }
 

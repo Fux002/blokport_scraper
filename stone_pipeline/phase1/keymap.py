@@ -1,27 +1,27 @@
-"""Phase 1 SC-1: the ONE union variety-key map generator (offline tool, C9 / spec section 5 step 2).
+"""Phase 1 SC-1: the ONE union variety-key map generator (offline tool).
 
 Reads every store that carries an OLD variation Key, in each env, and writes one union map
-`(old_key, new_key, category_rank, type_name)`: a Key present in several stores or envs maps to ONE new Key
-(D1), so an identity's slab/block/tile copies and any retired-only copy collapse together. The new Key is
+`(old_key, new_key, category_rank, type_name)`: a Key present in several stores or envs maps to ONE new Key,
+so an identity's slab/block/tile copies and any retired-only copy collapse together. The new Key is
 `phase1.variety_key.new_key`. The map build is the proof "every Key in every store is mapped": it ABORTS and
 lists, rather than guessing, when a Key cannot resolve.
 
 Scope (SC-1): offline, deterministic, additive. It reads real stores only on PRIVATE copies, read-only, and
 writes a local CSV plus its sha256 digest, never S3 and never a live store. It changes no matching, type,
 curate, ledger or sync code; the type parse here is NEW offline code, not the production parser. The Medusa
-survivor map (D2) and `scraper_sync_ref` are the backend's, later, and are not read here.
+survivor map and `scraper_sync_ref` are the backend's, later, and are not read here.
 
-Stores unioned (the scraper manager, 8 Nov): the ledger `variation` table (all rows, `in_full` 0 included),
+Stores unioned: the ledger `variation` table (all rows, `in_full` 0 included),
 config.db `retired_variation` and `protected_variation` (Keys), the committed base copies
 (`variants_export_base.csv`), the backbone files and `backbone_additions`.
 
-The new Key's name is the identity's CANONICAL Name (the stored Name with any bracketed alias split off,
-D1 rev 8), found by joining the old-Key MIDDLE (branch and uuid stripped) across stores: the bracket
-identities carry the bracketed slug in every old Key but one clean Name, so a row-less Key takes that Name
-and never parses its own slug (which would mint a second new Key).
+The new Key's name is the identity's CANONICAL Name (the stored Name with any bracketed alias split off),
+found by joining the old-Key MIDDLE (branch and uuid stripped) across stores: the bracket identities carry the
+bracketed slug in every old Key but one clean Name, so a row-less Key takes that Name and never parses its own
+slug (which would mint a second new Key).
 
 Aborts (each lists the offending Keys, then the run fails):
-  - name_tie: one identity's store Names give two different new Keys: their name slugs differ (D1 tie rule, an
+  - name_tie: one identity's store Names give two different new Keys: their name slugs differ (the tie rule: an
     in-place rename). Names that differ only in what the slug folds (punctuation, case, accents: 'St. Amber' and
     'St Amber') give ONE new Key, so they map; each such identity is listed (spellings), never silently passed.
   - unresolved_type: a row-less Key whose type cannot be parsed, or whose parsed/row type does not map to
@@ -69,10 +69,10 @@ SNAPSHOT_STORES = {
                            "backbone_additions/tile.json"),
 }
 # Every configured store is REQUIRED: build_stores ABORTS and names any absent from the snapshot, so a
-# silently skipped store can never shrink the "every store" proof (spec rev 8 section 3 names each one). A
-# multi-file store is required to have at least one file. The S3 base copies are the deployed task's authority
-# on a stack and have diverged from the committed base before (an S3 base edit git never saw), so they are a
-# store in their own right, not a cross-check. No store is optional.
+# silently skipped store can never shrink the "every store" proof. A multi-file store is required to have at least
+# one file. The S3 base copies are the deployed task's authority on a stack and have diverged from the committed base
+# before (an S3 base edit git never saw), so they are a store in their own right, not a cross-check. No store is
+# optional.
 REQUIRED_STORES = ("ledger_db", "config_db", "base_csv", "base_copies", "attributes_csv",
                    "backbone_files", "backbone_additions")
 
@@ -130,7 +130,7 @@ class KeyMapResult:
 
 
 # which stores' Name is authoritative. config.db Keys carry no Name; a backbone `variant` spelling is a last
-# resort only, and never feeds the tie rule (C1: 162 identities tied on backbone case/accent drift alone).
+# resort only, and never feeds the tie rule (162 identities tied on backbone case/accent drift alone).
 _STORE_NAME_STORES = ("ledger", "base_csv")
 _BACKBONE_STORES = ("backbone", "backbone_additions")
 
@@ -211,7 +211,7 @@ def _middle(old_key: str) -> str:
 
 
 def _canonical(name: str | None) -> str | None:
-    """The identity's canonical Name: the stored Name with any bracketed alias pulled off (D1, rev 8). The old
+    """The identity's canonical Name: the stored Name with any bracketed alias pulled off. The old
     Keys of the bracket identities carry the bracketed slug, but the new Key's name must be the clean Name, so
     the name slug is NEVER read from the old Key."""
     return split_bracket_alias(name)[0] if name else None
@@ -248,7 +248,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
 
     An identity is keyed by the old-Key MIDDLE (branch and uuid stripped): every copy and any row-less copy
     shares it. The canonical Name comes from STORE rows (ledger, base copies) only; a backbone `variant`
-    spelling is a last-resort Name and never feeds the tie rule (C1). The type comes from the ledger or a
+    spelling is a last-resort Name and never feeds the tie rule. The type comes from the ledger or a
     backbone post."""
     res = KeyMapResult()
     by_key: dict[str, list[Record]] = {}
@@ -291,7 +291,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         mid = _middle(old_key)
 
         store_names = store_names_of.get(mid, set())
-        if len({_slug_us(n) for n in store_names}) > 1:   # D1 tie: STORE Names (C1) that give two new Keys
+        if len({_slug_us(n) for n in store_names}) > 1:   # tie: STORE Names that give two new Keys
             res.aborts.setdefault("name_tie", []).append(old_key)
             continue
         if len(store_names) > 1:                        # one new Key either way (the map carries no name): listed
@@ -301,7 +301,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
 
         types = types_of.get(mid, set())
         parsed = parse_type_slug(old_key, known_type_slugs)
-        if len(types) > 1:                              # M1: keep the abort, name both sides
+        if len(types) > 1:                              # keep the abort, name both sides
             key_type = _type_for_slug(parsed[0], types) if parsed else None
             posts = ",".join(sorted(t for t in types if t != key_type))
             res.aborts.setdefault("type_conflict", []).append(
@@ -331,11 +331,11 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         new_to_entries.setdefault(nk, []).append((rank, old_key, old_key in store_backed))
         new_to_mids.setdefault(nk, set()).add(mid)
         if old_key not in store_backed:
-            res.ghosts.append(old_key)                  # M2: backbone-only Key, mapped and listed
+            res.ghosts.append(old_key)                  # backbone-only Key, mapped and listed
         if any(r.protected for r in recs):
             protected_to_new.setdefault(nk, set()).add(old_key)
 
-    # M2: abort only when two STORE-backed old Keys of ONE category land on one new Key (that breaks D2's
+    # Abort only when two STORE-backed old Keys of ONE category land on one new Key (that breaks the
     # per-env, per-category survivor pick); backbone-only ghosts colliding are listed, not aborted.
     for nk, entries in sorted(new_to_entries.items()):
         by_rank: dict[int, list[str]] = {}
@@ -346,7 +346,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
             if len(by_rank[rank]) > 1:
                 res.aborts.setdefault("category_collision", []).extend(sorted(by_rank[rank]))
 
-    # M3: a new Key fed by more than one middle merges two Medusa records; a non-abort list for N1 review.
+    # A new Key fed by more than one middle merges two Medusa records; a non-abort list for review.
     res.merged = sorted(nk for nk, mids in new_to_mids.items() if len(mids) > 1)
     res.spellings = sorted(spellings)
 
@@ -367,7 +367,7 @@ def write_map(result: KeyMapResult, out_csv: Path) -> str:
     """Write the map CSV deterministically and return its sha256 hex digest."""
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     # UTF-8 with no BOM and `\n` line ends (not the csv default `\r\n`), to match the repo's other writers and
-    # fd's P1-8 parser; QUOTE_MINIMAL, so a type name with a comma is quoted.
+    # the backend's parser of the map; QUOTE_MINIMAL, so a type name with a comma is quoted.
     with out_csv.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, lineterminator="\n")
         w.writerow(CSV_COLUMNS)

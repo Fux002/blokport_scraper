@@ -1,7 +1,7 @@
-"""BUILD-CANDIDATE (SC #639, its ECR reads moved to batch-get-image): the build-candidate workflow's two ECR reads run
-here as written, against a fake `aws` that answers with the exact batch-get-image shapes (AWS API reference,
-BatchGetImage and ImageFailure), so the decision is proved red first: an existing tag and every answer that is not a
-plain ImageNotFound for that tag refuse. Also pinned: every `aws ecr` call the workflow makes maps to an action the
+"""BUILD-CANDIDATE (its ECR reads use batch-get-image): the build-candidate workflow's two ECR reads run here as
+written, against a fake `aws` that answers with the exact batch-get-image shapes (AWS API reference, BatchGetImage
+and ImageFailure), so the decision is proved red first: an existing tag and every answer that is not a plain
+ImageNotFound for that tag refuse. Also pinned: every `aws ecr` call the workflow makes maps to an action the
 deploy role's policy (infra/main.tf) grants. Nothing here reaches AWS or GitHub."""
 from __future__ import annotations
 

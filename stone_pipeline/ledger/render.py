@@ -96,7 +96,7 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
 
 
 def _category_pcat(handle: str) -> str | None:
-    """The pcat of a stored category HANDLE (D11), from the category registry (table 577: the one source of a
+    """The pcat of a stored category HANDLE (D11), from the category registry (the one source of a
     category; the ledger's attribute table holds no category rows). An unknown handle raises: a product is never
     rendered under a guessed category."""
     if (cat := category_by_handle(handle)) is None:
@@ -144,12 +144,12 @@ def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
 
 def _dump_attributes(ledger: Ledger, path: Path) -> None:
     """Ledger attribute table -> attributes.csv shape, WITH status/internal (VE2). The ledger does not store
-    those (the files are the single authority, PR3/PR4 ruling), so they are sourced from the real
+    those (the files are the single authority), so they are sourced from the real
     attributes.csv per (category, value); a value absent there defaults to active/not-internal. Carrying them
     is what makes build_combinations filter the RENDER'S combinations exactly as the real build does, so
     ledger.verify still matches once a value is archived. Dormant: with no status columns every value reads
     active/false, so the combination set is byte-identical to today. Category rows are never written: a category
-    is the registry's (table 577), and any a live ledger still holds from before are inert, so they are skipped."""
+    is the registry's, and any a live ledger still holds from before are inert, so they are skipped."""
     from stone_pipeline.config.settings import SETTINGS
     from stone_pipeline.reference.loaders.common import norm
     from stone_pipeline.reference.medusa_files import read_attributes

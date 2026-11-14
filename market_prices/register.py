@@ -264,7 +264,7 @@ class Register(BaseModel):
 
 def supplier_problem(label: str, host: str, domains: dict[str, str]) -> Optional[str]:
     """Why a seller may not be in market_prices, or None: its host is one of the product scraper's suppliers'
-    domains, and supplier prices are a separate contract (<env>/supplier_prices/<brand>/, Mas's split). `domains` is
+    domains, and supplier prices are a separate contract (<env>/supplier_prices/<brand>/). `domains` is
     scrapers.run.supplier_domains() (source id -> site_domain). The one rule for a register site and a price sheet's
     competitor."""
     if matched := sorted(key for key, domain in domains.items() if same_host(host, domain)):

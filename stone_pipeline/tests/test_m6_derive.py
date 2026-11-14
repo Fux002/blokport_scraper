@@ -243,7 +243,7 @@ def test_inventory_unparseable_count_without_area_is_undetermined(ref, cfg):
 
 def test_inventory_made_to_order_word_is_made_to_order_with_no_count(ref, cfg):
     # a supplier word that means made to order or no limit ('Unlimited', 'Made to Order') is the same state as a
-    # free-size shape: on sale with no count (owner 2026-11-05). Never an invented number.
+    # free-size shape: on sale with no count. Never an invented number.
     for word in ("Unlimited", "Made to Order", "made-to-order"):
         row = _slab_row(raw_stock_m2=word)           # the qualitative label the scraper captured
         derive.derive_inventory(row)
@@ -281,7 +281,7 @@ def test_inventory_in_stock_word_on_a_single_piece_listing_is_one(ref, cfg):
 
 def test_inventory_in_stock_word_without_a_count_holds_a_slab(ref, cfg):
     # a slab or tile listing is stocked in a quantity the word does not give: held like a missing stock, never
-    # an invented count (owner 2026-11-05).
+    # an invented count.
     for word in ("In Stock", "Available", "Limited"):
         row = _slab_row(raw_stock_m2=word)
         derive.derive_inventory(row)
@@ -738,7 +738,7 @@ def test_handle_is_namespaced_and_stable(ref, cfg):
 
 
 def test_a_title_is_built_from_parts_written_by_their_fields():
-    # W10: each part by its own field, then the whole by the title's (identifier) rule. On BlokPort every part
+    # each part by its own field, then the whole by the title's (identifier) rule. On BlokPort every part
     # is a name, so a title reads as before; an accent never reaches a title.
     row = _slab_row(variation_name="Brown St Laurent", finish_name="Polished", type_name="Marble")
     derive.derive_title(row)
@@ -759,7 +759,7 @@ def test_a_title_is_built_from_parts_written_by_their_fields():
     ("A marble with &amp; veins that runs through the whole of the slab surface.", False),
 ])
 def test_a_description_passes_only_as_english_prose(text, kept):
-    # W11 (owner O3): a supplier description passes when it is plain English prose; HTML, another language or
+    # a supplier description passes when it is plain English prose; HTML, another language or
     # an internal note falls back to the generated description.
     row = _slab_row(raw_description=text)
     derive.derive_description(row)
@@ -773,7 +773,7 @@ def test_a_passed_description_is_normalised_not_reworded():
 
 
 def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_form(ref):
-    # W24: the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
+    # the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
     from types import SimpleNamespace
     from stone_pipeline.core.text import UnfoldableName
     cfg = SimpleNamespace(collection_country_default="BR", collection_city_default="São Francisco")
@@ -784,7 +784,7 @@ def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_
 
 
 def test_overrides_pass_their_fields_rules(ref):
-    # W22: an override is cleaned by its field's rule; a description override that is not English prose fails
+    # an override is cleaned by its field's rule; a description override that is not English prose fails
     # the row loudly (the row guard dead-letters it), never silently replaced.
     from types import SimpleNamespace
     values = {"title": "São X Polished", "origin_city": "São Paulo"}
@@ -803,7 +803,7 @@ def test_a_size_outside_the_category_s_band_is_flagged_with_the_band(ref):
     row = _slab_row(raw_dimensions="length=3.00m;height=19.75m")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    # the longer plan face is the length (flat-dims, #611), so the typo is the length's
+    # the longer plan face is the length (flat-dims), so the typo is the length's
     lo, hi = derive._plausible_band(*derive.active_pack().dimension_ranges[derive.dimension_category(row)]["length"])
     flag = next(f for f in row.review_flags if f.code == FlagCode.dimension_out_of_range)
     assert (flag.field, flag.raw_value, flag.detail) == ("length", "19.75", f"band {lo:g} to {hi:g}")

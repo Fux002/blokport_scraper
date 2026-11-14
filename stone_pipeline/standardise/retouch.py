@@ -73,7 +73,7 @@ def card_boxes(found, w, h):
     """(sure, labels) of the detected cards, stickers and labels, each as (x0, y0, x1, y1). Sure: up to CARD_MAX_BOX of
     the photo at CARD_MIN_SCORE; they must come off. Labels: small (up to LABEL_MAX_BOX) and weaker, from LABEL_MIN_SCORE:
     a sticker scores lower than a card fan, but so does a clean patch of stone, so a label whose fill is refused stays as
-    shot, like a strap or a reflection (2026-11-01: holding the photo for it lost good slabs)."""
+    shot, like a strap or a reflection (holding the photo for it lost good slabs)."""
     sure, labels = [], []
     for x0, y0, x1, y1, score in found:
         area = (x1 - x0) * (y1 - y0)

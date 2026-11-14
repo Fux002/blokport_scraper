@@ -1,11 +1,11 @@
-"""No produce-path write creates config.db (the scraper manager, 11-12).
+"""No produce-path write creates config.db.
 
 On the sync service config.db is restored from S3 at boot, BEFORE seed_from_yaml, and the restore runs only when the
 local file is absent: a store a produce write had created (empty of sources) would make the restore skip. So the config
 server's boot is the only creator, and every produce-side writer opens the store through the ONE refusing opener,
 store.open_existing_store: the review queue (decisions_store.replace_pending), the minted membership
-(decisions_store.record_minted_membership) and the learned aliases (P2-10 C2). Each refuses loud with no store and
-creates no file; with a seeded store each writes as before.
+(decisions_store.record_minted_membership) and the learned aliases. Each refuses loud with no store and creates no file;
+with a seeded store each writes as before.
 Hermetic: the conftest isolation points BLOKPORT_CONFIG_DB at an absent path; seeded_config_store seeds a private one.
 """
 
