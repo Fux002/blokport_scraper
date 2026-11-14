@@ -13,7 +13,8 @@ into one module per table so a storage bug stays local:
   - leaves      -- backbone leaf-growth verdicts (approve/reject a value onto a variety's allowed set).
   - lots        -- lot sold answers: which scanned slabs of a lot are sold, for a given stock figure.
   - queue       -- the pending review queue produce WRITES and the API READS, plus the card projection.
-  - learned     -- learned aliases (P2-10 C2): proposed by the pipeline, decided active or rejected.
+  - learned     -- learned aliases (P2-10 C2): proposed by the pipeline, decided active or rejected (C6: reviewed,
+                   deleted, and dropped with an unminted or retired identity).
 
 This module is the FACADE: callers use `decisions_store.<name>` and nothing imports the submodules directly,
 so a test that patches `decisions_store.load_decisions` is honored by every internal caller (which resolves
@@ -26,7 +27,8 @@ from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
 from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
                      list_decided_leaves, record_minted_membership, revise_leaf_decision,
                      set_backbone_leaf_decision)
-from .learned import (active_learned_aliases, decide_learned_alias, learned_migration_done,
+from .learned import (LEARNED_STATUSES, active_learned_aliases, clear_learned_for_keys, decide_learned_alias,
+                      delete_learned_alias, learned_alias, learned_migration_done, list_learned_aliases,
                       propose_learned_aliases, record_learned_migration)
 from .lots import answer_lot, lot_answers
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
@@ -36,13 +38,14 @@ from .queue import (approve_leaf_pending, clear_review_pending, decide_leaf_pend
                     pending_payload, replace_pending)
 from .statements import (_statement_rows, _upsert_statement, check_clearable, clear, clear_all,
                          clear_all_statements, clear_for_variety, decide, decide_all, load_decisions,
-                         mint_seed_colors, reject, scope_key, statement_decided_at, statement_rows)
+                         mint_seed_colors, reject, resolution, scope_key, statement_decided_at, statement_rows)
 
 __all__ = [
     "InvalidDecision",
     # statements
     "scope_key", "load_decisions", "decide", "decide_all", "reject", "clear", "clear_all", "check_clearable", "clear_for_variety", "clear_all_statements",
     "_statement_rows", "statement_rows", "_upsert_statement", "mint_seed_colors", "statement_decided_at",
+    "resolution",
     # per-variety origins
     "set_variety_origin", "delete_variety_origin", "variety_origins", "list_variety_origins",
     "get_variety_origin", "clear_variety_origins",
@@ -56,7 +59,8 @@ __all__ = [
     "record_minted_membership", "_LEAF_ATTRIBUTES",
     # learned aliases (P2-10 C2)
     "active_learned_aliases", "propose_learned_aliases", "decide_learned_alias",
-    "learned_migration_done", "record_learned_migration",
+    "learned_migration_done", "record_learned_migration", "list_learned_aliases", "delete_learned_alias",
+    "clear_learned_for_keys", "LEARNED_STATUSES", "learned_alias",
     # lot sold answers
     "answer_lot", "lot_answers",
     # pending review queue

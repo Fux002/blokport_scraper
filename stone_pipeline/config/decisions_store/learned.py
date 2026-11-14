@@ -9,6 +9,7 @@ overwrites a decision and a rejected norm is never proposed again. No reset clea
 
 from __future__ import annotations
 
+import json
 from contextlib import closing
 from typing import Iterable
 
@@ -19,6 +20,7 @@ from ._common import InvalidDecision, _now
 
 _COLUMNS = ("identity_key", "value", "norm", "method", "source", "status", "first_seen", "decided_by", "decided_at")
 _DECISIONS = ("active", "rejected")
+LEARNED_STATUSES = ("proposed", *_DECISIONS)
 
 
 def active_learned_aliases() -> list[dict]:
@@ -62,6 +64,41 @@ def decide_learned_alias(identity_key: str, value: str, status: str, decided_by:
         return conn.execute("UPDATE learned_alias SET status = ?, decided_by = ?, decided_at = ? "
                             "WHERE identity_key = ? AND norm = ?",
                             (status, decided_by, _now(), identity_key, alias_key(value))).rowcount == 1
+
+
+def list_learned_aliases() -> list[dict]:
+    """Every learned alias, one dict per row with all of its columns and its score, sorted by (identity_key, norm): the
+    review API's read (P2-10 C6). Read-only: an absent store reads as empty."""
+    with closing(store.read_store()) as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT {', '.join(_COLUMNS)}, score FROM learned_alias ORDER BY identity_key, norm")]
+
+
+def learned_alias(identity_key: str, norm: str) -> dict | None:
+    """One learned alias by its Key and norm, with all of its columns and its score, or None (read-only)."""
+    with closing(store.read_store()) as conn:
+        row = conn.execute(f"SELECT {', '.join(_COLUMNS)}, score FROM learned_alias WHERE identity_key = ? AND norm = ?",
+                           (identity_key, norm)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_learned_alias(identity_key: str, norm: str) -> bool:
+    """Remove one learned alias, found by its Key and norm: the ONLY way a learned value leaves the table (the review
+    API's delete). Forgotten, not rejected: the norm may be proposed again. False when no such row exists."""
+    with closing(store.open_existing_store()) as conn, conn:
+        return conn.execute("DELETE FROM learned_alias WHERE identity_key = ? AND norm = ?",
+                            (identity_key, norm)).rowcount == 1
+
+
+def clear_learned_for_keys(keys: Iterable[str]) -> int:
+    """Drop every learned alias of these Keys, whatever its status: an unmint or retire removes the identity, and its
+    learned rows with it (the matcher re-proposes against whatever identity comes back). Returns rows dropped."""
+    keys = sorted(set(keys))
+    if not keys:
+        return 0
+    with closing(store.open_existing_store()) as conn, conn:
+        return conn.execute("DELETE FROM learned_alias WHERE identity_key IN (SELECT value FROM json_each(?))",
+                            (json.dumps(keys),)).rowcount
 
 
 def learned_migration_done(name: str) -> bool:
