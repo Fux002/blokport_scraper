@@ -96,7 +96,7 @@ Every run folder carries the brand's register as it stood when the run started: 
 {"brand": "blokport", "contract_version": "4", "run_id": "20261114T150000Z", "sources": [
   {"brand": "blokport", "source_key": "cereser_carrara", "source": "file", "seller_name": "Cereser Listino Carrara",
    "seller_type": "wholesaler", "country_iso_2": "it", "served_market": "EU", "price_basis": "net",
-   "net_discount": "0.2", "net_discount_stated_by": "owner", "vat_rate": null, "vat_rate_stated_by": null,
+   "net_markup": "0.20", "net_markup_stated_by": "owner", "vat_rate": null, "vat_rate_stated_by": null,
    "seller_is_our_supplier": false,
    "supplier_key": null, "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}]}
 ```
@@ -112,8 +112,8 @@ Every run folder carries the brand's register as it stood when the run started: 
 | country_iso_2 | The seller's country, ISO 3166 alpha-2 in LOWER case (`it`), `^[a-z]{2}$`: the pricing module keys countries that way (as `origin_iso_2`); its observations' `seller_country` stays as the register writes it (upper case) |
 | served_market | As its observations carry it, as the register writes it (`EU` included) |
 | price_basis | `list` or `net`: whether its prices are list prices or net prices. Declared on every approved site and every competitor; never defaulted |
-| net_discount | For a `net` source only (else `null`): the exact decimal in [0, 1) that its net prices are below list (`0.2`: list = net / (1 - 0.2)) |
-| net_discount_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `net_discount` is |
+| net_markup | For a `net` source only (else `null`): the exact decimal, 0 or more, that grosses its net prices up to list: list = net x (1 + net_markup) (`0.20`: EUR 100 net is EUR 120 list) |
+| net_markup_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `net_markup` is |
 | vat_rate | The VAT rate as an exact decimal (`0.2`), only when the site or the owner states it; else `null`, never inferred |
 | vat_rate_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `vat_rate` is |
 | seller_is_our_supplier, supplier_key | As its observations carry them |
