@@ -41,10 +41,24 @@ data "aws_ssm_parameter" "polonine_password_dev" {
 data "aws_ssm_parameter" "polonine_username" {
   count = var.polonine_username_ssm_name == "" ? 0 : 1
   name  = var.polonine_username_ssm_name
+  lifecycle {
+    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    precondition {
+      condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
+      error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."
+    }
+  }
 }
 data "aws_ssm_parameter" "polonine_password" {
   count = var.polonine_password_ssm_name == "" ? 0 : 1
   name  = var.polonine_password_ssm_name
+  lifecycle {
+    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    precondition {
+      condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
+      error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."
+    }
+  }
 }
 
 locals {
