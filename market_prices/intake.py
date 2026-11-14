@@ -35,7 +35,7 @@ from market_prices import config
 from market_prices.brand import output_key, require_brand_key
 from market_prices.collect import RunResult, Stamp, counted_reasons, invalid_reason, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
-from market_prices.publish import publish_run
+from market_prices.publish import move_latest, publish_run
 from market_prices.register import load_register
 from market_prices.register_file import register_sources
 from market_prices.run_input import run_brand
@@ -325,10 +325,17 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
             continue
         run_dir = write_run(result, root)
         if not dry_run:
-            if (held := _held_by_another_run(client, bucket, brand, result.run_id, run_dir)) is not None:
-                refused.append((key, held))
+            held = published_manifest(client, bucket, output_key(brand, result.run_id, MANIFEST_NAME))
+            if not held:
+                publish_run(client, bucket, brand, run_dir)
+            elif _is_own_run(held, run_dir):
+                # the file's own run, published before a crash: its folder is written once, so only what the crash
+                # left (latest, then the record) is finished
+                move_latest(client, bucket, brand, result.run_id, held["files"][config.OBSERVATIONS_FILE]["rows"])
+            else:
+                refused.append((key, f"run folder {result.run_id} already holds another run; the file is left for "
+                                     f"the next run"))
                 continue
-            publish_run(client, bucket, brand, run_dir)
             record[sha] = {"sha256": sha, "key": key, "version_id": file.version_id, "layout_id": layout.layout_id,
                            "run_id": result.run_id}
             write_absorbed(client, bucket, record_key, record)
@@ -360,16 +367,11 @@ def _fetch(client, bucket: str, key: str) -> IntakeFile:
                       data=answer["Body"].read())
 
 
-def _held_by_another_run(client, bucket: str, brand: str, run_id: str, run_dir: Path) -> Optional[str]:
-    """Why this file's run folder cannot be published, or None. A folder already holding exactly these observations
-    is this file's own run, published before its record was written."""
-    held = published_manifest(client, bucket, output_key(brand, run_id, MANIFEST_NAME))
-    if not held:
-        return None
+def _is_own_run(held: dict, run_dir: Path) -> bool:
+    """Whether the published run folder holds exactly this file's observations: its own run, published before its
+    record was written."""
     theirs = held.get("files", {}).get(config.OBSERVATIONS_FILE, {}).get("sha256")
-    if theirs == file_entry(run_dir / config.OBSERVATIONS_FILE)["sha256"]:
-        return None
-    return f"run folder {run_id} already holds another run; the file is left for the next run"
+    return theirs == file_entry(run_dir / config.OBSERVATIONS_FILE)["sha256"]
 
 
 def read_absorbed(client, bucket: str, key: str) -> dict[str, dict[str, str]]:
