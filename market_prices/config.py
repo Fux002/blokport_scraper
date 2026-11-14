@@ -92,6 +92,8 @@ PILOT_SAMPLE_ROWS = 5
 INTAKE_DIR_NAME = "intake"
 ABSORBED_FILE = "intake_absorbed.csv"
 INTAKE_RUNS_DIR_NAME = "intake"
+# Under the runs root: where the redo rebuilds a lost run from its files, to compare with what was published
+INTAKE_REBUILD_DIR_NAME = "rebuild"
 SHEET_COLLECTOR_VERSION = "sheet-intake/1"
 # A sheet row's site_status decision: the owner supplied the file, so no terms gate applies.
 FILE_DECISION = "supplied"
