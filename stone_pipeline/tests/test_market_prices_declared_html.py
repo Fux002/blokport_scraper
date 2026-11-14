@@ -368,6 +368,11 @@ def test_a_declared_html_site_loads_with_its_declaration():
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
      "struck"),                                                          # struck text is never the price
     ({"html": {**CARDS, "specs": {"Material": {"class": "specs", "label": "Material", "text": True}}}}, "one of"),
+    # F1 (reviewer 2's must-fix): the price is the page's visible text, never a JSON or an attribute value
+    ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"json": ["data-ms-tracking-item", "price"]}}}},
+     "visible text"),
+    ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "attr": "data-price"}}}},
+     "visible text"),
     ({"discovery": {"sitemaps": ["/sitemap.xml"], "product_path": "^/p/"}}, "listing_pages"),  # read: listing_pages
 ])
 def test_a_declaration_that_is_not_whole_is_refused(change, message):
