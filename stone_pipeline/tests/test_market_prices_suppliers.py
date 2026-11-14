@@ -22,6 +22,8 @@ import yaml
 from market_prices import intake
 from market_prices.collect import _observation, stamp_for
 from market_prices.layouts import LayoutError, Layouts, load_layouts
+from market_prices.specs import load_countries
+from market_prices.vocabulary import load_vocabulary
 from market_prices.register import Register, RegisterError, check_suppliers, load_register
 from market_prices.schema import ListingFacts, Observation, columns, csv_values
 from market_prices.text import same_site
@@ -231,7 +233,8 @@ def test_a_sheet_row_copies_its_competitors_supplier_flag():
     for key, flag in (("ferraz", True), (None, False)):
         layouts = Layouts.model_validate(_layouts(key, site_domain="www.ferrazbrasilinventory.com" if key
                                                   else "ferraz-rival.example"))
-        (row,) = intake.absorb_file(file, layouts, "bucket", "blokport").observations
+        (row,) = intake.absorb_file(file, layouts, load_vocabulary("blokport"), load_countries(), "bucket",
+                                    "blokport").observations
         assert (row.seller_is_our_supplier, row.supplier_key) == (flag, key)
 
 

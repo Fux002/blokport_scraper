@@ -22,6 +22,8 @@ from botocore.exceptions import ClientError
 from market_prices import collect, config, intake
 from market_prices.collect import _observation, stamp_for
 from market_prices.layouts import LayoutError, Layouts, check_ids_apart, load_layouts
+from market_prices.specs import load_countries
+from market_prices.vocabulary import load_vocabulary
 from market_prices.register import Register
 from market_prices.schema import (
     ListingFacts, MalformedListing, Observation, PriceStatus, Provenance, SiteStatus, Source, columns,
@@ -91,7 +93,12 @@ def _file(data: bytes = STONECORP, key: str = f"{PREFIX}/intake/stonecorp.csv", 
 
 
 def _absorb(data: bytes = STONECORP, layouts: Layouts | None = None, key: str = f"{PREFIX}/intake/stonecorp.csv"):
-    return intake.absorb_file(_file(data, key), layouts or _layouts(), "bucket", "blokport")
+    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport")
+
+
+def _words():
+    """blokport's vocabulary and the country table, which a row's specs are read through (contract v3)."""
+    return load_vocabulary("blokport"), load_countries()
 
 
 def _status(result, site_id="stonecorp_gb") -> SiteStatus:
@@ -866,7 +873,7 @@ def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
     headers = _OWNER_TABS[tab]
     data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
     key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
-    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), "bucket", "blokport")
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport")
     return {row.listing_key: row for row in result.observations}
 
 
@@ -914,7 +921,7 @@ def test_an_owner_row_with_no_honest_spec_mapping_is_refused_with_its_reason_and
             {**base, "Finish": "Gepolijst", "Origin": "Not defined in catalog legend"},
             {**base, "Finish": "Letano", "Catalog page": 11}))]})
     result = intake.absorb_file(_file(data, f"{PREFIX}/intake/owner_brachot.xlsx"), load_layouts("blokport"),
-                                "bucket", "blokport")
+                                *_words(), "bucket", "blokport")
     (row,) = result.observations
     assert (row.finish, row.origin_iso_2, row.stated_specs["Origin"]) == ("Polished", None,
                                                                          "Not defined in catalog legend")

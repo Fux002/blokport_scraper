@@ -13,6 +13,7 @@ from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
 from market_prices.register import Country, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
+from market_prices.specs import SpecLabels
 
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 # A bare host such as "www.stonecorp.co.uk": lowercase labels, no scheme, path, port or spaces.
@@ -138,6 +139,8 @@ class Layout(BaseModel):
     grade: Optional[Words] = None
     number: NumberFormat
     statements: SheetStatements = SheetStatements()
+    # contract v3: the column (header) stating each spec, and a bare thickness number's unit (CONTRACT.md "Specs")
+    specs: Optional[SpecLabels] = None
     on_request_words: tuple[Words, ...] = ()
     currency_symbols: dict[Words, Currency] = {}
 
@@ -159,7 +162,8 @@ class Layout(BaseModel):
             raise ValueError(f"layout {self.layout_id} names no price column (price or price_by_competitor)")
         named = (self.price, self.unit, self.currency, self.min_qty, self.availability, self.grade,
                  self.competitor.column)
-        for column in (*self.listing_key, *self.listing_text, *self.price_by_competitor.values(),
+        specs = self.specs.all_labels() if self.specs is not None else ()
+        for column in (*self.listing_key, *self.listing_text, *self.price_by_competitor.values(), *specs,
                        *(column for column in named if column is not None)):
             if name_key(column) not in keys:
                 raise ValueError(f"layout {self.layout_id}: column {column!r} is not a header")

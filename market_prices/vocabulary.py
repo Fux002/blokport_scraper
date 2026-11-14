@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, StringConstraints, field_validator, model_validator
 
@@ -70,8 +70,29 @@ class Vocabulary(BaseModel):
     scope: Scope
     languages_by_market: dict[Market, tuple[Language, ...]] = {}
     categories: tuple[Category, ...] = ()
+    # Contract v3 (CONTRACT.md "Specs"): each canonical finish / material word to the words, in any language, that mean
+    # it; `unstated` words mean the seller stated nothing. Every word here comes from a source's own evidence.
+    finishes: dict[Word, tuple[Word, ...]] = {}
+    materials: dict[Word, tuple[Word, ...]] = {}
+    unstated: tuple[Word, ...] = ()
     # market -> the compared words of every category in its languages, built once at load
     _words_by_market: dict[str, tuple[str, ...]] = PrivateAttr(default_factory=dict)
+    # compared word -> canonical word, and the compared unstated words, built once at load
+    _finish_by_key: dict[str, str] = PrivateAttr(default_factory=dict)
+    _material_by_key: dict[str, str] = PrivateAttr(default_factory=dict)
+    _unstated_keys: frozenset[str] = PrivateAttr(default_factory=frozenset)
+
+    @model_validator(mode="after")
+    def _each_word_means_one_thing(self) -> "Vocabulary":
+        finishes, materials = _word_map("finish", self.finishes), _word_map("material", self.materials)
+        unstated = {match_key(word): word for word in self.unstated}
+        if empty := [word for key, word in unstated.items() if not key]:
+            raise ValueError(f"unstated {empty} has no letters or digits to compare")
+        if taken := sorted(word for key, word in unstated.items() if key in finishes or key in materials):
+            raise ValueError(f"unstated {taken} is also a finish or material word")
+        self._finish_by_key, self._material_by_key = finishes, materials
+        self._unstated_keys = frozenset(unstated)
+        return self
 
     @model_validator(mode="after")
     def _a_whole_declaration(self) -> "Vocabulary":
@@ -114,6 +135,32 @@ class Vocabulary(BaseModel):
                                   f"(declared: {sorted(self.languages_by_market)})")
         text = match_key(listing_text or "")
         return any(word in text for word in words)
+
+    def finish_for(self, stated: str) -> Optional[str]:
+        """The canonical finish a stated finish means, the whole value compared; None when no finish word is it."""
+        return self._finish_by_key.get(match_key(stated))
+
+    def material_for(self, stated: str) -> Optional[str]:
+        """The canonical material a stated material means, the whole value compared; None when no word is it."""
+        return self._material_by_key.get(match_key(stated))
+
+    def is_unstated(self, stated: str) -> bool:
+        """Whether a stated value is one of the brand's words for "not stated"."""
+        return match_key(stated) in self._unstated_keys
+
+
+def _word_map(kind: str, mapping: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """Each compared word (a canonical names itself) to its canonical; a word under two canonicals is refused."""
+    by_key: dict[str, str] = {}
+    for canonical, words in mapping.items():
+        for word in (canonical, *words):
+            key = match_key(word)
+            if not key:
+                raise ValueError(f"{kind} {word!r} has no letters or digits to compare")
+            if by_key.get(key, canonical) != canonical:
+                raise ValueError(f"{kind} word {word!r} means more than one {kind}: {by_key[key]!r}, {canonical!r}")
+            by_key[key] = canonical
+    return by_key
 
 
 def load_vocabulary(run_brand: str, vocabulary_dir: Path = config.VOCABULARY_DIR) -> Vocabulary:

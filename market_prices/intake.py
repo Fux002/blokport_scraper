@@ -17,6 +17,7 @@ written locally and nothing is published or recorded.
 
 from __future__ import annotations
 
+import collections
 import csv
 import hashlib
 import io
@@ -32,7 +33,7 @@ from pydantic import ValidationError
 
 from market_prices import config
 from market_prices.brand import output_key, require_brand_key
-from market_prices.collect import RunResult, Stamp, stamp_for, write_run
+from market_prices.collect import RunResult, Stamp, counted_reasons, invalid_reason, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
 from market_prices.publish import publish_run
 from market_prices.register import load_register
@@ -42,6 +43,8 @@ from market_prices.schema import (
 )
 from market_prices.sheet_files import FileRefused, Table, read_tables
 from market_prices.sheet_values import cell_text, read_currency, read_price
+from market_prices.specs import UNSTATED_NOTE, Countries, Specs, load_countries, read_specs
+from market_prices.vocabulary import Vocabulary, load_vocabulary
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, SETTINGS
 from stone_pipeline.io.deliverables import MANIFEST_NAME, file_entry, published_manifest
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
@@ -76,12 +79,14 @@ class _Matched:
 
 
 # --- one file -> one run ---------------------------------------------------------------------------------------------
-def absorb_file(file: IntakeFile, layouts: Layouts, bucket: str, brand: str) -> RunResult:
+def absorb_file(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
+                brand: str) -> RunResult:
     """The file's rows and one status per competitor in it. Raises FileRefused when the whole file cannot be read."""
-    return _absorb(file, layouts, bucket, brand)[1]
+    return _absorb(file, layouts, vocabulary, countries, bucket, brand)[1]
 
 
-def _absorb(file: IntakeFile, layouts: Layouts, bucket: str, brand: str) -> tuple[Layout, RunResult]:
+def _absorb(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
+            brand: str) -> tuple[Layout, RunResult]:
     matched = _match_layout(file.key, read_tables(PurePosixPath(file.key).name, file.data), layouts)
     layout, rows = matched.layout, matched.table.rows
     stamp = stamp_for(file.last_modified)
@@ -89,6 +94,8 @@ def _absorb(file: IntakeFile, layouts: Layouts, bucket: str, brand: str) -> tupl
     named = _file_competitor(file.key, layout, rows, layouts)
     kept: dict[str, dict[str, Observation]] = {}
     malformed: dict[str, int] = {}
+    reasons: dict[str, collections.Counter] = {}
+    unstated: dict[str, int] = {}
     duplicates: dict[str, int] = {}
     data_rows = 0
     for index in range(layout.header_row, len(rows)):
@@ -100,10 +107,14 @@ def _absorb(file: IntakeFile, layouts: Layouts, bucket: str, brand: str) -> tupl
         site_id = competitor.competitor_id
         kept.setdefault(site_id, {})
         try:
-            row = _observation(file, bucket, brand, layout, header, cells, index, matched.table, competitor, stamp)
-        except (MalformedListing, ValidationError):
+            row, specs = _observation(file, bucket, brand, layout, header, cells, index, matched.table, competitor,
+                                      stamp, vocabulary, countries)
+        except (MalformedListing, ValidationError) as exc:
             malformed[site_id] = malformed.get(site_id, 0) + 1
+            why = str(exc) if isinstance(exc, MalformedListing) else invalid_reason(exc)
+            reasons.setdefault(site_id, collections.Counter())[why] += 1
             continue
+        unstated[site_id] = unstated.get(site_id, 0) + specs.unstated
         if row.listing_key in kept[site_id]:
             duplicates[site_id] = duplicates.get(site_id, 0) + 1
             continue
@@ -112,7 +123,8 @@ def _absorb(file: IntakeFile, layouts: Layouts, bucket: str, brand: str) -> tupl
         raise FileRefused(f"{file.key}: no data rows under the header (row {layout.header_row})")
     observations = tuple(row for site_id in sorted(kept) for _key, row in sorted(kept[site_id].items()))
     statuses = tuple(_status(site_id, brand, len(kept[site_id]), malformed.get(site_id, 0),
-                             duplicates.get(site_id, 0), stamp) for site_id in sorted(kept))
+                             duplicates.get(site_id, 0), reasons.get(site_id, collections.Counter()),
+                             unstated.get(site_id, 0), stamp) for site_id in sorted(kept))
     return layout, RunResult(brand=brand, run_id=stamp.run_id, observations=observations, statuses=statuses)
 
 
@@ -191,8 +203,10 @@ def _raw(cells: list[object], header: list[str], column: Optional[str]) -> objec
 
 
 def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, header: list[str], cells: list[object],
-                 index: int, table: Table, competitor: Competitor, stamp: Stamp) -> Observation:
-    """The one place a sheet row becomes an observation."""
+                 index: int, table: Table, competitor: Competitor, stamp: Stamp, vocabulary: Vocabulary,
+                 countries: Countries) -> tuple[Observation, Specs]:
+    """The one place a sheet row becomes an observation, with the specs read through the layout's `specs` (their
+    unstated count is the caller's to report)."""
     if len(cells) > len(header):
         raise MalformedListing(f"row {index + 1} has cells past the last header")
     gaps = sorted(column for row, column in table.formula_gaps if row == index)
@@ -213,16 +227,18 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     listed_currency = column_currency or price.currency
     listed_unit = _cell(cells, header, layout.unit)
     said = layout.statements
-    fields = {name_key(column) for column in layout.field_columns(competitor.competitor_id)}
-    specs = {layout.headers[position]: value for position, cell in enumerate(cells)
-             if header[position] not in fields and (value := cell_text(cell))}
+    stated = {layout.headers[position]: value for position, cell in enumerate(cells) if (value := cell_text(cell))}
+    specs = read_specs(stated, layout.specs, vocabulary, countries)
+    fields = {name_key(column) for column in (*layout.field_columns(competitor.competitor_id), *specs.used)}
+    kept = {header_text: value for header_text, value in stated.items() if name_key(header_text) not in fields}
     grade, min_qty = _cell(cells, header, layout.grade), _cell(cells, header, layout.min_qty)
-    return Observation(
+    row = Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,
         seller_name=competitor.names[0], seller_type=competitor.seller_type, seller_country=competitor.seller_country,
         served_market=competitor.served_market, seller_is_our_supplier=competitor.supplier_key is not None,
         supplier_key=competitor.supplier_key, listing_key="|".join(key_parts),
-        source_url=_source_url(bucket, file, table.name, index), listing_text=text, stated_specs=specs,
+        source_url=_source_url(bucket, file, table.name, index), listing_text=text, stated_specs=kept,
+        **specs.columns(),
         grade_text=grade, price_text=price.text, price_amount=price.amount,
         currency=listed_currency or said.currency, price_status=price.status,
         vat_basis=said.vat_basis or VatBasis.unknown, unit_text=listed_unit or said.unit_text,
@@ -233,10 +249,12 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
             "delivery_text": _said(said.delivery_text), "delivery_included": _said(said.delivery_included),
             "grade_text": _listed(grade), "price_amount": _listed(price.amount),
             "currency": _either(listed_currency, said.currency), "min_qty_text": _listed(min_qty),
+            **specs.provenance(),
         },
         observed_at=stamp.observed_at, run_id=stamp.run_id,
         collector_version=f"{config.SHEET_COLLECTOR_VERSION}:{layout.layout_id}",
     )
+    return row, specs
 
 
 def _listed(value: object) -> Provenance:
@@ -257,13 +275,17 @@ def _source_url(bucket: str, file: IntakeFile, sheet: Optional[str], index: int)
     return f"s3://{bucket}/{quote(file.key, safe='/')}?versionId={quote(file.version_id, safe='')}#{place}"
 
 
-def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int, stamp: Stamp) -> SiteStatus:
+def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int, reasons: collections.Counter,
+            unstated: int, stamp: Stamp) -> SiteStatus:
+    """One competitor's status: the refused rows named by their reasons, and the unstated words counted, as a site's."""
+    why = f": {counted_reasons(reasons)}" if malformed else ""
     if not rows:
-        status, detail = SiteRunStatus.unavailable_error, f"no readable rows ({malformed} malformed)"
+        status, detail = SiteRunStatus.unavailable_error, f"no readable rows ({malformed} malformed{why})"
     elif malformed:
-        status, detail = SiteRunStatus.partial, f"{malformed} malformed rows skipped"
+        status, detail = SiteRunStatus.partial, f"{malformed} malformed rows skipped{why}"
     else:
         status, detail = SiteRunStatus.ok, ""
+    detail = "; ".join(part for part in (detail, f"{UNSTATED_NOTE} x{unstated}" if unstated else "") if part)
     return SiteStatus(contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=site_id,
                       status=status, rows=rows, malformed_listings=malformed, duplicate_listings=duplicates,
                       detail=detail, terms_checked_on=None, decision=config.FILE_DECISION,
@@ -273,6 +295,7 @@ def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int
 # --- the intake folder, the record and the publish --------------------------------------------------------------------
 def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dry_run: bool) -> IntakeOutcome:
     """Every intake file of the brand, in key order, each isolated: a refused file never stops the others."""
+    vocabulary, countries = load_vocabulary(brand), load_countries()
     record_key = output_key(brand, config.ABSORBED_FILE)
     record = read_absorbed(client, bucket, record_key)
     seen = set(record)
@@ -291,7 +314,7 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
             continue
         seen.add(sha)
         try:
-            layout, result = _absorb(file, layouts, bucket, brand)
+            layout, result = _absorb(file, layouts, vocabulary, countries, bucket, brand)
         except FileRefused as exc:
             refused.append((key, str(exc)))
             continue

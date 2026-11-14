@@ -67,6 +67,11 @@ class SiteRunStatus(str, Enum):
     disallowed_robots = "disallowed_robots"
 
 
+# contract v3: each spec column and the column holding it as written
+SPEC_TEXTS = {"thickness_mm": "thickness_text", "finish": "finish_text", "material_type": "material_text",
+              "origin_iso_2": "origin_text"}
+
+
 class Observation(BaseModel):
     """One listing seen at one site in one run. Null means the site did not say."""
 
@@ -86,6 +91,16 @@ class Observation(BaseModel):
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
     stated_specs: dict[str, str]
+    # contract v3 (CONTRACT.md "Specs"): the normalised specs, each as written, and the label each was read from
+    thickness_mm: Optional[str] = Field(pattern=r"^(0|[1-9]\d*)(\.\d*[1-9])?$")
+    finish: Optional[str]
+    material_type: Optional[str]
+    origin_iso_2: Optional[str] = Field(pattern=r"^[a-z]{2}$")
+    thickness_text: Optional[str]
+    finish_text: Optional[str]
+    material_text: Optional[str]
+    origin_text: Optional[str]
+    spec_labels: dict[str, str]
     grade_text: Optional[str]
     price_text: Optional[str]
     price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
@@ -106,6 +121,18 @@ class Observation(BaseModel):
     def _amount_matches_status(self) -> "Observation":
         if (self.price_status is PriceStatus.priced) != (self.price_amount is not None):
             raise ValueError("price_amount is set exactly when price_status is priced")
+        return self
+
+    @model_validator(mode="after")
+    def _a_spec_is_stated_whole(self) -> "Observation":
+        """A spec column is set exactly when its text, its label and provenance `listing` are."""
+        for column, text in SPEC_TEXTS.items():
+            stated = {getattr(self, column) is not None, getattr(self, text) is not None, column in self.spec_labels,
+                      self.provenance.get(column) is Provenance.listing}
+            if len(stated) != 1:
+                raise ValueError(f"{column} is not stated whole (its value, {text}, spec_labels and provenance)")
+        if unknown := sorted(set(self.spec_labels) - set(SPEC_TEXTS)):
+            raise ValueError(f"spec_labels names {unknown}, not a spec column")
         return self
 
     @model_validator(mode="after")
