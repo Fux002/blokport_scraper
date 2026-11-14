@@ -6,6 +6,7 @@ CONTRACT_VERSION = "2"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
+VOCABULARY_DIR = Path(__file__).resolve().parent / "vocabulary"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
@@ -55,10 +56,8 @@ WOO_MAX_DIGITS = 18
 DESCRIPTION_SPEC_MAX_LABEL_CHARS = 60
 DESCRIPTION_SPEC_MAX_VALUE_CHARS = 200
 
-# The dev pilot (market_prices/pilot.py): ONE approved site of ONE brand, run against dev's bucket, then a summary with
-# the first rows. It refuses any site the register has not approved, and any environment but development.
-PILOT_BRAND = "blokport"
-PILOT_SITE_ID = "ceralith"
+# The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
+# with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
 PILOT_SAMPLE_ROWS = 5
 
 # The sheet intake (market_prices/intake.py): the owner's competitor price sheets, from

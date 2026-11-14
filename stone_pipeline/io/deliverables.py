@@ -25,6 +25,8 @@ THE CONTRACT (Blokport's import reads it):
   * Files in to_upload/ that are not deliverables (settings.UPLOAD_SIDE_FILES: the operator checklist, the photo
     process's list, the texture fingerprints) are published by the same rule beside them, recorded under the
     manifest's `side_files`, never under `files`: no importer reads them through it.
+  * The manifest carries `brand`, whose deliverables these are (the produce's SCRAPER_BRAND; a market-price run's
+    brand), beside contract, env, run_id and produced_at. Readers take the fields they need by name.
   * The manifest on S3 is the ONLY record of what is published; no local state.
 
 Local source is the per-env folder (to_upload/<env>/) resolved by BLOKPORT_ENV; the S3 prefix uses ENV_SEGMENT
@@ -43,7 +45,7 @@ from pathlib import Path
 
 from botocore.exceptions import ClientError
 
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
+from stone_pipeline.config.settings import BRAND, ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
 from stone_pipeline.config.standardise_settings import STANDARDISE
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
@@ -132,11 +134,12 @@ def _put_manifest(client, bucket: str, key: str, manifest: dict) -> None:
 
 
 def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None,
-                         only: set[str] | None = None) -> dict:
-    """Upload the changed deliverables and side files under `local`, then write the manifest. `only` restricts the
-    publish, and so the manifest, to exactly those names whatever else `local` holds (a factory reset: the seed base
-    is the one valid deliverable for a wiped Medusa, so no other deliverable and no side file is listed); a name in
-    `only` that `local` lacks raises before anything is written. Returns
+                         only: set[str] | None = None, *, brand: str) -> dict:
+    """Upload the changed deliverables and side files under `local`, then write the manifest, which carries `brand`
+    (whose deliverables these are: every manifest says it). `only` restricts the publish, and so the manifest, to
+    exactly those names whatever else `local` holds (a factory reset: the seed base is the one valid deliverable for a
+    wiped Medusa, so no other deliverable and no side file is listed); a name in `only` that `local` lacks raises
+    before anything is written. Returns
     {"uploaded": [...], "unchanged": [...], "side": [<side files uploaded>], "manifest": <the manifest written>}."""
     if only is not None and (missing := sorted(n for n in only if not (local / n).is_file())):
         raise FileNotFoundError(f"cannot publish {missing}: not in {local}")
@@ -159,7 +162,7 @@ def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: 
             side += [name] if changed else []
         else:
             (uploaded if changed else unchanged).append(name)
-    manifest = {"contract": MANIFEST_CONTRACT, "env": ENV_NAME, "run_id": run_id,
+    manifest = {"contract": MANIFEST_CONTRACT, "brand": brand, "env": ENV_NAME, "run_id": run_id,
                 "produced_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
                 **sections}
     _put_manifest(client, bucket, manifest_key, manifest)
@@ -225,7 +228,7 @@ def publish_to_upload(client, run_id: str | None, only: set[str] | None = None) 
     prefix). The one entry point for every caller that publishes deliverables: a produce (the whole folder), and
     a factory reset (only the reseeded base)."""
     return publish_deliverables(client, S3_BUCKET, SETTINGS.paths.to_upload_dir,
-                                f"{ENV_SEGMENT}/scraper/to_upload", run_id, only)
+                                f"{ENV_SEGMENT}/scraper/to_upload", run_id, only, brand=BRAND)
 
 
 def upload_all(run_id: str | None) -> int:

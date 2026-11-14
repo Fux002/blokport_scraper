@@ -31,6 +31,7 @@ from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
 from market_prices import config
+from market_prices.brand import output_key, require_brand_key
 from market_prices.collect import RunResult, Stamp, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
 from market_prices.publish import publish_run
@@ -41,7 +42,7 @@ from market_prices.schema import (
 )
 from market_prices.sheet_files import FileRefused, Table, read_tables
 from market_prices.sheet_values import cell_text, read_currency, read_price
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, SETTINGS
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, SETTINGS
 from stone_pipeline.io.deliverables import MANIFEST_NAME, file_entry, published_manifest
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
@@ -268,14 +269,14 @@ def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int
 # --- the intake folder, the record and the publish --------------------------------------------------------------------
 def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dry_run: bool) -> IntakeOutcome:
     """Every intake file of the brand, in key order, each isolated: a refused file never stops the others."""
-    prefix = config.S3_BRAND_PREFIX.format(env_segment=ENV_SEGMENT, brand=brand)
-    record_key = f"{prefix}/{config.ABSORBED_FILE}"
+    record_key = output_key(brand, config.ABSORBED_FILE)
     record = read_absorbed(client, bucket, record_key)
     seen = set(record)
     absorbed: list[tuple[str, str]] = []
     skipped: list[str] = []
     refused: list[tuple[str, str]] = []
-    for key, size in _listed_files(client, bucket, f"{prefix}/{config.INTAKE_DIR_NAME}/"):
+    for key, size in _listed_files(client, bucket, output_key(brand, config.INTAKE_DIR_NAME) + "/"):
+        require_brand_key(brand, key)       # brand_scoped_output: a listed key is read only inside the brand's prefix
         if size > config.MAX_INTAKE_FILE_BYTES:
             refused.append((key, f"{size} bytes is over the cap of {config.MAX_INTAKE_FILE_BYTES} bytes"))
             continue
@@ -292,7 +293,7 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
             continue
         run_dir = write_run(result, root)
         if not dry_run:
-            if (held := _held_by_another_run(client, bucket, prefix, result.run_id, run_dir)) is not None:
+            if (held := _held_by_another_run(client, bucket, brand, result.run_id, run_dir)) is not None:
                 refused.append((key, held))
                 continue
             publish_run(client, bucket, brand, run_dir)
@@ -327,10 +328,10 @@ def _fetch(client, bucket: str, key: str) -> IntakeFile:
                       data=answer["Body"].read())
 
 
-def _held_by_another_run(client, bucket: str, prefix: str, run_id: str, run_dir: Path) -> Optional[str]:
+def _held_by_another_run(client, bucket: str, brand: str, run_id: str, run_dir: Path) -> Optional[str]:
     """Why this file's run folder cannot be published, or None. A folder already holding exactly these observations
     is this file's own run, published before its record was written."""
-    held = published_manifest(client, bucket, f"{prefix}/{run_id}/{MANIFEST_NAME}")
+    held = published_manifest(client, bucket, output_key(brand, run_id, MANIFEST_NAME))
     if not held:
         return None
     theirs = held.get("files", {}).get(config.OBSERVATIONS_FILE, {}).get("sha256")

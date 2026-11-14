@@ -40,8 +40,8 @@ EXPECTED_DOMAINS = {
 
 def _site(site_id="shop", base_url="https://shop.example", **overrides) -> dict:
     site = {
-        "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
-        "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
+        "brand": "blokport", "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant",
+        "seller_country": "BE", "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
         "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-02", "summary": "No clause on copying."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
     }

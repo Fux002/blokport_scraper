@@ -107,7 +107,7 @@ def test_the_contract_is_version_2_and_source_is_the_second_column():
 
 def test_a_crawl_row_says_it_came_from_a_site():
     site = Register.model_validate({"brand": "blokport", "sites": [{
-        "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
+        "brand": "blokport", "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
         "served_market": "NL", "platform": "woocommerce_store", "base_url": "https://shop.example",
         "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02", "summary": "None."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
@@ -199,7 +199,7 @@ def test_a_competitor_name_belongs_to_one_competitor_and_ids_are_unique():
 
 def test_competitor_ids_and_site_ids_stay_apart():
     register = Register.model_validate({"brand": "blokport", "sites": [{
-        "site_id": "stonecorp_gb", "seller_name": "StoneCorp", "seller_type": "wholesaler", "platform":
+        "brand": "blokport", "site_id": "stonecorp_gb", "seller_name": "StoneCorp", "seller_type": "wholesaler", "platform":
         "woocommerce_store", "base_url": "https://stonecorp.example", "terms": {}, "decision": "pending"}]})
     with pytest.raises(LayoutError, match="stonecorp_gb"):
         check_ids_apart(_layouts(), register)
