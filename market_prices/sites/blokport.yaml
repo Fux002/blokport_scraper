@@ -119,9 +119,7 @@ sites:
     decided_on: 2026-11-14
     statements:
       vat_basis: excl
-  # Mas for the owner, 14 Nov: approved on worker 74's measure (32/32 listings state GBP per slab and per m2), natural
-  # stone only (engineered quartz and porcelain have no material word, so v3 refuses them), the current price only
-  # (struck sale prices are never read), VAT as the site displays it by default.
+  # Its natural stone categories only: engineered quartz and porcelain are separate categories, never listed.
   - brand: blokport
     site_id: starelstones
     seller_name: Starel Stones
@@ -131,28 +129,25 @@ sites:
     platform: declared_html
     base_url: https://starelstones.co.uk
     discovery:
-      listing_pages: [/product-category/slabs/]
+      listing_pages: [/product-category/slabs/marble-slabs/, /product-category/slabs/travertine-slabs/,
+                      /product-category/slabs/onyx-slabs/]
       product_path: "^/product/[^/]+/?$"
-    # Product pages: the material is stated there only ("Material: Marble"), and the vocabulary refuses what it cannot
-    # name (engineered quartz, porcelain). The title is the text before the price in the purchase block (its h1 has no
-    # class).
+    # The cards, not the product pages: only a card strikes the per-m2 price, so only there is the regular price in
+    # the price's own unit.
     html:
-      read: product_pages
-      record: {tag: div, class: starel-pdp-product}
+      read: listing_pages
+      record: {attribute: data-starel-product-card}
       fields:
-        listing_key: {attr: id}
-        listing_text: {class: starel-pdp-purchase, text: true, pattern: "^\\s*(.+?)\\s+(?:from\\s+)?£"}
-        price: {class: starel-slab-price__item--sqm, text: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
-        # Mas's sale rule (contract v4): the struck price is the regular price
-        regular_price: {class: starel-slab-price__item--sqm, text: true, struck: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
-        unit: {class: starel-slab-price__item--sqm, text: true, pattern: "/\\s*(m²)"}
+        listing_key: {attr: data-product-id}
+        listing_text: {class: starel-loop-card__title-heading, text: true}
+        url: {class: starel-loop-card__image-link, attr: href}
+        price: {class: starel-loop-card-price__row--sqm, text: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
+        regular_price: {class: starel-loop-card-price__row--sqm, text: true, struck: true, pattern: "£\\s*([\\d,]+\\.\\d{2})"}
+        unit: {class: starel-loop-card-price__row--sqm, text: true, pattern: "/\\s*(m²)"}
         currency_symbols: {"£": GBP}
       number: {decimal: ".", thousands: ","}
       specs:
-        Material: {label: Material, class: starel-pdp-specs}
-        Price per slab: {class: starel-slab-price__item--slab, text: true}
-    spec_labels:
-      material_type: {labels: [Material]}
+        Price per slab: {class: starel-loop-card-price__row--slab, text: true}
     terms:
       terms_url: https://starelstones.co.uk/terms-conditions/
       checked_on: 2026-11-14
