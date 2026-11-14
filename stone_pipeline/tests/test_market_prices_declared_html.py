@@ -263,6 +263,39 @@ def test_a_spec_whose_pattern_does_not_match_is_left_empty_never_a_refusal():
     assert row.stated_specs == {"Price ex VAT": "100.00"}
 
 
+# --- a LABELLED source: the value a page pairs with a label (the manager's ruling, 14 Nov ~14:40Z) ------------------
+LABELLED = {**SALE, "specs": {"Material": {"class": "specs", "label": "Material"},
+                              "Origin": {"class": "specs", "label": "Origin"}}}
+
+
+def _spec_card(path: str, specs_html: str) -> str:
+    return (f'<article class="starel-loop-card"><a class="card-link" href="{path}">x</a>'
+            f'<h3 class="card-title">Stone Slab</h3>'
+            f'<div class="starel-loop-card-price__row--sqm">£300.00 per m²</div>{specs_html}</article>')
+
+
+@pytest.mark.parametrize("specs_html, expected", [
+    # a th/td row
+    ('<table class="specs"><tr><th>Material</th><td>Marble</td></tr><tr><th>Origin</th><td>Italy</td></tr></table>',
+     {"Material": "Marble", "Origin": "Italy"}),
+    # a dt/dd pair, the label's colon and case aside
+    ('<dl class="specs"><dt>MATERIAL:</dt><dd>Granite</dd><dt>Finish</dt><dd>Polished</dd></dl>',
+     {"Material": "Granite"}),
+    # a label element followed by its text
+    ('<div class="specs"><p><strong>Material :</strong> Quartzite</p><p><strong>Origin:</strong>  Brazil </p></div>',
+     {"Material": "Quartzite", "Origin": "Brazil"}),
+])
+def test_a_labelled_source_reads_the_value_the_page_pairs_with_its_label(specs_html, expected):
+    row = _rows(_run({f"{BASE}/collections/slabs/": _page(_spec_card("/p/s/", specs_html))}, _site(LABELLED)))["/p/s/"]
+    assert row.stated_specs == expected
+
+
+def test_a_label_matches_whole_so_another_label_is_never_read_and_the_spec_stays_empty():
+    specs_html = '<table class="specs"><tr><th>Material type</th><td>Natural stone</td></tr></table>'
+    row = _rows(_run({f"{BASE}/collections/slabs/": _page(_spec_card("/p/t/", specs_html))}, _site(LABELLED)))["/p/t/"]
+    assert row.stated_specs == {}
+
+
 # --- refusals: one record's problem, never the site's ----------------------------------------------------------------
 def test_a_record_without_its_key_or_with_unparsable_json_is_refused_with_its_reason():
     no_key = ('<div class="items-loop__item" data-ms-tracking-item="' + _attr({"item_name": "No id slab"}) + '">'
@@ -304,6 +337,7 @@ def test_a_declared_html_site_loads_with_its_declaration():
     ({"html": {**CARDS, "specs": {"Regular price": {"json": ["data-x", "price"], "struck": True}}}}, "struck"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
      "struck"),                                                          # struck text is never the price
+    ({"html": {**CARDS, "specs": {"Material": {"class": "specs", "label": "Material", "text": True}}}}, "one of"),
     ({"discovery": {"sitemaps": ["/sitemap.xml"], "product_path": "^/p/"}}, "listing_pages"),  # read: listing_pages
 ])
 def test_a_declaration_that_is_not_whole_is_refused(change, message):
