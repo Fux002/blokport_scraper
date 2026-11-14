@@ -65,7 +65,7 @@ def test_acked_products_only_includes_medusa_held(tmp_path):
 
 def test_acked_products_carry_the_stored_category_handle(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
-        _ledger_product(lg, "ZUCCHI-1", category="tiles", medusa_id="M1")   # stored by handle
+        _ledger_product(lg, "ZUCCHI-1", category="tiles", medusa_id="M1")   # stored by handle (D11)
         out = acked_products(lg)
     assert out == {"ZUCCHI-1": {("category", "tiles")}}                     # the handle itself
 

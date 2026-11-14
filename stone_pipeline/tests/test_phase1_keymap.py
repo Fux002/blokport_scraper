@@ -101,7 +101,7 @@ def test_a_spelling_only_difference_maps_to_its_one_new_key_and_is_listed():
 
 
 def test_a_different_name_on_one_identity_still_aborts_as_a_name_tie():
-    # 'St Ambre' slugs apart from 'St Amber': two new Keys, an in-place rename, so the map aborts and lists it
+    # 'St Ambre' slugs apart from 'St Amber': two new Keys, an in-place rename (D1), so the map aborts and lists it
     res = build_key_map(_st_amber("St Ambre"), LIMESTONE)
     copies = (f"{b}_limestone_st_amber_u{i}" for i, b in enumerate(("slab", "block", "tile")))
     assert res.aborts["name_tie"] == sorted(copies)
@@ -126,7 +126,7 @@ def test_two_protected_keys_to_one_new_key_abort():
 
 
 def test_type_conflict_names_both_sides():
-    # the block post states another type than the Key. Keep the abort; list Key, Key's type,
+    # the block post states another type than the Key (spec section 3). Keep the abort; list Key, Key's type,
     # the post's stated type.
     recs = [_led("development", "block_marble_panda_white_u1", "Marble", "Panda White"),   # the Key's type
             Record("production", "backbone", "block_marble_panda_white_u1", name="Panda White",
@@ -210,7 +210,7 @@ def test_backbone_only_collision_lists_ghosts_not_abort():
 
 
 def test_two_store_keys_one_category_abort():
-    # two STORE-backed Keys of one category on one new Key breaks the survivor pick -> abort.
+    # two STORE-backed Keys of one category on one new Key breaks D2's survivor pick -> abort.
     recs = [_led("development", "slab_granite_x_u1", "Granite", "X"),
             _led("development", "slab_granite_x_u2", "Granite", "X")]
     res = build_key_map(recs, VOCAB)

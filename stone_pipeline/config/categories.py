@@ -64,7 +64,7 @@ class Category:
 # prod run uses prod pcats and a dev run uses dev pcats -- the ids can never cross. The literals
 # below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
 class CategoryHandleError(ValueError):
-    """An attributes.csv category row breaks the exact-handle rule: named, never folded or skipped."""
+    """An attributes.csv category row breaks the exact-handle rule (D11): named, never folded or skipped."""
 
 
 def category_pcats(values: Iterable[AttributeValue]) -> dict[str, str]:

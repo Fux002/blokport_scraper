@@ -134,7 +134,7 @@ def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
     # Medusa's export also lists other vendors' variants (on dev: non-stone test products, np-cattle-...,
     # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
     export = tmp_path / "variants_export.csv"
-    # the scraper's own are the export's `owner = scraper` rows
+    # the scraper's own are the export's `owner = scraper` rows (PHASE-1-SPEC D5)
     export.write_text("Id,Key,Name,Aliases,status,Type,owner\n"
                       "v1,marble__carrara_0001,Carrara,,active,Marble,scraper\n"
                       "v2,np-cattle-heifer-limousin-430,Heifer,,active,Cattle,\n"

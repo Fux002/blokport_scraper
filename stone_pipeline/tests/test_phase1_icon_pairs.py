@@ -1,5 +1,5 @@
-"""The produce side of the icon layout `{ENV_SEGMENT}/variations/{Key}/{category name}.png` (spec section 4,
-"Texture generation per pair"). A texture is ONE (Key, category) pair:
+"""The produce side of the icon layout `{ENV_SEGMENT}/variations/{Key}/{category name}.png` (SC-4 2e, plan
+SC-3-SC-4-PLAN.md 2e; spec section 4, "Texture generation per pair", N3). A texture is ONE (Key, category) pair:
 
 - a queue item carries its pair (`key`, `category`) and its pair id `"{Key}/{category}"` as `output_name` (the icon's
   path under variations/ without ".png", the `_refreshed.json` id);

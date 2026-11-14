@@ -1,5 +1,5 @@
-"""ONE rule for every scraper reader of a category (BE-SCRAPER-INTERFACE section F), the EXACT handle (the pack's
-lowercase plural), never the label and never a case fold.
+"""ONE rule for every scraper reader of a category (BE-SCRAPER-INTERFACE section F), the EXACT handle (D11, the
+pack's lowercase plural), never the label and never a case fold.
 
   * T1 (from_medusa/<env>/attributes.csv) carries a `handle` column, LAST: a category row holds its handle, every
     other row ''. An export without the header is refused, and so is a row that breaks the rule;

@@ -36,7 +36,7 @@ from stone_pipeline.reference.medusa_files import CATEGORY_KIND, read_attributes
 log = logfmt.get_logger("tree")
 
 # The categories a variety is priced in: every one a new variety fans out to (phase 1: a variety is ONE record per
-# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle.
+# (type, name) and has no category of its own, so it is offered in each). Category NAME -> its handle (D11).
 _FAN_OUT_CATEGORIES = {c.name: c.handle for c in CATEGORIES if c.fan_out}
 COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
                        "finish_id", "color_id", "quality_id")
@@ -82,7 +82,7 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict]:
 
 
 def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[str, list[str]]:
-    """Category name -> the finish ids it supports: the default form's are every finish its
+    """Category name -> the finish ids it supports (spec D7): the default form's are every finish its
     variety posts carry; another category's are its declared `finishes`, or the set of the category named by its
     `finishes_from`. Any finish the category's products use this run is added. A declared finish the vocabulary
     does not hold fails loud (it would otherwise silently price nothing)."""

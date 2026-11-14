@@ -1,27 +1,27 @@
-"""Phase 1 SC-1: the ONE union variety-key map generator (offline tool).
+"""Phase 1 SC-1: the ONE union variety-key map generator (offline tool, spec section 5 step 2).
 
 Reads every store that carries an OLD variation Key, in each env, and writes one union map
-`(old_key, new_key, category_rank, type_name)`: a Key present in several stores or envs maps to ONE new Key,
-so an identity's slab/block/tile copies and any retired-only copy collapse together. The new Key is
+`(old_key, new_key, category_rank, type_name)`: a Key present in several stores or envs maps to ONE new Key
+(D1), so an identity's slab/block/tile copies and any retired-only copy collapse together. The new Key is
 `phase1.variety_key.new_key`. The map build is the proof "every Key in every store is mapped": it ABORTS and
 lists, rather than guessing, when a Key cannot resolve.
 
 Scope (SC-1): offline, deterministic, additive. It reads real stores only on PRIVATE copies, read-only, and
 writes a local CSV plus its sha256 digest, never S3 and never a live store. It changes no matching, type,
 curate, ledger or sync code; the type parse here is NEW offline code, not the production parser. The Medusa
-survivor map and `scraper_sync_ref` are the backend's, later, and are not read here.
+survivor map (D2) and `scraper_sync_ref` are the backend's, later, and are not read here.
 
 Stores unioned: the ledger `variation` table (all rows, `in_full` 0 included),
 config.db `retired_variation` and `protected_variation` (Keys), the committed base copies
 (`variants_export_base.csv`), the backbone files and `backbone_additions`.
 
-The new Key's name is the identity's CANONICAL Name (the stored Name with any bracketed alias split off),
+The new Key's name is the identity's CANONICAL Name (the stored Name with any bracketed alias split off, D1),
 found by joining the old-Key MIDDLE (branch and uuid stripped) across stores: the bracket identities carry the
 bracketed slug in every old Key but one clean Name, so a row-less Key takes that Name and never parses its own
 slug (which would mint a second new Key).
 
 Aborts (each lists the offending Keys, then the run fails):
-  - name_tie: one identity's store Names give two different new Keys: their name slugs differ (the tie rule: an
+  - name_tie: one identity's store Names give two different new Keys: their name slugs differ (D1 tie rule: an
     in-place rename). Names that differ only in what the slug folds (punctuation, case, accents: 'St. Amber' and
     'St Amber') give ONE new Key, so they map; each such identity is listed (spellings), never silently passed.
   - unresolved_type: a row-less Key whose type cannot be parsed, or whose parsed/row type does not map to
@@ -211,7 +211,7 @@ def _middle(old_key: str) -> str:
 
 
 def _canonical(name: str | None) -> str | None:
-    """The identity's canonical Name: the stored Name with any bracketed alias pulled off. The old
+    """The identity's canonical Name: the stored Name with any bracketed alias pulled off (D1). The old
     Keys of the bracket identities carry the bracketed slug, but the new Key's name must be the clean Name, so
     the name slug is NEVER read from the old Key."""
     return split_bracket_alias(name)[0] if name else None
@@ -291,7 +291,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         mid = _middle(old_key)
 
         store_names = store_names_of.get(mid, set())
-        if len({_slug_us(n) for n in store_names}) > 1:   # tie: STORE Names that give two new Keys
+        if len({_slug_us(n) for n in store_names}) > 1:   # D1 tie: STORE Names that give two new Keys
             res.aborts.setdefault("name_tie", []).append(old_key)
             continue
         if len(store_names) > 1:                        # one new Key either way (the map carries no name): listed
@@ -335,7 +335,7 @@ def build_key_map(records: list[Record], type_vocab: dict[str, set[str]]) -> Key
         if any(r.protected for r in recs):
             protected_to_new.setdefault(nk, set()).add(old_key)
 
-    # Abort only when two STORE-backed old Keys of ONE category land on one new Key (that breaks the
+    # Abort only when two STORE-backed old Keys of ONE category land on one new Key (that breaks D2's
     # per-env, per-category survivor pick); backbone-only ghosts colliding are listed, not aborted.
     for nk, entries in sorted(new_to_entries.items()):
         by_rank: dict[int, list[str]] = {}

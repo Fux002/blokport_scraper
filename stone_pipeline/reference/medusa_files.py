@@ -18,19 +18,19 @@ from typing import Iterable, Iterator
 
 from stone_pipeline.core.text import match_key
 
-# `handle`: a category row's handle, '' on every other row. It is how the scraper keys a category
+# `handle`: a category row's D11 handle, '' on every other row. It is how the scraper keys a category
 # (config/categories.category_pcats); the label in `value` is never a key.
 ATTRIBUTE_COLUMNS = ("category", "value", "sourceid", "handle")
 CATEGORY_KIND = "category"
 _STATUS_COLUMNS = ("status", "internal")
-# On a `type` row, the product_category handles the type has a valid combination in, '|'-joined
+# On a `type` row, the product_category handles (D11) the type has a valid combination in, '|'-joined
 # ('' when it has none); empty on every other row. load_attributes scopes the type vocabulary to the pack with it.
 CATEGORY_HANDLES_COLUMN = "category_handles"
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
 # Key, Name and Type are the variation's identity (phase 1: a Key names one stone of one type, and Type is its
 # canonical type NAME), so they are required. Id and Aliases are read as empty when their column is absent: the
-# scraper's base files (variants_export_base*.csv) carry no Id. Image and Volume are gone: a variety's
+# scraper's base files (variants_export_base*.csv) carry no Id. Image and Volume are gone (SC-4 2b): a variety's
 # icons are per (Key, category) pairs on S3, and the volume was never the scraper's.
 EXPORT_COLUMNS = ("Key", "Name", "Type")
 # The ONE column list of every variety file the scraper writes: the three published files (1_variants_full,
@@ -47,7 +47,7 @@ class AttributeValue:
     sourceid: str
     status: str        # "active" | "archived"
     internal: bool
-    handle: str = ""   # a category row's handle, exactly as served; '' for every other kind
+    handle: str = ""   # a category row's D11 handle, exactly as served; '' for every other kind
     # the type's product_category handles, sorted; None when the file has no category_handles column
     category_handles: tuple[str, ...] | None = None
 

@@ -5,8 +5,8 @@ stone types they made 'Dark Steel', 'Steel Grey', 'Summer Wheat', 'Wild Wine' an
 stones (adapters/tokens.explicit_type_word into identity.is_mistyped_variant), so catalog.write_variants_to_delete
 listed them and drop_deleted_variants cut them from 1_variants_full: on blokport-dev they were never served.
 
-The export now carries `category_handles` on every type row: the '|'-joined product_category handles the type has
-a valid combination in, '' when it has none. A type is the PACK's iff (i) its list holds one of the pack's
+The export now carries `category_handles` on every type row: the '|'-joined product_category handles (D11) the type
+has a valid combination in, '' when it has none. A type is the PACK's iff (i) its list holds one of the pack's
 category handles, OR (ii) the committed seed (backbone_varieties.json, read at runtime) holds a variety of that type.
 Everything else is EXCLUDED, never guessed, and LISTED in the run's review/<env>/types_outside_pack.csv. A seed
 variety whose type BE lists with ONLY non-pack handles fails loud, naming the type (the seed and BE disagree). Both

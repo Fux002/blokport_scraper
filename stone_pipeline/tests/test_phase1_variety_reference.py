@@ -1,8 +1,8 @@
-"""The matcher's reference holds ONE record per variety (type, name), no longer one table per category split by
-the Key's prefix. A variety has no category (D3): every category that shares the stone-variety vocabulary matches
-against the same varieties, under the same Keys and ids. The (type, variant) identity stays atomic, the type from
-the Key's type slug: one name under two types is two varieties. A Key of the old prefixed form is refused, never
-split into a guessed category or type.
+"""SC-4 (plan SC-3-SC-4-PLAN.md section 2a): the matcher's reference holds ONE record per variety (type, name), no
+longer one table per category split by the Key's prefix. A variety has no category (D3): every category that shares the
+stone-variety vocabulary matches against the same varieties, under the same Keys and ids. The (type, variant) identity
+stays atomic, the type from the Key's type slug: one name under two types is two varieties. A Key of the old prefixed
+form is refused, never split into a guessed category or type.
 """
 from __future__ import annotations
 

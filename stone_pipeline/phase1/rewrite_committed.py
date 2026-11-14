@@ -4,12 +4,12 @@ Every committed old Key maps through SC-1's key map by its old Key, never re-min
 The map is read once, by its VersionId, and only at its sha256 (`migrate_stores.read_key_map`, the one reader SC-3
 uses too).
 
-The variety backbone (`catalog_source/backbone_varieties.json`): ONE post per (type, name), merged from the three
-per-category backbones.
+The variety backbone (`catalog_source/backbone_varieties.json`, spec section 3 "Backbone result", D7): ONE post per
+(type, name), merged from the three per-category backbones.
 - A keyed post (every slab and tile post, 327 block posts) joins by its old Key through the map. A keyless block
   post joins its identity by (type, name). Anything else refuses: nothing is minted (measured: all 12,159
   block posts map, 327 by Key and 11,832 by (type, name)).
-- The post: the default form's copy's variant and type, the slab post's finishes and qualities, and the
+- The post: the default form's copy's variant and type, the slab post's finishes and qualities (D7), and the
   union of every copy's colours, aliases (the default form's casing first; another copy's differing name joins
   them) and merged_from. category, image_file, exists, in_csv and variant_id are dropped.
 - MAPPED_BACKBONE_KEYS_SHA256 is the digest of the sorted Keys this wrote, so CI (which has no map) pins it.

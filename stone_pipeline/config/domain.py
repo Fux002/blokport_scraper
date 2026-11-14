@@ -144,7 +144,7 @@ _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_w
 _STOCK_WORD_LISTS = ("in_stock_words", "made_to_order_words", "out_of_stock_words")
 
 _CATEGORY_KEYS = ("name", "plural", "label", "base_image", "shares_variety_vocab", "fan_out")
-# the optional ones; any other key is refused (a leftover `mirror_of` fails loud, never ignored)
+# the optional ones; any other key is refused (spec D9: a leftover `mirror_of` fails loud, never ignored)
 _CATEGORY_OPTIONAL = ("volume_per_kg", "pcat_env_var", "default_form", "bulk_form", "finishes", "finishes_from")
 
 
@@ -266,7 +266,7 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         bad(f"leaf_attributes {sorted(leaf - attrs)} are not in attributes {sorted(attrs)}")
     if data["disambiguator"] in leaf:
         bad(f"disambiguator {data['disambiguator']!r} must NOT be in leaf_attributes {sorted(leaf)}")
-    # the default form's finishes are its variety posts'; every other category declares
+    # spec D7, D9: the default form's finishes are its variety posts'; every other category declares
     # exactly one of `finishes` (a list) or `finishes_from` (another category that does not itself borrow).
     for cat in data["categories"]:
         has_own, source = "finishes" in cat, cat.get("finishes_from")
