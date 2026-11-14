@@ -10,6 +10,10 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from market_prices import config
+from market_prices.brand import SLUG
+
+# A row's brand is the run's (brand_required): a slug, never empty; write_run refuses any but the run's own.
+BRAND_PATTERN = f"^{SLUG.pattern}$"
 
 
 class MalformedListing(ValueError):
@@ -70,7 +74,7 @@ class Observation(BaseModel):
 
     contract_version: str
     source: Source
-    brand: str
+    brand: str = Field(pattern=BRAND_PATTERN)
     site_id: str
     seller_name: str
     seller_type: SellerType
@@ -127,7 +131,7 @@ class SiteStatus(BaseModel):
 
     contract_version: str
     source: Source
-    brand: str
+    brand: str = Field(pattern=BRAND_PATTERN)
     site_id: str
     status: SiteRunStatus
     rows: int
@@ -155,6 +159,10 @@ class ListingFacts:
     price_status: PriceStatus = PriceStatus.none
     min_qty_text: Optional[str] = None
     availability_text: Optional[str] = None
+    # the listing's own VAT statement; it wins over the site's (collect._observation)
+    vat_basis: Optional[VatBasis] = None
+    # what about this listing the site_status detail counts, though the listing itself is delivered (not malformed)
+    notes: tuple[str, ...] = ()
 
 
 def columns(model: type[BaseModel]) -> tuple[str, ...]:

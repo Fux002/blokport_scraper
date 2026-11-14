@@ -107,7 +107,7 @@ def test_the_contract_is_version_2_and_source_is_the_second_column():
 
 def test_a_crawl_row_says_it_came_from_a_site():
     site = Register.model_validate({"brand": "blokport", "sites": [{
-        "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
+        "brand": "blokport", "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
         "served_market": "NL", "platform": "woocommerce_store", "base_url": "https://shop.example",
         "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02", "summary": "None."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
@@ -199,7 +199,7 @@ def test_a_competitor_name_belongs_to_one_competitor_and_ids_are_unique():
 
 def test_competitor_ids_and_site_ids_stay_apart():
     register = Register.model_validate({"brand": "blokport", "sites": [{
-        "site_id": "stonecorp_gb", "seller_name": "StoneCorp", "seller_type": "wholesaler", "platform":
+        "brand": "blokport", "site_id": "stonecorp_gb", "seller_name": "StoneCorp", "seller_type": "wholesaler", "platform":
         "woocommerce_store", "base_url": "https://stonecorp.example", "terms": {}, "decision": "pending"}]})
     with pytest.raises(LayoutError, match="stonecorp_gb"):
         check_ids_apart(_layouts(), register)
@@ -229,7 +229,8 @@ def test_the_name_from_a_column_names_each_row():
     assert [(row.site_id, row.listing_key) for row in result.observations] == [("rocca_it", "R1"),
                                                                              ("stonecorp_gb", "S1")]
     assert [status.site_id for status in result.statuses] == ["rocca_it", "stonecorp_gb"]
-    assert "Supplier" not in result.observations[0].stated_specs
+    # identity columns stay in stated_specs as written (the manager, 13 Nov): the naming column too
+    assert result.observations[0].stated_specs["Supplier"] == "Rocca"
 
 
 def test_the_name_from_the_file_name():
@@ -304,7 +305,7 @@ def test_a_known_layout_gives_the_exact_rows():
         "contract_version": "2", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
         "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
-        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Finish": "Polished"}, "grade_text": None,
+        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"}, "grade_text": None,
         "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",
         "min_qty_text": None, "availability_text": None,
@@ -709,6 +710,7 @@ def test_a_record_that_does_not_read_fails_loud(tmp_path):
 def test_the_entry_exits_non_zero_when_a_file_was_refused(tmp_path, monkeypatch, capsys):
     s3 = _S3()
     s3.add(f"{PREFIX}/intake/unknown.csv", _csv(["Who"], ["Ref", "Cost"], ["1", "2"]))
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "blokport")
     monkeypatch.setattr(intake, "load_layouts", lambda brand: _layouts())
     monkeypatch.setattr(intake, "load_register", lambda brand: Register.model_validate({"brand": brand, "sites": []}))
     monkeypatch.setattr(intake, "_s3_client", lambda: s3)
@@ -717,6 +719,47 @@ def test_the_entry_exits_non_zero_when_a_file_was_refused(tmp_path, monkeypatch,
     with pytest.raises(SystemExit) as stopped:
         intake.main()
     assert stopped.value.code == 1 and "refused: dev/market_prices/blokport/intake/unknown.csv" in capsys.readouterr().out
+
+
+def test_the_entry_absorbs_the_run_inputs_brand_not_the_deployments(tmp_path, monkeypatch):
+    # this deployment is blokport's (the dev default); the run input names wudport, so wudport's layouts and register
+    # are read and wudport's intake prefix is worked: the one shared runner
+    read: list[tuple[str, str]] = []
+    worked: list[str] = []
+
+    def layouts(brand: str) -> Layouts:
+        read.append(("layouts", brand))
+        return _layouts()
+
+    def register(brand: str) -> Register:
+        read.append(("register", brand))
+        return Register.model_validate({"brand": brand, "sites": []})
+
+    def work(client, bucket, brand, layouts, root, dry_run) -> intake.IntakeOutcome:
+        worked.append(brand)
+        return intake.IntakeOutcome(absorbed=(), skipped=(), refused=())
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "wudport")
+    monkeypatch.setattr(intake, "load_layouts", layouts)
+    monkeypatch.setattr(intake, "load_register", register)
+    monkeypatch.setattr(intake, "run_intake", work)
+    monkeypatch.setattr(intake, "_s3_client", lambda: _S3())
+    monkeypatch.setattr(intake, "_dry_run", lambda: False)
+    intake.main()
+    assert read == [("layouts", "wudport"), ("register", "wudport")] and worked == ["wudport"]
+
+
+def test_the_entry_without_the_brand_input_stops_before_any_file_or_bucket_is_read(monkeypatch):
+    monkeypatch.setattr(intake, "load_layouts", lambda brand: pytest.fail(f"the {brand} layouts were read"))
+    monkeypatch.setattr(intake, "_s3_client", lambda: pytest.fail("a bucket client was built"))
+    with pytest.raises(SystemExit, match="SCRAPER_MARKET_PRICES_BRAND"):
+        intake.main()
+
+
+def test_the_entry_refuses_an_unknown_run_brand_before_any_bucket_is_read(monkeypatch):
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "no_such_brand")
+    monkeypatch.setattr(intake, "_s3_client", lambda: pytest.fail("a bucket client was built"))
+    with pytest.raises(LayoutError, match="no sheet layouts for brand 'no_such_brand'"):
+        intake.main()
 
 
 # --- RUN_MODE ----------------------------------------------------------------------------------------------------------
@@ -732,3 +775,154 @@ def test_run_mode_market_prices_intake_runs_the_intake_entry(tmp_path):
 def test_the_intake_imports_nothing_from_the_produce():
     text = (REPO / "market_prices" / "intake.py").read_text(encoding="utf-8")
     assert not any(f"stone_pipeline.{name}" in text for name in ("stages", "matching", "ledger", "emit"))
+
+
+# --- one sheet, several competitors, each priced from its own stated column (W7, the manager 13 Nov) -----------------
+_TWO_LISTS = ["Code", "Product", "List", "List -20%", "Net", "Source"]
+
+
+def _two_lists(**overrides) -> dict:
+    """A sheet naming its competitor per row (the Source column), each competitor's price in its own column."""
+    layout = {**_layout(layout_id="two_lists", header_row=1, headers=_TWO_LISTS, competitor={"column": "Source"},
+                        unit=None, statements={"currency": "EUR", "vat_basis": "excl", "unit_text": "m²"},
+                        currency_symbols={}),
+              "price_by_competitor": {"stonecorp_gb": "List", "rocca_it": "Net"}}
+    layout.pop("price")
+    return {**layout, **overrides}
+
+
+TWO_LISTS = _csv(_TWO_LISTS, ["SC-1", "Nero slab", "100.00", "80.00", "77.00", "StoneCorp Ltd"],
+                 ["R-1", "Rosso slab", "", "", "55.50", "Rocca"])
+
+
+def test_each_row_takes_its_own_competitors_stated_price_column():
+    result = _absorb(TWO_LISTS, _layouts(_two_lists()), key=f"{PREFIX}/intake/two_lists.csv")
+    rows = {row.site_id: row for row in result.observations}
+    assert (rows["stonecorp_gb"].price_amount, rows["rocca_it"].price_amount) == ("100.00", "55.50")
+    # every other stated column rides in stated_specs as written, another competitor's price column included
+    assert rows["stonecorp_gb"].stated_specs == {"Code": "SC-1", "List -20%": "80.00", "Net": "77.00",
+                                                 "Source": "StoneCorp Ltd"}
+    assert "Net" not in rows["rocca_it"].stated_specs
+
+
+@pytest.mark.parametrize("layout, message", [
+    (_two_lists(price="List"), "not both"),
+    ({k: v for k, v in _two_lists().items() if k != "price_by_competitor"}, "names no price column"),
+    (_two_lists(price_by_competitor={"stonecorp_gb": "List", "nobody": "Net"}), "not a declared competitor"),
+    (_two_lists(price_by_competitor={"stonecorp_gb": "List", "rocca_it": "Missing"}), "is not a header"),
+])
+def test_a_layout_names_one_price_column_per_competitor_or_is_refused(layout, message):
+    with pytest.raises(ValueError, match=message):
+        _layouts(layout)
+
+
+def test_the_identity_columns_stay_in_stated_specs_as_written():
+    # the naming column and every listing_key part are identity, not observation fields (the manager, 13 Nov): kept
+    # as written, so a consumer reads thickness or finish from stated_specs and never parses listing_key
+    result = _absorb(TWO_LISTS, _layouts(_two_lists()), key=f"{PREFIX}/intake/two_lists.csv")
+    rows = {row.site_id: row for row in result.observations}
+    assert (rows["stonecorp_gb"].stated_specs["Source"], rows["rocca_it"].stated_specs["Source"]) == (
+        "StoneCorp Ltd", "Rocca")
+
+
+def test_a_row_naming_a_competitor_without_a_price_column_refuses_the_file():
+    layouts = _layouts(_two_lists(price_by_competitor={"stonecorp_gb": "List"}))
+    with pytest.raises(FileRefused, match="rocca_it"):
+        _absorb(TWO_LISTS, layouts, key=f"{PREFIX}/intake/two_lists.csv")
+
+
+# --- the owner's competitor price sheets (W7: M22/P4's mapping, the owner's answers of 13 Nov via Mas) ---------------
+# Each tab of the owner's workbook All_Competitor_Stone_Prices.xlsx (2026-11-11) arrives as its own file, the tab
+# copied unchanged; these are its exact header rows. Every row names its competitor by the source document it was
+# transcribed from ('Source file'), which is what tells Cereser's main list from its Listino Carrara.
+_PRICE_M2 = "(EUR/m² ex VAT)"
+_OWNER_TABS = {
+    "Brachot Prices": [
+        "Material", "Grade / selection", "Brachot product name", "Stone type", "Origin", "Origin code",
+        "Thickness (cm)", "Finish", "Treatment / calibration", "Dimensions", f"Price {_PRICE_M2}",
+        f"Base list price {_PRICE_M2}", "Adjustment (%)", "Original pricing conditions", "Brachot price category",
+        "Catalog page", "PDF page", "Price status", "Catalog section", "Catalog edition / effective date", "Notes",
+        "Source file", "Sales terms"],
+    "Tuytelaers Prices": [
+        "Material", "Grade / selection", "Tuytelaers product name", "Stone type", "Origin", "Origin code",
+        "Thickness (cm)", "Finish", "Dimensions", f"Price {_PRICE_M2}", f"Base list price {_PRICE_M2}",
+        "Adjustment (%)", "Original pricing conditions", "Catalog section", "Catalog page", "PDF page", "Price status",
+        "New in 2026 catalog", "Notes", "Catalog edition / effective date", "Source file", "Sales terms"],
+    "Cereser Prices": [
+        "Material", "Grade / selection", "Cereser product name (source)", "Stone type", "Source category", "Origin",
+        "Origin (source)", "Thickness (cm)", "Finish", "Dimensions", "Block / lot", "Slab selection / pricing basis",
+        "List price (EUR/m²)", "Price -20% (EUR/m²)", "Carrara net price (EUR/m²)",
+        "Price used in master (EUR/m²)", "Discount (%)", "Price status", "Source file", "Source row", "List date",
+        "Lot date / source note", "Vendor notes"],
+}
+
+
+def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
+    """The committed blokport layouts reading one owner tab holding `rows`, by listing_key."""
+    headers = _OWNER_TABS[tab]
+    data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
+    key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), "bucket", "blokport")
+    return {row.listing_key: row for row in result.observations}
+
+
+def test_the_owner_competitors_are_declared_from_the_owners_answers():
+    competitors = load_layouts("blokport").competitors
+    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value, c.supplier_key)
+            for c in competitors} == {
+        "brachot": ("brachot.com", "BE", "EU", "wholesaler", None),
+        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler", None),
+        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+    }
+
+
+def test_a_brachot_row_is_its_own_sizes_price_per_m2_ex_vat_with_identity_kept():
+    rows = _owner_rows("Brachot Prices", {
+        "Material": "Belgische Blauwe Hardsteen", "Brachot product name": "Belgische Blauwe Hardsteen Courant",
+        "Stone type": "blauwe hardsteen", "Thickness (cm)": 2, "Finish": "Gezaagd", "Dimensions": "Standard sizes",
+        f"Price {_PRICE_M2}": 76.9, f"Base list price {_PRICE_M2}": 70, "Adjustment (%)": 10, "Catalog page": 10,
+        "PDF page": 6, "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"})
+    row = rows["Belgische Blauwe Hardsteen Courant|2|Gezaagd|Standard sizes|10"]
+    assert (row.site_id, row.seller_name, row.listing_text) == ("brachot", "Brachot",
+                                                                "Belgische Blauwe Hardsteen Courant")
+    assert (row.price_amount, row.currency, row.unit_text, row.vat_basis.value) == ("76.9", "EUR", "m²", "excl")
+    kept = ("Thickness (cm)", "Finish", "Dimensions", "Stone type", f"Base list price {_PRICE_M2}", "Catalog page",
+            "PDF page", "Source file")
+    assert {key: row.stated_specs[key] for key in kept} == {
+        "Thickness (cm)": "2", "Finish": "Gezaagd", "Dimensions": "Standard sizes", "Stone type": "blauwe hardsteen",
+        f"Base list price {_PRICE_M2}": "70", "Catalog page": "10", "PDF page": "6",
+        "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"}
+    assert f"Price {_PRICE_M2}" not in row.stated_specs
+
+
+def test_a_tuytelaers_row_keys_on_its_catalog_section():
+    # one stone, thickness and finish listed in two sections at two prices: two listings, never one
+    same = {"Tuytelaers product name": "Star Galaxy", "Thickness (cm)": 3, "Finish": "gepolijst",
+            "Dimensions": "Not specified / standard", "Source file": "prijslijst-platen-2026(3).pdf"}
+    rows = _owner_rows("Tuytelaers Prices", {**same, "Catalog section": "Natuursteen", f"Price {_PRICE_M2}": 140},
+                       {**same, "Catalog section": "Blokzaag", f"Price {_PRICE_M2}": 187})
+    stem = "Star Galaxy|3|gepolijst|Not specified / standard"
+    assert {key: (row.site_id, row.price_amount) for key, row in rows.items()} == {
+        f"{stem}|Natuursteen": ("tuytelaers", "140"), f"{stem}|Blokzaag": ("tuytelaers", "187")}
+
+
+def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
+    rows = _owner_rows(
+        "Cereser Prices",
+        {"Cereser product name (source)": "BLACK ANTIQUE *", "Thickness (cm)": 2, "List price (EUR/m²)": 88.5,
+         "Price -20% (EUR/m²)": 70.8, "Price used in master (EUR/m²)": 70.8,
+         "Source file": "Italian supplier list(1).xlsx", "Source row": 2},
+        {"Cereser product name (source)": "BIANCO CARRARA C", "Thickness (cm)": 2, "Finish": "Lucido",
+         "Carrara net price (EUR/m²)": 60, "Price used in master (EUR/m²)": 60,
+         "Source file": "LISTINO CARRARA -(2).xlsx", "Source row": 7},
+        {"Cereser product name (source)": "AZUL MACAUBAS", "Thickness (cm)": 3, "Price status": "Unpriced",
+         "Source file": "Italian supplier list(1).xlsx", "Source row": 9})
+    main, carrara, unpriced = rows["BLACK ANTIQUE *|2|2"], rows["BIANCO CARRARA C|2|7"], rows["AZUL MACAUBAS|3|9"]
+    assert (main.site_id, main.price_amount, main.vat_basis.value) == ("cereser", "88.5", "excl")
+    assert (carrara.site_id, carrara.price_amount, carrara.vat_basis.value) == ("cereser_carrara", "60", "excl")
+    assert (main.stated_specs["Price -20% (EUR/m²)"], main.stated_specs["Source file"]) == (
+        "70.8", "Italian supplier list(1).xlsx")
+    assert carrara.stated_specs["Finish"] == "Lucido"
+    # an unpriced row is kept as stated, never priced from another column
+    assert (unpriced.price_amount, unpriced.price_status) == (None, PriceStatus.none)

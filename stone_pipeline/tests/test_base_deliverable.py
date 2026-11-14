@@ -169,7 +169,7 @@ def _produce(tmp_path: Path, keys: list[str]) -> Path:
 def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_path):
     deliverable = _produce(tmp_path, ["marble__a_1", "marble__b_2", "granite__c_3"])
     s3 = _S3()
-    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "dev/scraper/to_upload", run_id="r1")
+    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "dev/scraper/to_upload", run_id="r1", brand="blokport")
     entry = out["manifest"]["files"][VARIANTS_BASE_FILE]
     assert VARIANTS_BASE_FILE not in out["manifest"].get("side_files", {})
     assert entry["sha256"] == hashlib.sha256(deliverable.read_bytes()).hexdigest()
@@ -182,14 +182,14 @@ def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_p
 def test_an_unchanged_base_is_not_re_uploaded_and_a_changed_one_is(tmp_path):
     s3, key = _S3(), f"p/{VARIANTS_BASE_FILE}"
     _produce(tmp_path, ["marble__a_1", "marble__b_2"])
-    ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r1")
+    ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r1", brand="blokport")
     s3.uploads.clear()
     _produce(tmp_path, ["marble__a_1", "marble__b_2"])          # the same base again
-    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r2")
+    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r2", brand="blokport")
     assert VARIANTS_BASE_FILE in out["unchanged"] and key not in s3.uploads
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[key]
     deliverable = _produce(tmp_path, ["marble__a_1", "marble__b_2", "onyx__c_3"])   # a mint grows it
-    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r3")
+    out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r3", brand="blokport")
     assert VARIANTS_BASE_FILE in out["uploaded"] and s3.objects[key] == deliverable.read_bytes()
     assert out["manifest"]["files"][VARIANTS_BASE_FILE]["rows"] == 3
 
@@ -271,7 +271,7 @@ def test_publishing_only_a_name_the_folder_lacks_writes_nothing(tmp_path):
     s3 = _S3()
     (tmp_path / "1_variants_full.csv").write_text("Key\n", encoding="utf-8")
     with pytest.raises(FileNotFoundError, match=VARIANTS_BASE_FILE):
-        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id=None, only={VARIANTS_BASE_FILE})
+        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id=None, only={VARIANTS_BASE_FILE}, brand="blokport")
     assert s3.objects == {}
 
 
