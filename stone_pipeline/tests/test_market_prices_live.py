@@ -236,7 +236,9 @@ def test_main_runs_the_run_inputs_brand_not_the_deployments_and_publishes_under_
     monkeypatch.setattr(run, "_s3_client", lambda: s3)
     monkeypatch.setattr(run, "_runs_root", lambda: tmp_path)
     monkeypatch.setattr(run, "load_register", load)
-    monkeypatch.setattr(run, "LiveTransport", lambda: _Context(_shop(_page([_listing()]))))
+    # a listing in wudport's scope (its vocabulary), so the run has rows and moves wudport's latest
+    in_scope = _listing(name="Birch plywood 18mm")
+    monkeypatch.setattr(run, "LiveTransport", lambda: _Context(_shop(_page([in_scope]))))
     monkeypatch.setattr(run, "_now", lambda: MOMENT)
     monkeypatch.setattr(run.time, "sleep", lambda _seconds: None)
     run.main()
