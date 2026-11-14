@@ -1,8 +1,14 @@
-# Market price observations: delivery contract (version 2)
+# Market price observations: delivery contract (version 3)
 
 Reference prices seen on competitor sites, and read from the competitor price sheets the owner supplies, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site or a sheet says. Matching, conversion, grading and trust rules belong to the consumer.
 
-Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1.
+Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1. Version 3 adds nine columns to observations.csv right after `stated_specs` (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`, `thickness_text`, `finish_text`, `material_text`, `origin_text`, `spec_labels`; see "Specs") and four keys to `provenance`; every other column, and site_status.csv's columns, are as in version 2. Version 3 replaces version 2 outright: no version 2 run was ever delivered, so no consumer reads both.
+
+The observations.csv header, version 3, in order:
+
+```
+contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,price_text,price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,availability_text,provenance,observed_at,run_id,collector_version
+```
 
 ## Where
 
@@ -34,7 +40,13 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
 | listing_text | The seller's name for the listing, and short description when there is one |
-| stated_specs | JSON object: the seller's label to its value, as written |
+| stated_specs | JSON object: the seller's label to its value, as written, for every stated value not read into a column (a label mapped to a spec column below is in that column, not here) |
+| thickness_mm | The stated thickness in millimetres: an exact decimal, `^\d+(\.\d+)?$`, no trailing zeros (`20`, `12.5`, never `20.0`). Empty when not stated |
+| finish | The brand vocabulary's canonical finish word for the stated finish (for example `Polished`). Empty when not stated |
+| material_type | The brand vocabulary's canonical material word for the stated material: for blokport the seed's stone type name exactly (for example `Granite`), for wudport its material word (for example `Plywood`). Empty when not stated |
+| origin_iso_2 | The stated origin country, ISO 3166 alpha-2, upper case. Empty when not stated |
+| thickness_text, finish_text, material_text, origin_text | Each spec as the seller wrote it. Empty when not stated |
+| spec_labels | JSON object: each stated spec column (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`) to the seller's label or sheet header it was read from, for example `{"finish":"Afwerking","thickness_mm":"Dikte"}`. A column not stated has no key |
 | grade_text | The seller's grade words, as written, when the register names the label that holds them |
 | price_text | The price as the seller shows it |
 | price_amount | Exact decimal, only when the listing has one price |
@@ -45,13 +57,33 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | delivery_text, delivery_included | As written; `yes`, `no` or `unknown` |
 | min_qty_text | The minimum order as stated |
 | availability_text | The stock wording as written |
-| provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency and min_qty_text: `listing`, `site_statement` (said once for the whole site) or `unknown`. A listing that states its own VAT basis (schema.org `valueAddedTaxIncluded`) gives `vat_basis` provenance `listing`, over any site statement; site_status `detail` counts the listings where the two differ |
+| provenance | JSON object for vat_basis, unit_text, delivery_text, delivery_included, grade_text, price_amount, currency, min_qty_text, thickness_mm, finish, material_type and origin_iso_2: `listing`, `site_statement` (said once for the whole site) or `unknown`. The four spec columns are `listing` when stated and `unknown` when empty. A listing that states its own VAT basis (schema.org `valueAddedTaxIncluded`) gives `vat_basis` provenance `listing`, over any site statement; site_status `detail` counts the listings where the two differ |
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
 
 A row with `seller_is_our_supplier` = `true` is still a public price, the same universe price as any competitor's, labelled as the owner's supplier. The consumer shows a supplier's list prices as their own line, apart from the competitor comparison, and never as the buy price: the owner's buy price comes only from his own load.
 
 No photos are collected. Text cells are the seller's own words: read them as data, and do not open the raw file in a spreadsheet that runs formulas.
+
+## Specs
+
+A listing's thickness, finish, material and origin are delivered as normalised columns, so the consumer matches on them and never parses `stated_specs` or `listing_key`. Each source maps its own labels in its own config, as it maps price, VAT and unit:
+
+- **A site:** its register row's `spec_labels` names the labels (a WooCommerce attribute name, a schema.org `additionalProperty` name) that state each spec, compared case and spacing aside, and the unit a bare thickness number is in. A site whose row has no `spec_labels` yet delivers the four columns empty: the labels come from pilot evidence, never guessed.
+- **A sheet:** its layout's `specs` names the column that states each spec, and the unit of a bare thickness number (a header `Thickness (cm)` declares cm).
+- **Words:** the brand's vocabulary (`market_prices/vocabulary/<brand>.yaml`) maps each stated finish and material to its canonical word (`finishes`, `materials`: canonical to the words that mean it, in any language). A stated value matches a word whole, case, accents and punctuation aside, never a part of it. Its `unstated` words (for example `Not specified`) mean the seller stated nothing: the column is empty and `detail` counts them as `stated as unstated xN`.
+- **Countries:** one brand-neutral table, `market_prices/countries.yaml`: each ISO 3166 alpha-2 code with its alpha-3 code and its names. A stated code matches exactly, a name case and accents aside.
+- **Thickness:** one number (a dot or a comma as the decimal mark), with `mm` or `cm` or bare. A stated unit wins over the declared one; cm is multiplied by 10 exactly.
+
+A stated value that has no honest mapping refuses its row, which is counted in `malformed_listings` with its reason and never delivered with a guess:
+
+| Reason in `detail` | When |
+|---|---|
+| `thickness '<value>' is not one number in mm or cm` | A range, two numbers, a unit other than mm or cm, or a bare number with no declared unit |
+| `finish '<value>' is not in <brand>'s finishes` | The finish is neither a finish word nor an unstated word |
+| `material '<value>' is not in <brand>'s materials` | The material is neither a material word nor an unstated word |
+| `origin '<value>' is not in the country table` | The origin is neither a code nor a name in the table, nor an unstated word |
+| `<column>: two labels state different values '<a>' / '<b>'` | A site states one spec under two of its labels with different values |
 
 ## site_status.csv
 
@@ -86,7 +118,7 @@ The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3:/
 - `run_id` and `observed_at` are when S3 received the file (its LastModified), not a price date. A date the sheet states is in `stated_specs` as written.
 - `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the file; its `decision` is `supplied` and `terms_checked_on` is empty.
 - `source_url` is `s3://<bucket>/<intake key>?versionId=<version>#<sheet>!R<row>` (`#R<row>` for a csv): the exact file version and row.
-- `stated_specs` holds every column the layout does not read into an observation field, header to cell as written. The identity columns (the column naming the competitor, every `listing_key` part) are kept there too, unless the column is read into a field (a product name that is both a key part and `listing_text` is in `listing_text`), so thickness, finish or dimensions are read from `stated_specs`, never parsed out of `listing_key`.
+- `stated_specs` holds every column the layout does not read into an observation field or a spec column, header to cell as written. The identity columns (the column naming the competitor, every `listing_key` part) are kept there too, unless the column is read into a field (a product name that is both a key part and `listing_text` is in `listing_text`; a thickness column the layout's `specs` names is in `thickness_mm` and `thickness_text`), so nothing is ever parsed out of `listing_key`.
 - `provenance` `site_statement` means the sheet's layout states it once for every row (for example its currency or VAT basis).
 - `s3://<bucket>/<env>/market_prices/<brand>/intake_absorbed.csv` records each absorbed file: `sha256`, `key`, `version_id`, `layout_id`, `run_id`, sorted by `sha256`.
 
@@ -94,11 +126,11 @@ A file is refused, named, and left in the intake (never half-read) when it is no
 
 ## Adding a competitor sheet
 
-One `competitors` entry (id, the names the sheet uses, seller type, country, market, its own `site_domain` (a bare host), and `supplier_key` when the competitor is one of the owner's suppliers; the flag is written in the layout file and checked both ways against the product scraper's suppliers at load, as for a site) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the number separators, the currency symbols it accepts and what the sheet states once. A sheet that names several competitors, each stating its price in its own column, names those columns per competitor (`price_by_competitor`, competitor id to column) instead of one `price`: each row takes its own competitor's column, every other stated column (another competitor's price among them) is kept in `stated_specs`, and a row naming a competitor the layout gives no price column refuses the file. A competitor named by a column is matched only by its declared names: where that column states the source document a row was transcribed from (the owner's workbook tabs), each competitor's names include that document's file name, so a sheet from a new source document refuses the file until the layout gains the name. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
+One `competitors` entry (id, the names the sheet uses, seller type, country, market, its own `site_domain` (a bare host), and `supplier_key` when the competitor is one of the owner's suppliers; the flag is written in the layout file and checked both ways against the product scraper's suppliers at load, as for a site) and one `layouts` entry in `market_prices/sheet_layouts/<brand>.yaml`. A layout names the sheet (xlsx), the header row and its exact headers, where the competitor's name is (a cell, a column, or the file name), the key, text, price and optional columns, the spec columns (`specs`, see "Specs"), the number separators, the currency symbols it accepts and what the sheet states once. A sheet that names several competitors, each stating its price in its own column, names those columns per competitor (`price_by_competitor`, competitor id to column) instead of one `price`: each row takes its own competitor's column, every other stated column (another competitor's price among them) is kept in `stated_specs`, and a row naming a competitor the layout gives no price column refuses the file. A competitor named by a column is matched only by its declared names: where that column states the source document a row was transcribed from (the owner's workbook tabs), each competitor's names include that document's file name, so a sheet from a new source document refuses the file until the layout gains the name. Two layouts with the same headers are refused, and a competitor id may not also be a site id.
 
 ## Adding a site
 
-One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. robots.txt is read from the site's root on every run.
+One entry in `market_prices/sites/<brand>.yaml`, carrying `brand: <brand>` (a row of another brand, or none, is refused). A site_id or host already in another brand's register is refused unless both rows name each other in `shared_with: [<brand>]`. A site that is one of the owner's suppliers carries `supplier_key`, the product scraper's source id for it (`scrapers/<source>.py`). At load the register is checked against every supplier the product scraper knows (each fetcher's `site_domain`): an unknown key, a key whose domain is not the site's, and a supplier's domain without the key are all refused. The domains are compared host to host, case and a leading `www.` dropped on both sides: the site's host must be the supplier's domain or a subdomain of it (never a shared parent such as `slabware.com`, which hosts several sellers). `decision: approved` is refused without terms URL, date checked, a summary of the terms, who decided and when, the seller's country and the market served. A site's `spec_labels` (see "Specs") names the labels that state its specs, taken from its listings as fetched. robots.txt is read from the site's root on every run.
 
 An approved `schema_org_product` site needs `discovery` (another platform refuses it; a site never requested, such as a blocked one registered unapproved, may leave it out, so nothing about it is invented), and takes no `query`:
 
