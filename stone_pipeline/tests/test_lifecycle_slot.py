@@ -31,6 +31,7 @@ def _slot_recorder(calls):
     (lambda: lifecycle.retire_variation("granite__x_1"), "add_retired"),
     (lambda: lifecycle.un_retire("granite__x_1"), "remove_retired"),
 ])
+@pytest.mark.usefixtures("seeded_config_store")   # retire also clears the Key's learned aliases (P2-10 C6), an existing store
 def test_retire_memory_is_written_inside_the_slot(monkeypatch, verb, memory):
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "_ledger_op", _slot_recorder(calls))
