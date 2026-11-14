@@ -762,6 +762,16 @@ def test_a_listing_outside_the_brands_scope_is_not_delivered_and_is_counted():
     assert "listings out of scope x1" in status.detail
 
 
+def test_scope_is_decided_before_a_listing_is_read_so_an_out_of_scope_one_is_never_malformed():
+    """f8's note: an out-of-scope listing that would not read (prices not an object) is out of scope, not malformed,
+    so it can never turn a site partial; malformed counts in-scope listings only."""
+    result = _run(_shop(_page([_listing(1, name="Birch plywood 18mm 2440 x 1220"),
+                               _listing(2, name="Paint roller 9 inch", prices="unreadable")])), _wudport_register())
+    status = _status(result)
+    assert (status.status.value, status.rows, status.malformed_listings) == ("ok", 1, 0)
+    assert status.detail == "listings out of scope x1"
+
+
 def test_a_site_with_no_listing_in_scope_is_read_whole_and_delivers_none():
     result = _run(_shop(_page([_listing(1, name="Paint roller 9 inch")])), _wudport_register())
     status = _status(result)
