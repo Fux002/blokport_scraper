@@ -776,9 +776,9 @@ def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_
     # W24: the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
     from types import SimpleNamespace
     from stone_pipeline.core.text import UnfoldableName
-    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="São Francisco")
+    cfg = SimpleNamespace(collection_country_default="BR", collection_city_default="São Francisco")
     assert derive.collection_location(ref, cfg) == ("BR", "Sao Francisco")
-    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="黑")
+    cfg = SimpleNamespace(collection_country_default="BR", collection_city_default="黑")
     with pytest.raises(UnfoldableName):
         derive.collection_location(ref, cfg)
 

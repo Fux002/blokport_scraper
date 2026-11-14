@@ -30,6 +30,7 @@ from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import UnfoldableName, clean_description, indefinite_article, slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData, field_kinds
+from stone_pipeline.reference.loaders.origins import InvalidCountry, is_iso2
 
 log = logfmt.get_logger("derive")
 
@@ -789,11 +790,21 @@ def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[s
         return None, None
     if not country:
         raise ValueError(f"collection_city_default {city!r} is set without a collection_country_default")
-    iso = ref.to_iso(country)
-    if not iso:
-        raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
+    if not is_iso2(country, ref.valid_iso_codes):
+        raise InvalidCountry(f"collection_country_default {country!r} is not an ISO-3166 alpha-2 code")
     # a source-level operator setting: a city with no ASCII form stops this source's run loudly (UnfoldableName)
-    return iso, _place(field_kinds.PRODUCT_COLLECTION_CITY, city) or None
+    return country, _place(field_kinds.PRODUCT_COLLECTION_CITY, city) or None
+
+
+_SOURCE_ORIGIN_FIELDS = ("origin_default", "primary_origin")
+
+
+def require_source_countries(ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    """A source's origin countries are blank (unset) or ISO-2 codes; run_source holds the source on a bad one."""
+    bad = [f"{field} {value!r}" for field in _SOURCE_ORIGIN_FIELDS
+           if (value := getattr(source_cfg, field)) and not is_iso2(value, ref.valid_iso_codes)]
+    if bad:
+        raise InvalidCountry(f"{', '.join(bad)}: not ISO-3166 alpha-2 codes")
 
 
 def _place(field: str, value: str | None) -> str | None:

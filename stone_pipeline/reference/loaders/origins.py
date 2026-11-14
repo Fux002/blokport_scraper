@@ -6,10 +6,31 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from stone_pipeline.core.text import match_key
 from stone_pipeline.reference.loaders.common import env, log, norm
+
+
+class InvalidCountry(ValueError):
+    """A country code that is not a real ISO-3166 alpha-2 code."""
+
+
+def country_list(value: str) -> list[str]:
+    """The ordered, de-duplicated ISO-2 codes of a comma list ("BR, in" -> ["BR", "IN"])."""
+    return list(dict.fromkeys(c.strip().upper() for c in (value or "").split(",") if c.strip()))
+
+
+def is_iso2(code: str, valid_iso_codes) -> bool:
+    """The one country-code rule: `code` is, exactly as written, a known ISO-3166 alpha-2 code."""
+    return code in valid_iso_codes
+
+
+def require_iso2(where: str, codes: Iterable[str], valid_iso_codes) -> None:
+    """Raise InvalidCountry naming `where` and every code in `codes` that is not ISO-2."""
+    bad = sorted({c for c in codes if not is_iso2(c, valid_iso_codes)})
+    if bad:
+        raise InvalidCountry(f"{where} hold non-ISO-3166 country codes: {', '.join(map(repr, bad))}")
 
 
 # --- origin_map.csv -----------------------------------------------------------
@@ -30,7 +51,7 @@ class OriginRule:
         """The ordered ISO-2 candidates parsed from country_iso ("BR,IN" -> ["BR","IN"]). A single-country
         row yields a 1-element list, so existing single-origin behaviour is unchanged. Duplicates are folded
         (order-preserving) so a stray "BR,BR" is treated as the single origin it means."""
-        return list(dict.fromkeys(c.strip().upper() for c in self.country_iso.split(",") if c.strip()))
+        return country_list(self.country_iso)
 
 
 @dataclass
@@ -213,6 +234,6 @@ def resolve_iso(value: str, country_codes: dict[str, str], valid_iso_codes) -> s
     hit = country_codes.get(match_key(v))   # same key the country table was built with (norm)
     if hit:
         return hit
-    if len(v) == 2 and v.isalpha() and v.upper() in valid_iso_codes:
+    if is_iso2(v.upper(), valid_iso_codes):
         return v.upper()
     return None
