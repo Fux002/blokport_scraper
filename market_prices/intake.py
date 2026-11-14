@@ -1,6 +1,8 @@
 """The owner's competitor price sheets, absorbed into delivered runs: `python -m market_prices.intake`
-(RUN_MODE=market-prices-intake on the ad-hoc task). No arguments: the brand, environment, bucket and S3 dry run come
-from settings, every tunable from market_prices/config.py, the layouts from market_prices/sheet_layouts/<brand>.yaml.
+(RUN_MODE=market-prices-intake on the ad-hoc task). No arguments: the brand is the required run input
+SCRAPER_MARKET_PRICES_BRAND (market_prices/run_input.py), never the deployment's own brand; the environment, bucket and
+S3 dry run come from settings, every tunable from market_prices/config.py, the layouts from
+market_prices/sheet_layouts/<brand>.yaml.
 
 Each file in `<env>/market_prices/<brand>/intake/` is read once, by its sha256:
 - a file whose sha is in the brand's `intake_absorbed.csv` is skipped, under any name;
@@ -34,12 +36,13 @@ from market_prices.collect import RunResult, Stamp, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
 from market_prices.publish import publish_run
 from market_prices.register import load_register
+from market_prices.run_input import run_brand
 from market_prices.schema import (
     DeliveryIncluded, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source, VatBasis,
 )
 from market_prices.sheet_files import FileRefused, Table, read_tables
 from market_prices.sheet_values import cell_text, read_currency, read_price
-from stone_pipeline.config.settings import BRAND, ENV_NAME, S3_BUCKET, SETTINGS
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, SETTINGS
 from stone_pipeline.io.deliverables import MANIFEST_NAME, file_entry, published_manifest
 from stone_pipeline.io.storage import BOTOCORE_DEFAULTS, aws_client
 
@@ -199,16 +202,20 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     if not all(key_parts):
         raise MalformedListing(f"row {index + 1} has no listing key")
     text = " ".join(part for column in layout.listing_text if (part := _cell(cells, header, column)))
-    price = read_price(_raw(cells, header, layout.price), layout)
+    price_column = layout.price_column(competitor.competitor_id)
+    if price_column is None:                            # the whole file is refused, never half-read
+        raise FileRefused(f"{file.key}: layout {layout.layout_id} gives competitor {competitor.competitor_id} "
+                          f"no price column")
+    price = read_price(_raw(cells, header, price_column), layout)
     column_currency = read_currency(_raw(cells, header, layout.currency), layout)
     if column_currency and price.currency and column_currency != price.currency:
         raise MalformedListing(f"row {index + 1}: currency {column_currency} but the price says {price.currency}")
     listed_currency = column_currency or price.currency
     listed_unit = _cell(cells, header, layout.unit)
     said = layout.statements
-    mapped = {name_key(column) for column in layout.mapped_columns()}
+    fields = {name_key(column) for column in layout.field_columns(competitor.competitor_id)}
     specs = {layout.headers[position]: value for position, cell in enumerate(cells)
-             if header[position] not in mapped and (value := cell_text(cell))}
+             if header[position] not in fields and (value := cell_text(cell))}
     grade, min_qty = _cell(cells, header, layout.grade), _cell(cells, header, layout.min_qty)
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,
@@ -391,10 +398,11 @@ def _runs_root() -> Path:
 
 
 def main() -> None:
-    layouts = load_layouts(BRAND)
-    check_ids_apart(layouts, load_register(BRAND))
+    brand = run_brand()
+    layouts = load_layouts(brand)
+    check_ids_apart(layouts, load_register(brand))
     dry_run = _dry_run()
-    outcome = run_intake(_s3_client(), S3_BUCKET, BRAND, layouts, _runs_root(), dry_run)
+    outcome = run_intake(_s3_client(), S3_BUCKET, brand, layouts, _runs_root(), dry_run)
     print(summary(outcome, dry_run))
     if outcome.refused:
         raise SystemExit(1)

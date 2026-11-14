@@ -30,6 +30,14 @@ def _no_ambient_aws(monkeypatch):
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_run_brand(monkeypatch):
+    """No test inherits a market-price run brand from the shell (under either prefix); a test that runs an entry sets
+    the one it means, so a run without it is the default every test sees."""
+    for var in ("SCRAPER_MARKET_PRICES_BRAND", "BLOKPORT_MARKET_PRICES_BRAND"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _published_field_kinds():
     """The name-field kinds come from the backend's published field-kinds.json, which a produce fetches. Tests read

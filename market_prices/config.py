@@ -13,6 +13,10 @@ OBSERVATIONS_FILE = "observations.csv"
 SITE_STATUS_FILE = "site_status.csv"
 LATEST_FILE = "latest.json"
 S3_BRAND_PREFIX = "{env_segment}/market_prices/{brand}"
+# The run input naming the brand a run or intake works on, read through stone_pipeline.core.env (so it is set as
+# SCRAPER_MARKET_PRICES_BRAND, the env module's legacy prefix read too). Required, never the deployment's own brand: one
+# deployment's ad-hoc task runs any brand's register (the one shared runner), its keys under that brand's prefix.
+RUN_BRAND_ENV = "MARKET_PRICES_BRAND"
 
 # An honest, generic client name: this path never disguises itself as a browser.
 ROBOTS_TOKEN = "market-price-observer"
