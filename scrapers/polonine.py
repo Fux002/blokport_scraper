@@ -33,6 +33,7 @@ except ImportError:
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
+from stone_pipeline.core import env
 
 # The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://polonine.slabware.com"
@@ -42,6 +43,21 @@ DETAIL_API = f"{BASE}/FullInventory.aspx/DetalheBundle"
 PAGE_SIZE = 40
 API_HEADERS = {"content-type": "application/json; charset=UTF-8",
                "x-requested-with": "XMLHttpRequest", "origin": BASE, "referer": PAGE_URL}
+# The customer login that shows prices ("Prices ... are available for logged in customers only"): the owner's own
+# account (14 Nov, via Mas). Both values come from the environment (SSM-backed when deployed), never from code or config:
+# the username is a person's email. The endpoints are the site's own login and logout (slabware.js).
+LOGIN_API = f"{BASE}/ajax/Ajax.aspx/Modal_Login"
+LOGOUT_API = f"{BASE}/ajax/Ajax.aspx/LogOut_Head"
+LOGIN_USER_ENV = "SCRAPER_POLONINE_USERNAME"
+LOGIN_PASSWORD_ENV = "SCRAPER_POLONINE_PASSWORD"
+LOGIN_OK = "ok"
+# how much of the site's refusal message the completion marker keeps (its own words, never the secret)
+LOGIN_REFUSAL_CHARS = 120
+
+
+def _as_the_login_form_sends(value: str) -> str:
+    """A login value as the site's own form sends it: slabware.js strips quotes from both fields."""
+    return value.replace("'", "").replace('"', "")
 
 
 def _g(d, key, default=""):
@@ -108,11 +124,41 @@ class PolonineScraper(ScraperBase):
         self.note_detail(ok=True)
         return (r.json().get("d") or {}).get("Bundle") or {}
 
+    def _login(self) -> str:
+        """"ok" when the customer login that shows prices succeeded, else why not. Never raises: the product and
+        stock scrape needs no login."""
+        user, password = env.getenv(LOGIN_USER_ENV), env.getenv(LOGIN_PASSWORD_ENV)
+        if not user or not password:
+            return f"no login in the environment ({LOGIN_USER_ENV}, {LOGIN_PASSWORD_ENV})"
+        body = json.dumps({"login": _as_the_login_form_sends(user), "senha": _as_the_login_form_sends(password)})
+        try:
+            answer = (self.post(LOGIN_API, headers=API_HEADERS, content=body).json() or {}).get("d")
+        except (RuntimeError, ValueError) as exc:    # no answer after the retries; an answer that is not JSON
+            return f"login request failed: {type(exc).__name__}"
+        return LOGIN_OK if answer == LOGIN_OK else f"login refused: {str(answer)[:LOGIN_REFUSAL_CHARS]}"
+
+    def _logout(self) -> None:
+        """End the customer session. A logout that gets no answer is logged, not fatal: the session expires."""
+        try:
+            self.post(LOGOUT_API, headers=API_HEADERS, content="{}")
+        except RuntimeError as exc:
+            self.log.warning("logout got no answer: %s", type(exc).__name__)
+
     def list_products(self) -> Iterable[Any]:
         # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
         # accepting the end (a transient empty must not truncate the tail -> silent delist).
         self._warm_up()
+        # logged in, the list carries the prices (price1/price2); the completion marker states whether they were read,
+        # which the supplier price emission reads. A failed login never stops the product and stock scrape: it is
+        # logged loudly, recorded, and the prices are reported missing (never a silent unpriced run).
+        prices = self._login()
+        self.run_facts["prices"] = prices
+        if prices != LOGIN_OK:
+            self.log.error("price login failed, scraping products without prices: %s", prices)
+            self.record_failure("price_login", error=prices)
         yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
+        if prices == LOGIN_OK:
+            self._logout()
 
     def parse_product(self, item: dict) -> Optional[dict]:
         fetched = self._fetch_detail(item.get("id"))

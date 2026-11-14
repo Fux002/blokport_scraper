@@ -157,6 +157,8 @@ class WooCommerceStoreCollector:
     version = "woocommerce_store-1"
     takes_query = True
     needs_discovery = False
+    needs_scrape = False
+    fetches = True
     reserved_query = frozenset({"page", "per_page"})
 
     def _page_url(self, site: "Site", page: int) -> str:

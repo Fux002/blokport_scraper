@@ -35,7 +35,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | source | `site`: read from a site in the register. `file`: read from a supplied price sheet (see "Price sheets") |
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
-| seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
+| seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market; a seller whose prices serve the EU as one market states `EU` (ISO 3166-1's exceptionally reserved code for it) |
 | seller_is_our_supplier, supplier_key | `true` when this seller is also one of the owner's suppliers, with `supplier_key` the product scraper's source id for it (empty when `false`). Copied from the row's seller: written in the register and checked both ways against the product scraper's suppliers at load |
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
@@ -53,7 +53,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | currency | ISO 4217 code as stated |
 | price_status | `priced`, `on_request` or `none`. A range, or zero (made-to-measure), is `none` with `price_text` kept |
 | vat_basis | `incl`, `excl` or `unknown` |
-| unit_text | The selling unit as written |
+| unit_text | The selling unit as written: the listing's own (provenance `listing`, for example a supplier's `Sq.Mt.`), else the site's statement |
 | delivery_text, delivery_included | As written; `yes`, `no` or `unknown` |
 | min_qty_text | The minimum order as stated |
 | availability_text | The stock wording as written |
@@ -87,7 +87,7 @@ A stated value that has no honest mapping refuses its row, which is counted in `
 
 ## site_status.csv
 
-One row per site in the register, every run.
+One row per site the run collects. A fetching run lists every site of the register except its `supplier_scrape` rows: each of those is listed in the runs its supplier's product scrape delivers (see "Supplier prices").
 
 | status | Meaning |
 |---|---|
@@ -108,6 +108,7 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 
 - **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for the brand named by the required run input `SCRAPER_MARKET_PRICES_BRAND` (set as a container override; never the deployment's own brand, so one deployment's task runs every brand's register), in that deployment's env and bucket, under `<env>/market_prices/<brand>/`. A run without it stops before any request; an unknown brand (no `sites/<brand>.yaml`) is refused the same way. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
 - **Collectors:** a site names its platform. `woocommerce_store` reads the shop's public Store API. `schema_org_product` reads each product page's schema.org Product/Offer structured data (JSON-LD), reached through the entry points the register names (see "Adding a site"): one listing per product, or per variant of a ProductGroup. Only what the structured data states is read: a price is `priced` only as one exact decimal in schema.org's form (a dot, no grouping), and a span, a zero or any other form is `none` with `price_text` kept as stated. Offers stating prices in several currencies are not one price either: `none`, every stated price in `price_text` (`10 EUR | 10 GBP`), `currency` empty, and `detail` counts them (`offers state several currencies x<n>`); the listing is still delivered. `listing_key` is the product's `sku`, else its `productID`, else its page's path; a variant shares its page, so without a `sku` or `productID` it is keyed by its own `@id` or `url` on the site, and one with no identity of its own is a malformed listing (`variant has no id of its own`), never merged into another. A site that states no structured price (prices loaded by script, or a browser needed) gives no rows, and `detail` says why; it is never worked around.
+- **Supplier prices (`supplier_scrape`):** a seller that is also one of the owner's suppliers can have its prices read from the product scraper's own fetch of it (one fetch, one transport): the row names its `supplier_key` and the scraper's columns, and requests nothing itself. The produce delivers them right after its scrape, as its own run per supplier, stamped with the scrape's time (`run_id` and `observed_at` are when the prices were seen). The scrape's completion marker states whether it read prices (`prices`: `ok`, or why not, such as a refused customer login); a scrape that read none gives the site `unavailable_error` with that reason and no rows, never unpriced listings. A price is read as stated: `priced` only as one exact positive amount after a declared currency symbol (`US$` is `USD`), with the unit after its `/` as the listing's `unit_text`; another symbol leaves it `none` with its text kept and `detail` counting it (`price in a currency symbol not declared x<n>`); a declared on-request wording (`Call for Price`) is `on_request`. Nothing is converted. Such a row is still a public competitor price labelled as the supplier's (`seller_is_our_supplier`), and no price of the product scrape reaches a product on the BlokPort product path.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
 - **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (the same required run input `SCRAPER_MARKET_PRICES_BRAND`), that brand register's own `pilot_site` (`market_prices/sites/<brand>.yaml`), against development's bucket and prints a summary with the first rows. It refuses any other environment, a register naming no pilot site, and a pilot site the register has not approved, before a single request.
 
@@ -142,3 +143,14 @@ discovery:
 ```
 
 At least one sitemap or listing page. The entry points are the in-scope part of the site (for example its sheet-material categories), never its whole catalogue: nothing is guessed from a link before a page is fetched. Product pages are read in sorted order, each only where robots.txt allows it (a forbidden one is skipped unrequested and counted in `malformed_listings`, `detail` reason `robots.txt disallows the product page`; a query is never dropped to reach an allowed URL); a page that answers with an error is its listing's problem, while a block or no answer ends the site. Caps (`SCHEMA_ORG_*` in `config.py`) bound the sitemaps, listing pages and product pages of one site; reaching one is reported in `detail`.
+
+A `supplier_scrape` row needs `supplier_key` (the source whose scrape it reads), takes no `discovery` or `query`, and, approved, needs `scrape`: the scraper's columns for the listing's `key`, `url` and `price`, its `text` columns (joined as `listing_text`) and its `specs` columns (each in `stated_specs` under the column's name):
+
+```yaml
+scrape:
+  key: product_id
+  url: detail_url
+  price: price1
+  text: [material, stone_type, thickness, finish]
+  specs: [material, stone_type, thickness, finish, price2, area_sqmt]
+```

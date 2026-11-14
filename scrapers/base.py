@@ -127,6 +127,10 @@ class ScraperBase:
         self.failures_csv = self.run_dir / "failures.csv"
         self.complete_marker = self.run_dir / "scrape_complete.json"
         self._failures: list[dict] = []
+        # What a scraper states about its run, written into the completion marker beside the base's own facts (which
+        # win on a name clash): e.g. whether it read prices (`prices`: "ok" or why not), which the supplier price
+        # emission reads (market_prices.collectors.supplier_scrape). Never a secret.
+        self.run_facts: dict[str, str] = {}
         # Detail-fetch accounting (A1). A scraper that fetches a per-product DETAIL page reports each outcome
         # via note_detail(ok=...); the base persists the failure RATIO into the completion marker. The delist
         # gate reads it and refuses to discontinue against a scrape whose detail fetches were badly degraded
@@ -349,7 +353,7 @@ class ScraperBase:
             self.mark_incomplete("zero rows scraped -- treating as a failed run, not an empty catalog")
         # Written ONLY after a clean finish: a crash mid-scrape leaves no marker, so the pipeline
         # falls back to the prior good folder instead of ingesting a half-written products.csv.
-        marker = {"rows": len(rows), "complete": not self._incomplete, "timestamp": self.timestamp}
+        marker = {**self.run_facts, "rows": len(rows), "complete": not self._incomplete, "timestamp": self.timestamp}
         detail_ratio = self._detail_failure_ratio()
         if detail_ratio is not None:   # only for scrapers that report detail fetches (A1 delist gate reads it)
             marker["detail_failure_ratio"] = round(detail_ratio, 4)

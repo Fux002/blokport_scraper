@@ -8,13 +8,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 
 from pydantic import BaseModel, ValidationError
 
 from market_prices import config
 from market_prices.brand import require_run_brand
 from market_prices.collectors import COLLECTORS
+from market_prices.collectors.supplier_scrape import ScrapeFolder
 from market_prices.fetching import (
     SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse,
 )
@@ -30,7 +31,7 @@ _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "del
                           "delivery_included": DeliveryIncluded.unknown}
 _LISTING_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
 # A statement a listing may make for itself; it wins over the site's, being the more specific (manager's ruling 13 Nov)
-_LISTING_STATEMENT_FIELDS = ("vat_basis",)
+_LISTING_STATEMENT_FIELDS = ("vat_basis", "unit_text")
 _VAT_CONFLICT = "listing VAT differs from the site statement"
 
 
@@ -111,8 +112,8 @@ def counted_reasons(reasons: collections.Counter) -> str:
     return "; ".join(shown + ([f"other reasons x{rest}"] if rest else []))
 
 
-def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Countries, transport: Transport,
-                 stamp: Stamp, pause: Callable[[float], None]) -> SiteResult:
+def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Countries, transport: Optional[Transport],
+                 stamp: Stamp, pause: Callable[[float], None], scrape: Optional[ScrapeFolder] = None) -> SiteResult:
     """One site, isolated. A listing is kept only when the run brand's vocabulary has it in scope; one out of scope
     is counted in `detail`, never dropped silently. Scope is decided first, on the collector's listing_text, so a
     listing out of scope is never read further and malformed counts in-scope listings only. An in-scope listing's
@@ -141,8 +142,10 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Coun
     collector = COLLECTORS[site.platform]
     rows: dict[str, Observation] = {}
     try:
-        fetcher = SiteFetcher(site.robots_url, transport, pause)
-        for raw in collector.listings(site, fetcher):
+        # a fetching collector reads the site through the rules every request obeys; a supplier_scrape row reads the
+        # rows its supplier's product scrape already fetched (one fetch, one transport), so it requests nothing
+        source = SiteFetcher(site.robots_url, transport, pause) if collector.fetches else scrape
+        for raw in collector.listings(site, source):
             try:
                 if not vocabulary.in_scope(collector.listing_text(raw, site), site.served_market):
                     out_of_scope += 1
@@ -185,19 +188,44 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Coun
     return finish(SiteRunStatus.ok, "", rows.values())
 
 
-def collect_run(register: Register, transport: Transport, moment: datetime,
-                pause: Callable[[float], None] = time.sleep) -> RunResult:
-    stamp = stamp_for(moment)
+def _scoped(register: Register, sites: list[Site]) -> tuple[Vocabulary, Countries]:
+    """The run brand's vocabulary and the country table, refused when a collectable site serves a market the
+    vocabulary does not declare (before any listing is read)."""
     vocabulary = load_vocabulary(register.brand)
-    countries = load_countries()
-    if uncovered := sorted(site.site_id for site in register.sites
+    if uncovered := sorted(site.site_id for site in sites
                            if site.collectable and not vocabulary.covers(site.served_market)):
         raise VocabularyError(f"{register.brand}'s scope vocabulary declares no market for sites {uncovered}")
-    results = [collect_site(site, register.brand, vocabulary, countries, transport, stamp, pause)
-               for site in sorted(register.sites, key=lambda site: site.site_id)]
+    return vocabulary, load_countries()
+
+
+def _run_result(register: Register, stamp: Stamp, results: list[SiteResult]) -> RunResult:
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),
                      statuses=tuple(result.status for result in results))
+
+
+def collect_run(register: Register, transport: Transport, moment: datetime,
+                pause: Callable[[float], None] = time.sleep) -> RunResult:
+    """The register's fetching sites. A supplier_scrape row is not this run's: its prices come with its supplier's
+    product scrape (collect_supplier_run), so it is neither requested nor listed here."""
+    stamp = stamp_for(moment)
+    sites = sorted((site for site in register.sites if COLLECTORS[site.platform].fetches),
+                   key=lambda site: site.site_id)
+    vocabulary, countries = _scoped(register, sites)
+    return _run_result(register, stamp, [collect_site(site, register.brand, vocabulary, countries, transport,
+                                                      stamp, pause) for site in sites])
+
+
+def collect_supplier_run(register: Register, scrape: ScrapeFolder) -> RunResult:
+    """The register's supplier_scrape rows of `scrape`'s source, read from that scrape and stamped with its own time
+    (when the prices were seen)."""
+    stamp = stamp_for(datetime.strptime(scrape.timestamp, config.SCRAPE_STAMP_FORMAT).replace(tzinfo=timezone.utc))
+    sites = sorted((site for site in register.sites
+                    if not COLLECTORS[site.platform].fetches and site.supplier_key == scrape.source),
+                   key=lambda site: site.site_id)
+    vocabulary, countries = _scoped(register, sites)
+    return _run_result(register, stamp, [collect_site(site, register.brand, vocabulary, countries, None, stamp,
+                                                      time.sleep, scrape) for site in sites])
 
 
 def _write_csv(path: Path, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
