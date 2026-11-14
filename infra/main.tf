@@ -25,6 +25,42 @@ data "aws_ssm_parameter" "scraper_proxy" {
   name  = var.scraper_proxy_ssm_name
 }
 
+# Polonine's customer login (the owner, 14 Nov: "Yes, store it"), read by the PRODUCT scraper's separate price pass
+# (scrapers/polonine.py). Least privilege: injected ONLY into the sync service's produce (its config container runs the
+# live scrape), never into the ad-hoc scraper task, which does not scrape. Only for a brand that switches the login on
+# (polonine_login): dev by its KNOWN /${var.brand}-dev/ names (they must exist before the plan), prod by explicit
+# SSM-name vars, exactly like FAL_KEY and the proxy.
+data "aws_ssm_parameter" "polonine_username_dev" {
+  count = var.polonine_login ? 1 : 0
+  name  = "/${var.brand}-dev/SCRAPER_POLONINE_USERNAME"
+}
+data "aws_ssm_parameter" "polonine_password_dev" {
+  count = var.polonine_login ? 1 : 0
+  name  = "/${var.brand}-dev/SCRAPER_POLONINE_PASSWORD"
+}
+data "aws_ssm_parameter" "polonine_username" {
+  count = var.polonine_username_ssm_name == "" ? 0 : 1
+  name  = var.polonine_username_ssm_name
+  lifecycle {
+    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    precondition {
+      condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
+      error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."
+    }
+  }
+}
+data "aws_ssm_parameter" "polonine_password" {
+  count = var.polonine_password_ssm_name == "" ? 0 : 1
+  name  = var.polonine_password_ssm_name
+  lifecycle {
+    # f8's should: half a login would be wired silently, so the plan refuses it (both names, and the brand's switch)
+    precondition {
+      condition     = var.polonine_login && var.polonine_username_ssm_name != "" && var.polonine_password_ssm_name != ""
+      error_message = "The prod Polonine login is wired whole or not at all: set polonine_username_ssm_name and polonine_password_ssm_name together, with polonine_login = true."
+    }
+  }
+}
+
 locals {
   # DEV runtime secrets, ALWAYS injected (the two data sources above always resolve).
   dev_ssm_secrets = {
@@ -35,6 +71,19 @@ locals {
   prod_ssm_secrets = merge(
     var.fal_key_ssm_name == "" ? {} : { FAL_KEY = data.aws_ssm_parameter.fal_key[0].arn },
     var.scraper_proxy_ssm_name == "" ? {} : { BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy[0].arn },
+  )
+  # The PRODUCE's secrets: every runtime secret above plus the Polonine login (the produce only, never the ad-hoc task).
+  dev_produce_secrets = merge(
+    local.dev_ssm_secrets,
+    var.polonine_login ? {
+      SCRAPER_POLONINE_USERNAME = data.aws_ssm_parameter.polonine_username_dev[0].arn
+      SCRAPER_POLONINE_PASSWORD = data.aws_ssm_parameter.polonine_password_dev[0].arn
+    } : {},
+  )
+  prod_produce_secrets = merge(
+    local.prod_ssm_secrets,
+    var.polonine_username_ssm_name == "" ? {} : { SCRAPER_POLONINE_USERNAME = data.aws_ssm_parameter.polonine_username[0].arn },
+    var.polonine_password_ssm_name == "" ? {} : { SCRAPER_POLONINE_PASSWORD = data.aws_ssm_parameter.polonine_password[0].arn },
   )
   prod_enabled = var.prod_staging_bucket != ""
   dev_enabled  = var.dev_enabled
@@ -416,8 +465,9 @@ module "sync_service_dev" {
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_dev.arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_dev.arn
   # the produce subprocess (live scrape + image gen) carries the same runtime secrets as the batch
-  # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured.
-  produce_secret_arns = local.dev_ssm_secrets
+  # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured,
+  # plus the Polonine login its price pass needs (the produce only).
+  produce_secret_arns = local.dev_produce_secrets
 
   # Auto-texture: the produce submits the texture job on the GPU queue (scoped IAM + queue/def names).
   gpu_job_queue_name      = module.gpu_enhance_dev[0].job_queue
@@ -511,7 +561,7 @@ module "sync_service_prod" {
 
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_prod[0].arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_prod[0].arn
-  produce_secret_arns  = local.prod_ssm_secrets
+  produce_secret_arns  = local.prod_produce_secrets
   secrets_kms_key_arn  = local.prod_secrets_kms_key_arn
 
   gpu_job_queue_name      = module.gpu_enhance_prod[0].job_queue

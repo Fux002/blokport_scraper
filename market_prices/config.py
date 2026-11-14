@@ -79,6 +79,19 @@ DECLARED_HTML_MAX_ELEMENTS = 200_000
 SALE_FLAG_LABEL = "On sale"
 SALE_FLAG_VALUE = "yes"
 
+# Supplier prices read from the product scraper's own fetch (collectors/supplier_scrape.py; the produce publishes them,
+# market_prices/supplier.py). Only a declared currency symbol names a currency: another leaves the listing unpriced and
+# is counted, never guessed. A price that states one of these words is on request.
+CURRENCY_SYMBOLS = {"US$": "USD"}
+ON_REQUEST_TEXTS = ("call for price",)
+# A supplier scraper's separate price pass, in its run folder (scrapers/base.py write_price_pass, whose PRICES_CSV and
+# PRICES_MARKER these equal): its rows, its marker with the statement of whether it read prices ("ok" or why not), and
+# the UTC stamp the run folder is named by. The products.csv beside them is never read here.
+SCRAPE_ROWS_FILE = "prices.csv"
+SCRAPE_MARKER_FILE = "prices_complete.json"
+SCRAPE_PRICES_KEY = "prices"
+SCRAPE_STAMP_FORMAT = "%Y%m%d_%H%M%S"
+
 # The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
 # with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
 PILOT_SAMPLE_ROWS = 5

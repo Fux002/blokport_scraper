@@ -11,6 +11,16 @@ on:
 # except the terraform job (see there).
 # A fork's or a bot's pull request stays on ubuntu-latest, so no outside code reaches a box. The expression is repeated
 # per job because runs-on cannot read env.
+
+# SUPERSEDED PULL-REQUEST RUNS ARE CANCELLED (Mas, 14 Nov: the 8 scraper slots were full of runs a newer push to the same
+# branch had already replaced, while main's run waited). A pull request's runs share one group and a newer push cancels
+# the older run. A push to main or develop gets a group of its own (its run id), so a main or develop run is never
+# cancelled and never held pending behind another: GitHub drops a PENDING run when a newer one joins its group even
+# without cancel-in-progress, so those runs must not share a group at all.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ${{ (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && 'blokport-ci-sc' || 'ubuntu-latest' }}
