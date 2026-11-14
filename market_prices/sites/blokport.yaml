@@ -31,3 +31,31 @@ sites:
       summary: robots.txt blocks nothing relevant; no clause on copying, scraping or image rights was found.
     decision: pending
     statements: {vat_basis: incl}
+  # Polonine is also one of the owner's suppliers (supplier_key polonine). Its slab prices are shown only to a logged-in
+  # customer: after its anonymous product scrape, the product scraper runs a separate price pass with the owner's own
+  # login (scrapers/polonine.py, credentials from the environment), and this row reads that pass's prices.csv (platform
+  # supplier_scrape): one fetch path, no request of its own. Spec labels wait for pilot evidence of how its stone types
+  # and finishes map; until then the four spec columns are empty and every listed column is in stated_specs.
+  - brand: blokport
+    site_id: polonine
+    seller_name: Polonine
+    seller_type: wholesaler
+    seller_country: BR
+    served_market: EU
+    platform: supplier_scrape
+    base_url: https://polonine.slabware.com
+    supplier_key: polonine
+    scrape:
+      key: product_id
+      url: detail_url
+      price: price1
+      text: [material, stone_type, thickness, finish]
+      specs: [material, stone_type, finish, quality, thickness, block, bundle_no, average_size, price2]
+    terms:
+      terms_url: https://polonine.slabware.com/Terms-conditions.aspx
+      checked_on: 2026-11-14
+      summary: robots.txt is absent (404); the terms page is placeholder text with no clause on access or copying; prices are shown to logged-in customers only and are read with the owner's own customer login.
+    decision: approved
+    decided_by: owner, 14 Nov via Mas (list price; USD per m2 kept as stated; VAT excluded; served EU-wide)
+    decided_on: 2026-11-14
+    statements: {vat_basis: excl}

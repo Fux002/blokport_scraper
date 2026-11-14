@@ -35,13 +35,17 @@ class RunOutcome:
     published: Optional[dict]       # None under the S3 dry run
 
 
+def _deliver(result: RunResult, client, bucket: str, root: Path, dry_run: bool) -> RunOutcome:
+    """Write a run's folder and (unless a dry run) publish it: every run's one way out."""
+    run_dir = write_run(result, root)
+    return RunOutcome(result, run_dir, None if dry_run else publish_run(client, bucket, result.brand, run_dir))
+
+
 def run_register(register: Register, transport: Transport, client, bucket: str, root: Path, moment: datetime,
                  dry_run: bool, pause: Callable[[float], None]) -> RunOutcome:
     """Collect, write and (unless a dry run) publish one register's run: the one path the run entry and the pilot
     share."""
-    result = collect_run(register, transport, moment, pause)
-    run_dir = write_run(result, root)
-    return RunOutcome(result, run_dir, None if dry_run else publish_run(client, bucket, register.brand, run_dir))
+    return _deliver(collect_run(register, transport, moment, pause), client, bucket, root, dry_run)
 
 
 def summary(outcome: RunOutcome, sample: int = 0) -> str:
@@ -75,6 +79,13 @@ def _runs_root() -> Path:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def deliver(result: RunResult) -> RunOutcome:
+    """`result` written and published to this deployment's bucket (unless the S3 dry run): the supplier prices a
+    produce read (market_prices.supplier) leave by the same path as a fetching run."""
+    dry_run = _dry_run()
+    return _deliver(result, None if dry_run else _s3_client(), S3_BUCKET, _runs_root(), dry_run)
 
 
 def run_live(register: Register) -> RunOutcome:
