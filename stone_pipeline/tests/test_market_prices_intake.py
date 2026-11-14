@@ -28,6 +28,7 @@ from market_prices.schema import (
 )
 from market_prices.sheet_files import FileRefused, read_tables
 from market_prices.sheet_values import read_currency, read_price
+from market_prices.vocabulary import load_vocabulary
 from stone_pipeline.io.deliverables import MANIFEST_NAME
 
 REPO = Path(__file__).resolve().parents[2]
@@ -91,16 +92,23 @@ def _file(data: bytes = STONECORP, key: str = f"{PREFIX}/intake/stonecorp.csv", 
 
 
 def _absorb(data: bytes = STONECORP, layouts: Layouts | None = None, key: str = f"{PREFIX}/intake/stonecorp.csv"):
-    return intake.absorb_file(_file(data, key), layouts or _layouts(), "bucket", "blokport")
+    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport")
+
+
+def _words():
+    """blokport's vocabulary and the country table, which a row's specs are read through (contract v3). Imported
+    here so a tree without the specs module fails these tests, never the whole collection."""
+    from market_prices.specs import load_countries
+    return load_vocabulary("blokport"), load_countries()
 
 
 def _status(result, site_id="stonecorp_gb") -> SiteStatus:
     return next(status for status in result.statuses if status.site_id == site_id)
 
 
-# --- contract v2: the source column -------------------------------------------------------------------------------------
-def test_the_contract_is_version_2_and_source_is_the_second_column():
-    assert config.CONTRACT_VERSION == "2"
+# --- the source column (since v2) ---------------------------------------------------------------------------------------
+def test_the_contract_is_version_3_and_source_is_the_second_column():
+    assert config.CONTRACT_VERSION == "3"
     assert columns(Observation)[:2] == ("contract_version", "source")
     assert columns(SiteStatus)[:2] == ("contract_version", "source")
 
@@ -111,8 +119,9 @@ def test_a_crawl_row_says_it_came_from_a_site():
         "served_market": "NL", "platform": "woocommerce_store", "base_url": "https://shop.example",
         "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02", "summary": "None."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
+    from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails this test only
     facts = ListingFacts(listing_key="1", source_url="https://shop.example/p/1", listing_text="Sill")
-    assert _observation(facts, site, "blokport", stamp_for(RECEIVED), "woo/1").source is Source.site
+    assert _observation(facts, site, "blokport", stamp_for(RECEIVED), "woo/1", NO_SPECS).source is Source.site
 
 
 def test_a_sheet_row_and_its_status_say_they_came_from_a_file():
@@ -123,7 +132,7 @@ def test_a_sheet_row_and_its_status_say_they_came_from_a_file():
 
 def test_the_contract_states_the_version_rule_and_the_source_column():
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
-    assert "version 2" in text and "| source |" in text
+    assert "Version 3" in text and "| source |" in text
     assert "refuses a contract_version it does not know" in text
 
 
@@ -302,16 +311,19 @@ def test_a_known_layout_gives_the_exact_rows():
     assert result.run_id == RUN_ID and result.brand == "blokport"
     first = result.observations[0].model_dump(mode="json")
     assert first == {
-        "contract_version": "2", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
+        "contract_version": "3", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
         "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
-        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"}, "grade_text": None,
+        "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"},
+        "thickness_mm": None, "finish": None, "material_type": None, "origin_iso_2": None, "thickness_text": None,
+        "finish_text": None, "material_text": None, "origin_text": None, "spec_labels": {}, "grade_text": None,
         "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",
         "min_qty_text": None, "availability_text": None,
         "provenance": {"vat_basis": "site_statement", "unit_text": "listing", "delivery_text": "unknown",
                        "delivery_included": "unknown", "grade_text": "unknown", "price_amount": "listing",
-                       "currency": "site_statement", "min_qty_text": "unknown"},
+                       "currency": "site_statement", "min_qty_text": "unknown", "thickness_mm": "unknown",
+                       "finish": "unknown", "material_type": "unknown", "origin_iso_2": "unknown"},
         "observed_at": "2026-11-11T09:15:00Z", "run_id": RUN_ID, "collector_version": "sheet-intake/1:stonecorp_csv",
     }
     second = result.observations[1]
@@ -862,7 +874,7 @@ def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
     headers = _OWNER_TABS[tab]
     data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
     key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
-    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), "bucket", "blokport")
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport")
     return {row.listing_key: row for row in result.observations}
 
 
@@ -880,20 +892,44 @@ def test_the_owner_competitors_are_declared_from_the_owners_answers():
 def test_a_brachot_row_is_its_own_sizes_price_per_m2_ex_vat_with_identity_kept():
     rows = _owner_rows("Brachot Prices", {
         "Material": "Belgische Blauwe Hardsteen", "Brachot product name": "Belgische Blauwe Hardsteen Courant",
-        "Stone type": "blauwe hardsteen", "Thickness (cm)": 2, "Finish": "Gezaagd", "Dimensions": "Standard sizes",
-        f"Price {_PRICE_M2}": 76.9, f"Base list price {_PRICE_M2}": 70, "Adjustment (%)": 10, "Catalog page": 10,
-        "PDF page": 6, "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"})
+        "Stone type": "blauwe hardsteen", "Origin": "Belgium", "Thickness (cm)": 2, "Finish": "Gezaagd",
+        "Dimensions": "Standard sizes", f"Price {_PRICE_M2}": 76.9, f"Base list price {_PRICE_M2}": 70,
+        "Adjustment (%)": 10, "Catalog page": 10, "PDF page": 6,
+        "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"})
     row = rows["Belgische Blauwe Hardsteen Courant|2|Gezaagd|Standard sizes|10"]
     assert (row.site_id, row.seller_name, row.listing_text) == ("brachot", "Brachot",
                                                                 "Belgische Blauwe Hardsteen Courant")
     assert (row.price_amount, row.currency, row.unit_text, row.vat_basis.value) == ("76.9", "EUR", "m²", "excl")
-    kept = ("Thickness (cm)", "Finish", "Dimensions", "Stone type", f"Base list price {_PRICE_M2}", "Catalog page",
-            "PDF page", "Source file")
+    # v3: the sheet's spec columns are normalised columns, with the cell as written and its header
+    assert (row.thickness_mm, row.finish, row.material_type, row.origin_iso_2) == ("20", "Sawn Cut", "Bluestone", "be")
+    assert (row.thickness_text, row.finish_text, row.material_text, row.origin_text) == (
+        "2", "Gezaagd", "blauwe hardsteen", "Belgium")
+    assert row.spec_labels == {"thickness_mm": "Thickness (cm)", "finish": "Finish", "material_type": "Stone type",
+                               "origin_iso_2": "Origin"}
+    kept = ("Dimensions", f"Base list price {_PRICE_M2}", "Catalog page", "PDF page", "Source file")
     assert {key: row.stated_specs[key] for key in kept} == {
-        "Thickness (cm)": "2", "Finish": "Gezaagd", "Dimensions": "Standard sizes", "Stone type": "blauwe hardsteen",
-        f"Base list price {_PRICE_M2}": "70", "Catalog page": "10", "PDF page": "6",
+        "Dimensions": "Standard sizes", f"Base list price {_PRICE_M2}": "70", "Catalog page": "10", "PDF page": "6",
         "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"}
-    assert f"Price {_PRICE_M2}" not in row.stated_specs
+    assert not {f"Price {_PRICE_M2}", "Thickness (cm)", "Finish", "Stone type", "Origin"} & set(row.stated_specs)
+
+
+def test_an_owner_row_with_no_honest_spec_mapping_is_refused_with_its_reason_and_unstated_words_are_counted():
+    base = {"Brachot product name": "Belgische Blauwe Hardsteen Courant", "Thickness (cm)": 2,
+            "Dimensions": "Standard sizes", f"Price {_PRICE_M2}": 76.9, "Catalog page": 10,
+            "Source file": "Platentarief_050825_BE_NL_spreads(7).pdf"}
+    data = _xlsx({"Brachot Prices": [_OWNER_TABS["Brachot Prices"], *(
+        [row.get(header) for header in _OWNER_TABS["Brachot Prices"]] for row in (
+            {**base, "Finish": "Gepolijst", "Origin": "Not defined in catalog legend"},
+            {**base, "Finish": "Letano", "Catalog page": 11}))]})
+    result = intake.absorb_file(_file(data, f"{PREFIX}/intake/owner_brachot.xlsx"), load_layouts("blokport"),
+                                *_words(), "bucket", "blokport")
+    (row,) = result.observations
+    assert (row.finish, row.origin_iso_2, row.stated_specs["Origin"]) == ("Polished", None,
+                                                                         "Not defined in catalog legend")
+    status = _status(result, "brachot")
+    assert (status.status.value, status.rows, status.malformed_listings) == ("partial", 1, 1)
+    assert "finish 'Letano' is not in blokport's finishes x1" in status.detail
+    assert "stated as unstated x1" in status.detail
 
 
 def test_a_tuytelaers_row_keys_on_its_catalog_section():
@@ -913,7 +949,7 @@ def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
         {"Cereser product name (source)": "BLACK ANTIQUE *", "Thickness (cm)": 2, "List price (EUR/m²)": 88.5,
          "Price -20% (EUR/m²)": 70.8, "Price used in master (EUR/m²)": 70.8,
          "Source file": "Italian supplier list(1).xlsx", "Source row": 2},
-        {"Cereser product name (source)": "BIANCO CARRARA C", "Thickness (cm)": 2, "Finish": "Lucido",
+        {"Cereser product name (source)": "BIANCO CARRARA C", "Thickness (cm)": 2, "Finish": "a spacco",
          "Carrara net price (EUR/m²)": 60, "Price used in master (EUR/m²)": 60,
          "Source file": "LISTINO CARRARA -(2).xlsx", "Source row": 7},
         {"Cereser product name (source)": "AZUL MACAUBAS", "Thickness (cm)": 3, "Price status": "Unpriced",
@@ -923,6 +959,6 @@ def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
     assert (carrara.site_id, carrara.price_amount, carrara.vat_basis.value) == ("cereser_carrara", "60", "excl")
     assert (main.stated_specs["Price -20% (EUR/m²)"], main.stated_specs["Source file"]) == (
         "70.8", "Italian supplier list(1).xlsx")
-    assert carrara.stated_specs["Finish"] == "Lucido"
+    assert (carrara.finish, carrara.finish_text, carrara.thickness_mm) == ("Split Face", "a spacco", "20")
     # an unpriced row is kept as stated, never priced from another column
     assert (unpriced.price_amount, unpriced.price_status) == (None, PriceStatus.none)

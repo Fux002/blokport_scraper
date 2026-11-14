@@ -17,6 +17,7 @@ from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
 from market_prices.collectors import COLLECTORS
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
+from market_prices.specs import SpecLabels
 from market_prices.text import same_host, site_host
 
 # whitespace, a backslash or a fragment could be read differently by another parser; a path names one page plainly
@@ -129,6 +130,9 @@ class Site(BaseModel):
     decided_on: Optional[Day] = None
     statements: SiteStatements = SiteStatements()
     grade_labels: tuple[Words, ...] = ()
+    # contract v3: the labels this site's listings state their specs under, from its listings as fetched (pilot
+    # evidence); without them the four spec columns are delivered empty (CONTRACT.md "Specs")
+    spec_labels: Optional[SpecLabels] = None
     # The product scraper's source id when this seller is also one of the owner's suppliers (check_suppliers).
     supplier_key: Optional[Words] = None
     # one_register_per_site: the other brands this same site is registered for; both rows must name each other

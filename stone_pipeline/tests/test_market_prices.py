@@ -793,3 +793,39 @@ def test_a_scope_all_brand_delivers_every_listing_as_before():
     result = _run(_shop(_page([_listing(1), _listing(2, name="Paint roller 9 inch")])))
     assert [row.listing_key for row in result.observations] == ["1", "2"]
     assert (_status(result).status.value, _status(result).detail) == ("ok", "")
+
+
+# --- contract v3: a site's specs through its register labels (CONTRACT.md "Specs") -----------------------------------
+_SPEC_LABELS = {"thickness": {"labels": ["Dikte"], "unit": "cm"}, "material_type": {"labels": ["Materiaal"]}}
+
+
+def test_a_site_reads_its_specs_through_its_register_labels():
+    site = _site(spec_labels=_SPEC_LABELS)
+    listing = _listing(1, attributes=[{"name": "Materiaal", "terms": [{"name": "Graniet"}]},
+                                      {"name": "Dikte", "terms": [{"name": "3"}]},
+                                      {"name": "Kleur", "terms": [{"name": "Zwart"}]}])
+    (row,) = _run(_shop(_page([listing])), _register(site)).observations
+    assert (row.thickness_mm, row.material_type, row.finish, row.origin_iso_2) == ("30", "Granite", None, None)
+    assert (row.thickness_text, row.material_text) == ("3", "Graniet")
+    assert row.spec_labels == {"thickness_mm": "Dikte", "material_type": "Materiaal"}
+    assert row.stated_specs["Kleur"] == "Zwart" and not {"Dikte", "Materiaal"} & set(row.stated_specs)
+    assert (row.provenance["thickness_mm"], row.provenance["material_type"], row.provenance["finish"]) == (
+        "listing", "listing", "unknown")
+
+
+def test_a_site_listing_with_no_honest_spec_mapping_is_refused_with_its_reason():
+    site = _site(spec_labels=_SPEC_LABELS)
+    good = _listing(1, attributes=[{"name": "Materiaal", "terms": [{"name": "Graniet"}]}])
+    unknown = _listing(2)                                   # the shared listing's Materiaal is "Hardsteen"
+    result = _run(_shop(_page([good, unknown])), _register(site))
+    assert [row.listing_key for row in result.observations] == ["1"]
+    status = _status(result)
+    assert (status.status.value, status.malformed_listings) == ("partial", 1)
+    assert "material 'Hardsteen' is not in blokport's materials x1" in status.detail
+
+
+def test_a_site_without_spec_labels_delivers_the_four_columns_empty_and_keeps_its_specs():
+    (row,) = _run(_shop(_page([_listing(1)]))).observations
+    assert (row.thickness_mm, row.finish, row.material_type, row.origin_iso_2, row.spec_labels) == (
+        None, None, None, None, {})
+    assert row.stated_specs["Materiaal"] == "Hardsteen"

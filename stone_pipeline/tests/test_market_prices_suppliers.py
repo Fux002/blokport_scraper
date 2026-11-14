@@ -25,6 +25,7 @@ from market_prices.layouts import LayoutError, Layouts, load_layouts
 from market_prices.register import Register, RegisterError, check_suppliers, load_register
 from market_prices.schema import ListingFacts, Observation, columns, csv_values
 from market_prices.text import same_site
+from market_prices.vocabulary import load_vocabulary
 from scrapers import run as scrapers_run
 
 REPO = Path(__file__).resolve().parents[2]
@@ -148,8 +149,9 @@ def test_the_committed_registers_hold_no_unflagged_supplier(brand):
 
 # --- the row ---------------------------------------------------------------------------------------------------------
 def _row(site: dict) -> Observation:
+    from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails these tests only
     facts = ListingFacts(listing_key="1", source_url=f"{site['base_url']}/p/1", listing_text="Slab")
-    return _observation(facts, _register(site).sites[0], "blokport", stamp_for(MOMENT), "woo/1")
+    return _observation(facts, _register(site).sites[0], "blokport", stamp_for(MOMENT), "woo/1", NO_SPECS)
 
 
 def test_the_row_copies_the_supplier_flag_from_the_register():
@@ -230,7 +232,9 @@ def test_a_sheet_row_copies_its_competitors_supplier_flag():
     for key, flag in (("ferraz", True), (None, False)):
         layouts = Layouts.model_validate(_layouts(key, site_domain="www.ferrazbrasilinventory.com" if key
                                                   else "ferraz-rival.example"))
-        (row,) = intake.absorb_file(file, layouts, "bucket", "blokport").observations
+        from market_prices.specs import load_countries     # v3; here so a red run fails this test only
+        (row,) = intake.absorb_file(file, layouts, load_vocabulary("blokport"), load_countries(), "bucket",
+                                    "blokport").observations
         assert (row.seller_is_our_supplier, row.supplier_key) == (flag, key)
 
 
