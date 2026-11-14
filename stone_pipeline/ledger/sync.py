@@ -31,7 +31,8 @@ from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
+from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, KEPT_SKUS_SQL,
+                                      RECORD_SYNCED_STOCK_SQL,
                                       RESERVE_SQL, STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql,
                                       now_iso, on_sale_sql, variation_icons)
 from stone_pipeline.ledger.payloads import product_payload, variation_payload
@@ -327,18 +328,20 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
     its ack records the stock as synced, and a failed or refused ack makes it wait like a failed product."""
     rows = ledger.execute(
         "SELECT i.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, i.reason AS reason, "
-        "i.replaced_by_lot_code AS lot_code " + _INVENTORY_LANE +
+        "i.replaced_by_lot_code AS lot_code, i.gone_at AS gone_at " + _INVENTORY_LANE +
         "ORDER BY i.sku" + _sub_limit(limit), (now_iso(), SETTINGS.sync.max_attempts))
     out = []
     for r in rows:
         # quantity is null exactly when made_to_order (on sale with no count)
         payload = {"sku": r["sku"], "quantity": r["qty"], "made_to_order": bool(r["made_to_order"])}
-        # 'delisted' -> Medusa hides; 'replaced_by_lot' -> Medusa deactivates + 301s to the lot (lot_code);
-        # absent -> a plain out-of-stock
+        # 'sold_out' -> stays published, not buyable; 'delisted' / 'no_photo' -> Medusa hides; 'replaced_by_lot' ->
+        # Medusa deactivates + 301s to the lot (lot_code); absent -> a plain stock (table 505, agreed with M4)
         if r["reason"]:
             payload["reason"] = r["reason"]
         if r["reason"] == "replaced_by_lot":
             payload["lot_code"] = r["lot_code"]
+        if r["gone_at"]:                       # gone at its supplier since then (a sold-out or hidden listing)
+            payload["gone_at"] = r["gone_at"]
         out.append({"external_id": r["sku"], "payload": payload})
     return out
 
@@ -790,6 +793,13 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
             continue
         survivor = survivor_of(keys, seed_keys)
         dedup += [k for k in keys if k != survivor and k not in protected]
+    # a variety a kept record shows (a gone or delisted listing, db.KEPT_SKUS_SQL) stays: that record is never deleted
+    # (table 505), and the variety is reported
+    kept_keys = {r["variation_key"] for r in ledger.execute(
+        f"SELECT DISTINCT variation_key FROM product WHERE sku IN ({KEPT_SKUS_SQL})")}
+    varieties_kept = sorted(k for k in dedup + stale if k in kept_keys)
+    dedup = [k for k in dedup if k not in kept_keys]
+    stale = [k for k in stale if k not in kept_keys]
     dropped = dedup + stale
     if dropped:
         for keys, reason in ((dedup, "reseed_dedup"), (stale, "not_in_seed")):
@@ -810,10 +820,10 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
         ledger.execute(f"DELETE FROM product WHERE variation_key IN ({q})", tuple(dropped))
         ledger.execute(f"DELETE FROM variation WHERE key IN ({q})", tuple(dropped))
     log.warning("variation table reconciled to seed (dedup old sides + drop non-seed leftovers)",
-                extra={"extra_fields": {"tombstoned_dropped": len(dropped),
-                                        "dedup": len(dedup), "not_in_seed": len(stale)}})
+                extra={"extra_fields": {"tombstoned_dropped": len(dropped), "dedup": len(dedup),
+                                        "not_in_seed": len(stale), "varieties_kept": varieties_kept}})
     return {"tombstoned_dropped": len(dropped), "dedup": len(dedup),
-            "not_in_seed": len(stale), "dropped_keys": dropped}
+            "not_in_seed": len(stale), "dropped_keys": dropped, "varieties_kept": varieties_kept}
 
 
 def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
@@ -870,17 +880,29 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
         # pull leaves them as orphans forever. A product Medusa never received is dropped silently. Mirrors
         # retire_variation's E2 synced-only rule.
         # the SELECT already has a WHERE, so fold a scoped source filter in as AND (not a second WHERE)
+        # A kept record (a gone or delisted listing, db.KEPT_SKUS_SQL) is spared: it is never deleted (table 505), and
+        # no re-scrape brings it back.
         src_and = where.replace(" WHERE ", " AND ", 1) if scoped else ""
-        synced = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE {in_medusa_sql('p')}{src_and}",
-                                params).fetchall()
+        not_kept = f"sku NOT IN ({KEPT_SKUS_SQL})"
+        out["records_kept"] = ledger.execute(
+            f"SELECT COUNT(*) FROM product WHERE sku IN ({KEPT_SKUS_SQL}){src_and}", params).fetchone()[0]
+        synced = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE {in_medusa_sql('p')}{src_and} "
+                                f"AND p.{not_kept}", params).fetchall()
         if synced:
             record_tombstones(ledger, [(r["sku"], r["source"]) for r in synced],
                               reason="reset_dropped", kind="product")
         out["product_tombstoned"] = len(synced)
         out["inventory"] = ledger.execute(
-            f"DELETE FROM inventory WHERE sku IN (SELECT sku FROM product{where})", params).rowcount \
-            if scoped else ledger.execute("DELETE FROM inventory").rowcount
-        out["product"] = ledger.execute(f"DELETE FROM product{where}", params).rowcount
+            f"DELETE FROM inventory WHERE {not_kept} AND sku IN (SELECT sku FROM product{where})",
+            params).rowcount if scoped else ledger.execute(f"DELETE FROM inventory WHERE {not_kept}").rowcount
+        out["product"] = ledger.execute(
+            f"DELETE FROM product{where}{' AND ' if where else ' WHERE '}{not_kept}", params).rowcount
+        # the spared records re-serve once from zero, as a soft reset does: a coordinated factory reset wipes Medusa
+        # too, so a record kept with its old sync overlay would never be sent again
+        kept_scope = f"{where}{' AND ' if where else ' WHERE '}sku IN ({KEPT_SKUS_SQL})"
+        _reset_overlay(ledger, "product", now, kept_scope, params)
+        ledger.execute(f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL}, updated_at = ? WHERE sku IN ({KEPT_SKUS_SQL})"
+                       + (f" AND sku IN (SELECT sku FROM product{where})" if scoped else ""), (now, *params))
     else:                                      # keep the rows, just re-serve them from zero
         out["product"] = _reset_overlay(ledger, "product", now, where, params)
         inv_where = " WHERE sku IN (SELECT sku FROM product%s)" % where if scoped else ""
@@ -909,38 +931,55 @@ def record_tombstones(ledger: Ledger, pairs: list[tuple], reason: str = "discont
     return len(pairs)
 
 
-def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
-                       reason: str = "discontinued") -> dict:
-    """Hard-delete the qty-0 (delisted / dead-stock) products and their inventory rows, so the
-    graveyard of never-returning products stops accumulating. A product that reappears in a later
-    scrape recreates cleanly (no prior ledger row -> populate treats it as NEW, and clears any leftover
-    tombstone). Variation/backbone rows are untouched. `source_codes` scopes to those sources. Records a
-    tombstone per deleted SKU (`reason` tags why: discontinued vs vendor_removed) so Medusa deletes the
-    same set (product + scraper_sync_ref) via the pull lane. Returns {product, inventory, external_ids}."""
+def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None) -> dict:
+    """Hard-delete the bundles their lot replaced (stock 0, reason 'replaced_by_lot') and their inventory rows: the
+    only dead stock. Every other stock-0 product stays: a listing gone at its supplier stays published as sold out or
+    keeps being hidden, and a delisted vendor's products are hidden with their records kept; their records are never
+    deleted (owner 11-11, table 505). Variation/backbone rows are untouched. `source_codes` scopes to those sources.
+    Records a tombstone per deleted SKU (reason 'discontinued') so Medusa deletes the same set (product +
+    scraper_sync_ref) via the pull lane. Returns {product, inventory, external_ids}."""
     _lock_and_check_in_flight(ledger)          # same atomic guard as reset -- never purge mid-serve
     scope = ""
     params: tuple = ()
     if source_codes is not None:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
-    # dead stock = a product not on sale, stock 0 (populate_discontinued / a drop set it there). A product hidden
-    # only until its standardised photo is published (reason 'no_photo') is not dead stock: it comes back, so only the
-    # vendor removal (reason 'vendor_removed') deletes it.
-    if reason != "vendor_removed":
-        scope += " AND i.reason IS NOT 'no_photo'"
     rows = ledger.execute(
         f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
-        f"WHERE NOT {on_sale_sql('i')}{scope}", params).fetchall()
+        f"WHERE i.reason = 'replaced_by_lot' AND NOT {on_sale_sql('i')}{scope}", params).fetchall()
     skus = [r["sku"] for r in rows]
     if not skus:
         return {"product": 0, "inventory": 0, "external_ids": []}
-    record_tombstones(ledger, [(r["sku"], r["source"]) for r in rows], reason)   # deliver the delete to Medusa
+    record_tombstones(ledger, [(r["sku"], r["source"]) for r in rows], "discontinued")   # deliver the delete
     q = ",".join("?" * len(skus))
     inv = ledger.execute(f"DELETE FROM inventory WHERE sku IN ({q})", tuple(skus)).rowcount   # child first (FK)
     prod = ledger.execute(f"DELETE FROM product WHERE sku IN ({q})", tuple(skus)).rowcount
-    log.warning("ledger PURGE discontinued (qty-0) products", extra={"extra_fields": {
-        "sources": source_codes or "all", "reason": reason, "product": prod, "inventory": inv}})
+    log.warning("ledger PURGE replaced bundles", extra={"extra_fields": {
+        "sources": source_codes or "all", "product": prod, "inventory": inv}})
     return {"product": prod, "inventory": inv, "external_ids": skus}
+
+
+def unpublish_source(ledger: Ledger, source_codes: list[str]) -> dict:
+    """Stage 2 of a vendor removal ('Remove permanently'): hide EVERY product of the sources (stock 0, reason
+    'delisted'), sold-out and hidden ones included, so Blokport unpublishes them. Records, gone_at, photos and textures
+    stay; no tombstone, since a tombstone deletes the backend record and its image rows, which renders and the bespoke
+    library read (table 505, agreed with M4). Idempotent: a product already delisted is left as it is. Returns
+    {unpublished, external_ids}."""
+    _lock_and_check_in_flight(ledger)          # same atomic guard as reset/purge -- never mutate mid-serve
+    marks = ",".join("?" * len(source_codes)) or "NULL"
+    skus = [r["sku"] for r in ledger.execute(
+        f"SELECT p.sku FROM product p LEFT JOIN inventory i ON i.sku = p.sku "
+        f"WHERE p.source IN ({marks}) AND i.reason IS NOT 'delisted' ORDER BY p.sku", tuple(source_codes))]
+    now = now_iso()
+    for sku in skus:                           # a product with no stock row yet gets one: it must be hidden too
+        ledger.upsert("inventory", {"sku": sku, "qty": 0, "made_to_order": 0, "reason": "delisted",
+                                    "updated_at": now}, pk=("sku",))
+    if skus:
+        q = ",".join("?" * len(skus))
+        ledger.execute(f"UPDATE inventory SET {CLEAR_STOCK_FAILURES_SQL} WHERE sku IN ({q})", tuple(skus))
+    log.warning("ledger UNPUBLISH source (vendor removal)", extra={"extra_fields": {
+        "sources": source_codes, "unpublished": len(skus)}})
+    return {"unpublished": len(skus), "external_ids": skus}
 
 
 def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict:
@@ -959,8 +998,8 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
     if not skus:
         return {"delisted": 0, "external_ids": []}
     q = ",".join("?" * len(skus))
-    # reason='delisted' rides the inventory delta so Medusa can HIDE (status->draft) exactly these SKUs,
-    # provenance-safe, and tell them apart from an ordinary out-of-stock (qty 0, reason null -> stays listed).
+    # reason='delisted' rides the inventory delta so Medusa HIDES exactly these SKUs, provenance-safe, and keeps
+    # their records (table 505).
     ledger.execute(f"UPDATE inventory SET qty = 0, made_to_order = 0, reason = 'delisted', "   # a new stock: no wait
                    f"{CLEAR_STOCK_FAILURES_SQL}, updated_at = ? WHERE sku IN ({q})",
                    (now_iso(), *skus))
@@ -991,6 +1030,18 @@ def variation_live_products(ledger: Ledger, key: str) -> int:
     return int(row["n"]) if row else 0
 
 
+class KeptListingsShowVariety(RuntimeError):
+    """A variety some kept record shows (a gone or delisted listing, db.KEPT_SKUS_SQL) cannot be retired: retiring
+    cascades its products, and a kept record is never deleted (table 505), the one rule a reset follows too. Raised
+    whatever `force` says: the operator moves or decides those listings first."""
+
+
+def variation_kept_listings(ledger: Ledger, key: str) -> list[str]:
+    """The SKUs of the kept records (db.KEPT_SKUS_SQL) that show this variety, sorted."""
+    return [r["sku"] for r in ledger.execute(
+        f"SELECT sku FROM product WHERE variation_key = ? AND sku IN ({KEPT_SKUS_SQL}) ORDER BY sku", (key,))]
+
+
 def retire_variation(ledger: Ledger, key: str, force: bool = False,
                      reason: str = "variation_removed") -> dict:
     """Cascade a variety's explicit removal (also the old side of a re-key). Its products (which belong to
@@ -999,6 +1050,10 @@ def retire_variation(ledger: Ledger, key: str, force: bool = False,
     never-synced variety: Medusa never received it, so there is nothing to tell it to delete). The caller
     (lifecycle) has already guarded existence + the live-product precondition. Serve-in-flight guarded."""
     _lock_and_check_in_flight(ledger)
+    if kept := variation_kept_listings(ledger, key):
+        raise KeptListingsShowVariety(f"variety {key!r} is shown by {len(kept)} gone or delisted listing(s) "
+                                      f"{', '.join(kept)}: their records stay (table 505); move them to another "
+                                      "variety first")
     var = ledger.get("variation", "key", key)
     prods = ledger.execute("SELECT sku, source FROM product WHERE variation_key = ?", (key,)).fetchall()
     if prods:                                  # E1: product tombstones (serve before the variation one)
