@@ -65,7 +65,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
 
-A row with `seller_is_our_supplier` = `true` is still a public price, the same universe price as any competitor's, labelled as the owner's supplier. The consumer shows a supplier's list prices as their own line, apart from the competitor comparison, and never as the buy price: the owner's buy price comes only from his own load.
+A row with `seller_is_our_supplier` = `true` is one of the owner's suppliers' shown prices, kept verbatim: an indicative cost input for the supplier-cost module. It is never a competitor price: a competitor-price consumer refuses it by `seller_is_our_supplier`, as a named refusal. Nor is it ever a buy price on its own: the owner's buy price comes only from his own load.
 
 No photos are collected. Text cells are the seller's own words: read them as data, and do not open the raw file in a spreadsheet that runs formulas.
 
@@ -112,8 +112,8 @@ Every run folder carries the brand's register as it stood when the run started: 
 | seller_name, seller_type | As its observations carry them |
 | country_iso_2 | The seller's country, ISO 3166 alpha-2 in LOWER case (`it`), `^[a-z]{2}$`: the pricing module keys countries that way (as `origin_iso_2`); its observations' `seller_country` stays as the register writes it (upper case) |
 | served_market | As its observations carry it, as the register writes it (`EU` included) |
-| price_basis | `list` or `net`: whether its prices are list prices or net prices. Declared on every approved site and every competitor; never defaulted |
-| net_markup | For a `net` source only (else `null`): the exact decimal, 0 or more, that grosses its net prices up to list: list = net x (1 + net_markup) (`0.20`: EUR 100 net is EUR 120 list) |
+| price_basis | `list` or `net`: whether a competitor's prices are list prices or net prices. Declared on every approved competitor site and every sheet competitor; never defaulted. `null` on a supplier row (`seller_is_our_supplier` = `true`): a supplier's price is what the owner pays, never a competitor price, so a supplier row stating one is refused at register load |
+| net_markup | For a `net` competitor only (else `null`, a supplier row included): the exact decimal, 0 or more, that grosses its net prices up to list: list = net x (1 + net_markup) (`0.20`: EUR 100 net is EUR 120 list) |
 | net_markup_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `net_markup` is |
 | vat_rate | The VAT rate as an exact decimal (`0.2`), only when the site or the owner states it; else `null`, never inferred |
 | vat_rate_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `vat_rate` is |
