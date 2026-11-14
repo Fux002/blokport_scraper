@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from market_prices.register import Site
 
 _NO_RECORD = "the product page holds no declared record"
+_MANY_SYMBOLS = "price text holds more than one declared currency symbol"
+_ISO_CURRENCY = re.compile(r"[A-Z]{3}")
 
 
 @dataclass(frozen=True)
@@ -136,11 +138,32 @@ def _amount(price_text: str, declaration: HtmlDeclaration) -> Optional[str]:
     return format(number, "f") if number is not None and number > 0 else None
 
 
-def _currency(record: Element, declaration: HtmlDeclaration, price_text: str) -> Optional[str]:
+def _whole(symbol: str, text: str) -> bool:
+    """Whether the symbol occurs in the text whole: not joined to a letter on either side, so "R$" and "CA$" never
+    count as a declared "$" (f8's must, 14 Nov)."""
+    at = text.find(symbol)
+    while at != -1:
+        before, after = text[at - 1:at], text[at + len(symbol):at + len(symbol) + 1]
+        if not before.isalpha() and not after.isalpha():
+            return True
+        at = text.find(symbol, at + 1)
+    return False
+
+
+def _currency(record: Element, declaration: HtmlDeclaration, price_text: str) -> tuple[Optional[str], tuple[str, ...]]:
+    """(the currency, notes). A currency source must read an ISO 4217 code; a symbol counts only whole, and price text
+    naming two declared currencies gives none. Neither is ever guessed: the listing keeps its price, the note says
+    why its currency is empty."""
     fields = declaration.fields
     if fields.currency is not None:
-        return _optional(record, fields.currency, "currency")
-    return next((code for symbol, code in fields.currency_symbols.items() if symbol in price_text), None)
+        code = _optional(record, fields.currency, "currency")
+        if code is not None and not _ISO_CURRENCY.fullmatch(code):
+            return None, (f"currency '{code}' is not an ISO 4217 code",)
+        return code, ()
+    codes = {code for symbol, code in fields.currency_symbols.items() if _whole(symbol, price_text)}
+    if len(codes) > 1:
+        return None, (_MANY_SYMBOLS,)
+    return next(iter(codes), None), ()
 
 
 def _on_sale(record: Element, declaration: HtmlDeclaration, specs: dict[str, str]) -> bool:
@@ -235,6 +258,7 @@ class DeclaredHtmlCollector:
         on_request = (amount is None and price_text is not None
                       and match_key(price_text) in {match_key(word) for word in fields.on_request})
         specs = _specs(record, declaration)
+        currency, notes = _currency(record, declaration, price_text) if amount is not None else (None, ())
         return ListingFacts(
             listing_key=_required(record, fields.listing_key, "listing_key"),
             source_url=_url(raw, fields.url, site.base_url),
@@ -243,8 +267,9 @@ class DeclaredHtmlCollector:
             grade_text=_grade(specs, site.grade_labels),
             price_text=price_text,
             price_amount=amount,
-            currency=_currency(record, declaration, price_text) if amount is not None else None,
+            currency=currency,
             price_status=(PriceStatus.priced if amount is not None
                           else PriceStatus.on_request if on_request else PriceStatus.none),
             unit_text=_optional(record, fields.unit, "unit"),
+            notes=notes,
         )
