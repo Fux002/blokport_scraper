@@ -258,6 +258,15 @@ def alias_classification() -> tuple[dict, int]:
         return {"error": str(exc)}, 500
 
 
+def _wipe_product_images(ledger, sync) -> dict:
+    """The factory reset's image wipe, inside the reset's ledger op (`ledger` and `sync` are the op's): it spares every
+    photo of the records the reset spares (sync.kept_photos over db.KEPT_SKUS_SQL: the gone and the delisted listings),
+    whose assets are permanent (Mas, table 505) and which no re-scrape would bring back."""
+    from stone_pipeline.io import image_wipe
+    keep = {(source, sha) for source, shas in sync.kept_photos(ledger).items() for sha in shas}
+    return image_wipe.wipe_all_product_images(keep=keep)
+
+
 def _ledger_op(name: str, work):
     """Run `work(ledger, sync)` under the exclusive slot + the ledger lease guard, mapping the standard
     failures to http codes. `work` returns the success dict (paired with 200). _Busy -> 409, an in-flight
@@ -553,8 +562,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
             # Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails the reset
             # (catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
             try:
-                from stone_pipeline.io.image_wipe import wipe_all_product_images
-                out["images_wiped"] = wipe_all_product_images()
+                out["images_wiped"] = _wipe_product_images(lg, sync)
             except Exception as exc:
                 log.exception("reset: product-image wipe FAILED; images were kept")
                 out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
