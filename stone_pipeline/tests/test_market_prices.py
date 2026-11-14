@@ -32,8 +32,8 @@ ROBOTS = f"{BASE}/robots.txt"
 
 def _site(site_id="shop", base_url=BASE, **overrides) -> dict:
     site = {
-        "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
-        "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
+        "brand": "blokport", "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant",
+        "seller_country": "BE", "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
         "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-02", "summary": "No clause on copying."},
         "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
     }
@@ -713,8 +713,11 @@ _PACKAGE = Path(market_prices.__file__).parent
 # the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
 # factory (the run entry)
 # scrapers.run: the product scraper's suppliers, for the supplier flag (register.supplier_keys)
+# stone_pipeline.core.env: the repo's one env reader, for the run input naming the run's brand (run_input.run_brand)
+# stone_pipeline.core.text: the one shared name folding (match_key), which a vocabulary word is compared by; pure, no I/O
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
-                    "stone_pipeline.io.storage", "scrapers.run"}
+                    "stone_pipeline.io.storage", "scrapers.run", "stone_pipeline.core.env",
+                    "stone_pipeline.core.text"}
 # openpyxl reads the supplied .xlsx price sheets; botocore's ClientError tells the intake record's absence from a failure
 _THIRD_PARTY = {"pydantic", "yaml", "httpx", "openpyxl", "openpyxl.utils.exceptions", "botocore.exceptions"}
 _NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}
@@ -743,3 +746,40 @@ def test_only_the_live_transport_holds_an_http_client():
     holders = {path.relative_to(_PACKAGE).as_posix() for path in _PACKAGE.rglob("*.py")
                if {name.split(".")[0] for name in _imports(path)} & _HTTP_CLIENTS}
     assert holders == {"transport.py"}
+
+
+# --- the run's scope: its brand's vocabulary, asked once per listing after the fetch (W4, Mas 13 Nov) -----------------
+def _wudport_register() -> Register:
+    return Register.model_validate({"brand": "wudport", "sites": [_site(brand="wudport", served_market="GB")]})
+
+
+def test_a_listing_outside_the_brands_scope_is_not_delivered_and_is_counted():
+    result = _run(_shop(_page([_listing(1, name="Birch plywood 18mm 2440 x 1220"),
+                               _listing(2, name="Paint roller 9 inch")])), _wudport_register())
+    assert [row.listing_key for row in result.observations] == ["1"]
+    status = _status(result)
+    assert (status.status.value, status.rows) == ("ok", 1)
+    assert "listings out of scope x1" in status.detail
+
+
+def test_a_site_with_no_listing_in_scope_is_read_whole_and_delivers_none():
+    result = _run(_shop(_page([_listing(1, name="Paint roller 9 inch")])), _wudport_register())
+    status = _status(result)
+    assert (status.status.value, status.rows, result.observations) == ("ok", 0, ())
+    assert "listings out of scope x1" in status.detail
+
+
+def test_a_site_in_a_market_the_vocabulary_does_not_declare_stops_the_run_before_any_fetch():
+    # WudPort's vocabulary declares GB DE FR NL BE PL SE; a collectable site serving US is a setup error, named
+    from market_prices.vocabulary import VocabularyError
+    sites = _shop(_page([_listing(1, name="Birch plywood 18mm")]))
+    register = Register.model_validate({"brand": "wudport", "sites": [_site(brand="wudport", served_market="US")]})
+    with pytest.raises(VocabularyError, match="shop"):
+        _run(sites, register)
+    assert sites.requested == []
+
+
+def test_a_scope_all_brand_delivers_every_listing_as_before():
+    result = _run(_shop(_page([_listing(1), _listing(2, name="Paint roller 9 inch")])))
+    assert [row.listing_key for row in result.observations] == ["1", "2"]
+    assert (_status(result).status.value, _status(result).detail) == ("ok", "")

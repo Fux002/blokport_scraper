@@ -155,6 +155,8 @@ def _min_qty(listing: Mapping) -> Optional[str]:
 class WooCommerceStoreCollector:
     platform = "woocommerce_store"
     version = "woocommerce_store-1"
+    takes_query = True
+    needs_discovery = False
     reserved_query = frozenset({"page", "per_page"})
 
     def _page_url(self, site: "Site", page: int) -> str:
