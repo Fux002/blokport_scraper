@@ -713,8 +713,10 @@ _PACKAGE = Path(market_prices.__file__).parent
 # the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
 # factory (the run entry)
 # scrapers.run: the product scraper's suppliers, for the supplier flag (register.supplier_keys)
+# stone_pipeline.core.text: the one shared name folding (match_key), which a vocabulary word is compared by; pure, no I/O
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
-                    "stone_pipeline.io.storage", "scrapers.run"}
+                    "stone_pipeline.io.storage", "scrapers.run",
+                    "stone_pipeline.core.text"}
 # openpyxl reads the supplied .xlsx price sheets; botocore's ClientError tells the intake record's absence from a failure
 _THIRD_PARTY = {"pydantic", "yaml", "httpx", "openpyxl", "openpyxl.utils.exceptions", "botocore.exceptions"}
 _NETWORK = {"urllib.request", "http.client", "socket", "ssl", "ftplib", "smtplib"}
@@ -747,7 +749,7 @@ def test_only_the_live_transport_holds_an_http_client():
 
 # --- the run's scope: its brand's vocabulary, asked once per listing after the fetch (W4, Mas 13 Nov) -----------------
 def _wudport_register() -> Register:
-    return Register.model_validate({"brand": "wudport", "sites": [_site(served_market="GB")]})
+    return Register.model_validate({"brand": "wudport", "sites": [_site(brand="wudport", served_market="GB")]})
 
 
 def test_a_listing_outside_the_brands_scope_is_not_delivered_and_is_counted():
@@ -770,7 +772,7 @@ def test_a_site_in_a_market_the_vocabulary_does_not_declare_stops_the_run_before
     # WudPort's vocabulary declares GB DE FR NL BE PL SE; a collectable site serving US is a setup error, named
     from market_prices.vocabulary import VocabularyError
     sites = _shop(_page([_listing(1, name="Birch plywood 18mm")]))
-    register = Register.model_validate({"brand": "wudport", "sites": [_site(served_market="US")]})
+    register = Register.model_validate({"brand": "wudport", "sites": [_site(brand="wudport", served_market="US")]})
     with pytest.raises(VocabularyError, match="shop"):
         _run(sites, register)
     assert sites.requested == []
