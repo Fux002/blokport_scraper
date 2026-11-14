@@ -141,8 +141,8 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None, f
 
 def _refuse_an_unmigrated_store(key: str) -> None:
     """The phase 1 boot guard, for a store whose `key` has no snapshot: refuse when its pre-phase-1 key HAS one. A
-    fresh store there would be served and uploaded as if real (and an empty write-back saved over the learned
-    aliases). Any error but absence on the old key fails loud, every store alike, since a throttle says nothing
+    fresh store there would be served and uploaded as if real (and the learned-alias migration would record an
+    empty move). Any error but absence on the old key fails loud, every store alike, since a throttle says nothing
     about whether the old store exists. A brand-new stack (neither key) falls through to the fresh start."""
     legacy = _legacy_key(key)
     if legacy is None:
@@ -162,7 +162,7 @@ def _refuse_an_unmigrated_store(key: str) -> None:
 def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None,
             required: bool = False) -> bool:
     """Restore a single file from its latest S3 snapshot into `ledger_path` (the ledger by default; `key`
-    targets another -- config.db, the learned-alias write-back), IF the local file is absent and a snapshot
+    targets another, e.g. config.db), IF the local file is absent and a snapshot
     exists. Atomic (download to a temp then rename). Returns True if a restore happened; False (leaving the
     caller to bootstrap fresh) when the file already exists or there is no snapshot.
 
@@ -171,7 +171,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
     between head and download it is safe to start fresh; anything else (transient / throttle / permission)
     must FAIL LOUD (raise -> non-zero boot -> ECS restarts the task and retries), because booting a fresh
     base-only store would let the guardless periodic save() clobber the good snapshot and silently drop the
-    acked ids / pending removals. Non-required callers (the alias write-back, the ops CLI) stay
+    acked ids / pending removals. Non-required callers (the ops CLI) stay
     best-effort and never crash boot."""
     ledger_path = Path(ledger_path)
     if ledger_path.exists():
@@ -353,47 +353,6 @@ def wipe_artifacts(env: str = ENV_NAME, outputs_dir=None, data_dir=None) -> dict
                           extra={"extra_fields": {"key": key}})
     log.info("scrape-artifact cache wiped (pristine reset)", extra={"extra_fields": removed})
     return removed
-
-
-# -- learned-alias write-back (matcher consistency) ---------------------------
-# state/alias_writeback.csv holds confirmed fuzzy/phonetic spellings the matcher learned, so a
-# next run resolves them as exact hits instead of re-reviewing (section 8.4). It lives on the task's
-# EPHEMERAL disk, so a roll dropped it and the accumulated consistency was lost. Persist it like the ledger.
-# ONLY this file is durable: state/ also holds magnitude_baselines.json, a DATA-derived drift baseline that
-# MUST regenerate fresh on a cold task (a restored stale baseline could fail emit after a dims/schema change),
-# so it is deliberately not snapshotted. A restored alias whose variant no longer exists is harmless: the
-# matcher applies a learned alias only for a cid present in the current index (index.add_surface_alias guards).
-# The key is the learned-alias migration's (aliases.migrate_learned.writeback_key), which reads it from S3 itself.
-def _writeback_path(env: str = ENV_NAME) -> Path:
-    from stone_pipeline.aliases.migrate_learned import ALIAS_WRITEBACK
-    from stone_pipeline.config.settings import SETTINGS
-    return Path(SETTINGS.paths.state_dir) / ALIAS_WRITEBACK
-
-
-def save_state(env: str = ENV_NAME) -> bool:
-    """Snapshot the learned-alias write-back after a produce, so a cold task restores accumulated matcher
-    consistency instead of re-learning it. Best-effort plain-file upload (a CSV, NOT the sqlite backup
-    path). No-op when the file does not exist yet. Mirrors save_artifacts."""
-    from stone_pipeline.aliases.migrate_learned import writeback_key
-    path = _writeback_path(env)
-    if not path.exists():
-        return False
-    key = writeback_key(env)
-    try:
-        _s3().upload_file(str(path), S3_BUCKET, key)
-        log.info("state snapshot uploaded", extra={"extra_fields": {"key": key, "bytes": path.stat().st_size}})
-        return True
-    except Exception:
-        log.exception("state snapshot failed (non-fatal)")
-        return False
-
-
-def restore_state(env: str = ENV_NAME) -> bool:
-    """Restore the learned-alias write-back onto a cold task BEFORE any produce (mirrors restore_artifacts).
-    No-op when a local write-back already exists (a warm task's is fresher) or nothing has been snapshotted
-    yet. Best-effort: a learned alias is self-regenerating, so a lost restore only costs one run's re-learn."""
-    from stone_pipeline.aliases.migrate_learned import writeback_key
-    return restore(_writeback_path(env), env, key=writeback_key(env))
 
 
 class PeriodicSnapshot(threading.Event):

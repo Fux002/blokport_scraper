@@ -1,6 +1,6 @@
 """Curate learns only what the matcher guessed, and every nearest-variety lookup is (name, type) (owner, 2026-11-06).
 
-  * ONE rule decides whether a bind is a guess worth saving as an alias: writeback.is_learned (phonetic, fuzzy,
+  * ONE rule decides whether a bind is a guess worth saving as an alias: aliases.learned.is_learned (phonetic, fuzzy,
     fuzzy_origin, looking through the clean_variety_ / operator_type_ wrappers). Curate's alias proposals used a
     second rule, so clean_variety_projection_*, operator_type_projection_* and operator_type_exact binds still
     reached the base as aliases and outlived a later seed correction (#520's intent).
@@ -28,7 +28,8 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.stages import curate, match_variation
 from stone_pipeline.stages.curate.context import CurationResult
 from stone_pipeline.stages.curate.minting import leaf_updates
-from stone_pipeline.state import writeback as wb
+from stone_pipeline.aliases.learned import is_learned
+from stone_pipeline.stages.match_variation import WriteBack
 from stone_pipeline.tests._existing_index import existing_index
 from stone_pipeline.tests.test_origin_aware_matching import _stage
 
@@ -56,7 +57,7 @@ def test_curate_proposes_an_alias_exactly_when_the_writeback_would_learn_it(monk
                        variation_name="Bianco Carrara", variation_method=method)
     res = curate.build_curation([row], ref)
     proposed = [a["identity_key"] for a in res.learned_proposals if a["method"] == "curate_confirmed"]
-    assert proposed == (["marble__bianco_carrara_C"] if wb.is_learned(method) else [])
+    assert proposed == (["marble__bianco_carrara_C"] if is_learned(method) else [])
 
 
 # --- near_meta is (name, type) ---------------------------------------------------------------------------
@@ -113,7 +114,7 @@ def test_the_gap_carries_the_nearest_candidates_key():
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(base), "variants": {"slab": SimpleNamespace(
             by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1")})}}),
-        engines={"slab": VariationEngine(idx, auto_accept=92, review_floor=84)}, writeback=wb.WriteBack(),
+        engines={"slab": VariationEngine(idx, auto_accept=92, review_floor=84)}, writeback=WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Blue",
                        raw_type="Granite", raw_format="Slab")
@@ -142,4 +143,4 @@ def test_a_leaf_suggestion_is_kept_per_type():
 def test_a_leaf_verdict_uses_the_learned_guess_rule(method):
     res = CurationResult()
     leaf_updates([_leaf_row("Marble", method)], res)
-    assert res.backbone_updates[0]["verdict"] == ("verify_match" if wb.is_learned(method) else "likely_real")
+    assert res.backbone_updates[0]["verdict"] == ("verify_match" if is_learned(method) else "likely_real")
