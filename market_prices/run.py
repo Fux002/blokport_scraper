@@ -81,13 +81,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def deliver(result: RunResult) -> RunOutcome:
-    """`result` written and published to this deployment's bucket (unless the S3 dry run): the supplier prices a
-    produce read (market_prices.supplier) leave by the same path as a fetching run."""
-    dry_run = _dry_run()
-    return _deliver(result, None if dry_run else _s3_client(), S3_BUCKET, _runs_root(), dry_run)
-
-
 def run_live(register: Register) -> RunOutcome:
     """`register` collected over the live transport and published to this deployment's bucket."""
     dry_run = _dry_run()

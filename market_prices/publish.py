@@ -40,8 +40,9 @@ def publish_run(client, bucket: str, brand: str, run_dir: Path) -> dict:
     if not SLUG.fullmatch(brand) or not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
         raise ValueError(f"{run_dir} is not a run folder of brand {brand!r}")
     manifest_key = output_key(brand, run_id, MANIFEST_NAME)
-    # read-then-write, not atomic: a same-id race needs two producers of one brand in the same second (ids are
-    # second-resolution, each producer runs one run at a time), so no S3 conditional write
+    # A brand has two producers, the fetching run and the intake, each one run at a time; an id is a second, so an id
+    # both reach is refused here, never overwritten. The check is read-then-write: only two publishes of one id inside
+    # the same moment pass it together, which no S3 conditional write is spent on (the manager, 14 Nov)
     if published_manifest(client, bucket, manifest_key):
         raise RunAlreadyPublished(f"s3://{bucket}/{manifest_key} exists: a run folder is written once, so run "
                                   f"{run_id} is not published again (a correction is a new run)")

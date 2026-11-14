@@ -238,8 +238,7 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     row = Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,
         seller_name=competitor.names[0], seller_type=competitor.seller_type, seller_country=competitor.seller_country,
-        served_market=competitor.served_market, seller_is_our_supplier=competitor.supplier_key is not None,
-        supplier_key=competitor.supplier_key, listing_key="|".join(key_parts),
+        served_market=competitor.served_market, listing_key="|".join(key_parts),
         source_url=_source_url(bucket, file, table.name, index), listing_text=text, stated_specs=kept,
         **specs.columns(),
         grade_text=grade, price_text=price.text, price_amount=price.amount,

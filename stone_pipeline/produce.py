@@ -117,37 +117,6 @@ def _live_scrape(sources: list[str] | None) -> int:
 _COLD_START_MARKERS = ("NOT in the current export", "NO valid-combination row", "cannot verify")
 
 
-def _scrape_stamp_now() -> str:
-    """Now, in the form the product scraper stamps its run folders with (market_prices.config.SCRAPE_STAMP_FORMAT)."""
-    from datetime import datetime, timezone
-    from market_prices import config as market_config
-    return datetime.now(timezone.utc).strftime(market_config.SCRAPE_STAMP_FORMAT)
-
-
-def _emit_supplier_prices(sources: list[str] | None, since: str) -> None:
-    """Deliver the supplier prices this produce's own scrape read (market_prices.supplier: the register's
-    supplier_scrape rows of the sources it scraped), isolated from the products: a failure is logged loudly and never
-    fails the product produce, whose products carry no price (the owner's rule: a supplier's price is never the buy
-    price, and none goes to BlokPort on the product path)."""
-    import json
-    from botocore.exceptions import BotoCoreError, ClientError
-    from market_prices import supplier
-    from market_prices.brand import BrandError
-    from market_prices.register import RegisterError
-    from market_prices.specs import SpecError
-    from market_prices.vocabulary import VocabularyError
-    from stone_pipeline.io.deliverables import PublishedManifestUnreadable
-    try:
-        lines = supplier.emit_live(sources, since)
-    except (RegisterError, VocabularyError, SpecError, BrandError, ClientError, BotoCoreError,
-            PublishedManifestUnreadable, OSError, json.JSONDecodeError) as exc:
-        log.error(f"supplier prices not delivered: {type(exc).__name__}: {exc}",
-                  extra={"extra_fields": {"sources": sources or "all"}})
-        return
-    for line in lines:
-        log.info(f"supplier prices: {line}")
-
-
 def _mirror_archived() -> None:
     """VE2: mirror the export's archived flag onto the ledger RIGHT AFTER the fetch, before any record_source
     write, so a variety Blokport archived in the fresh export is frozen for the whole produce (every stage,
@@ -298,12 +267,10 @@ def run(sources: list[str] | None, stage: str, verify: bool = False) -> int:
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
     if stage not in _NO_SCRAPE_STAGES:
-        since = _scrape_stamp_now()     # this produce's scrape folders are stamped at or after it
         if (rc := _live_scrape(sources)) != 0:
             log.error("produce aborted: live scrape failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
-        _emit_supplier_prices(sources, since)
     rc = build.run(sources, stage)
     _finalize_control_plane(stage)
     if stage in _CATALOG_STAGES:

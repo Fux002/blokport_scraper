@@ -24,7 +24,6 @@ def _site_row(brand: str, site: Site) -> dict:
     return {"brand": brand, "source_key": site.site_id, "source": Source.site.value, "seller_name": site.seller_name,
             "seller_type": site.seller_type.value, "country_iso_2": site.seller_country.lower(),
             "served_market": site.served_market, **_terms(site),
-            "seller_is_our_supplier": site.supplier_key is not None, "supplier_key": site.supplier_key,
             "decided_by": site.decided_by, "decided_on": site.decided_on.isoformat()}
 
 
@@ -32,8 +31,7 @@ def _competitor_row(brand: str, competitor: Competitor) -> dict:
     return {"brand": brand, "source_key": competitor.competitor_id, "source": Source.file.value,
             "seller_name": competitor.names[0], "seller_type": competitor.seller_type.value,
             "country_iso_2": competitor.seller_country.lower(), "served_market": competitor.served_market,
-            **_terms(competitor), "seller_is_our_supplier": competitor.supplier_key is not None,
-            "supplier_key": competitor.supplier_key, "decided_by": competitor.decided_by,
+            **_terms(competitor), "decided_by": competitor.decided_by,
             "decided_on": competitor.decided_on.isoformat()}
 
 

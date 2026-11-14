@@ -54,10 +54,8 @@ class Competitor(PriceTerms):
     seller_type: SellerType
     seller_country: Country
     served_market: Country
-    # The competitor's own site host, and the product scraper's source id when it is also one of the owner's
-    # suppliers: checked both ways against the suppliers at load (load_layouts), by the register's rule.
+    # The competitor's own site host: never one of the product scraper's suppliers' (load_layouts, the register's rule)
     site_domain: Host
-    supplier_key: Optional[Words] = None
     decided_by: Words
     decided_on: Day
 
@@ -226,6 +224,6 @@ def load_layouts(brand: str, layouts_dir: Path = config.LAYOUTS_DIR) -> Layouts:
     suppliers = supplier_keys()
     for competitor in layouts.competitors:
         if problem := supplier_problem(f"{path}: competitor {competitor.competitor_id}", competitor.site_domain,
-                                       competitor.supplier_key, suppliers):
+                                       suppliers):
             raise LayoutError(problem)
     return layouts

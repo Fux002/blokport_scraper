@@ -85,8 +85,6 @@ class Observation(BaseModel):
     seller_type: SellerType
     seller_country: str = Field(pattern=r"^[A-Z]{2}$")
     served_market: str = Field(pattern=r"^[A-Z]{2}$")
-    seller_is_our_supplier: bool
-    supplier_key: Optional[str]
     listing_key: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
@@ -142,12 +140,6 @@ class Observation(BaseModel):
     def _regular_amount_has_its_text(self) -> "Observation":
         if self.regular_price_amount is not None and self.regular_price_text is None:
             raise ValueError("regular_price_amount is set only with the regular_price_text it is read from")
-        return self
-
-    @model_validator(mode="after")
-    def _supplier_flag_has_its_key(self) -> "Observation":
-        if self.seller_is_our_supplier != (self.supplier_key is not None):
-            raise ValueError("supplier_key is set exactly when seller_is_our_supplier is true")
         return self
 
     @model_validator(mode="after")

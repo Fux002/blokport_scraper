@@ -290,8 +290,6 @@ class SchemaOrgProductCollector:
     takes_query = False
     needs_discovery = True
     needs_html = False
-    needs_scrape = False
-    fetches = True
     reserved_query: frozenset = frozenset()
 
     def listings(self, site: "Site", fetcher: SiteFetcher) -> Iterator[object]:
