@@ -1,17 +1,29 @@
-"""Polonine's customer login, which shows its prices (the owner's own account, 14 Nov): both values from the
-environment, never in code; a failed login never stops the product and stock scrape, which needs none, and the scrape
-states in its completion marker whether it read prices. The secret is never written anywhere."""
+"""Polonine's prices, shown only to a logged-in customer (the owner's own account, 14 Nov): read by a SEPARATE price
+pass after the anonymous product and stock scrape, which stays exactly as it was (the manager's ruling 14 Nov: the
+product set never depends on the login). The price pass writes only its own files (prices.csv and its marker), takes
+both credentials from the environment and never writes them, and a missing, refused or failing login leaves the
+products identical. New names are imported inside the tests, so each spec fails for its own reason."""
 
 from __future__ import annotations
 
+import csv
 import json
+from pathlib import Path
 
 import pytest
 
-from scrapers.polonine import LIST_API, LOGIN_API, LOGOUT_API, PolonineScraper
+from scrapers.polonine import DETAIL_API, LIST_API, PolonineScraper
 
 USER = "buyer@example.com"
 SECRET = "s3cr'et\"pw"
+BUNDLE = {"id": 1, "nomeMaterial": "ALPINE", "nomeComposicao": "Dolomite Marble", "nomeEspessura": "2CM",
+          "acabamento": "Polished", "nomeQualidade": "A", "bloco": "B7", "cavalete": "C1", "averageSize": ""}
+PRICED = {"preco1": "US$ 59.00<span>/Sq.Mt.</span>", "preco2": "US$ 5.48<span>/Sq.Ft.</span>"}
+
+
+def _api():
+    from scrapers import polonine
+    return polonine.LOGIN_API, polonine.LOGOUT_API
 
 
 class _R:
@@ -22,26 +34,41 @@ class _R:
         return self._data
 
 
-def _scraper(tmp_path, monkeypatch, answer="ok", raises=None):
-    scraper = PolonineScraper(data_dir=tmp_path)
-    posts: list[tuple[str, str]] = []
-    batches = [[{"id": 1}], []]
+class _Site:
+    """Polonine's SlabWare API: the list carries prices only to a logged-in session."""
 
-    def post(url, headers=None, content=None):
-        posts.append((url, content))
-        if url == LOGIN_API:
-            if raises is not None:
-                raise raises
-            return _R({"d": answer})
-        if url == LIST_API:
-            return _R({"d": {"Bundles": json.dumps(batches.pop(0) if batches else [])}})
-        if url == LOGOUT_API:
+    def __init__(self, answer="ok", login_raises=None, list_raises_logged_in=None):
+        self.answer, self.login_raises, self.list_raises_logged_in = answer, login_raises, list_raises_logged_in
+        self.logged_in = False
+        self.posts: list[tuple[str, str, bool]] = []
+
+    def post(self, url, headers=None, content=None):
+        login_api, logout_api = _api()
+        self.posts.append((url, content, self.logged_in))
+        if url == login_api:
+            if self.login_raises is not None:
+                raise self.login_raises
+            self.logged_in = self.answer == "ok"
+            return _R({"d": self.answer})
+        if url == logout_api:
+            self.logged_in = False
             return _R({"d": None})
+        if url == LIST_API:
+            if self.logged_in and self.list_raises_logged_in is not None:
+                raise self.list_raises_logged_in
+            offset = json.loads(content)["inicio"]
+            item = {**BUNDLE, **(PRICED if self.logged_in else {"preco1": "", "preco2": ""})}
+            return _R({"d": {"Bundles": json.dumps([item] if offset == 0 else [])}})
+        if url == DETAIL_API:
+            return _R({"d": {"Bundle": {"fotos": ["/a.jpg"], "chapas": [], "totalSqmt": "55.160"}}})
         raise AssertionError(f"unexpected POST {url}")
 
-    monkeypatch.setattr(scraper, "post", post)
+
+def _scraper(root: Path, monkeypatch, site: _Site) -> PolonineScraper:
+    scraper = PolonineScraper(data_dir=root)
+    monkeypatch.setattr(scraper, "post", site.post)
     monkeypatch.setattr(scraper, "get", lambda url, **kwargs: None)
-    return scraper, posts
+    return scraper
 
 
 @pytest.fixture
@@ -57,49 +84,93 @@ def no_login_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_a_login_logs_in_before_the_list_and_out_after_it(tmp_path, monkeypatch, login_env):
-    scraper, posts = _scraper(tmp_path, monkeypatch)
-    assert list(scraper.list_products()) == [{"id": 1}]
-    assert scraper.run_facts["prices"] == "ok"
-    urls = [url for url, _ in posts]
-    assert urls[0] == LOGIN_API and urls[-1] == LOGOUT_API and LIST_API in urls
-    # sent as the site's own login form sends it (slabware.js strips quotes from both values)
-    assert json.loads(posts[0][1]) == {"login": USER, "senha": "s3cretpw"}
+def _products(scraper: PolonineScraper) -> list[dict]:
+    """products.csv without the per-row clock (scrape_timestamp), which differs between any two runs."""
+    with scraper.products_csv.open(encoding="utf-8", newline="") as handle:
+        return [{k: v for k, v in row.items() if k != "scrape_timestamp"} for row in csv.DictReader(handle)]
 
 
-def test_no_login_in_the_environment_scrapes_products_without_prices_and_says_so(tmp_path, monkeypatch,
-                                                                               no_login_env):
-    scraper, posts = _scraper(tmp_path, monkeypatch)
-    assert list(scraper.list_products()) == [{"id": 1}]
-    assert "SCRAPER_POLONINE_USERNAME" in scraper.run_facts["prices"]
-    assert LOGIN_API not in [url for url, _ in posts]
-    assert any(failure["kind"] == "price_login" for failure in scraper._failures)
+def _price_marker(scraper: PolonineScraper) -> dict:
+    return json.loads((scraper.run_dir / "prices_complete.json").read_text(encoding="utf-8"))
 
 
-def test_a_refused_login_never_stops_the_product_scrape(tmp_path, monkeypatch, login_env):
-    scraper, posts = _scraper(tmp_path, monkeypatch, answer="Invalid user or password")
-    assert list(scraper.list_products()) == [{"id": 1}]
-    assert scraper.run_facts["prices"] == "login refused: Invalid user or password"
-    assert LOGOUT_API not in [url for url, _ in posts]
+def test_the_product_pass_never_logs_in(tmp_path, monkeypatch, login_env):
+    site = _Site()
+    scraper = _scraper(tmp_path, monkeypatch, site)
+    assert [item["id"] for item in scraper.list_products()] == [1]
+    assert _api()[0] not in [url for url, _, _ in site.posts]
+    assert not any(logged_in for _, _, logged_in in site.posts)
 
 
-def test_a_login_that_gets_no_answer_never_stops_the_product_scrape(tmp_path, monkeypatch, login_env):
-    scraper, _ = _scraper(tmp_path, monkeypatch, raises=RuntimeError("POST failed after 4 tries"))
-    assert list(scraper.list_products()) == [{"id": 1}]
-    assert scraper.run_facts["prices"] == "login request failed: RuntimeError"
+def test_login_on_or_off_gives_an_identical_products_csv(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCRAPER_POLONINE_USERNAME", USER)
+    monkeypatch.setenv("SCRAPER_POLONINE_PASSWORD", SECRET)
+    with_login = _scraper(tmp_path / "on", monkeypatch, _Site())
+    with_login.run()
+    monkeypatch.delenv("SCRAPER_POLONINE_USERNAME")
+    without = _scraper(tmp_path / "off", monkeypatch, _Site())
+    without.run()
+    assert _products(with_login) == _products(without)
+    assert _products(with_login)[0]["price1"] == ""                  # the product pass is the anonymous one
+    assert json.loads(with_login.complete_marker.read_text()) == json.loads(without.complete_marker.read_text()) | {
+        "timestamp": json.loads(with_login.complete_marker.read_text())["timestamp"]}
 
 
-@pytest.mark.parametrize("answer", ["ok", "Invalid user or password"])
-def test_the_secret_is_never_written(tmp_path, monkeypatch, login_env, answer):
-    scraper, _ = _scraper(tmp_path, monkeypatch, answer=answer)
-    list(scraper.list_products())
-    written = json.dumps([scraper.run_facts, scraper._failures], default=str)
-    assert SECRET not in written and "s3cretpw" not in written
-
-
-def test_the_completion_marker_carries_what_the_scraper_states_about_its_run(tmp_path, monkeypatch, login_env):
-    scraper, _ = _scraper(tmp_path, monkeypatch)
-    monkeypatch.setattr(scraper, "parse_product", lambda raw: {"product_id": str(raw["id"]), "image_urls": []})
+def test_the_price_pass_writes_its_own_rows_and_marker_and_logs_out(tmp_path, monkeypatch, login_env):
+    site = _Site()
+    scraper = _scraper(tmp_path, monkeypatch, site)
     scraper.run()
-    marker = json.loads(scraper.complete_marker.read_text(encoding="utf-8"))
-    assert marker["prices"] == "ok" and marker["rows"] == 1
+    assert _price_marker(scraper) == {"prices": "ok", "rows": 1}
+    with (scraper.run_dir / "prices.csv").open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert (rows[0]["product_id"], rows[0]["price1"], rows[0]["material"]) == ("1", PRICED["preco1"], "ALPINE")
+    login_api, logout_api = _api()
+    urls = [url for url, _, _ in site.posts]
+    assert urls.index(login_api) > urls.index(DETAIL_API) and urls[-1] == logout_api
+    # sent as the site's own login form sends it (slabware.js strips quotes from both values)
+    assert json.loads(next(body for url, body, _ in site.posts if url == login_api)) == {"login": USER,
+                                                                                         "senha": "s3cretpw"}
+
+
+def test_no_login_in_the_environment_reads_no_prices_and_says_so(tmp_path, monkeypatch, no_login_env):
+    scraper = _scraper(tmp_path, monkeypatch, _Site())
+    scraper.run()
+    assert "SCRAPER_POLONINE_USERNAME" in _price_marker(scraper)["prices"]
+    assert not (scraper.run_dir / "prices.csv").exists()
+    assert json.loads(scraper.complete_marker.read_text())["complete"] is True      # the products are untouched
+
+
+def test_a_refused_login_is_stated_without_the_sites_words(tmp_path, monkeypatch, login_env):
+    scraper = _scraper(tmp_path, monkeypatch, _Site(answer=f"Unknown user {USER}"))
+    scraper.run()
+    assert _price_marker(scraper)["prices"] == f"login refused ({len('Unknown user ' + USER)} characters)"
+    assert not (scraper.run_dir / "prices.csv").exists()
+
+
+def test_a_login_with_no_answer_reads_no_prices(tmp_path, monkeypatch, login_env):
+    scraper = _scraper(tmp_path, monkeypatch, _Site(login_raises=RuntimeError("POST failed after 4 tries")))
+    scraper.run()
+    assert _price_marker(scraper)["prices"] == "login request failed: RuntimeError"
+
+
+def test_a_price_list_that_fails_still_logs_out_and_reads_no_prices(tmp_path, monkeypatch, login_env):
+    site = _Site(list_raises_logged_in=RuntimeError("POST failed after 4 tries"))
+    scraper = _scraper(tmp_path, monkeypatch, site)
+    scraper.run()
+    assert _price_marker(scraper) == {"prices": "price list failed: RuntimeError", "rows": 0}
+    assert site.posts[-1][0] == _api()[1]
+    assert json.loads(scraper.complete_marker.read_text())["complete"] is True
+
+
+@pytest.mark.parametrize("site", [_Site(), _Site(answer=f"Unknown user {USER}")])
+def test_neither_the_secret_nor_the_username_is_ever_written(tmp_path, monkeypatch, login_env, site):
+    scraper = _scraper(tmp_path, monkeypatch, site)
+    scraper.run()
+    written = "".join(path.read_text(encoding="utf-8") for path in scraper.run_dir.rglob("*") if path.is_file())
+    assert SECRET not in written and "s3cretpw" not in written and USER not in written
+
+
+def test_the_price_files_are_the_names_the_supplier_price_reader_reads():
+    from market_prices import config
+    from scrapers import base
+    assert (base.PRICES_CSV, base.PRICES_MARKER) == (config.SCRAPE_ROWS_FILE, config.SCRAPE_MARKER_FILE)

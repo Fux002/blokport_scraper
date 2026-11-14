@@ -1,7 +1,8 @@
-"""A supplier's prices read from the product scraper's own fetch (platform supplier_scrape): one fetch, one transport,
-on fixtures only. The register row, the facts read from the scraper's rows (currency and unit as stated, never
-converted), the scrape's own statement of whether it read prices, the produce's generic selection of which suppliers a
-scrape feeds, and the run stamped with the scrape's own time."""
+"""A supplier's prices read from the product scraper's separate price pass (platform supplier_scrape): one fetch,
+one transport, on fixtures only. The register row, the facts read from the price pass's rows (currency and unit as
+stated, never converted), its own statement of whether it read prices, the produce's generic selection of which suppliers
+a scrape feeds, and the run stamped with the scrape's own time. The new modules are imported inside the tests, so on a
+tree without them each spec fails for its own reason."""
 
 from __future__ import annotations
 
@@ -12,9 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from market_prices import supplier
-from market_prices.collect import collect_run, collect_supplier_run
-from market_prices.collectors.supplier_scrape import ScrapeFolder, read_scrape
+from market_prices.collect import collect_run
 from market_prices.fetching import Response
 from market_prices.register import Register
 
@@ -48,8 +47,30 @@ def _row(pid="101", price1="US$ 59.00<span style='font-size: smaller;'>/Sq.Mt.</
     return {**row, **overrides}
 
 
-def _scrape(*rows: dict, prices="ok", source="polonine", timestamp="20261114_120000") -> ScrapeFolder:
+def _scrape(*rows: dict, prices="ok", source="polonine", timestamp="20261114_120000"):
+    from market_prices.collectors.supplier_scrape import ScrapeFolder
     return ScrapeFolder(source=source, timestamp=timestamp, rows=tuple(rows or [_row()]), prices=prices)
+
+
+def collect_supplier_run(register, scrape):
+    from market_prices.collect import collect_supplier_run as collect
+    return collect(register, scrape)
+
+
+def read_scrape(folder):
+    from market_prices.collectors.supplier_scrape import read_scrape as read
+    return read(folder)
+
+
+class _Supplier:
+    """market_prices.supplier, imported when a spec uses it."""
+
+    def __getattr__(self, name):
+        from market_prices import supplier as module
+        return getattr(module, name)
+
+
+supplier = _Supplier()
 
 
 def _status(result, site_id="polonine"):
@@ -199,34 +220,42 @@ def test_a_produce_scoped_to_other_sources_feeds_no_supplier():
 
 
 # --- the scrape folder: this produce's own, complete ---------------------------------------------------------------
-def _folder(root: Path, source: str, stamp: str, complete=True, prices="ok", rows=(), **marker) -> Path:
+def _folder(root: Path, source: str, stamp: str, priced=True, prices="ok", rows=()) -> Path:
+    """A scraper run folder. `priced`: whether its separate price pass ran (prices.csv when it read rows, and always its
+    prices_complete.json marker); a run whose price pass never ran has neither."""
     folder = root / source / stamp
     folder.mkdir(parents=True)
-    with (folder / "products.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(_row()))
-        writer.writeheader()
-        writer.writerows(rows or [_row()])
-    facts = {"rows": len(rows or [1]), "complete": complete, "timestamp": stamp, **marker}
+    (folder / "products.csv").write_text("product_id\n101\n", encoding="utf-8")     # the product pass, untouched
+    if not priced:
+        return folder
+    if prices == "ok":
+        with (folder / "prices.csv").open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(_row()))
+            writer.writeheader()
+            writer.writerows(rows or [_row()])
+    marker = {"rows": len(rows or [1]) if prices == "ok" else 0}
     if prices is not None:
-        facts["prices"] = prices
-    (folder / "scrape_complete.json").write_text(json.dumps(facts), encoding="utf-8")
+        marker["prices"] = prices
+    (folder / "prices_complete.json").write_text(json.dumps(marker), encoding="utf-8")
     return folder
 
 
-def test_the_scrape_read_is_this_produces_newest_complete_one(tmp_path):
+def test_the_scrape_read_is_this_produces_newest_with_a_price_pass(tmp_path):
     _folder(tmp_path, "polonine", "20261114_100000")                     # before this produce
-    _folder(tmp_path, "polonine", "20261114_130000", complete=False)     # this produce, but not complete
+    _folder(tmp_path, "polonine", "20261114_130000", priced=False)       # this produce, but its price pass never ran
     newest = _folder(tmp_path, "polonine", "20261114_120000")
     assert supplier.newest_scrape(tmp_path / "polonine", "20261114_110000") == newest
     assert supplier.newest_scrape(tmp_path / "polonine", "20261114_140000") is None
     assert supplier.newest_scrape(tmp_path / "absent", "20261114_110000") is None
 
 
-def test_a_scrape_folder_reads_into_its_rows_its_time_and_its_price_statement(tmp_path):
-    scrape = read_scrape(_folder(tmp_path, "polonine", "20261114_120000", prices="login refused: x"))
+def test_a_scrape_folder_reads_into_its_price_rows_its_time_and_its_price_statement(tmp_path):
+    scrape = read_scrape(_folder(tmp_path, "polonine", "20261114_120000"))
     assert (scrape.source, scrape.timestamp, scrape.prices, scrape.rows[0]["product_id"]) == (
-        "polonine", "20261114_120000", "login refused: x", "101")
-    assert read_scrape(_folder(tmp_path, "polonine", "20261114_130000", prices=None)).prices is None
+        "polonine", "20261114_120000", "ok", "101")
+    refused = read_scrape(_folder(tmp_path, "polonine", "20261114_130000", prices="login refused (12 characters)"))
+    assert (refused.prices, refused.rows) == ("login refused (12 characters)", ())
+    assert read_scrape(_folder(tmp_path, "polonine", "20261114_140000", prices=None)).prices is None
 
 
 def test_emit_delivers_one_run_per_supplier_scraped_and_none_for_a_supplier_not_scraped(tmp_path):
