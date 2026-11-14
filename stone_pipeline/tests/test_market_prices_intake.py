@@ -710,6 +710,7 @@ def test_a_record_that_does_not_read_fails_loud(tmp_path):
 def test_the_entry_exits_non_zero_when_a_file_was_refused(tmp_path, monkeypatch, capsys):
     s3 = _S3()
     s3.add(f"{PREFIX}/intake/unknown.csv", _csv(["Who"], ["Ref", "Cost"], ["1", "2"]))
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "blokport")
     monkeypatch.setattr(intake, "load_layouts", lambda brand: _layouts())
     monkeypatch.setattr(intake, "load_register", lambda brand: Register.model_validate({"brand": brand, "sites": []}))
     monkeypatch.setattr(intake, "_s3_client", lambda: s3)
@@ -718,6 +719,47 @@ def test_the_entry_exits_non_zero_when_a_file_was_refused(tmp_path, monkeypatch,
     with pytest.raises(SystemExit) as stopped:
         intake.main()
     assert stopped.value.code == 1 and "refused: dev/market_prices/blokport/intake/unknown.csv" in capsys.readouterr().out
+
+
+def test_the_entry_absorbs_the_run_inputs_brand_not_the_deployments(tmp_path, monkeypatch):
+    # this deployment is blokport's (the dev default); the run input names wudport, so wudport's layouts and register
+    # are read and wudport's intake prefix is worked: the one shared runner
+    read: list[tuple[str, str]] = []
+    worked: list[str] = []
+
+    def layouts(brand: str) -> Layouts:
+        read.append(("layouts", brand))
+        return _layouts()
+
+    def register(brand: str) -> Register:
+        read.append(("register", brand))
+        return Register.model_validate({"brand": brand, "sites": []})
+
+    def work(client, bucket, brand, layouts, root, dry_run) -> intake.IntakeOutcome:
+        worked.append(brand)
+        return intake.IntakeOutcome(absorbed=(), skipped=(), refused=())
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "wudport")
+    monkeypatch.setattr(intake, "load_layouts", layouts)
+    monkeypatch.setattr(intake, "load_register", register)
+    monkeypatch.setattr(intake, "run_intake", work)
+    monkeypatch.setattr(intake, "_s3_client", lambda: _S3())
+    monkeypatch.setattr(intake, "_dry_run", lambda: False)
+    intake.main()
+    assert read == [("layouts", "wudport"), ("register", "wudport")] and worked == ["wudport"]
+
+
+def test_the_entry_without_the_brand_input_stops_before_any_file_or_bucket_is_read(monkeypatch):
+    monkeypatch.setattr(intake, "load_layouts", lambda brand: pytest.fail(f"the {brand} layouts were read"))
+    monkeypatch.setattr(intake, "_s3_client", lambda: pytest.fail("a bucket client was built"))
+    with pytest.raises(SystemExit, match="SCRAPER_MARKET_PRICES_BRAND"):
+        intake.main()
+
+
+def test_the_entry_refuses_an_unknown_run_brand_before_any_bucket_is_read(monkeypatch):
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "no_such_brand")
+    monkeypatch.setattr(intake, "_s3_client", lambda: pytest.fail("a bucket client was built"))
+    with pytest.raises(LayoutError, match="no sheet layouts for brand 'no_such_brand'"):
+        intake.main()
 
 
 # --- RUN_MODE ----------------------------------------------------------------------------------------------------------
