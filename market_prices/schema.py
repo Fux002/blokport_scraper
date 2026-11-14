@@ -161,6 +161,8 @@ class ListingFacts:
     availability_text: Optional[str] = None
     # the listing's own VAT statement; it wins over the site's (collect._observation)
     vat_basis: Optional[VatBasis] = None
+    # what about this listing the site_status detail counts, though the listing itself is delivered (not malformed)
+    notes: tuple[str, ...] = ()
 
 
 def columns(model: type[BaseModel]) -> tuple[str, ...]:

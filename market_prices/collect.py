@@ -111,12 +111,14 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
                  pause: Callable[[float], None]) -> SiteResult:
     malformed = duplicates = vat_conflicts = 0
     reasons: collections.Counter = collections.Counter()
+    notes: collections.Counter = collections.Counter()
 
     def finish(status: SiteRunStatus, detail: str, kept: Iterable[Observation] = ()) -> SiteResult:
         ordered = tuple(sorted(kept, key=lambda row: row.listing_key))
         parts = [detail] if detail else []
         if vat_conflicts:
             parts.append(f"{_VAT_CONFLICT} x{vat_conflicts}")
+        parts.extend(f"{note} x{count}" for note, count in sorted(notes.items()))
         return SiteResult(ordered, SiteStatus(
             contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
             status=status, rows=len(ordered), malformed_listings=malformed, duplicate_listings=duplicates,
@@ -147,6 +149,7 @@ def collect_site(site: Site, brand: str, transport: Transport, stamp: Stamp,
                 continue
             rows[row.listing_key] = row
             vat_conflicts += _vat_conflict(facts, site)
+            notes.update(facts.notes)
     except SiteBlocked as exc:
         return finish(SiteRunStatus.unavailable_blocked, str(exc))
     except SiteDisallowed as exc:

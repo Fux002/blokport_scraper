@@ -41,6 +41,8 @@ _HREF = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", re.I
 _REL_NEXT = re.compile(r"""\brel\s*=\s*(?:"[^"]*\bnext\b[^"]*"|'[^']*\bnext\b[^']*'|next\b)""", re.IGNORECASE)
 _DECIMAL = re.compile(r"\d+(\.\d+)?")
 _GZIP_MAGIC = b"\x1f\x8b"
+_SEVERAL_CURRENCIES = "offers state several currencies"
+_VARIANT_ID_FIELDS = ("@id", "url")
 _SPEC_FIELDS = ("brand", "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "mpn", "sku", "productID", "color", "material",
                 "size", "width", "height", "depth", "weight")
 _KEY_FIELDS = ("sku", "productID")
@@ -105,6 +107,8 @@ def _sitemap_text(response: Response, url: str) -> str:
         raise UnexpectedResponse(f"{url} is not a readable gzip file") from exc
     if len(data) > config.SCHEMA_ORG_MAX_UNZIPPED_BYTES:
         raise UnexpectedResponse(f"{url} unzipped is over the cap of {config.SCHEMA_ORG_MAX_UNZIPPED_BYTES} bytes")
+    if inflater.unused_data:    # zlib reads one member; a second would otherwise be left unread, silently
+        raise UnexpectedResponse(f"{url} holds more than one gzip member")
     return data.decode("utf-8", errors="replace")
 
 
@@ -264,18 +268,22 @@ def _exact(price: str) -> Optional[str]:
     return price if _DECIMAL.fullmatch(price) and Decimal(price) > 0 else None
 
 
-def _price(offers: list[Mapping]) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """(price_amount, price_text, currency). One stated price is one price; several are a span, kept as text."""
+def _price(offers: list[Mapping]) -> tuple[Optional[str], Optional[str], Optional[str], tuple[str, ...]]:
+    """(price_amount, price_text, currency, notes). One stated price is one price; several are a span, and prices in
+    several currencies are not one price either: both kept as text, never one chosen."""
     stated = [pair for offer in offers for pair in _offer_prices(offer)]
     if not stated:
-        return None, None, None
+        return None, None, None, ()
     currencies = {currency for _, currency in stated if currency}
-    currency = next(iter(currencies)) if len(currencies) == 1 else None
+    if len(currencies) > 1:
+        text = " | ".join(sorted({f"{price} {currency}" if currency else price for price, currency in stated}))
+        return None, text, None, (_SEVERAL_CURRENCIES,)
+    currency = next(iter(currencies), None)
     distinct = sorted({price for price, _ in stated},
                       key=lambda price: (0, Decimal(price), price) if _DECIMAL.fullmatch(price) else (1, 0, price))
     shown = distinct[0] if len(distinct) == 1 else f"{distinct[0]}-{distinct[-1]}"
     text = f"{shown} {currency}" if currency else shown
-    return (_exact(distinct[0]) if len(distinct) == 1 else None), text, currency
+    return (_exact(distinct[0]) if len(distinct) == 1 else None), text, currency, ()
 
 
 def _vat(offers: list[Mapping]) -> Optional[VatBasis]:
@@ -344,14 +352,31 @@ def _grade(specs: Mapping[str, str], labels: tuple[str, ...]) -> Optional[str]:
     return next((value for label, value in sorted(specs.items()) if label.lower() in wanted), None)
 
 
-def _key(node: Mapping, page_url: str) -> str:
-    """The site's own id (sku, else productID), else the page's path: stable between runs."""
+def _address_key(url: str) -> str:
+    """A URL's path, query and fragment: the part that tells one listing of the site from another."""
+    parts = urlsplit(url)
+    return (parts.path + (f"?{parts.query}" if parts.query else "")
+            + (f"#{parts.fragment}" if parts.fragment else ""))
+
+
+def _key(node: Mapping, page_url: str, variant: bool) -> str:
+    """The site's own id (sku, else productID). Without one, a product is keyed by its page; a variant shares its page
+    with the others, so it is keyed by its own @id or url on the site, and with no identity of its own it is refused,
+    never collapsed into another variant."""
     for name in _KEY_FIELDS:
         key = _text(node.get(name))
         if key:
             return key
-    parts = urlsplit(page_url)
-    return f"{parts.path}?{parts.query}" if parts.query else parts.path
+    if not variant:
+        return _address_key(page_url)
+    page = _address_key(page_url)
+    for name in _VARIANT_ID_FIELDS:
+        stated = node.get(name)
+        if isinstance(stated, str):
+            absolute = urljoin(page_url, stated)
+            if on_site(absolute, page_url) and _address_key(absolute) not in ("", page):
+                return _address_key(absolute)
+    raise MalformedListing("variant has no id of its own")
 
 
 def _source_url(node: Mapping, page_url: str, base_url: str) -> str:
@@ -415,10 +440,10 @@ class SchemaOrgProductCollector:
         if not name:
             raise MalformedListing("Product has no name")
         offers = _offers(node)
-        amount, price_text, currency = _price(offers)
+        amount, price_text, currency, notes = _price(offers)
         specs = _specs(node)
         return ListingFacts(
-            listing_key=_key(node, raw.page_url),
+            listing_key=_key(node, raw.page_url, variant=group is not None),
             source_url=_source_url(node, raw.page_url, site.base_url),
             listing_text=name,
             stated_specs=specs,
@@ -430,4 +455,5 @@ class SchemaOrgProductCollector:
             min_qty_text=_min_qty(offers),
             availability_text=_availability(offers),
             vat_basis=_vat(offers),
+            notes=notes,
         )
