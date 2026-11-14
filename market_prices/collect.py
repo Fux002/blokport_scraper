@@ -111,7 +111,8 @@ def _counted(reasons: collections.Counter) -> str:
 def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Transport, stamp: Stamp,
                  pause: Callable[[float], None]) -> SiteResult:
     """One site, isolated. A listing is kept only when the run brand's vocabulary has it in scope; one out of scope
-    is counted in `detail`, never dropped silently."""
+    is counted in `detail`, never dropped silently. Scope is decided first, on the collector's listing_text, so a
+    listing out of scope is never read further and malformed counts in-scope listings only."""
     malformed = duplicates = vat_conflicts = out_of_scope = 0
     reasons: collections.Counter = collections.Counter()
     notes: collections.Counter = collections.Counter()
@@ -139,10 +140,10 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, transport: Tran
         fetcher = SiteFetcher(site.robots_url, transport, pause)
         for raw in collector.listings(site, fetcher):
             try:
-                facts = collector.facts(raw, site)
-                if not vocabulary.in_scope(facts.listing_text, site.served_market):
+                if not vocabulary.in_scope(collector.listing_text(raw, site), site.served_market):
                     out_of_scope += 1
                     continue
+                facts = collector.facts(raw, site)
                 row = _observation(facts, site, brand, stamp, collector.version)
             except MalformedListing as exc:
                 malformed += 1

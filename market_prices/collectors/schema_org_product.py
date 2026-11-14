@@ -430,15 +430,22 @@ class SchemaOrgProductCollector:
         for node, group in products:
             yield _Listing(url, node, group)
 
-    def facts(self, raw: object, site: "Site") -> ListingFacts:
+    def listing_text(self, raw: object, site: "Site") -> str:
+        """The product's name (a variant without one takes its group's): the text the run's scope is decided on,
+        before anything else of the listing is read. A product page that gave no listing has no text to decide on,
+        so it stays counted as malformed with its reason."""
         if isinstance(raw, _Skipped):
             raise MalformedListing(raw.reason)
         if not isinstance(raw, _Listing):
             raise MalformedListing("not a product page listing")
-        node, group = raw.node, raw.group
-        name = _text(node.get("name")) or (_text(group.get("name")) if group is not None else None)
+        name = _text(raw.node.get("name")) or (_text(raw.group.get("name")) if raw.group is not None else None)
         if not name:
             raise MalformedListing("Product has no name")
+        return name
+
+    def facts(self, raw: object, site: "Site") -> ListingFacts:
+        name = self.listing_text(raw, site)
+        node, group = raw.node, raw.group
         offers = _offers(node)
         amount, price_text, currency, notes = _price(offers)
         specs = _specs(node)
