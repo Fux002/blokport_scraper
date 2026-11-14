@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from market_prices import config, pilot, run
+from market_prices.collectors import COLLECTORS
 from market_prices.fetching import Response, TransportError, UnexpectedResponse
 from market_prices.register import Register, RegisterError
 from market_prices.transport import LiveTransport
@@ -195,14 +196,6 @@ def test_a_register_with_no_approved_site_runs_cleanly_and_publishes_only_eviden
     assert outcome.published["latest_moved"] is False
 
 
-def test_the_shipped_blokport_register_approves_no_site_yet_so_a_run_requests_nothing(tmp_path):
-    outcome = run.run_register(run.load_register("blokport"), _Refuses(), _S3(), "bucket", tmp_path, MOMENT,
-                               dry_run=True, pause=_no_pause)
-    # every listed site is skipped for want of approval, and nothing is requested
-    assert {status.status.value for status in outcome.result.statuses} <= {"disabled_terms"}
-    assert outcome.result.observations == ()
-
-
 class _BlocksAll:
     """A transport that records every URL asked for and answers each with a block (HTTP 403)."""
 
@@ -214,22 +207,29 @@ class _BlocksAll:
         return Response(status=403, text="")
 
 
-# Mas's decision record of 13 Nov on the owner's 13 Nov site list (SC #750): the only wudport sites a run may request.
-WUDPORT_APPROVED = {"beijerbygg", "byggmax", "holzhandel_deutschland", "jewson", "mkm", "originalmarquetry", "scbs",
-                    "selcobw", "totemtimber"}
+# The only sites a run of each shipped register may request, as Mas decided them: wudport on the owner's 13 Nov site list
+# (SC #750), blokport on the owner's 14 Nov source list (worker 74's measure, Mas's rulings 14 Nov).
+APPROVED = {
+    "wudport": {"beijerbygg", "byggmax", "holzhandel_deutschland", "jewson", "mkm", "originalmarquetry", "scbs",
+                "selcobw", "totemtimber"},
+    "blokport": {"countryfloors", "mandarinstone", "mosstonex_terra", "starelstones", "stoneks"},
+}
 
 
-def test_a_wudport_run_requests_only_the_approved_sites_and_never_a_refused_or_pending_one(tmp_path):
-    register = run.load_register("wudport")
+@pytest.mark.parametrize("brand", sorted(APPROVED))
+def test_a_run_requests_only_the_approved_sites_and_never_a_refused_or_pending_one(brand, tmp_path):
+    register = run.load_register(brand)
     transport = _BlocksAll()
     outcome = run.run_register(register, transport, _S3(), "bucket", tmp_path, MOMENT, dry_run=True, pause=_no_pause)
-    approved = {site.site_id for site in register.sites if site.collectable}
-    assert approved == WUDPORT_APPROVED
+    # a site run is the register's fetching rows; a supplier_scrape row (polonine) comes with its supplier's scrape
+    fetching = [site for site in register.sites if COLLECTORS[site.platform].fetches]
+    approved = {site.site_id for site in fetching if site.collectable}
+    assert approved == APPROVED[brand]
     # each approved site asks for its robots.txt first and stops at the block; no other site is asked anything
-    assert sorted(transport.requested) == sorted(site.robots_url for site in register.sites if site.collectable)
+    assert sorted(transport.requested) == sorted(site.robots_url for site in fetching if site.collectable)
     statuses = {status.site_id: status.status.value for status in outcome.result.statuses}
-    assert {site_id for site_id, value in statuses.items() if value == "unavailable_blocked"} == WUDPORT_APPROVED
-    assert {value for site_id, value in statuses.items() if site_id not in WUDPORT_APPROVED} == {"disabled_terms"}
+    assert {site_id for site_id, value in statuses.items() if value == "unavailable_blocked"} == APPROVED[brand]
+    assert {value for site_id, value in statuses.items() if site_id not in APPROVED[brand]} == {"disabled_terms"}
     assert outcome.result.observations == ()
 
 
