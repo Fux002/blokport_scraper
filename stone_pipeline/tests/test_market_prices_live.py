@@ -195,12 +195,41 @@ def test_a_register_with_no_approved_site_runs_cleanly_and_publishes_only_eviden
     assert outcome.published["latest_moved"] is False
 
 
-@pytest.mark.parametrize("brand", ["blokport", "wudport"])
-def test_the_shipped_registers_approve_no_site_yet_so_a_run_requests_nothing(brand, tmp_path):
-    outcome = run.run_register(run.load_register(brand), _Refuses(), _S3(), "bucket", tmp_path, MOMENT, dry_run=True,
-                               pause=_no_pause)
-    # every listed site is skipped for want of approval (wudport lists none yet), and nothing is requested
+def test_the_shipped_blokport_register_approves_no_site_yet_so_a_run_requests_nothing(tmp_path):
+    outcome = run.run_register(run.load_register("blokport"), _Refuses(), _S3(), "bucket", tmp_path, MOMENT,
+                               dry_run=True, pause=_no_pause)
+    # every listed site is skipped for want of approval, and nothing is requested
     assert {status.status.value for status in outcome.result.statuses} <= {"disabled_terms"}
+    assert outcome.result.observations == ()
+
+
+class _BlocksAll:
+    """A transport that records every URL asked for and answers each with a block (HTTP 403)."""
+
+    def __init__(self):
+        self.requested: list[str] = []
+
+    def get(self, url: str) -> Response:
+        self.requested.append(url)
+        return Response(status=403, text="")
+
+
+# Mas's decision record of 13 Nov on the owner's 13 Nov site list (SC #750): the only wudport sites a run may request.
+WUDPORT_APPROVED = {"beijerbygg", "byggmax", "holzhandel_deutschland", "jewson", "mkm", "originalmarquetry", "scbs",
+                    "selcobw", "totemtimber"}
+
+
+def test_a_wudport_run_requests_only_the_approved_sites_and_never_a_refused_or_pending_one(tmp_path):
+    register = run.load_register("wudport")
+    transport = _BlocksAll()
+    outcome = run.run_register(register, transport, _S3(), "bucket", tmp_path, MOMENT, dry_run=True, pause=_no_pause)
+    approved = {site.site_id for site in register.sites if site.collectable}
+    assert approved == WUDPORT_APPROVED
+    # each approved site asks for its robots.txt first and stops at the block; no other site is asked anything
+    assert sorted(transport.requested) == sorted(site.robots_url for site in register.sites if site.collectable)
+    statuses = {status.site_id: status.status.value for status in outcome.result.statuses}
+    assert {site_id for site_id, value in statuses.items() if value == "unavailable_blocked"} == WUDPORT_APPROVED
+    assert {value for site_id, value in statuses.items() if site_id not in WUDPORT_APPROVED} == {"disabled_terms"}
     assert outcome.result.observations == ()
 
 
