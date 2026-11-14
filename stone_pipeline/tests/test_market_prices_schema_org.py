@@ -201,6 +201,13 @@ def test_a_gzipped_sitemap_is_read():
     assert [row.listing_key for row in _run(answers).observations] == ["A"]
 
 
+def test_a_gzipped_sitemap_of_several_members_is_refused_not_read_in_part():
+    """f8 note: zlib reads one gzip member; a second would otherwise be dropped silently."""
+    body = gzip.compress(_urlset("/p/a").text.encode()) + gzip.compress(_urlset("/p/b").text.encode())
+    status = _status(_run({ROBOTS: ROBOTS_OPEN, SITEMAP: Response(200, "", {}, body)}))
+    assert status.status.value == "unavailable_error" and "gzip member" in status.detail
+
+
 def test_a_gzipped_sitemap_over_the_unzipped_cap_is_refused():
     body = gzip.compress(b"<urlset>" + b" " * (config.SCHEMA_ORG_MAX_UNZIPPED_BYTES + 1) + b"</urlset>")
     answers = {ROBOTS: ROBOTS_OPEN, SITEMAP: Response(200, "", {}, body)}
@@ -335,6 +342,21 @@ def test_several_offers_are_one_price_only_when_they_agree():
     assert (rows["D"].price_status.value, rows["D"].price_text) == ("none", "10-12 GBP")
 
 
+def test_offers_in_several_currencies_are_no_price_their_text_kept_and_counted():
+    """f8 M1, the manager's rule: the same as a span, not one price. The listing still delivers its text and specs,
+    with every stated price in price_text, and site_status counts it."""
+    product = _product()
+    product["offers"] = [{"@type": "Offer", "price": "10", "priceCurrency": "GBP"},
+                         {"@type": "Offer", "price": "10", "priceCurrency": "EUR"}]
+    result = _run(_shop({"/p/a": _page(product), "/p/b": _page(_product("B"))}))
+    row = next(row for row in result.observations if row.listing_key == "PLY-18")
+    assert (row.price_status.value, row.price_amount, row.currency, row.price_text) == ("none", None, None,
+                                                                                         "10 EUR | 10 GBP")
+    status = _status(result)
+    assert (status.status.value, status.malformed_listings) == ("ok", 0)
+    assert status.detail == "offers state several currencies x1"
+
+
 def test_a_price_specification_is_read_when_the_offer_has_no_price():
     product = _product(price=None)
     product["offers"]["priceSpecification"] = {"@type": "UnitPriceSpecification", "price": "41.20",
@@ -356,6 +378,32 @@ def test_a_product_group_gives_one_listing_per_variant():
              "hasVariant": [_product("OSB-11", "OSB3 11mm", "12.00"), _product("OSB-18", "OSB3 18mm", "19.00")]}
     rows = _run(_shop({"/p/osb": _page(group)})).observations
     assert [(row.listing_key, row.price_amount) for row in rows] == [("OSB-11", "12.00"), ("OSB-18", "19.00")]
+
+
+def _variant(name, price, **ids):
+    variant = _product(name=name, price=price, **{})
+    del variant["sku"]
+    variant.update(ids)
+    return variant
+
+
+def test_variants_without_a_sku_are_keyed_by_their_own_id_on_the_page():
+    """f8 M2: every variant of a page shares its path, so a variant with no sku or productID is keyed by its own @id or
+    url on that page, never collapsed into the first as a duplicate."""
+    group = {"@context": "https://schema.org", "@type": "ProductGroup", "name": "OSB3 board",
+             "hasVariant": [_variant("OSB3 11mm", "12.00", **{"@id": f"{BASE}/p/osb#v11"}),
+                            _variant("OSB3 18mm", "19.00", url=f"{BASE}/p/osb?size=18")]}
+    result = _run(_shop({"/p/osb": _page(group)}))
+    assert sorted(row.listing_key for row in result.observations) == ["/p/osb#v11", "/p/osb?size=18"]
+    assert _status(result).duplicate_listings == 0
+
+
+def test_a_variant_with_no_id_of_its_own_is_malformed_not_a_duplicate():
+    group = {"@context": "https://schema.org", "@type": "ProductGroup", "name": "OSB3 board",
+             "hasVariant": [_variant("OSB3 11mm", "12.00"), _variant("OSB3 18mm", "19.00", url=f"{BASE}/p/osb")]}
+    status = _status(_run(_shop({"/p/osb": _page(group)})))
+    assert (status.rows, status.duplicate_listings, status.malformed_listings) == (0, 0, 2)
+    assert "variant has no id of its own x2" in status.detail
 
 
 def test_the_pages_own_product_is_chosen_among_related_ones():
