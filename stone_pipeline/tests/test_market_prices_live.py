@@ -290,8 +290,34 @@ def test_the_pilot_summary_names_status_rows_malformed_and_the_first_rows(tmp_pa
     assert "published: no (S3 dry run)" in text
 
 
+def test_the_pilot_runs_the_run_inputs_brand_not_the_deployments(monkeypatch, tmp_path):
+    # this deployment is blokport's (the dev default); the run input names wudport, so wudport's pilot site is run
+    piloted: list[str] = []
+
+    def cut(brand: str) -> Register:
+        piloted.append(brand)
+        return Register.model_validate({"brand": brand, "sites": [_site()]})
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "wudport")
+    monkeypatch.setattr(pilot, "pilot_register", cut)
+    monkeypatch.setattr(pilot.run, "_dry_run", lambda: True)
+    monkeypatch.setattr(pilot.run, "_runs_root", lambda: tmp_path)
+    monkeypatch.setattr(pilot.run, "LiveTransport", lambda: _Context(_shop(_page([_listing()]))))
+    monkeypatch.setattr(pilot.run, "_now", lambda: MOMENT)
+    monkeypatch.setattr(pilot.run.time, "sleep", lambda _seconds: None)
+    pilot.main()
+    assert piloted == ["wudport"]
+
+
+def test_a_pilot_without_the_brand_input_stops_before_any_register_or_request(monkeypatch):
+    monkeypatch.setattr(pilot, "pilot_register", lambda brand: pytest.fail(f"the {brand} register was read"))
+    monkeypatch.setattr(pilot.run, "LiveTransport", lambda: pytest.fail("a transport was built"))
+    with pytest.raises(SystemExit, match="SCRAPER_MARKET_PRICES_BRAND"):
+        pilot.main()
+
+
 def test_the_pilot_publishes_to_the_deployments_bucket(monkeypatch, tmp_path, capsys):
     s3 = _S3()
+    monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "blokport")
     monkeypatch.setattr(pilot, "pilot_register", lambda brand: _register())
     monkeypatch.setattr(pilot.run, "_dry_run", lambda: False)
     monkeypatch.setattr(pilot.run, "_s3_client", lambda: s3)
