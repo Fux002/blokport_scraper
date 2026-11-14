@@ -220,9 +220,9 @@ def test_dev_s_committed_retired_keys_file_holds_the_one_type_less_key_retired_b
 
 
 def test_prod_s_committed_retired_keys_file_holds_the_seven_keys_prod_s_marker_needs():
-    # B1's prod read (13 Nov, b1_F1.out 6ee1f805): 7 marker Keys outside prod's F1 map (1d842f88) and not tombstoned.
-    # Alpine Luxe is dev's type-less Key (#109); the 6 dolomite_marble slabs left both bases at #293 (the Dolomite
-    # Marble type collapse: 5 re-keyed to slab_dolomite_*, Super White folded into Super White Dolomite).
+    # prod's read: 7 marker Keys outside prod's key map and not tombstoned. Alpine Luxe is dev's type-less Key; the
+    # 6 dolomite_marble slabs left both bases in the Dolomite Marble type collapse (5 re-keyed to slab_dolomite_*,
+    # Super White folded into Super White Dolomite).
     data = (migrate_run.RETIRED_KEYS_DIR / "production.csv").read_bytes()
     assert read_retired_keys(data, hashlib.sha256(data).hexdigest(), _key_map()) == {
         "slab_alpine_luxe_b1d2b915-341d-5c79-8591-0d7bb923ed11": "#109 9a661d4",

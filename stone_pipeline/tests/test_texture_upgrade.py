@@ -1,6 +1,6 @@
 """The demand-driven texture upgrade: legacy icons are re-made ONCE, only for a pair a product links to, and the
-already-on-S3 prune must NOT drop them (their icon exists by definition). Per (Key, category) pair (spec rev 8
-section 4): the pair ids are `{Key}/{category}`."""
+already-on-S3 prune must NOT drop them (their icon exists by definition). Per (Key, category) pair: the pair ids
+are `{Key}/{category}`."""
 
 import json
 import types

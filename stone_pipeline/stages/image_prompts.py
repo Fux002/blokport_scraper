@@ -7,9 +7,9 @@ the only file the generator reads):
   build_with_upgrades(done, cap)  the produce's queue: the new ones plus up to `cap` older textures re-made
   build_for_keys(pair_ids)        a specific set of icon pairs        (`--keys K/slab K/block`: fix a few bad icons)
 
-A texture is ONE (Key, category) pair (spec rev 8 section 4): a queue item carries `key` and `category`, and is named by
-its pair id `{Key}/{category name}` (io.variety_icons.pair_id), so the generator writes `{Key}/{category}.png` and the
-upload OVERWRITES that one icon in place, never a new name. The generator appends a natural-stone guard so a variety
+A texture is ONE (Key, category) pair: a queue item carries `key` and `category`, and is named by its pair id
+`{Key}/{category name}` (io.variety_icons.pair_id), so the generator writes `{Key}/{category}.png` and the upload
+OVERWRITES that one icon in place, never a new name. The generator appends a natural-stone guard so a variety
 named after a painting/fruit (e.g. 'Mona Lisa') renders stone, not the subject.
 """
 

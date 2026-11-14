@@ -127,8 +127,8 @@ def test_product_page_parses_every_fact():
     # the JSON-LD Product image list only (not the similar-products carousel), deduped, in order
     assert d["image_urls"] == ["https://sentasmarble.com/upload/media/images/2026/10/a.webp",
                                "https://sentasmarble.com/upload/media/images/2026/10/b.webp"]
-    # both Drive photo folders, in page order, in either url form, whatever the card says (the site relabelled them
-    # 2026-11-05: 'Google Drive Folder' became 'View slab images and packing list'); the packing-list sheet is not one
+    # both Drive photo folders, in page order, in either url form, whatever the card says (the site relabelled them:
+    # 'Google Drive Folder' became 'View slab images and packing list'); the packing-list sheet is not one
     assert d["drive_folders"] == ["1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT", "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw"]
 
 

@@ -83,10 +83,10 @@ def test_no_rejects_is_an_empty_worklist():
 
 
 def test_a_bound_variety_without_a_colour_is_its_own_worklist_entry():
-    # prod 2026-09-17: Polonine's SPARTA WHITE binds to 'Sparta White' (Granite), a variety minted from a
-    # colourless listing, so it has no colour to inherit and rejects required_id_null: color_id. The generic
-    # text sent the operator to Medusa ("paste the id, or mint the variety"); nothing there fixes it. The
-    # fix is the amend flow (any statement's colour documents the variety), so it is its own entry.
+    # on prod: Polonine's SPARTA WHITE binds to 'Sparta White' (Granite), a variety minted from a colourless
+    # listing, so it has no colour to inherit and rejects required_id_null: color_id. The generic text sent the
+    # operator to Medusa ("paste the id, or mint the variety"); nothing there fixes it. The fix is the amend flow
+    # (any statement's colour documents the variety), so it is its own entry.
     bound = _row("Sparta White", ("required_id_null", "color_id"))
     bound.variation_key = "slab_granite_sparta_white_x"
     unbound = _row("Ocean X", ("required_id_null", "color_id"))     # no variety bound: the generic case
@@ -100,7 +100,7 @@ def test_a_bound_variety_without_a_colour_is_its_own_worklist_entry():
 
 
 def test_a_listing_with_no_photo_at_all_is_its_own_entry_not_a_transient_retry():
-    # prod 2026-09-17: 16 Varsha bundles carry no image url on the vendor's site. They were filed under the
+    # on prod: 16 Varsha bundles carry no image url on the vendor's site. They were filed under the
     # transient "no usable photo this run ... re-lists on its own", which is true only for a photo that
     # failed to fetch or process; a listing with no source heals only when the supplier adds a photo.
     out = validate.held_breakdown([

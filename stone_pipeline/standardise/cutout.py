@@ -8,7 +8,7 @@ import numpy as np
 
 from stone_pipeline.config.standardise_settings import STANDARDISE as C
 
-# What a 3D slab's pixels are made from, additive meta keys (Mas, 2026-11-10; the contract's parser allows extra keys).
+# What a 3D slab's pixels are made from, additive meta keys (the contract's parser allows extra keys).
 # Exact, for a slab its run recorded (layout.source_of): the stone's long side in real pixels before the layout enlarged
 # it, and whether it did. Only a bound, for one published before that was recorded: the long side of the photo its run
 # started from. A value that cannot be determined is absent, never false or 0.

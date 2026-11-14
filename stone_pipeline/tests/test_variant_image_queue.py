@@ -1,7 +1,7 @@
-"""Variant icon queue: an icon is queued ONLY for a (Key, category) pair that has a PRODUCT to list (spec rev 8
-section 4). A new variety's additions post lists the categories its products sit in; an existing variety's pairs
-come from the products file. A category with no product stays an imageless record (Blokport placeholders it) until
-its own product appears, and a pair whose icon is already on S3 is never minted again.
+"""Variant icon queue: an icon is queued ONLY for a (Key, category) pair that has a PRODUCT to list. A new
+variety's additions post lists the categories its products sit in; an existing variety's pairs come from the products
+file. A category with no product stays an imageless record (Blokport placeholders it) until its own product
+appears, and a pair whose icon is already on S3 is never minted again.
 """
 
 from __future__ import annotations

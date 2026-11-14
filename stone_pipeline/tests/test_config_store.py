@@ -196,7 +196,7 @@ def test_removed_source_is_not_resurrected_by_reconcile_seed(tmp_path, monkeypat
 
 
 def test_duplicate_source_code_is_rejected_by_the_db(tmp_path, monkeypatch):
-    # F8: two DISTINCT sources must not share a non-empty source_code (their SKU namespaces would collide).
+    # two DISTINCT sources must not share a non-empty source_code (their SKU namespaces would collide).
     # The DB UNIQUE(source_code) backstop rejects it even if two concurrent PUTs slip past the app check.
     import sqlite3
 
@@ -212,8 +212,8 @@ def test_duplicate_source_code_is_rejected_by_the_db(tmp_path, monkeypatch):
 
 
 def test_readd_clears_tombstone_atomically(tmp_path, monkeypatch):
-    # F8: the source upsert and its removal-tombstone clear happen in ONE transaction, so a re-added source
-    # is never left both present AND tombstoned. (Functional check of the single-transaction upsert_row.)
+    # the source upsert and its removal-tombstone clear happen in ONE transaction, so a re-added source is never left
+    # both present AND tombstoned. (Functional check of the single-transaction upsert_row.)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.upsert_row({"source": "zucchi",  "source_code": "zuc", "vendor": "Z"})
     assert store.delete_source("zucchi") is True

@@ -1,16 +1,15 @@
-"""The alias classification file (P2-10 C5; plan P2-10-SCRAPER-PLAN.md section 5; table 249 rev 3 "Definitions"):
-`python -m stone_pipeline.aliases.cleanup`, and `POST /config/v1/aliases/classification`
-(lifecycle.alias_classification).
+"""The alias classification file: `python -m stone_pipeline.aliases.cleanup`, and
+`POST /config/v1/aliases/classification` (lifecycle.alias_classification).
 
 The backend's phase 2 fill reads it to give every scraper alias row on Medusa its owner. It names every served Key and
 every pending variation tombstone with its CURRENT ACKED set (the ledger keeps no history), one row per
 (Key, alias_key(Value)), each value in ONE class, the first that applies:
-- `code`: the brand's code pattern accepts it (C1's code test, inside alias_refusal);
+- `code`: the brand's code pattern accepts it (the code test inside alias_refusal);
 - `operator`: a GLOBAL `is` statement renamed onto the variety (vendor bindings stay match-only);
-- `removed`: a seed or learned value C1's alias refusal fails (the cleanup drops it; an operator's row is never
+- `removed`: a seed or learned value the alias refusal fails (the cleanup drops it; an operator's row is never
   changed);
 - `seed`: the env's base `Aliases` or a phase 1 backbone post's `aliases`;
-- `learned`: an ACTIVE learned_alias row (C2);
+- `learned`: an ACTIVE learned_alias row;
 and a Key holding no value is the one row `Key,,none`.
 
 It is written only when every variation is synced (or retiring with its pending tombstone): otherwise it refuses,
@@ -44,7 +43,7 @@ DIFFERENCES_FILE = "alias_cleanup_differences.csv"
 COLUMNS = ("Key", "Value", "Class")
 DIFFERENCE_COLUMNS = ("Key", "Value", "Class", "Reason")
 MANIFEST_FIELD = "alias_classification"
-# The manifest field's fixed statements (table 249 rev 3: the backend's G1 compares them exactly).
+# The manifest field's fixed statements (the backend compares them exactly).
 BASIS = "all variations synced"
 KEYS_TEXT = "every served Key and pending tombstone"
 VALUES_TEXT = "current acked set"
@@ -56,7 +55,7 @@ EMPTY_KEY = "empty key"
 ORPHAN_TOMBSTONE = "pending tombstone with no ledger row (no last set to name)"
 # The classes whose values are aliases served as such (not a code, not removed): a digit in one is an open item.
 ALIAS_CLASSES = ("seed", "operator", "learned")
-ADMIN_ALIASES_COLUMN = "AdminAliases"      # the live export's admin rows (P2-7's E1), read by header
+ADMIN_ALIASES_COLUMN = "AdminAliases"      # the live export's admin rows, read by header
 
 
 class NotAllSynced(RuntimeError):
@@ -131,9 +130,9 @@ def _order(row: tuple) -> tuple:
 
 
 def alias_contexts(variations: list[dict]) -> dict[str, AliasContext]:
-    """{Key: its alias-check context}, built by C2's one builder (aliases.context.build_contexts) over the varieties
-    C2's migration judges against: the live ones (in the full set, not retiring). A Key outside them (retiring, or an
-    export-only row) is judged against every variety, its own type's names included."""
+    """{Key: its alias-check context}, built by the one builder (aliases.context.build_contexts) over the varieties the
+    learned-alias migration judges against: the live ones (in the full set, not retiring). A Key outside them (retiring,
+    or an export-only row) is judged against every variety, its own type's names included."""
     def triple(v: dict) -> tuple[str, str, str]:
         return v["key"], v["type"], v["name"]
     live = build_contexts(triple(v) for v in variations if v["in_full"] and v["state"] != RETIRING)
@@ -142,8 +141,8 @@ def alias_contexts(variations: list[dict]) -> dict[str, AliasContext]:
 
 
 def seed_refusal(value: str, context: AliasContext, is_code: Callable[[str], bool]) -> Optional[str]:
-    """THE `removed` judgement for a seed or learned value, shared with the seed rewrite (one place decides): C1's
-    alias refusal, except that a code is never a refusal (it moves to `codes`). None for a good alias or a code."""
+    """THE `removed` judgement for a seed or learned value, shared with the seed rewrite (one place decides): the alias
+    refusal, except that a code is never a refusal (it moves to `codes`). None for a good alias or a code."""
     refusal = alias_refusal(value, context, is_code)
     return None if refusal == "is_code" else refusal
 
@@ -290,9 +289,9 @@ def digit_items(classification: Classification) -> list[tuple[str, str, str, str
 
 
 def admin_items(export: Path, is_code: Callable[[str], bool]) -> Optional[list[tuple[str, str, str, str]]]:
-    """The open items of the admin aliases (the live export's AdminAliases) failing the boundary, judged with C2's
-    context over the export's own rows; never changed by the cleanup (design 3j), only listed for staff. None when
-    the export has no AdminAliases column (before P2-7's export split), said in the log."""
+    """The open items of the admin aliases (the live export's AdminAliases) failing the boundary, judged with the same
+    context over the export's own rows; never changed by the cleanup (design 3j), only listed for staff. None when the
+    export has no AdminAliases column (an export from before the split), said in the log."""
     with Path(export).open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
         columns = rows[0].keys() if rows else []

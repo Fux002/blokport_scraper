@@ -1,7 +1,7 @@
-"""Brazilian White and Super White are DIFFERENT stones (owner, 11-11): 641ae4c's merge is undone in the committed data
-(PLAN_brazilian_white_undo.md section 4). Brazilian White is its own variety for Marble, Onyx and Quartzite; the real
-Super White Quartzite (Fjord White Quartzite) is its own quartzite; Super White Dolomite is unchanged; and no alias
-binds one stone's listing to the other. No em dashes."""
+"""Brazilian White and Super White are DIFFERENT stones: an earlier merge of the two is undone in the committed
+data. Brazilian White is its own variety for Marble, Onyx and Quartzite; the real Super White Quartzite (Fjord White
+Quartzite) is its own quartzite; Super White Dolomite is unchanged; and no alias binds one stone's listing to the
+other. No em dashes."""
 from __future__ import annotations
 
 import csv

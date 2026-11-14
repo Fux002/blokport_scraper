@@ -1,4 +1,4 @@
-"""The variety Key rule (PHASE-1-SPEC rev 8, D1 and 2a): mint a `{type slug}__{name slug}_{uuid}` Key and its ONE parse.
+"""The variety Key rule (PHASE-1-SPEC D1 and 2a): mint a `{type slug}__{name slug}_{uuid}` Key and its ONE parse.
 
 This is the production parser: every reader of a Key's type or name goes through `variety_key_type` and
 `variety_key_name_slug`, with ONE split on `__` and no type list, so a type slug that prefixes another
@@ -30,7 +30,7 @@ SEP = "__"
 # No slug holds a run of underscores, so a Key holding three in a row is a fault (paired with the backend's).
 UNDERSCORE_RUN = "___"
 
-# varietyKeyProblem values, paired with the backend enum (154-fd P1-6, unit 6.1).
+# varietyKeyProblem values, paired with the backend enum.
 NO_TYPE_SEPARATOR = "no_type_separator"
 UNDERSCORE_RUN_PROBLEM = "underscore_run"
 EMPTY_TYPE = "empty_type"

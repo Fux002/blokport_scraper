@@ -1,7 +1,6 @@
-"""The one boundary check for an alias value: the scraper twin of the backend's aliasProblem and codeMatcher (P2-2,
-table 171; PHASE-2-SPEC WP2.1). The phase 2 cleaner pre-classifies every value with it before the payload states it
-(P2-10: a code goes in `codes`, a refused alias never reaches `alias_rows`), so the backend never holds an item for a
-disagreement.
+"""The one boundary check for an alias value: the scraper twin of the backend's aliasProblem and codeMatcher. The
+phase 2 cleaner pre-classifies every value with it before the payload states it (a code goes in `codes`, a refused
+alias never reaches `alias_rows`), so the backend never holds an item for a disagreement.
 
 PAIRED with the backend through tests/fixtures/alias_problem_vectors.json, byte-identical to the backend's
 src/model/catalog/__tests__/alias-problem.vectors.json: a change to either side is a paired PR. A value's key is
@@ -59,7 +58,7 @@ def alias_problem(value: str, context: AliasContext) -> Optional[str]:
         return "same_type_name"
     if key in context.vocabulary_keys:
         return "bare_vocabulary_word"
-    # a script-preserving key is never too short: a CJK character carries a word (34, 13 Nov; BE likewise)
+    # a script-preserving key is never too short: a CJK character carries a word (the backend likewise)
     if len(key) <= _TOO_SHORT_MAX and not keeps_script(value):
         return "too_short"
     return None

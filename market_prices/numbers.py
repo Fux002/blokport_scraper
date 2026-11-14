@@ -1,6 +1,6 @@
 """A source's own number notation, declared once and read one way: a sheet layout's `number` and a declared-HTML site's
-`number` (the manager's ruling, 14 Nov: one logic). A text is a number only in the declared notation; anything else (a
-range, a word, another notation) is no number, never a guess."""
+`number` (one logic for both). A text is a number only in the declared notation; anything else (a range, a word,
+another notation) is no number, never a guess."""
 
 from __future__ import annotations
 

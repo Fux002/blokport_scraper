@@ -1,5 +1,5 @@
-"""Operator dimension overrides (Mas's word, 10 Nov): the EXISTING manual override (state/manual_overrides.csv, keyed
-src_site + surrogate_key + field) also takes length, width and height, in metres, with the flat-dims convention
+"""Operator dimension overrides: the EXISTING manual override (state/manual_overrides.csv, keyed src_site +
+surrogate_key + field) also takes length, width and height, in metres, with the flat-dims convention
 (height = thickness, width = the short face). A set dimension is recorded as `<field>:override` in dimension_method,
 and the weight is derived from it.
 
@@ -209,17 +209,17 @@ def test_a_produce_stops_when_the_overrides_cannot_be_fetched(monkeypatch):
     assert stop.value.code == 2
 
 
-# --- review fixes (Scraper's review of #608) ----------------------------------------------------------------------
+# --- the overrides' load and match edges --------------------------------------------------------------------------
 
 def test_an_override_outside_the_categorys_plausible_band_is_refused(ref, tmp_path):
-    # M1: an office "325" meant for 3.25 m is a 325 m slab. An override skips the unit correction (a person states
+    # an office "325" meant for 3.25 m is a 325 m slab. An override skips the unit correction (a person states
     # metres), so the plausible band is its guard: outside it the row is refused, never published.
     with pytest.raises(ValueError, match=r"length override '325'.*band"):
         _derive(ref, _slab(), _file(tmp_path, f"polonine,620,length,325,{_SIGNED}"))
 
 
 def test_a_field_no_resolver_reads_is_refused_and_named(tmp_path):
-    # L1: a typo would load and never apply
+    # a typo would load and never apply
     with pytest.raises(ov.OverridesError, match=r"line 2.*lenght.*not a field"):
         ov.load_overrides(_file(tmp_path, f"polonine,620,lenght,3.1,{_SIGNED}"))
 

@@ -1,4 +1,4 @@
-"""VE2 PR5: fan out only to assignable values, keep emitted products' exact tuples, count frozen varieties
+"""VE2: fan out only to assignable values, keep emitted products' exact tuples, count frozen varieties
 frozen not uncovered (tree_build); archived varieties stay in the curate index; no alias onto an archived
 Key; a mint drops restricted colours/qualities and holds a restricted type. Dormant (byte-identical) while
 attributes.csv / the export carry no status columns.
@@ -17,7 +17,7 @@ from stone_pipeline.tests._category_registry import set_category_pcats, with_han
 from stone_pipeline.tests.test_tree_build import (_FINISH_IDS, COL, FIN, _backbone, _export, _for,
                                                   _post, _products, _prow)
 
-# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+# the category pcats come from the registry: every test here prices under TREE_PCATS
 pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 # the same vocabulary as test_tree_build._attrs, but written WITH status/internal columns so values can be
@@ -139,7 +139,7 @@ def test_a_variety_left_with_no_combination_after_the_filter_is_uncovered(tmp_pa
 
 
 def test_an_acked_product_absent_from_this_runs_emit_keeps_its_restricted_tuple(tmp_path, monkeypatch):
-    # fix 3: the keep-set is emitted UNION ledger-acked tuples. A product live in Medusa on a restricted value
+    # The keep-set is emitted UNION ledger-acked tuples. A product live in Medusa on a restricted value
     # whose source emitted NOTHING this run still keeps its combination (Blokport replaces the whole set).
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger, now_iso
@@ -193,7 +193,7 @@ def _posts(res, slug):
 
 
 def test_mint_with_a_restricted_type_holds(ref, monkeypatch):
-    # item 3 / fix 1: a genuinely NEW variety whose stone type is restricted HOLDS via the existing
+    # A genuinely NEW variety whose stone type is restricted HOLDS via the existing
     # pending_confirm path, not minted.
     views.mint("Novum Frozen Stone", stone_type="Granite")   # operator confirms the mint
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"type": {proj.norm("Granite")}})
@@ -203,7 +203,7 @@ def test_mint_with_a_restricted_type_holds(ref, monkeypatch):
 
 
 def test_an_existing_variety_of_a_restricted_type_gives_no_card_or_mint(ref, monkeypatch):
-    # fix 1 (protected): the restricted-type hold must NOT fire for a variety that already exists (it re-enters
+    # The restricted-type hold must NOT fire for a variety that already exists (it re-enters
     # emit_new_variants every produce); a card there would flood the queue and following it would mint a
     # duplicate under a wrong type. Use a real existing variety + its own type, so would_mint is False.
     from stone_pipeline.stages.curate import existing as cur_existing
@@ -218,7 +218,7 @@ def test_an_existing_variety_of_a_restricted_type_gives_no_card_or_mint(ref, mon
 
 
 def test_mint_with_only_a_restricted_colour_holds(ref, monkeypatch):
-    # fix 2: dropping the ONLY colour (restricted) must HOLD, never fall back to a default (no guessing).
+    # Dropping the ONLY colour (restricted) must HOLD, never fall back to a default (no guessing).
     views.mint("Novum Only Pink", stone_type="Granite")
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"color": {proj.norm("Pink")}})
     res = curate.build_curation([_mk_row("Novum Only Pink", "Pink")], ref)
@@ -227,7 +227,7 @@ def test_mint_with_only_a_restricted_colour_holds(ref, monkeypatch):
 
 
 def test_mint_drops_a_restricted_colour_but_keeps_the_rest(ref, monkeypatch):
-    # fix 2: a non-empty remainder after the drop mints with what remains (no default, no hold).
+    # A non-empty remainder after the drop mints with what remains (no default, no hold).
     views.mint("Novum Two Colour", stone_type="Granite")
     rows = [_mk_row("Novum Two Colour", "Pink", sk="a"), _mk_row("Novum Two Colour", "Grey", sk="b")]
     base = _posts(curate.build_curation(rows, ref), "novum_two_colour")
@@ -238,7 +238,7 @@ def test_mint_drops_a_restricted_colour_but_keeps_the_rest(ref, monkeypatch):
 
 
 def test_decision_audit_suppresses_the_mint_gap_only_for_a_ve2_hold():
-    # fix 6c: the "Mint not applied" gap is suppressed only when THIS (source, spelling) is held by a VE2
+    # The "Mint not applied" gap is suppressed only when THIS (source, spelling) is held by a VE2
     # freeze card -- not by another vendor's card, and not for non-VE2 holds. One hold, one review entry.
     from stone_pipeline.stages import decision_audit
     st = SimpleNamespace(is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone",
@@ -256,7 +256,7 @@ def test_decision_audit_suppresses_the_mint_gap_only_for_a_ve2_hold():
 
 
 def test_a_gapped_scrape_aliasing_to_an_archived_variety_is_held(ref, monkeypatch):
-    # fix 1 (round 2): the alias to an archived variety never serves, so curate surfaces an archived_variety
+    # The alias to an archived variety never serves, so curate surfaces an archived_variety
     # card (the alias row is still recorded). No card when the owner is active.
     v = next(iter(cur_existing.load_existing().varieties))
     name, ntype = v["Name"], v["type"]
@@ -275,7 +275,7 @@ def test_a_gapped_scrape_aliasing_to_an_archived_variety_is_held(ref, monkeypatc
 
 
 def test_a_global_mint_is_held_by_any_vendors_ve2_card():
-    # fix 1: a GLOBAL mint statement ('' source) is held by that spelling's VE2 card from ANY vendor.
+    # A GLOBAL mint statement ('' source) is held by that spelling's VE2 card from ANY vendor.
     from stone_pipeline.stages import decision_audit
     st = SimpleNamespace(is_mint=True, name="Novum Frozen Stone", display="Novum Frozen Stone",
                          stone_type="Granite", source="", origin_iso="")
@@ -286,7 +286,7 @@ def test_a_global_mint_is_held_by_any_vendors_ve2_card():
 
 
 def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards(seeded_config_store):
-    # fix 3: the archived_variety card's stone_type gives it a (name, type) ref, so write_confirm_file keeps it
+    # The archived_variety card's stone_type gives it a (name, type) ref, so write_confirm_file keeps it
     # separate from a type-less listing of the same name (which would otherwise swallow it into one card).
     from stone_pipeline.stages import decisions
     cards = [
@@ -298,7 +298,7 @@ def test_two_listings_of_one_name_one_typed_onto_archived_stay_two_cards(seeded_
 
 
 def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monkeypatch):
-    # fix 2: the QUALITY recovery text must not send the operator to a Review action that cannot set a quality.
+    # The QUALITY recovery text must not send the operator to a Review action that cannot set a quality.
     views.mint("Novum Only Quality", stone_type="Granite")
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"quality": {proj.norm("A")}})
     rows = [_mk_row("Novum Only Quality", "White")]   # quality A is the pack last-resort, now restricted
@@ -311,9 +311,9 @@ def test_the_archived_value_quality_card_points_at_blokport_not_review(ref, monk
 
 
 def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path, monkeypatch):
-    # fix 4: when ONLY the category pcat is missing (not colour/quality), main writes an empty missing. The
+    # When ONLY the category pcat is missing (not colour/quality), main writes an empty missing. The
     # post-filter classification must preserve that '' (not write 'restricted'), so the file is byte-identical.
-    # A category's pcat is the registry's (table 577), so the shortfall is a registry with no pcat on this env.
+    # A category's pcat is the registry's, so the shortfall is a registry with no pcat on this env.
     set_category_pcats(monkeypatch, {"slab": "", "block": "", "tile": ""})
     p = tmp_path / "attrs_no_category.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
@@ -328,7 +328,7 @@ def test_uncovered_missing_is_dormant_for_a_category_only_shortfall(tmp_path, mo
 
 
 def test_an_acked_product_that_cannot_be_rebuilt_is_counted(tmp_path, monkeypatch):
-    # fix 5: an acked product whose tuple cannot be rebuilt (an id/vid missing) is counted, not dropped silently.
+    # An acked product whose tuple cannot be rebuilt (an id/vid missing) is counted, not dropped silently.
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger, now_iso
     key = "marble__carrara_1"
@@ -353,7 +353,7 @@ def test_an_acked_product_that_cannot_be_rebuilt_is_counted(tmp_path, monkeypatc
 
 
 def test_render_dump_attributes_writes_status_and_internal(tmp_path):
-    # fix 6: render._dump_attributes carries status/internal so ledger.verify matches once restricted. A revert
+    # render._dump_attributes carries status/internal so ledger.verify matches once restricted. A revert
     # to the 3-column shape fails this.
     from stone_pipeline.ledger import render
     from stone_pipeline.ledger.db import Ledger, now_iso
@@ -369,10 +369,10 @@ def test_render_dump_attributes_writes_status_and_internal(tmp_path):
     assert rows[0]["status"] == "active" and rows[0]["internal"] == "false"
 
 
-# --- review follow-up pins (PR7): the behaviours PR5 shipped, now covered directly -------------------------
+# --- pinned directly: load_existing, the archived_value card, render_combinations --------------------------
 
 def test_the_curate_index_reads_the_archived_flag_from_the_export(tmp_path, monkeypatch):
-    # LOW (PR5): load_existing must populate each variety's `archived` from the export STATUS column, not
+    # load_existing must populate each variety's `archived` from the export STATUS column, not
     # only when a test sets it on the index by hand (existing.py line "archived": r.archived).
     p = tmp_path / "variants_export.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
@@ -387,7 +387,7 @@ def test_the_curate_index_reads_the_archived_flag_from_the_export(tmp_path, monk
 
 
 def test_the_archived_value_card_leaves_the_colour_field_empty(ref, monkeypatch):
-    # LOW (PR5): prefilling the restricted colour on an archived_value card would just hold again, so the
+    # Prefilling the restricted colour on an archived_value card would just hold again, so the
     # card's colour field is left empty (minting.py raises the card with no color=).
     views.mint("Novum Empty Colour", stone_type="Granite")
     monkeypatch.setattr(minting, "restricted_values", lambda *a, **k: {"color": {proj.norm("Pink")}})
@@ -398,7 +398,7 @@ def test_the_archived_value_card_leaves_the_colour_field_empty(ref, monkeypatch)
 
 
 def test_render_combinations_passes_its_own_ledger_to_the_acked_rebuild(tmp_path, monkeypatch):
-    # LOW (PR5): render_combinations must hand build_combinations the ledger it was given (acked_ledger=ledger),
+    # render_combinations must hand build_combinations the ledger it was given (acked_ledger=ledger),
     # so the render rebuilds its acked tuples from THAT ledger, not the default on-disk one.
     from stone_pipeline.ledger import render
     from stone_pipeline.ledger.db import Ledger

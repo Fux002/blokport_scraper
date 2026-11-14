@@ -12,7 +12,7 @@ The system emits additions in the variety-file format (Key, Name, Type, Aliases)
 into Medusa to create/update varieties, which then assigns ids and re-exports the id files the pipeline
 matches against. It never rewrites the supplied files; it writes separate curation files for review.
 
-A variety is ONE record per (type, name), whatever category its products sit in (PHASE-1-SPEC rev 8): one
+A variety is ONE record per (type, name), whatever category its products sit in (PHASE-1-SPEC): one
 addition per variety, never a copy per category. Its Key is phase1.variety_key's one rule,
 {type slug}__{name slug}_{uuid5}, deterministic (stable across runs).
 

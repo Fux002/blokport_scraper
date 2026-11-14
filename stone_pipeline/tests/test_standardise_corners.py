@@ -1,6 +1,6 @@
-"""Rounded and broken slab corners on real photos (prod, 2026-11-02 audit): the wall the photo shows in such a corner is
-never drawn as stone, a corner broken off keeps its true shape (never filled with stone), and a slab with square corners
-or a broken corner already drawn true is drawn exactly as before.
+"""Rounded and broken slab corners on real photos (prod audit): the wall the photo shows in such a corner is never drawn
+as stone, a corner broken off keeps its true shape (never filled with stone), and a slab with square corners or a broken
+corner already drawn true is drawn exactly as before.
 
 Each fixture is a real photo the standardiser worked from (prod run folder, the retouched or cleaned copy it used), at
 640 px, with SAM's own masks of it (the slab mask, what SAM counted as stone, the straps, the text marks) dumped on the

@@ -196,7 +196,7 @@ def test_clean_alias_list_splits_every_comma_form_before_cleaning_and_reports_dr
     from stone_pipeline.reference.loaders import field_kinds as fk
     clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
     # a fullwidth comma joins a Latin alias to a CJK one: the split comes first, and both halves are kept (the alias
-    # kind keeps every script, Mas 13 Nov)
+    # kind keeps every script)
     blob = "Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a"
     assert clean_alias_list("X", [blob], clean) == (["Wratza Limestone", "\u7ef4\u7eb3\u591a"], [])
     assert clean_alias_list("X", ["Nero\u3001Black"], clean) == (["Nero", "Black"], [])

@@ -20,7 +20,7 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_inventory, populate_products
 from stone_pipeline.tests._ledger_icons import SLAB_PCAT, add_icon
 
-# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's (table 577)
+# a product row on SLAB_PCAT is stored under `slabs`: the category pcat is the registry's
 pytestmark = pytest.mark.usefixtures("slab_category_pcat")
 
 

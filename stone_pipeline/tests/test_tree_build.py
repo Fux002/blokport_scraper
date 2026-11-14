@@ -20,7 +20,7 @@ from stone_pipeline.core.text import match_key
 from stone_pipeline.stages import tree_build
 from stone_pipeline.tests._category_registry import with_handle
 
-# the category pcats come from the registry (table 577): every test here prices under TREE_PCATS
+# the category pcats come from the registry: every test here prices under TREE_PCATS
 pytestmark = pytest.mark.usefixtures("tree_category_pcats")
 
 _PCOLS = ["Product Category 1", "STN Type Id", "STN Variation Id",

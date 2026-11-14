@@ -104,14 +104,14 @@ def build():
               "Tan Brown", "Kashmir White", "Juparana Colombo", "Blue Pearl GT", "Emperador Dark", "Calacatta Oro",
               "Crema Marfil Coto", "Verde Ubatuba", "Giallo Veneziano", "Labrador Antique"]:
         add("names", s)
-    # the alias kind (34's OWNED-NAMES-CLEAN row, 13 Nov): refused (mojibake only, Mas), kept and cleaned cases
+    # the alias kind: refused (mojibake only), kept and cleaned cases
     for s in ["C?te D", "K?r?ehir Nero Picasso", "K?r?ehir Nero Picasso Marble", "C\ufffdte", "C\u00f4te d'Azur",
               "Hu\u00e1ngji\u0101 H\u01d4p\u00f2", "\u5df4\u6bd4\u4f26\u91d1", "3D\u7070", "Giallo D`istria",
               "Celestial Splendor\u200b", "Cel\u200bestial", "Black & White", "Bianco Carrara C/d", "China St.laurent",
               "In Russian:nigrozero", "Who? Me", "Picass?", "Cafe\u0301", "x\u1dc0y", "x\u0331y", "\u00b4Nero\u00b4",
               "Verde \u2013 Lapponia", "Kir\u015fehir Nero Picasso", "Bianco (Carrara) #1/2", "Bian\u200bco",
               "x\u0331'y", "Kir\u015fehir's", "'Nero' Marquina", "D''Oro", "\u5df4'\u91d1", "1'2", "a' b",
-              # the paired alias key (Mas, 13 Nov): pure CJK; mixed (never its Latin part's key); "3D\u7070" never
+              # the paired alias key: pure CJK; mixed (never its Latin part's key); "3D\u7070" never
               # "3D"'s; Greek with a final sigma (lower(), not casefold); a Common-script letter (U+210C, the second
               # path); Devanagari vowel signs (marks kept in the key); Arabic-Indic digits (Nd); German sharp s on
               # the second path; dev's mixed value; a dash alone (an empty key)

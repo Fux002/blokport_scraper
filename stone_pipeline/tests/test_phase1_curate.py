@@ -1,7 +1,8 @@
-"""SC-4 curate (PHASE-1-SPEC rev 8 section 6.2 "Curate"; SC-3-SC-4-PLAN.md section 2a): a variety is ONE record per
-(type, name), so curate writes one row, one backbone post and one image item per category its products sit in,
-never a copy per category. The Key is the one rule (phase1.variety_key.new_key) and its type is the Key's type slug:
-(type, variant) stays one atomic identity, so one name under two types is two varieties. No em dashes."""
+"""SC-4 curate (PHASE-1-SPEC section 6.2 "Curate"; SC-3-SC-4-PLAN.md section 2a): a variety is ONE record per
+(type, name), so curate writes one row, one backbone post and one image item
+per category its products sit in, never a copy per category. The Key is the one rule (phase1.variety_key.new_key) and
+its type is the Key's type slug: (type, variant) stays one atomic identity, so one name under two types is two
+varieties. No em dashes."""
 from __future__ import annotations
 
 import ast

@@ -726,8 +726,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
 
     # 3b. CLASSIC ladder (vendors without primary_origin): pick the candidate country that fits the supplier's
     #     home (see _select_origin); a multi-country variety whose countries do not include the home is HELD
-    #     for origin confirmation, like the vendor gate above (owner: never guess). Never a country guessed
-    #     from another type.
+    #     for origin confirmation, like the vendor gate above. Never a country guessed from another type.
     if rule and rule.countries:
         home = ref.to_iso(source_cfg.origin_default) or ""
         iso = _select_origin(rule.countries, home)

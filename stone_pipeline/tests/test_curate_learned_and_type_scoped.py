@@ -1,9 +1,9 @@
-"""Curate learns only what the matcher guessed, and every nearest-variety lookup is (name, type) (owner, 2026-11-06).
+"""Curate learns only what the matcher guessed, and every nearest-variety lookup is (name, type).
 
   * ONE rule decides whether a bind is a guess worth saving as an alias: writeback.is_learned (phonetic, fuzzy,
     fuzzy_origin, looking through the clean_variety_ / operator_type_ wrappers). Curate's alias proposals used a
     second rule, so clean_variety_projection_*, operator_type_projection_* and operator_type_exact binds still
-    reached the base as aliases and outlived a later seed correction (#520's intent).
+    reached the base as aliases and outlived a later seed correction.
   * The nearest-variety metadata was keyed by NAME only, so for a name held by several types it kept whichever
     type loaded last; a type-less row could be confirmed onto an arbitrary type. It is keyed (name, type) and
     the nearest's type is the matcher candidate's Key type; a type-less row with a multi-type nearest is held.

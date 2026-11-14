@@ -1,9 +1,8 @@
-"""The `alias` field kind (34's OWNED-NAMES-CLEAN row, the owner's ruling 13 Nov): field-kinds.json marks
-variation_alias.value as kind "alias", and an owned alias is written by clean_alias, which KEEPS accents and every
-script (never folded, never dropped) and only removes what the database class ^[[:alpha:]\u0300-\u036f0-9 '-]+$
-refuses. The ONE refusal is mojibake (Mas, 13 Nov): no length bound; a sentence or a concatenation is fixed at its
-source. Names keep kind "name". Matching and Keys are unchanged: match_key still folds for matching, and no alias ever
-keys.
+"""The `alias` field kind: field-kinds.json marks variation_alias.value as kind "alias", and an owned alias is
+written by clean_alias, which KEEPS accents and every script (never folded, never dropped) and only removes what the
+database class ^[[:alpha:]\u0300-\u036f0-9 '-]+$ refuses. The ONE refusal is mojibake: no length bound; a sentence
+or a concatenation is fixed at its source. Names keep kind "name". Matching and Keys are unchanged: match_key still
+folds for matching, and no alias ever keys.
 
 Red form: names the fix adds are read with a default, so each case fails on its assert. No em dashes."""
 from __future__ import annotations
@@ -19,7 +18,7 @@ ALIAS_KIND = getattr(field_kinds, "ALIAS", "alias")
 _CLEAN_ALIAS = getattr(text, "clean_alias", None)
 _REFUSED = getattr(text, "AliasRefused", None)
 
-# 34's spec vectors (the shared name-key vectors gain them as `alias` cases; this table pins them meanwhile)
+# The spec vectors (the shared name-key vectors gain them as `alias` cases; this table pins them meanwhile)
 SPEC_VECTORS = [
     ("Giallo D`istria", "Giallo D'istria"),      # a backtick is an apostrophe (the typographic table)
     ("Huángjiā Hǔpò", "Huángjiā Hǔpò"),          # accents KEPT
@@ -59,7 +58,7 @@ def test_mojibake_is_refused(raw):
 
 
 def test_no_length_bound_refuses_a_long_alias():
-    # Mas: mojibake is the only refusal; a long real name is kept, a sentence is cleaned (its fix is at the source)
+    # mojibake is the only refusal; a long real name is kept, a sentence is cleaned (its fix is at the source)
     assert _CLEAN_ALIAS is not None
     assert _CLEAN_ALIAS("Bianco Statuarietto Venato Extra Calacatta Oro Gold") == (
         "Bianco Statuarietto Venato Extra Calacatta Oro Gold")
@@ -139,7 +138,7 @@ def test_matching_keys_are_unchanged_by_the_alias_kind():
     assert text.match_key("Huángjiā Hǔpò") == text.match_key("Huangjia Hupo") == "huangjia hupo"
 
 
-# --- the paired alias key (Mas, 13 Nov; `alias_key` in the shared name-key vectors) -----------------------------------
+# --- the paired alias key (`alias_key` in the shared name-key vectors) ------------------------------------------------
 _ALIAS_KEY = getattr(text, "alias_key", None)
 
 
@@ -175,7 +174,7 @@ def _wratza():
 
 
 def test_too_short_applies_to_the_latin_key_only():
-    # 34, 13 Nov: a CJK character carries a word, so a script-preserving key is never too short
+    # a CJK character carries a word, so a script-preserving key is never too short
     from stone_pipeline.core.alias_problem import alias_problem
     assert alias_problem("灰石", _wratza()) is None
     assert alias_problem("3D灰", _wratza()) is None
@@ -183,7 +182,7 @@ def test_too_short_applies_to_the_latin_key_only():
 
 
 def test_a_code_is_judged_on_every_token_of_its_alias_key():
-    # 34, 13 Nov: codeMatcher tokenises by alias_key, so a non-Latin token never hides inside a code
+    # codeMatcher tokenises by alias_key, so a non-Latin token never hides inside a code
     from stone_pipeline.core.alias_problem import code_matcher
     is_code = code_matcher(r"[Gg]\d+[A-Za-z]?")
     assert is_code("G12") and is_code("g654 G12a")

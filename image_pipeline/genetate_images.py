@@ -327,7 +327,7 @@ def save_image(content: bytes, out_path: Path) -> None:
 
 
 def item_category(item: dict) -> str:
-    """The queue item's category (it carries its icon pair, spec rev 8 section 4). One this generator has no prompt
+    """The queue item's category (it carries its icon pair). One this generator has no prompt
     template for raises: it is never rendered as a slab."""
     category = item.get("category") or ""
     if category not in PROMPT_TEMPLATES:

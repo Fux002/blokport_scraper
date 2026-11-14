@@ -53,7 +53,7 @@ class SourceConfig:
     collection_city_default: str = ""
     emit_on_review: bool = True
     default_bundle_size: int = 6
-    # The image pipeline (owner 2026-11-02), set per source from the admin. On: the photo process works the source's
+    # The image pipeline, set per source from the admin. On: the photo process works the source's
     # listings and a product is listed only with a standardised photo (images.require_standard_photo). Off: its
     # products show the scraped photos as re-hosted (size-reduced, no GPU, no hosted call) and stay listed, and the
     # photo process never picks them (nothing is spent on them); handy for testing a source.

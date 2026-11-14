@@ -1,7 +1,6 @@
-"""The competitor price-sheet intake, on fixtures only (plan blokport_research/2026-11-11-market-prices-sheet-intake-plan.md,
-Mas's ruling of 11-11): contract v2's `source` column, the layout file (exact header signature), the competitor named
-from the file by its declared names, the price, currency and unit as the layout declares them, the size caps, the
-idempotent sha record and the run mode. Nothing here reaches S3 or a site."""
+"""The competitor price-sheet intake, on fixtures only: contract v2's `source` column, the layout file (exact header
+signature), the competitor named from the file by its declared names, the price, currency and unit as the layout
+declares them, the size caps, the idempotent sha record and the run mode. Nothing here reaches S3 or a site."""
 
 from __future__ import annotations
 
@@ -238,7 +237,7 @@ def test_the_name_from_a_column_names_each_row():
     assert [(row.site_id, row.listing_key) for row in result.observations] == [("rocca_it", "R1"),
                                                                              ("stonecorp_gb", "S1")]
     assert [status.site_id for status in result.statuses] == ["rocca_it", "stonecorp_gb"]
-    # identity columns stay in stated_specs as written (the manager, 13 Nov): the naming column too
+    # identity columns stay in stated_specs as written: the naming column too
     assert result.observations[0].stated_specs["Supplier"] == "Rocca"
 
 
@@ -804,7 +803,7 @@ def test_the_intake_imports_nothing_from_the_produce():
     assert not any(f"stone_pipeline.{name}" in text for name in ("stages", "matching", "ledger", "emit"))
 
 
-# --- one sheet, several competitors, each priced from its own stated column (W7, the manager 13 Nov) -----------------
+# --- one sheet, several competitors, each priced from its own stated column ------------------------------------------
 _TWO_LISTS = ["Code", "Product", "List", "List -20%", "Net", "Source"]
 
 
@@ -844,8 +843,8 @@ def test_a_layout_names_one_price_column_per_competitor_or_is_refused(layout, me
 
 
 def test_the_identity_columns_stay_in_stated_specs_as_written():
-    # the naming column and every listing_key part are identity, not observation fields (the manager, 13 Nov): kept
-    # as written, so a consumer reads thickness or finish from stated_specs and never parses listing_key
+    # the naming column and every listing_key part are identity, not observation fields: kept as written, so a
+    # consumer reads thickness or finish from stated_specs and never parses listing_key
     result = _absorb(TWO_LISTS, _layouts(_two_lists()), key=f"{PREFIX}/intake/two_lists.csv")
     rows = {row.site_id: row for row in result.observations}
     assert (rows["stonecorp_gb"].stated_specs["Source"], rows["rocca_it"].stated_specs["Source"]) == (
@@ -858,8 +857,8 @@ def test_a_row_naming_a_competitor_without_a_price_column_refuses_the_file():
         _absorb(TWO_LISTS, layouts, key=f"{PREFIX}/intake/two_lists.csv")
 
 
-# --- the owner's competitor price sheets (W7: M22/P4's mapping, the owner's answers of 13 Nov via Mas) ---------------
-# Each tab of the owner's workbook All_Competitor_Stone_Prices.xlsx (2026-11-11) arrives as its own file, the tab
+# --- the owner's competitor price sheets -----------------------------------------------------------------------------
+# Each tab of the owner's workbook All_Competitor_Stone_Prices.xlsx arrives as its own file, the tab
 # copied unchanged; these are its exact header rows. Every row names its competitor by the source document it was
 # transcribed from ('Source file'), which is what tells Cereser's main list from its Listino Carrara.
 _PRICE_M2 = "(EUR/m² ex VAT)"
@@ -981,7 +980,7 @@ def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
 
 
 
-# --- one intake run delivers every pending readable sheet (contract v4, the manager) ---------------------------------
+# --- one intake run delivers every pending readable sheet (contract v4) ----------------------------------------------
 ROCCA = _csv(["Rocca"], ["Code", "Product", "Finish", "Price", "Unit"],
              ["R1", "Statuario slab 2cm", "Polished", "990.00", "m2"])
 LATER = datetime(2026, 11, 11, 9, 20, 0, tzinfo=timezone.utc)
@@ -1040,7 +1039,7 @@ def test_one_competitor_in_two_pending_sheets_refuses_both_and_delivers_the_rest
 
 
 def test_a_crashed_run_is_finished_and_a_new_sheet_makes_its_own_run(tmp_path):
-    # the double fault the manager ruled closed: a run dies after its manifest, before its record, and a new sheet
+    # the double fault: a run dies after its manifest, before its record, and a new sheet
     # lands before the redo. The redo finishes the crashed run (nothing in its folder is written again) and the new
     # sheet is a run of its own: no sheet is ever delivered twice.
     s3 = _S3()

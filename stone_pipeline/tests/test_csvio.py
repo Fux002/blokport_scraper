@@ -79,7 +79,7 @@ def test_atomic_write_new_file_absent_on_failure(tmp_path):
 
 
 def test_atomic_write_uses_a_unique_temp_per_writer(tmp_path, monkeypatch):
-    # F8: a FIXED '.tmp' sibling meant two overlapping writers to the same path clobbered each other's temp
+    # A FIXED '.tmp' sibling meant two overlapping writers to the same path clobbered each other's temp
     # mid-write and produced a corrupt file. The temp must be UNIQUE per writer (pid + random) so their
     # writes never interleave -- each os.replace is atomic, so the final file is one writer's full output.
     import os as _os

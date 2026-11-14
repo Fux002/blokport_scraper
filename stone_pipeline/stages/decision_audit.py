@@ -1,7 +1,7 @@
 """Did the produce DO what the operator decided? The pipeline says so itself, every run.
 
 A decision the produce silently ignores is the worst failure this review can have: the operator sees a card
-disappear and assumes the catalog changed, while nothing did (the 2026-09-09 case: eleven mints keyed on a
+disappear and assumes the catalog changed, while nothing did (a past case: eleven mints keyed on a
 spelling with a type word were never read). So after each produce every stored decision is checked against
 the outcome:
 

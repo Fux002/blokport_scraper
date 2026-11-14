@@ -191,7 +191,7 @@ def _offered(row):
 
 
 def test_no_action_a_row_offers_is_refused_by_the_applier(monkeypatch):
-    # manager 2026-11-07: an action must never lead to a 422 for its row; the applier's own rules decide what is offered
+    # an action must never lead to a 422 for its row; the applier's own rules decide what is offered
     _hidden_in_ledger(monkeypatch, ONE, TWO, GONE, CHOSEN, UNSEEN, TILE)
     one = _row(ONE, photos=[_photo(A, fixable=False, left=()), _photo(B)])
     two = _row(TWO, photos=[_photo(D, state="pass", copy="fail")])
@@ -209,7 +209,7 @@ def test_no_action_a_row_offers_is_refused_by_the_applier(monkeypatch):
         dec.plan(s3, [doc], PHOTO_LISTINGS, exclude=set())                      # never InvalidDecisions
 
 
-# --- the hidden list a page at a time (manager 2026-11-07: dev's full list was 48 s and 13 MB in one answer) ----------
+# --- the hidden list a page at a time (dev's full list was 48 s and 13 MB in one answer) ------------------------------
 def _many(monkeypatch, n):
     """n hidden listings, each with a run's row (awaiting_click on its photo A-like sha), and the bucket."""
     listings = [_listing(f"l{i:02d}", f"{i + 16:x}" * 32) for i in range(n)]
@@ -251,7 +251,7 @@ def test_only_the_page_s_photos_are_read_and_signed(monkeypatch):
 
 
 def test_a_removed_listing_shows_its_photos_and_offers_use_and_clean_the_applier_accepts(monkeypatch):
-    # manager ruling (c): a removal is never a dead end on the page; a use or a clean lifts it (the applier's rule)
+    # a removal is never a dead end on the page; a use or a clean lifts it (the applier's rule)
     _hidden_in_ledger(monkeypatch, ONE)
     s3 = _bucket(**{imagestore.owner_removed_key("SEN-ONE"): json.dumps(
         {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "reason": C.REMOVED_REASON, "at": AT}).encode()})
@@ -427,7 +427,7 @@ def test_a_click_while_a_photos_run_holds_the_lock_is_409_naming_the_run(monkeyp
 
 
 def test_a_click_never_lists_a_whole_run_folder(monkeypatch):
-    # review of #555: dev v2/zucchi holds 56,840 keys; a click reads only its listing's photos
+    # dev v2/zucchi holds 56,840 keys; a click reads only its listing's photos
     _hidden_in_ledger(monkeypatch, ONE)
     s3 = _bucket()
     listed = []
@@ -617,7 +617,7 @@ def test_the_decisions_route_takes_the_export_and_an_explicit_dry_run(monkeypatc
 
 @pytest.mark.parametrize("bad", [{"id": ["x"]}, {"action": ["use"]}, {"sha": ["x"]}, {"at": 5}, {"source": None}])
 def test_a_decision_whose_field_is_not_a_string_is_400_never_a_crash(monkeypatch, bad):
-    # review of #556: a list in id, action or sha reached the conflict rule unhashed -> 500
+    # a list in id, action or sha reached the conflict rule unhashed -> 500
     monkeypatch.setattr(rv, "client", lambda: _bucket())
     doc = {**{"id": "one", "action": "use", "source": "sentas", "sha": A, "tag": C.RUN_TAG, "at": AT}, **bad}
     code, body = server.dispatch("POST", ["photos", "decisions"], [doc], "dry_run=true")
@@ -627,7 +627,7 @@ def test_a_decision_whose_field_is_not_a_string_is_400_never_a_crash(monkeypatch
 
 
 def test_the_export_is_planned_in_full_never_narrow(monkeypatch):
-    # manager 2026-11-07: narrow reads only for a click's single decision; a file of decisions is read whole
+    # narrow reads only for a click's single decision; a file of decisions is read whole
     seen = []
     monkeypatch.setattr(rv.decisions, "decide", lambda s3, docs, dry_run, say, sheet, narrow: seen.append((sheet, narrow))
                         or dec.plan(s3, docs, PHOTO_LISTINGS, set()))
@@ -666,7 +666,7 @@ def test_the_sheet_is_parsed_again_only_when_it_its_photo_list_or_the_categories
     assert len(raw) == 4
 
 
-# --- the query and body edges (review of #555 and #556) ------------------------------------------------------------------
+# --- the query and body edges -----------------------------------------------------------------------------------------
 @pytest.mark.parametrize("query", ["limit=²", "limit=١", "offset=١", f"offset={'9' * 5000}", "limit= 5",
                                    "offset=+1"])
 def test_a_page_number_that_is_not_plain_ascii_digits_is_400_never_a_crash(monkeypatch, query):
@@ -700,7 +700,7 @@ def test_a_sha_or_time_with_a_trailing_newline_or_a_non_ascii_digit_is_400(monke
 
 
 def test_a_candidate_decision_is_checked_at_the_millisecond_the_page_would_write(monkeypatch):
-    # review of #556: _now() floored to the second ('.000Z'), so an action could be withheld for up to a second
+    # _now() floored to the second ('.000Z'), so an action could be withheld for up to a second
     from datetime import datetime, timezone
 
     class _Clock(datetime):
@@ -712,7 +712,7 @@ def test_a_candidate_decision_is_checked_at_the_millisecond_the_page_would_write
 
 
 def test_a_row_names_its_listing_by_the_sheet_s_handle_not_the_one_stored_with_the_run(monkeypatch):
-    # review of #556: a variety re-bind moves the handle; review.json kept the old one until the next full run
+    # a variety re-bind moves the handle; review.json kept the old one until the next full run
     _hidden_in_ledger(monkeypatch, ONE)
     s3 = _bucket(**{REVIEW: json.dumps({"SEN-ONE": {**_row(ONE), "listing": "old-handle"}}).encode()})
     row = rv.hidden(s3)["rows"][0]
@@ -737,9 +737,9 @@ def test_a_click_before_any_conflict_set_is_503_never_a_crash(monkeypatch):
     assert s3.written == []
 
 
-# --- the open #555 follow-ups ---------------------------------------------------------------------------------------------
+# --- the applier's refusals and unreadable files ----------------------------------------------------------------------
 def test_a_click_on_a_tile_is_refused_by_the_applier_before_anything_else(monkeypatch):
-    # review of #555: a hidden tile with a choice record answered 409 chosen_not_linked instead of the promised 422
+    # a hidden tile with a choice record answered 409 chosen_not_linked instead of the promised 422
     _hidden_in_ledger(monkeypatch, TILE)
     s3 = _bucket(**{f"{ROOT}chosen/tile-1.json": json.dumps({"key": "tile-1", "sha": A}).encode()})
     code, body = rv.click(s3, "SEN-TILE-1", B, AT)
@@ -748,7 +748,7 @@ def test_a_click_on_a_tile_is_refused_by_the_applier_before_anything_else(monkey
 
 @pytest.mark.parametrize("change", ["excluded", "pipeline_off"])
 def test_a_stale_run_row_never_offers_what_the_applier_now_refuses(monkeypatch, change):
-    # review of #555: the row says fixable from the last run; the exclude list or the source's switch changed since
+    # the row says fixable from the last run; the exclude list or the source's switch changed since
     _hidden_in_ledger(monkeypatch, ONE)
     if change == "excluded":
         monkeypatch.setattr(dec, "excluded", lambda: {B})

@@ -290,7 +290,7 @@ resource "aws_ecs_task_definition" "this" {
         { name = "SCRAPER_AUTO_TEXTURE", value = tostring(var.auto_texture_enabled) },
         { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
         { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
-        # Produce ceiling (the runner kills a run past it). 2026-09-14: a full live scrape with a fresh image
+        # Produce ceiling (the runner kills a run past it). A full live scrape with a fresh image
         # batch ran past the old 2 h default on a slow day and was killed as wedged.
         { name = "SCRAPER_RUN_TIMEOUT_SECONDS", value = tostring(var.run_timeout_seconds) },
         # The standardised-photo process (the runner's photos stage, after each produce when AUTO is on): its GPU

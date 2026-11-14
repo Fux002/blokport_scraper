@@ -70,7 +70,7 @@ def update_rows(full_rows: list[dict], delta: list[dict]) -> list[dict]:
 
 
 def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
-    """Every alias dropped for having no ASCII form (owner decision O2), listed for the operator, sorted."""
+    """Every alias dropped for having no ASCII form, listed for the operator, sorted."""
     path = SETTINGS.paths.review_dir / "aliases_dropped.csv"
     csvio.write_dicts(path, ["Key", "alias"], [{"Key": k, "alias": a} for k, a in sorted(drops)], sanitize=True)
     if drops:
@@ -79,10 +79,10 @@ def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
 
 
 _COLS = VARIETY_FILE_COLUMNS
-ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of aliases dropped at emit (Mas, 11-12)
+ALIAS_COLLISIONS_REVIEW = "alias_collisions_dropped.csv"     # review list of aliases dropped at emit
 # Each run's list under its own UTC stamp: the base keeps only the emitted aliases (base := 1_variants_full), so a
-# dropped alias is gone for good and the current list is overwritten by the next run (Scraper L2). The review upload
-# mirrors this folder to S3 and never deletes, so every run's list stays there.
+# dropped alias is gone for good and the current list is overwritten by the next run. The review upload mirrors this
+# folder to S3 and never deletes, so every run's list stays there.
 ALIAS_COLLISIONS_RUNS = "alias_collisions_dropped_runs"
 _ALIAS_COLLISION_FIELDS = ["Key", "variety", "alias", "collides_with", "collides_with_key"]
 
@@ -93,8 +93,8 @@ def _run_stamp() -> str:
 
 def _drop_alias_collisions(rows: list[dict]) -> list[dict]:
     """An alias equal to another live variety's name of the same type (an operator mint equal to a seed alias) would
-    bind one stone's listing to another (Mas, 11-11): it is DROPPED from its row, logged, and returned for the review
-    list. The produce never stops on it; CI holds the committed vocabulary at 0."""
+    bind one stone's listing to another: it is DROPPED from its row, logged, and returned for the review list. The
+    produce never stops on it; CI holds the committed vocabulary at 0."""
     collisions = alias_collisions.find(
         alias_collisions.Variety(r["Key"], r["Type"], r["Name"], tuple(a for a in r["Aliases"].split("|") if a))
         for r in rows)
@@ -261,8 +261,8 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
             by_key[r["Key"]] = r
             order.append(r["Key"])                            # genuinely new variant
     rows = [by_key[k] for k in order]
-    # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
-    # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
+    # a retired variety (the operator's explicit removal / un-retire memory) never re-enters the upload -- so a produce
+    # does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
     from stone_pipeline.stages import decisions
     retired = set() if seed_only else decisions.load_retired()   # seed_only: no config.db retired filter
     if retired:
@@ -288,7 +288,7 @@ def build(existing_path: Path | None = None, icons: dict[str, dict[str, str]] | 
     # entered (dirty base, stale live-export union). This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
     dropped_aliases = _drop_alias_collisions(rows)
-    if not seed_only:                     # seed.verify's projection never rewrites the produce's list (Scraper L1)
+    if not seed_only:                     # seed.verify's projection never rewrites the produce's list
         _list_alias_collisions(dropped_aliases)
 
     path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")

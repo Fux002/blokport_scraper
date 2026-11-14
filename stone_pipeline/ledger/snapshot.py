@@ -1,4 +1,4 @@
-"""C1: persist the LOCAL-disk ledger to S3 (restore on a cold task, snapshot periodically + on stop).
+"""Persist the LOCAL-disk ledger to S3 (restore on a cold task, snapshot periodically + on stop).
 
 The ledger is the system of record for the acked Medusa id mappings. It lives on the task's LOCAL disk
 (never EFS/NFS -- design section 12 / M4, and WAL requires local disk), which is ephemeral, so we
@@ -64,8 +64,8 @@ def _s3():
     return storage.aws_client("s3", config=storage.FAIL_FAST)
 
 
-# The phase 1 store generation (PHASE-1-SPEC rev 8 step 5, N4): migrated stores live under NEW keys, never over the
-# old ones, so an image from before phase 1 can only ever read the old stores. One marker in every durable store key.
+# The phase 1 store generation: migrated stores live under NEW keys, never over the old ones, so an image from before
+# phase 1 can only ever read the old stores. One marker in every durable store key.
 STORE_GENERATION = ".v2"
 
 

@@ -270,7 +270,7 @@ def _lead_of(row: CanonicalRow, seen: dict[str, dict[str, str]],
 def _read_3d_inputs(rows: list[CanonicalRow], leads: list, shared: dict[str, set[str]]):
     """({(source, sha, ETag): outline px size}, {(source, sha): judge record or None}) of what _no_3d needs: the
     outline of every lead's 3D slab, and the judge's record of the own photo of every lot piece shown from its lot's
-    shared photo. Read at once, CUTOUT_OUTLINE_READ_WORKERS at a time (a fixed cap, Mas); any read failure raises."""
+    shared photo. Read at once, CUTOUT_OUTLINE_READ_WORKERS at a time (a fixed cap); any read failure raises."""
     from stone_pipeline.photos.publish import pool_map
 
     wanted, owns = set(), set()
@@ -298,7 +298,7 @@ def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
            outlines: dict[tuple[str, str, str], tuple[float, float]],
            shared: dict[str, set[str]], judged: dict[tuple[str, str], Optional[dict]]) -> Optional[dict]:
     """None when a product may carry its lead's 3D slab: a lot piece shown from its own photo, never its lot's shared
-    one (Mas: no 3D until its own photo passes), and its length and width measured (inside the category's band, not
+    one (no 3D until its own photo passes), and its length and width measured (inside the category's band, not
     filled from the pack's defaults) with the cut-out at their proportions (cutout.aspect_misfit, the one rule
     Blokport's renders measure too: the cut-out's width is the listing's length). Else why not, a photo_scale_mismatch
     row of the source's diagnostics: the judge's reason for a lot piece, both figures (and the band) for a size.
@@ -317,7 +317,7 @@ def _no_3d(row: CanonicalRow, lead: Lead, seen: dict[str, dict[str, str]],
               "fit_pct": round(cutout.aspect_off(w_px, h_px, row.length, row.width), 2)}
     band = {f.field: f.detail for f in row.review_flags
             if f.code == FlagCode.dimension_out_of_range and f.field in ("length", "width")}
-    if band:                                            # derive's range check: no size of its category (Mas)
+    if band:                                            # derive's range check: no size of its category
         return {**found, "reason": "size_out_of_band", "band": band}
     if _defaulted_size(row, ("length", "width")):
         return {**found, "reason": "size_defaulted"}
@@ -488,7 +488,7 @@ def photo_lead(urls: list[str], views: dict[str, set[str]]) -> Optional[Lead]:
 
 
 def standardised(urls: list[str], views: dict[str, set[str]], lead: Optional[Lead]) -> list[str]:
-    """A product's images: its lead's standardised views when it has a lead (user 2026-11-01: one very good image per
+    """A product's images: its lead's standardised views when it has a lead (one very good image per
     listing is enough, shown in every view): the showroom image is the catalog thumbnail, then the white, side and
     close-up views, whichever it has (a block: its showroom image only). The product's other photos are left out, their
     warehouse would show next to the showroom; a product without a lead keeps the images it had (`urls`)."""

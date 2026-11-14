@@ -140,7 +140,7 @@ def run(outputs_root: Path | None = None) -> Path:
             product_images[r.variation_key] = r.image_keys[0]
     color_stats = variety_color.fill_colors(backbone_paths=_additions, reference_paths=_merged,
                                             product_images=product_images)
-    write_types_outside_pack()                     # table 569: the types left out of the pack's vocabulary, listed
+    write_types_outside_pack()                     # the types left out of the pack's vocabulary, listed
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
     dropped = drop_deleted_variants()              # drop to-delete junk; imageless NEW records are KEPT now
@@ -339,9 +339,9 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
                 if photos.setdefault(handle, refs) != refs:
                     raise RuntimeError(f"collect_products: product handle {handle!r} has two different photo lists")
             # Written with the photo list by the same emit (emit.write_photos_json). A run whose photo list predates it
-            # (the producer before #605) has none: none of its sizes is listed until a produce runs that source again,
+            # (an older producer's) has none: none of its sizes is listed until a produce runs that source again,
             # named loud with the sources missing a photo list. Remover: drop this fallback once every source's latest
-            # run is from a producer that writes it (the first full produce on both envs after #605 merges).
+            # run is from a producer that writes it (after the first full produce on both envs).
             listed = own.parent / STANDARDISE.DEFAULTED_FILE
             if listed.exists():
                 defaulted.update(index.parse_defaulted(listed.read_text(encoding="utf-8")))
@@ -436,9 +436,9 @@ def collect_discontinued(outputs_root: Path) -> int:
 
 
 def write_types_outside_pack() -> int:
-    """List every type the pack's vocabulary leaves out (table 569, Mas's clause: never guessed in) to
-    review/<env>/types_outside_pack.csv: its handles and why (no stone-category combination yet, or only other
-    categories). Always written, header-only when none, so a type that has entered the pack drops off. Returns the count."""
+    """List every type the pack's vocabulary leaves out (never guessed in) to review/<env>/types_outside_pack.csv:
+    its handles and why (no stone-category combination yet, or only other categories). Always written, header-only
+    when none, so a type that has entered the pack drops off. Returns the count."""
     excluded = loaders.types_outside_pack(SETTINGS.paths.attributes_csv)
     out = SETTINGS.paths.review_dir / "types_outside_pack.csv"
     csvio.write_dicts(out, ["type", "category_handles", "reason"], excluded, sanitize=True)

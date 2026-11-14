@@ -1,5 +1,5 @@
-"""The hidden-listings page's side of the photo process (design 2026-11-05, steps 4 and 5): what the config API serves
-under /config/v1/photos. Blokport's page renders each row's `actions`; an empty list is a read-only row.
+"""The hidden-listings page's side of the photo process: what the config API serves under /config/v1/photos.
+Blokport's page renders each row's `actions`; an empty list is a read-only row.
 
   hidden    the listings the ledger hides for want of a standardised photo (inventory reason no_photo), one row each:
             the owner's removal (owner_removed), a choice record not linked yet (chosen_not_linked), the full photos
@@ -223,9 +223,9 @@ def _conflicts(s3, sources):
 
 
 def _removed_photos(s3, page, exclude):
-    """{SKU: its photos} of the removed listings on the page (manager ruling (c): a removal is never a dead end): its
-    candidates (select.candidates: the photos the process judges, so the only ones with a result to use or clean),
-    each as a run's row has it (select.review_photo), over what the run folders hold of them alone."""
+    """{SKU: its photos} of the removed listings on the page (a removal is never a dead end): its candidates
+    (select.candidates: the photos the process judges, so the only ones with a result to use or clean), each as a run's
+    row has it (select.review_photo), over what the run folders hold of them alone."""
     removed = [(sku, listing) for sku, row, listing in page if row["reason"] == "owner_removed" and listing is not None]
     if not removed:
         return {}

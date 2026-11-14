@@ -3,7 +3,7 @@
 origin_map may list SEVERAL candidate countries for a (variety, type) when the same trade name is quarried
 in more than one place ("Patagonia,Quartzite,BR,IN"). derive_origin picks the one that fits the supplier's
 home country, with a per-supplier override lane, and holds the row for origin confirmation when no candidate
-matches. Covers the rules agreed in the origin redesign (rule d: owner ruling 2026-11-06, never guess):
+matches. Covers the rules of the origin redesign (rule d: never guess):
 
   a  scraped origin present            -> use it (wins over everything)
   2  per-supplier override set         -> use it (a reseller decision, scoped to one source)

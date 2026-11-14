@@ -1,11 +1,11 @@
-"""Which slab stone each tile listing of the product sheet is rendered from, and the files it gets (owner 2026-11-02: a
-tile listing is shown from its variety's judge-passed, published slab stone, from any vendor's slab of that variety).
+"""Which slab stone each tile listing of the product sheet is rendered from, and the files it gets (a tile listing is
+shown from its variety's judge-passed, published slab stone, from any vendor's slab of that variety).
 
 Never a guess: the stone is a slab listing's published 3D cut-out of the same variety (stone type and name) AND the
 same finish. A tile listing without one gets no files (it stays hidden by the no-photo rule), with the reason.
 
 One slab per variety and finish, never a pool: two slabs of one variety can be different lots or a mislabelled stone,
-and colour and texture statistics cannot tell that from two photos lit differently (prod 2026-11-02: Pietra Grey
+and colour and texture statistics cannot tell that from two photos lit differently (on prod: Pietra Grey
 8160c6, the same stone shot darker, is 17 L* from its pool; 902c4b, a brown quartzite, under 1). A floor cut from
 one slab is one real stone, as a tile order from one lot is. The slabs are tried in one order: the tile's own vendor's
 first (the stone it ships), then the most usable stone (square metres), then the cut-out key; a listing takes the first
@@ -140,7 +140,7 @@ def stamp(product: Product, slab: Slab) -> str:
     return hashlib.sha256(json.dumps(made, sort_keys=True).encode()).hexdigest()
 
 
-# Every tile listing's views (owner 2026-11-02, 2026-11-04): main, its catalog image, = the laid tiles from above at
+# Every tile listing's views: main, its catalog image, = the laid tiles from above at
 # true scale, also when its slab gives only a few distinct faces (the floor then repeats them, turned, as a layer from
 # one lot does); white = one tile face-on; studio = one tile at an angle (its thickness); the 3D tile beside them. The
 # close slot is never used: the main view is the close-up.

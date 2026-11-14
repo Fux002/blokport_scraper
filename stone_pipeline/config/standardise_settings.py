@@ -34,9 +34,9 @@ class STANDARDISE:
                                    # corner fits at the finest, a rough natural edge needs a coarser one
     EDGE_COVER_MIN = 0.85          # the four longest edges must be this share of the outline: a rectangle slab
     # The fitted slab must be at least this share stone: below it a corner was cut, not chipped, and four_corners'
-    # extended edges put a corner off the stone (MAR-P/10/05 0.937). Measured 2026-11-10 on the dev diag set: every kept
-    # slab 0.965 or more (chipped corners 0.965-0.99, 39 quads). DEV-DERIVED: the owner-confirmed prod re-run's outline
-    # records confirm the bar, or it moves to theirs.
+    # extended edges put a corner off the stone (MAR-P/10/05 0.937). Measured on the dev diag set: every kept slab 0.965
+    # or more (chipped corners 0.965-0.99, 39 quads). Dev-derived: the prod re-run's outline records confirm the bar, or
+    # it moves to theirs.
     QUAD_FILL_MIN = 0.95
     MAX_TILT_DEG = 35              # a corner fit implying more tilt than this is a misfit: clean-up only
     FLAT_SIGMA = 0.18              # illumination blur, share of the slab's long side
@@ -54,10 +54,10 @@ class STANDARDISE:
                                    # end too soft to show (19ab0177 at 3.1; 2.4 still sharp, adeebb0f)
     SIDE_RATIO_MEASURED = 1.35     # up to this the sides measure the slab's proportions; steeper, its real size does
     # A keystone (top and bottom differ: the camera tipped up or down at the standing slab) shortens the slab's height at
-    # a far smaller side ratio than a turn shortens its width. Measured 2026-11-10 on the dev diag set's fitted quads: all
-    # 12 keystones from 1.12 came out too wide (+0.8% to +12.4%: POL-736 1.18 +12.4%, POL-649 1.19 +7.0%); below it the
-    # error has either sign (the outline's own noise). From this, a keystone is squared at its real size. DEV-DERIVED
-    # (39 quads): the owner-confirmed prod re-run's corner records confirm the break point, or this moves to theirs.
+    # a far smaller side ratio than a turn shortens its width. Measured on the dev diag set's fitted quads: all 12
+    # keystones from 1.12 came out too wide (+0.8% to +12.4%: POL-736 1.18 +12.4%, POL-649 1.19 +7.0%); below it the
+    # error has either sign (the outline's own noise). From this, a keystone is squared at its real size. Dev-derived
+    # (39 quads): the prod re-run's corner records confirm the break point, or this moves to theirs.
     SIDE_RATIO_KEYSTONE = 1.12
     ASPECT_TOLERANCE = 0.10        # the real proportions may be this much narrower than a foreshortened photo shows
     OCR_CLUSTER = 1.5              # words within this many word-heights of each other form one mark
@@ -75,7 +75,7 @@ class STANDARDISE:
     FLARE_CORE_PCT = 90            # ... and its core (this percentile of its grey) near white ...
     FLARE_PEAK_MIN = 230           # ... at least this grey (pale flecks on a black stone reach 224) ...
     FLARE_STONE_PCT, FLARE_ABOVE_STONE = 99, 35   # ... and this far above the stone's own brightest (this percentile of it).
-                                   # Measured 2026-11-01 on 19 photos: reflections core 232-254 and +37..+125 above it; white
+                                   # Measured on 19 photos: reflections core 232-254 and +37..+125 above it; white
                                    # veins/clasts on pale stone at most +27, pale flecks on black stone at most 224
     FLARE_GROW = 9                 # the fill also covers its glow, this many px wide
     MARK_ON_MIN = 0.5              # a word counts as on the slab when this share of it lies on the slab
@@ -86,7 +86,7 @@ class STANDARDISE:
                    "a metal rack. a metal stand.")
     CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos ...
     LABEL_MIN_SCORE, LABEL_MAX_BOX = 0.25, 0.01   # ... a small one (this share of the photo) is tried from this score:
-                                   # stickers on the stone scored 0.27-0.45, clean stone up to 0.33 (2026-11-01), so a refused
+                                   # stickers on the stone scored 0.27-0.45, clean stone up to 0.33, so a refused
                                    # fill of one stays as shot, like a strap
     CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
     STRAP_ON_SLAB = 0.6                # so does a strap (one sticking out above the slab still has most of it on the slab)
@@ -144,7 +144,7 @@ class STANDARDISE:
         "strap": "Remove the two straps leaning across the stone slab, showing the slab's natural surface where they were. " + _KEEP,
         "logo": "Remove the company logo and its text from the surface of the stone, showing the natural stone beneath. " + _KEEP,
         "cards": "Remove the fan of sample cards lying on the stone, showing the natural stone beneath. " + _KEEP,
-        # The showroom halls (assets/rooms) once: the user wants a matte floor, not a shiny or satin one (2026-11-01).
+        # The showroom halls (assets/rooms) once: a matte floor, not a shiny or satin one.
         "matte_floor": ("Make the shiny polished floor a matte grey concrete floor: no reflections of the lights, windows or "
                         "racks on it, no shine, an even matte surface with fine natural concrete texture. Keep the stone slabs "
                         "on their racks, the walls, windows, ceiling and lights exactly as they are. Do not add anything."),
@@ -159,14 +159,14 @@ class STANDARDISE:
     CLEAN_TAGS = {"dev": "v2-clean", "prod": "v2-clean2"}
     CLEAN_TAG = CLEAN_TAGS[ENV_SEGMENT]
     # The slab outline's rule (layout.outline_with_erased): an erased mark is stone only within the stone's own hull, so
-    # the wall in a rounded or broken corner never shows (2026-11-02; before it, the fitted corners counted). A whole slab
+    # the wall in a rounded or broken corner never shows (before it, the fitted corners counted). A whole slab
     # made under it has a note <run folder><this><sha>.json; one without the note was made under the older rule and goes
     # to the GPU once, which checks its outline; drawn differently (the wall in a corner, or the studio's sawn edge
     # beside a broken right corner), it is redrawn as a candidate beside it, judged, and promoted over it only on a pass.
     # A later rule change = a new folder name, and every whole slab is checked once again.
     OUTLINE_CHECKED = "outline-v2/"
     # A photo named in a scoped run's re-standardise list (stone_pipeline.photos.process: SCRAPER_STANDARDISE_SCOPE_KEY)
-    # goes to the GPU once even when finished: a fix the outline recheck cannot see (#605's squaring; drawn_differently
+    # goes to the GPU once even when finished: a fix the outline recheck cannot see (a squaring fix; drawn_differently
     # compares the wall and the sawn edge only) reaches it. Its redraw is a candidate under this rule, judged and
     # promoted over the result only on a pass; settled, it has the note <run folder><this><sha>.json, so a re-run never
     # redoes it. A later fix that wants another pass = a new folder name.
@@ -260,7 +260,7 @@ class STANDARDISE:
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
     # from its photo, a tile product one rendered from its slab stone (stone_pipeline.photos.publish.publish_tiles); a block
     # or a close-up gets none.
-    # The 3D tile (Blokport's viewer, 2026-11-02): the cut-out's horizontal axis is the listing's stored Length, its aspect
+    # The 3D tile (Blokport's viewer): the cut-out's horizontal axis is the listing's stored Length, its aspect
     # Length:Width, at least CUTOUT_LONG_SIDE px on its long side (the viewer zooms 4x): the real face resampled
     # (Lanczos), never generated; its meta also records px_per_mm: the stone's real source pixels per millimetre before
     # that resample (0.65 to 1.2 on prod), i.e. how much real detail the texture holds, not the cut-out's own scale.
@@ -268,15 +268,15 @@ class STANDARDISE:
     CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab from its photo,
                                        # and whose published 3D slabs are the stone tiles are cut from
     CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum
-    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs, 62
-    # off their listed size by more than 5%, 24 by more than 10%; dev 2026-11-10 (BP3), 24 of 126. Blokport draws the
-    # cut-out's width as the listing's length, so one off the listing's length:width by more than this many percent
-    # (inclusive) is linked to no listing as its 3D slab and is no tile's stone (cutout.aspect_misfit, the one rule).
+    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): on prod, 544 published slabs, 62 off
+    # their listed size by more than 5%, 24 by more than 10%; on dev, 24 of 126. Blokport draws the cut-out's width as
+    # the listing's length, so one off the listing's length:width by more than this many percent (inclusive) is linked
+    # to no listing as its 3D slab and is no tile's stone (cutout.aspect_misfit, the one rule).
     # The same value as the backend renders' PHOTO_ASPECT_TOLERANCE_PCT (blokport_backend src/model/project/renders/
-    # layout.ts:12, RND-3, Mas 10 Nov from the dev p95), measured the same way: kept equal by hand, one constant a side.
+    # layout.ts:12, from the dev p95), measured the same way: kept equal by hand, one constant a side.
     PHOTO_ASPECT_TOLERANCE_PCT = 5
     CUTOUT_OUTLINE_READ_WORKERS = 16   # the produce's image stage reads the linked 3D outlines this many at once: a
-                                       # fixed cap (Mas), never unbounded; about 4.9k outlines a full prod produce
+                                       # fixed cap, never unbounded; about 4.9k outlines a full prod produce
     CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
     CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
     CUTOUT_MAX_POINTS = 64             # the contract's outline limit
@@ -284,18 +284,18 @@ class STANDARDISE:
     # it has at most CUTOUT_MAX_POINTS points: a ragged natural edge keeps its shape, only finer.
     CUTOUT_EPSILON, CUTOUT_EPSILON_STEP = 0.0015, 1.5
     CUTOUT_EDGE_WHITE = 0.25           # the sawn edge: the stone's mean colour mixed with this much white (paler, duller)
-    # The last check before a finished photo is published (user 2026-11-01: GPU first, a strict check, the hosted model for
-    # the rest): a vision model sees the original and the catalog image and passes or fails it with reasons. Opus matched the
-    # user's own labels best (23 of 25 defects, 6 of 6 flagged; Haiku 16, Sonnet 19). One good photo per listing is enough:
-    # its photos are judged in order and judging stops at the first pass, at most JUDGE_MAX_PER_LISTING of them.
+    # The last check before a finished photo is published (GPU first, a strict check, the hosted model for the rest): a
+    # vision model sees the original and the catalog image and passes or fails it with reasons. Opus matched the hand
+    # labels best (23 of 25 defects, 6 of 6 flagged; Haiku 16, Sonnet 19). One good photo per listing is enough: its
+    # photos are judged in order and judging stops at the first pass, at most JUDGE_MAX_PER_LISTING of them.
     JUDGE_URL = "https://fal.run/openrouter/router/vision"
     JUDGE_MODEL = "anthropic/claude-opus-5.5"
-    # The bar the prompt sets. 2 (user 2026-11-02, Namib Bianco: "if the final result looks like the FAL image I would
-    # accept that, I rather keep the product"): a tiny remnant at the very edge no longer fails. A stored verdict carries
-    # the version it was made under; a FAIL made under a lower one is judged again (a pass stays a pass: the bar only
-    # moved towards passing, so nothing that passed before can fail now). 3 (owner 2026-11-02, hidden listings whose
-    # results looked fine: black-queen 7029-27, bianco-river 7099, amasya 980): the slab's proportions are corrected to its
-    # real dimensions on purpose (never wrong_shape), and only what a buyer would see at catalog size fails.
+    # The bar the prompt sets. 2 (keep the product over a perfect photo, Namib Bianco): a tiny remnant at the very edge
+    # no longer fails. A stored verdict carries the version it was made under; a FAIL made under a lower one is judged
+    # again (a pass stays a pass: the bar only moved towards passing, so nothing that passed before can fail now). 3
+    # (hidden listings whose results looked fine: black-queen 7029-27, bianco-river 7099, amasya 980): the slab's
+    # proportions are corrected to its real dimensions on purpose (never wrong_shape), and only what a buyer would see
+    # at catalog size fails.
     JUDGE_VERSION = 3
     # An answer of the judge that does not parse is asked again, once a run, until it has been asked this many times;
     # then it is a final fail ("the judge's answer could not be read") and its listing goes to the review list.
@@ -304,7 +304,7 @@ class STANDARDISE:
     JUDGE_MAX_TOKENS = 6000            # reasoning included
     JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side
     JUDGE_TIMEOUT = 300                # s per call
-    # A run over the listings still without a good photo goes further down each listing (prod 2026-11-02: 365 such listings
+    # A run over the listings still without a good photo goes further down each listing (on prod, 365 such listings
     # had 2,025 photos past the third, never tried): a photo costs a GPU pass and one judge call, far less than an edit.
     JUDGE_MAX_PER_LISTING = _env_int("SCRAPER_STANDARDISE_JUDGE_MAX", 3)
     JUDGE_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark", "not_one_slab", "wrong_shape", "other")
@@ -342,12 +342,12 @@ Your whole answer is one JSON object and nothing else:
 {"verdict": "pass" | "fail", "problems": [{"kind": "<one of the kinds>", "where": "<short>"}]}"""
     # A listing with no photo that passes: the hosted edit models clean ONE of its photos (the first that can be fixed by
     # cleaning) in turn until a copy passes the clean check; that copy then goes through the standardiser like any photo and
-    # the judge again. Order by cost per passed copy (prod run 2026-11-02, 1,013 photos): Nano Banana 2 ($0.12) passed 55%
+    # the judge again. Order by cost per passed copy (a prod run, 1,013 photos): Nano Banana 2 ($0.12) passed 55%
     # even on the photos Kontext had failed, Kontext ($0.15) 31% first, FLUX 3 ($0.15) 37% last; the cheapest and most
     # successful goes first (the three in turn reach the same photos either way). The queue, not the sync gateway: a slow
     # model outlasts it (504) and the paid call is lost.
     CLEAN_QUEUE_URL = "https://queue.fal.run"
-    # Straps too (sample 2026-11-01: 27 of 42 failures were the GPU's own strap fills, light bands and clamp remnants, on
+    # Straps too (in a sample, 27 of 42 failures were the GPU's own strap fills, light bands and clamp remnants, on
     # copies the hosted edit had otherwise cleaned): the hosted edit takes off everything foreign, so the retouch finds
     # nothing left to fill.
     CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: lifting straps, belts and their corner clamps or "
@@ -373,9 +373,9 @@ Your whole answer is one JSON object and nothing else:
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
     # Held reasons (their start) a cleaned copy removes the cause of. "logo:" is no longer written (the logo step is
     # retired: a logo is the judge's leftover_mark now), but holds the retired step stored stay on S3 per photo (prod
-    # v2: 100 varsha photos, 2026-11-02) and a cleaned copy fixes them, so they stay cleanable.
+    # v2: 100 varsha photos) and a cleaned copy fixes them, so they stay cleanable.
     CLEAN_FIXES_HELD = ("retouch:", "logo:")
-    # What is cleaned without asking (owner 2026-11-05): every mark on the stone, the judge's leftover_mark (labels,
+    # What is cleaned without asking: every mark on the stone, the judge's leftover_mark (labels,
     # stickers, cards, writing, logos, tape, straps, film) and the holds the retouch or the retired logo step left for a
     # mark. Any other fixable photo (a reflection, a bad fill) is cleaned only when the owner clicks it (CLICKS_DIR).
     CLEAN_AUTO_KINDS = ("leftover_mark",)
@@ -399,7 +399,7 @@ Your whole answer is one JSON object and nothing else:
     # the process does not start.
     BUDGET_USD = _env_float("SCRAPER_STANDARDISE_BUDGET_USD", None)
     # The month's cap of the hosted clean-up edits and their clean checks, all runs together, kept apart from BUDGET_USD
-    # (owner 2026-11-05: the cleaning has its own cap). An edit is reserved with its check, so a copy paid for is always
+    # (the cleaning has its own cap). An edit is reserved with its check, so a copy paid for is always
     # checked in the run that paid for it. No default: unset, no photo is sent to an edit (the run says so once).
     CLEAN_BUDGET_USD = _env_float("SCRAPER_STANDARDISE_CLEAN_BUDGET_USD", None)
     # A scoped run's own cap (process.unconfigured: required with SCRAPER_STANDARDISE_SCOPE_KEY): what the run may
@@ -411,7 +411,7 @@ Your whole answer is one JSON object and nothing else:
     JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
     # Off: no photo is cleaned without asking (the automatic marks, CLEAN_AUTO_*); the owner's click still is, within the
-    # cleaning cap (owner 2026-11-05). An edit already paid for is always collected and checked.
+    # cleaning cap. An edit already paid for is always collected and checked.
     CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
     # The process (stone_pipeline.photos.process) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
@@ -470,15 +470,15 @@ Your whole answer is one JSON object and nothing else:
     SKIP_KINDS = ("pile", "hangar", "interior", "other")
     SKIP_MIN_CONFIDENCE = 0.6          # only a sure one is skipped here; the outline's checks catch what is left
     CLOSEUP_SHARE = 0.45               # a close-up shows this share of the slab's width when the photo has the pixels for it ...
-    CLOSEUP_MAX_ENLARGE = 1.0          # ... else it widens: at most 1:1 of the photo's own pixels, never enlarged (the owner,
-                                       # 2026-11-02, only real detail; any enlargement, ours or a viewer's, shows the
-                                       # interpolation, not the stone) ...
+    CLOSEUP_MAX_ENLARGE = 1.0          # ... else it widens: at most 1:1 of the photo's own pixels, never enlarged (only
+                                       # real detail; any enlargement, ours or a viewer's, shows the interpolation, not
+                                       # the stone) ...
     CLOSEUP_MIN_WIDTH = 1400           # ... until it holds this many of them across: stored at its own size (at most the 2048 px
                                        # canvas, made smaller with an area filter, never larger) in the canvas's 3:2 shape.
                                        # Blokport draws every image contain-fit, scaled to the frame, never at 1:1; its 3:2
                                        # frames are drawn up to 1328 device px wide (product page, DPR2 desktop), 1068 (iPhone
                                        # DPR3), 1148 (quick view), 1350-2700 (full-screen viewer): narrower than 1400 x 933
-                                       # (Blokport's minimum, 2026-11-02) the frame would enlarge it, so it has none ...
+                                       # (Blokport's minimum) the frame would enlarge it, so it has none ...
     CLOSEUP_MAX_SHARE = 0.9            # ... up to this share of the slab on either axis; needing more: no close-up
     CLOSEUP_DENSITY_SAMPLES = 5        # the squaring's local scale is read on this many points per axis (corner to corner)
     CLOSEUP_ALIAS_RATIO = 1.25         # a close-up whose near side has more than this many times its far side's photo pixels is
@@ -501,7 +501,7 @@ Your whole answer is one JSON object and nothing else:
                                        # model's cleaned copy) is none: a made-up patch shows at 1:1
     CLOSEUP_RETOUCH_DIFF = 8.0         # a retouched copy's pixel this much off the photo it was made from (8-bit luma, ...
     CLOSEUP_RETOUCH_SMOOTH = 2.0       # ... smoothed over this many px) was filled: luma only, as a q95 4:2:0 re-encode moves
-                                       # colour, not luma (measured 2026-11-02 on 55 real photos: 0 px flagged; colour too
+                                       # colour, not luma (measured on 55 real photos: 0 px flagged; colour too
                                        # flagged up to 0.39%), a fill of other stone found at a median of 100%
     CLOSEUP_DETAIL_BANDS = ((0.18, 0.25), (0.28, 0.40))   # cycles/px: the band just under half a photo's resolution and the
                                        # one above it, where a soft photo has little of its own ...
@@ -510,7 +510,7 @@ Your whole answer is one JSON object and nothing else:
     JPEG_BLOCK = 8                     # px: a JPEG photo's block grid, whose frequencies the detail score leaves out ...
     CLOSEUP_JPEG_GRID_BINS = 1.5       # ... this many FFT bins either side
     CLOSEUP_DETAIL_MIN = 0.40          # the upper band's energy rises at least this much with the lower's across the crop, on the
-                                       # photo's own pixels, else too soft to show at 1:1: no close-up. Calibrated 2026-11-02 on
+                                       # photo's own pixels, else too soft to show at 1:1: no close-up. Calibrated on
                                        # 55 real photos (gate/good, even ones; checked on the odd ones) against each enlarged 2x
                                        # by bilinear and bicubic, plain and unsharp-masked, JPEG q60 and q85 (clearly soft at
                                        # 1:1): those pass 1.8% / 4.2% pooled, real photos 79% / 78%. Accepted residual risk: a
@@ -560,7 +560,7 @@ Your whole answer is one JSON object and nothing else:
     STRAP_PIECE_MIN = 0.02         # slab pieces left beside the straps count when this share of the slab
     FRAME_EDGE = 0.01              # a slab corner this close (share of the photo) to a frame edge its stone runs into: cut off
     FRAME_TOUCH = 0.02             # the stone runs into a frame edge when it covers this share of that edge's outermost line
-                                   # (measured 2026-11-01: cut off 3.8-74%, framed tightly 0%)
+                                   # (measured: cut off 3.8-74%, framed tightly 0%)
     # --- outline ---
     ROOM_COUNT = 3                     # rooms/<1..n>.jpg, and far_<1..n>.jpg (the same hall from twice as far, for an open book)
     FAR_ROOM_BLUR = 3.0                # px: the far hall softened like a background behind slabs in focus
@@ -590,7 +590,7 @@ Your whole answer is one JSON object and nothing else:
     NOTCH_FILL = 0.08                  # bites in an edge narrower than this share of the slab's height are filled
     OUTLINE_CLOSE = 0.012              # notches thinner than this share of the photo's long side are filled, wider ones are real
     OUTLINE_HOLLOW_MAX = 0.02          # a cut-out missing more than this share of its convex hull has a stand in front of it
-                                       # (measured 2026-11-01 on 320 slabs: normal <= 0.0064, a stand cut out 0.108-0.153)
+                                       # (measured on 320 slabs: normal <= 0.0064, a stand cut out 0.108-0.153)
     EDGE_INSET = 2                     # the outline is taken this many px inside the photo's mixed edge pixels
     EDGE_SOFT = 0.6                    # the slab's edge softness (px): crisp
     EDGE = 0.45                        # the slab's bottom edge face (its thickness): this bright, relative to the stone ...
@@ -619,8 +619,8 @@ Your whole answer is one JSON object and nothing else:
     CROP_NOTE_MIN = 0.01               # the log says so when the canvas crop cuts more than this share of a block
     # --- scene ---
     # --- tiles (stone_pipeline.photos.publish.publish_tiles: a tile listing's views and 3D tile, from its slab stone) ---
-    # The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone (its 3D
-    # cut-out), never from the vendor's tile photos (warehouse racks), never generated; CPU only, no judge per tile.
+    # A tile listing is shown from the same variety's judge-passed, published slab stone (its 3D cut-out), never from
+    # the vendor's tile photos (warehouse racks), never generated; CPU only, no judge per tile.
     TILE_FORMAT = "tile"               # the format whose listings are rendered here, never sent through the photo process
     VARIANTS_KEY = "scraper/from_medusa/variants_export.csv"   # under <env>/: the Medusa variations (Id, Name) ...
     ATTRIBUTES_KEY = "scraper/from_medusa/attributes.csv"      # ... and attributes (category, value, sourceid)
@@ -641,7 +641,7 @@ Your whole answer is one JSON object and nothing else:
     TILE_STONE_INSET_M = 0.03
     # The cut-out check: a regular crosshatch (a mesh, a screen) over the face prints onto every tile, with no judge to
     # catch it. Straight lines along BOTH of the cut-out's axes put the face's fine detail on both axes of its spectrum;
-    # stone is never like that (veins and grooves run one way). Measured 2026-11-02 on 510 prod cut-outs: Tiger Black
+    # stone is never like that (veins and grooves run one way). Measured on 510 prod cut-outs: Tiger Black
     # 805cf5ac (mesh over the whole face) 17.6; every other cut-out at most 1.97, linear and grooved stone included.
     TILE_GRID_WINDOW, TILE_GRID_STEP = 128, 64   # px: the spectrum is averaged over windows this big, this far apart ...
     TILE_GRID_INSET_PX = 20            # ... lying wholly this far inside the stone ...

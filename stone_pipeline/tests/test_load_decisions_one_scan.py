@@ -74,7 +74,7 @@ def test_a_lookup_on_a_warm_index_normalises_only_its_own_arguments(monkeypatch)
 
 
 def test_concurrent_requests_after_an_invalidation_share_one_rebuild(monkeypatch):
-    # prod 2026-09-16: four admin clients poll the review list; when the index invalidates (a ledger or
+    # on prod, four admin clients poll the review list; when the index invalidates (a ledger or
     # config.db write), every in-flight request rebuilt it in parallel on the 1-vCPU task (a ~1 s laptop build
     # became 5 s each, past Blokport's 15 s deadline). A rebuild is single-flight: the first request builds,
     # the others wait for that build and read it.

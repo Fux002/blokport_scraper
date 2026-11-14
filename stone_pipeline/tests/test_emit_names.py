@@ -1,4 +1,4 @@
-"""Emit writes every variety Name and alias by its field's rule (field-kinds.json; plan W2, W3)."""
+"""Emit writes every variety Name and alias by its field's rule (field-kinds.json)."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ def test_a_name_with_no_ascii_form_stops_emit_naming_the_key():
 
 
 def test_aliases_are_split_cleaned_and_their_drops_reported():
-    # the alias kind (Mas, 13 Nov) keeps every script and accent: the CJK half is an alias, nothing is dropped, and
-    # an accent twin collapses onto the first spelling
+    # the alias kind keeps every script and accent: the CJK half is an alias, nothing is dropped, and an accent twin
+    # collapses onto the first spelling
     row = _row("Wratza", "Wratza Limestone\uff0cin China Stone Market:\u7ef4\u7eb3\u591a|Ros\u00e9|rose")
     assert emit_catalog._write_names(row) == []
     assert row["Aliases"] == "Wratza Limestone|\u7ef4\u7eb3\u591a|Ros\u00e9"
@@ -42,7 +42,7 @@ def test_a_bracketed_alternative_moves_from_the_name_into_the_aliases():
 
 
 def test_the_update_file_is_the_cleaned_subset_of_the_full_rows():
-    # W26: the incremental upload is the full file's rows the delta names, the same cleaned objects in full order;
+    # the incremental upload is the full file's rows the delta names, the same cleaned objects in full order;
     # a delta row the full gates dropped is not published.
     full = [{"Key": "a", "Name": "Rose"}, {"Key": "b", "Name": "Black"}, {"Key": "c", "Name": "Grey"}]
     delta = [{"Key": "c", "Name": "grey"}, {"Key": "a", "Name": "Rosé"}, {"Key": "gone", "Name": "x"}]
@@ -50,8 +50,8 @@ def test_the_update_file_is_the_cleaned_subset_of_the_full_rows():
 
 
 def test_a_union_filled_key_equals_the_key_of_its_cleaned_name():
-    # W18: union-fill keys a missing-category row from the Name before emit cleans it; the one slug rule (W4)
-    # and the identity property of the clean rules make that Key the cleaned Name's Key.
+    # union-fill keys a missing-category row from the Name before emit cleans it; the one slug rule and the identity
+    # property of the clean rules make that Key the cleaned Name's Key.
     from stone_pipeline.reference.loaders import field_kinds as fk
     from stone_pipeline.phase1.variety_key import new_key
     for raw in ("São Gabriel", "Valle D’Aosta", "Black & Gold", "Nero  (Spain)"):

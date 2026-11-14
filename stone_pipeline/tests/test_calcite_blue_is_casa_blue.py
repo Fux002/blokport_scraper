@@ -1,6 +1,6 @@
-"""Calcite Blue and Casa Blue are the SAME stone (owner, 2026-11-12): 'Calcite Blue' is an alias of marble Casa Blue
-again (SC #635's same-type cleanup removed it because a marble 'Calcite Blue' had been minted), and no committed
-store holds a separate marble Calcite Blue variety, so nothing mints it. No em dashes."""
+"""Calcite Blue and Casa Blue are the SAME stone: 'Calcite Blue' is an alias of marble Casa Blue again (an earlier
+same-type cleanup removed it because a marble 'Calcite Blue' had been minted), and no committed store holds a
+separate marble Calcite Blue variety, so nothing mints it. No em dashes."""
 from __future__ import annotations
 
 import csv

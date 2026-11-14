@@ -1,7 +1,6 @@
-"""The generic declared-HTML collector (platform declared_html; Mas approved 14 Nov, plan
-blokport_research/2026-11-14-seed-declared-html-plan.md), on fixtures only. A site's register row DECLARES where its
-facts sit in its pages (a record selector, and per field a JSON attribute path, an attribute, or a text, each with an
-optional pattern); one record is one listing. The fixtures copy the shapes worker 74 measured: a card grid with an
+"""The generic declared-HTML collector (platform declared_html), on fixtures only. A site's register row DECLARES where
+its facts sit in its pages (a record selector, and per field a JSON attribute path, an attribute, or a text, each with
+an optional pattern); one record is one listing. The fixtures copy measured shapes: a card grid with an
 analytics JSON attribute and a visible price (Country Floors), per-thickness variation rows on product pages
 (Mandarin Stone), and sale cards with a struck and a current price (Starel Stones). Nothing reaches a real site."""
 
@@ -62,7 +61,7 @@ SALE = {
         "listing_text": {"class": "card-title", "text": True},
         "url": {"class": "card-link", "attr": "href"},
         "price": {"class": "starel-loop-card-price__row--sqm", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
-        # Mas's sale rule (14 Nov; contract v4): the struck "was" price is the regular price, never the price
+        # the sale rule (contract v4): the struck "was" price is the regular price, never the price
         "regular_price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True,
                           "pattern": r"£\s*([\d,]+\.\d{2})"},
         "currency_symbols": {"£": "GBP"},
@@ -162,7 +161,7 @@ def test_each_card_is_one_listing_its_visible_price_read_and_its_page_followed()
 
 
 def test_a_card_that_shows_no_price_is_unpriced_with_its_words_kept_never_the_analytics_price():
-    # Mas's F1 ruling: the analytics JSON's "price" is tracking data, never a stated price
+    # the analytics JSON's "price" is tracking data, never a stated price
     page = _page(_card("SL3", "Albatre Blanc Polished Quartzite Slab Random", UNPRICED, analytics_price=67.2))
     row = _rows(_run({f"{BASE}/collections/slabs/": page}, _site(CARDS)))["SL3"]
     assert (row.price_amount, row.price_status, row.price_text) == (None, PriceStatus.none, "View Product")
@@ -206,7 +205,7 @@ def test_a_product_page_without_a_declared_record_is_counted_with_its_reason():
 
 # --- sale cards: the struck price is never read (the Starel Stones shape) --------------------------------------------
 def test_struck_text_is_never_the_price_but_is_the_regular_price():
-    # Mas's sale rule (14 Nov; contract v4): the price is the current one as shown, the struck "was" price the regular
+    # the sale rule (contract v4): the price is the current one as shown, the struck "was" price the regular
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/arabescato/">x</a>'
             '<h3 class="card-title">Arabescato Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--slab"><del>£2,400.00</del> <ins>£1,999.00</ins> per slab</div>'
@@ -228,7 +227,7 @@ def test_a_card_not_on_sale_has_no_regular_price():
 
 
 def test_a_class_lookup_skips_struck_subtrees_so_the_current_amount_is_read():
-    # the manager's ruling 2: a price whose struck and current amounts carry one class reads the current one
+    # a price whose struck and current amounts carry one class reads the current one
     declaration = {**SALE, "fields": {**SALE["fields"],
                                       "price": {"class": "amount", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
                                       "regular_price": {"class": "amount", "text": True, "struck": True,
@@ -243,7 +242,7 @@ def test_a_class_lookup_skips_struck_subtrees_so_the_current_amount_is_read():
 
 
 def test_a_price_is_read_in_the_declared_notation_and_one_that_does_not_parse_is_unpriced():
-    # the manager's ruling 5: the declared separators read a grouped price; another notation is no price
+    # the declared separators read a grouped price; another notation is no price
     euro = {**SALE, "fields": {**SALE["fields"], "price": {"class": "starel-loop-card-price__row--sqm", "text": True,
                                                            "pattern": r"([\d.,]+)\s*€"},
                                "currency_symbols": {"€": "EUR"}},
@@ -260,14 +259,14 @@ def test_a_price_is_read_in_the_declared_notation_and_one_that_does_not_parse_is
 
 
 def test_a_spec_whose_pattern_does_not_match_is_left_empty_never_a_refusal():
-    # the manager's ruling 3: only the required fields refuse a listing; a spec not in its declared form is not stated
+    # only the required fields refuse a listing; a spec not in its declared form is not stated
     product = _page(_variation(9, "Offcut", "£120.00", "100.00"))
     listing = _page('<a href="/product/offcut/">Offcut</a>')
     row = _rows(_run({f"{BASE}/collections/slabs/": listing, f"{BASE}/product/offcut/": product}, _site(ROWS)))["9"]
     assert row.stated_specs == {"Price ex VAT": "100.00"}
 
 
-# --- a LABELLED source: the value a page pairs with a label (the manager's ruling, 14 Nov ~14:40Z) ------------------
+# --- a LABELLED source: the value a page pairs with a label ---------------------------------------------------------
 LABELLED = {**SALE, "specs": {"Material": {"class": "specs", "label": "Material"},
                               "Origin": {"class": "specs", "label": "Origin"}}}
 
@@ -300,7 +299,7 @@ def test_a_label_matches_whole_so_another_label_is_never_read_and_the_spec_stays
     assert row.stated_specs == {}
 
 
-# --- the currency: never a silent wrong one (f8's must and should, 14 Nov) -------------------------------------------
+# --- the currency: never a silent wrong one --------------------------------------------------------------------------
 SYMBOLS = {**CARDS, "fields": {**CARDS["fields"],
                                "price": {"class": "items-loop__item-price", "text": True, "pattern": r"([\d,]+\.\d{2})"},
                                "currency_symbols": {"$": "USD", "R$": "BRL", "€": "EUR"}}}
@@ -375,7 +374,7 @@ def test_a_declared_html_site_loads_with_its_declaration():
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
      "struck"),                                                          # struck text is never the price
     ({"html": {**CARDS, "specs": {"Material": {"class": "specs", "label": "Material", "text": True}}}}, "one of"),
-    # F1 (reviewer 2's must-fix): the price is the page's visible text, never a JSON or an attribute value
+    # the price is the page's visible text, never a JSON or an attribute value
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"json": ["data-ms-tracking-item", "price"]}}}},
      "visible text"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "attr": "data-price"}}}},
@@ -394,7 +393,7 @@ def test_another_platform_takes_no_html_declaration():
         _register(woo)
 
 
-# --- a declared capture is a whole number (reviewer 2 on SC #785, the manager) ---------------------------------------
+# --- a declared capture is a whole number ----------------------------------------------------------------------------
 def _sale_card(key: str, shown: str, struck: str = "") -> str:
     was = f"<del>{struck}</del> " if struck else ""
     return (f'<article class="starel-loop-card"><a class="card-link" href="/p/{key}/">x</a>'
@@ -440,7 +439,7 @@ def test_a_regular_price_capture_that_is_part_of_a_longer_number_is_no_regular_a
     assert "regular_price capture is part of a longer number x1" in _status(result).detail
 
 
-# --- the shipped blokport rows read a price whole or not at all (reviewer 2 on SC #785) --------------------------------
+# --- the shipped blokport rows read a price whole or not at all -------------------------------------------------------
 def _shipped(site_id: str):
     register = load_register("blokport")
     return register.model_copy(update={"sites": tuple(s for s in register.sites if s.site_id == site_id)})

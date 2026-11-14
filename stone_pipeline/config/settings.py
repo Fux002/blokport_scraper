@@ -239,7 +239,7 @@ COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id", req
 # reference/ synonyms, type densities and standard slab areas) is MATERIAL-specific. The stone pack (historical) keeps
 # it flat at <base>; any OTHER pack MUST ship its own <base>/<pack>/ (catalog_source/<pack>/, reference/<pack>/) and
 # NEVER falls back to stone's -- so a wood/lime run reads its own data or gaps/fails loudly, never silently loads stone
-# varieties/origins/synonyms/densities (audit A2 / #213 M1).
+# varieties/origins/synonyms/densities.
 _STONE_PACK = "stone"
 
 
@@ -262,7 +262,7 @@ def _reference_file(filename: str) -> Path:
 # Colour is NOT last-resorted here (it inherits the variety's texture-classified colour, 'Natural' floor).
 
 
-# --- Product descriptions (owner decision O3, report 21) ------------------------
+# --- Product descriptions -------------------------------------------------------
 # A supplier description passes only as plain English prose: its share of these English function words must reach
 # DESCRIPTION_MIN_ENGLISH_SHARE (prod: English 0.20 to 0.45; the Spanish zucchi texts 0.014; internal notes 0.0).
 # 'no' is deliberately absent: it is also Spanish and Italian.
@@ -332,8 +332,8 @@ class Paths:
     # committed base itself is pristine, so lifecycle falls back to it.
     variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
-    # the ONE variety backbone every category reads (the pack's backbone_file, spec rev 8 section 3). A pack naming none
-    # has no seed, so there is no path to read: asking for one raises, naming the pack, never a guessed file.
+    # the ONE variety backbone every category reads (the pack's backbone_file). A pack naming none has no seed, so there
+    # is no path to read: asking for one raises, naming the pack, never a guessed file.
     @property
     def backbone_json(self) -> Path:
         from stone_pipeline.config.domain import active_pack
@@ -479,10 +479,10 @@ class Thresholds:
     # >50% adapt-drop / ingest / magnitude gates) rather than report it a clean success that shipped almost
     # nothing. Below this, per-row isolation does its job (ship the good rows, flag the few dead ones).
     row_isolated_abort: float = 0.25
-    # A1: when a scrape reports that more than this fraction of its per-product DETAIL fetches failed
-    # (rate-limited), its product absences are untrustworthy -- refuse to delist against it. Below the 30%
-    # delist cap so a moderately rate-limited run (10-25% detail failures) that would otherwise silently
-    # discontinue held products is caught. Scrapers with no detail fetch never report a ratio (no-op).
+    # When a scrape reports that more than this fraction of its per-product DETAIL fetches failed (rate-limited), its
+    # product absences are untrustworthy -- refuse to delist against it. Below the 30% delist cap so a moderately
+    # rate-limited run (10-25% detail failures) that would otherwise silently discontinue held products is caught.
+    # Scrapers with no detail fetch never report a ratio (no-op).
     delist_detail_failure_floor: float = 0.10
 
 
@@ -592,9 +592,10 @@ class ImagesConfig:
     require_images: bool = True  # a product with no image is rejected (Stage 9) -- we only list
     # products that have a picture, so 3_products_*.csv (and the inventory delta derived from the
     # same emitted set) never carry an imageless product.
-    # A product is live only with a standardised photo (owner 2026-11-02: whatever has no good image is delisted until it
-    # is fixed, one by one): without one it is served at stock 0 with reason 'no_photo' and photo_ready false on the product
-    # (Blokport hides it) and comes back on the first produce after its photo is published. On in production; dev has standardised only a test set.
+    # A product is live only with a standardised photo (whatever has no good image is delisted until it is fixed, one by
+    # one): without one it is served at stock 0 with reason 'no_photo' and photo_ready false on the product (Blokport
+    # hides it) and comes back on the first produce after its photo is published. On in production; dev has standardised
+    # only a test set.
     require_standard_photo: bool = _env_bool("SCRAPER_REQUIRE_STANDARD_PHOTO", IS_PRODUCTION)
     # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
     # fills as many as the product actually has; the rest stay blank. Shared by the image-slotting

@@ -44,19 +44,19 @@ DETAIL_API = f"{BASE}/FullInventory.aspx/DetalheBundle"
 PAGE_SIZE = 40
 API_HEADERS = {"content-type": "application/json; charset=UTF-8",
                "x-requested-with": "XMLHttpRequest", "origin": BASE, "referer": PAGE_URL}
-# The customer login that shows prices ("Prices ... are available for logged in customers only"): the owner's own
-# account (14 Nov, via Mas). Both values come from the environment (SSM-backed when deployed), never from code or config:
-# the username is a person's email. The endpoints are the site's own login and logout (slabware.js).
+# The customer login that shows prices ("Prices ... are available for logged in customers only"). Both values come from
+# the environment (SSM-backed when deployed), never from code or config: the username is a person's email. The
+# endpoints are the site's own login and logout (slabware.js).
 LOGIN_API = f"{BASE}/ajax/Ajax.aspx/Modal_Login"
 LOGOUT_API = f"{BASE}/ajax/Ajax.aspx/LogOut_Head"
 LOGIN_USER_ENV = "SCRAPER_POLONINE_USERNAME"
 LOGIN_PASSWORD_ENV = "SCRAPER_POLONINE_PASSWORD"
 LOGIN_OK = "ok"
-# The price pass's rows (prices.csv): the bundle's own list fields, the same values the product row takes from the list.
 # What a price-pass request can end in besides an answer: no answer after the retries (RuntimeError), an answer that is
 # not JSON (ValueError, JSONDecodeError among them), a refused redirect (SSRFBlocked), JSON that is not an object
-# (AttributeError on .get). Each reads no prices; none may reach the product scrape (f8's must, 14 Nov).
+# (AttributeError on .get). Each reads no prices; none may reach the product scrape.
 PRICE_PASS_FAILURES = (RuntimeError, ValueError, SSRFBlocked, AttributeError)
+# The price pass's rows (prices.csv): the bundle's own list fields, the same values the product row takes from the list.
 PRICE_COLUMNS = ["product_id", "material", "stone_type", "finish", "quality", "thickness", "block", "bundle_no",
                  "average_size", "price1", "price2", "detail_url"]
 
@@ -177,9 +177,9 @@ class PolonineScraper(ScraperBase):
 
     def run(self) -> Path:
         """The anonymous product and stock scrape exactly as before, then the separate logged-in price pass. The product
-        set never depends on the login, by design (the Scraper manager's ruling, 14 Nov): the pass writes only its own
-        files, after the products and their completion marker are written, and no failure of it reaches the products:
-        price files that cannot be written are logged, and the products are returned all the same."""
+        set never depends on the login: the pass writes only its own files, after the products and their completion
+        marker are written, and no failure of it reaches the products: price files that cannot be written are logged,
+        and the products are returned all the same."""
         products = super().run()
         try:
             self._price_pass()

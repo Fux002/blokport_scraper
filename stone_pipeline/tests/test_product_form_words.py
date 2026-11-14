@@ -93,7 +93,7 @@ def test_generic_descriptors_are_strings_and_carry_the_extension():
     # the pair-tested extension: type words, finish words, vendor-language format words, units
     assert {"quartzite", "travertine", "soapstone", "brushed", "sawn", "chapa", "bloco", "lastra", "mm", "cm"} <= generic
     # nationality/identity words stay OUT (they distinguish real varieties: 'Persian Green' vs 'Green'),
-    # including the five legacy ones removed 2026-09-07
+    # including the five legacy ones removed
     assert not ({"persian", "china", "new", "exotic", "antique", "diamond", "van",
                  "brazilian", "brazil", "italian", "turkish", "indian"} & generic)
     # no colour word beyond the legacy 'natural' (kept for byte-parity) may be generic

@@ -25,8 +25,8 @@ from stone_pipeline.core.schema import CanonicalRow
 
 log = logfmt.get_logger("product_state")
 
-# The column products_export.csv must carry (table 572's T4 `required`; BE's writer emits it), matched case-insensitively
-# like every column here; the others are optional and read by any of their spellings.
+# The column products_export.csv must carry (the interface's T4 `required`; BE's writer emits it), matched
+# case-insensitively like every column here; the others are optional and read by any of their spellings.
 REQUIRED_COLUMNS = ("Variant Sku",)
 _SKU_COL = REQUIRED_COLUMNS[0].lower()
 _INV_COLS = ("inventory quantity", "variant inventory quantity", "inventory_quantity",
@@ -57,7 +57,7 @@ def load_known_products(path: Path | None = None) -> KnownProducts:
         return known
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        # read by header name: an extra column is ignored; a missing REQUIRED one refuses by name (table 572)
+        # read by header name: an extra column is ignored; a missing REQUIRED one refuses by name
         header = {(name or "").strip().lower() for name in reader.fieldnames or []}
         missing = [c for c in REQUIRED_COLUMNS if c.lower() not in header]
         if missing:

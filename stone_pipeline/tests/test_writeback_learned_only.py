@@ -1,11 +1,10 @@
-"""The alias write-back keeps only learned GUESSES (owner, 2026-11-05).
+"""The alias write-back keeps only learned GUESSES.
 
-A bind the seed already decides (exact, exact narrowed by name / type / colour / origin, projection, override)
-is re-derived on every run, so saving it adds only stickiness: the saved pick outlived a later seed
-correction. Prod: four marenostone 'Volakas Marble' slabs bound to Spider Red by origin (exact_origin) and the
-pick was saved, so moving the seed alias to Volocas alone would have left them colliding. Since P2-10 C2 a learned
-guess is a proposal, and the one-time migration of the old file drops every non-learned pick. Hermetic: a
-hand-built index, runs in CI.
+A bind the seed already decides (exact, exact narrowed by name / type / colour / origin, projection, override) is
+re-derived on every run, so saving it adds only stickiness: the saved pick outlived a later seed correction. Prod:
+four marenostone 'Volakas Marble' slabs bound to Spider Red by origin (exact_origin) and the pick was saved, so
+moving the seed alias to Volocas alone would have left them colliding. A learned guess is a proposal, and the
+one-time migration of the old file drops every non-learned pick. Hermetic: a hand-built index, runs in CI.
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ from stone_pipeline.tests.test_origin_aware_matching import _stage
 
 @pytest.mark.parametrize("method, learned", [
     # every method the matcher binds with (engine.py tiers + the stage's wrappers), real strings from the
-    # prod and dev files of 2026-11-05
+    # prod and dev files
     ("phonetic", True), ("fuzzy", True), ("fuzzy_origin", True),
     ("clean_variety_fuzzy", True), ("clean_variety_phonetic", True), ("operator_type_fuzzy", True),
     ("exact", False), ("exact_name", False), ("exact_blocked", False), ("exact_origin", False),

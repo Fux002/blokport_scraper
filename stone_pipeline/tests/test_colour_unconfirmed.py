@@ -1,7 +1,6 @@
-"""No guessed colour (Mas's word, 10 Nov; C5's "black marble" finding). A product of a variety sold in several colours
-used to get ONE of them by "first wins" in two places: reconcile filled the variety's first allowed colour when the
-vendor gave none (Patagonia Quartzite -> Black), and normalize kept the first of a vendor's list ('Black and White' ->
-Black). Now:
+"""No guessed colour. A product of a variety sold in several colours used to get ONE of them by "first wins" in two
+places: reconcile filled the variety's first allowed colour when the vendor gave none (Patagonia Quartzite -> Black),
+and normalize kept the first of a vendor's list ('Black and White' -> Black). Now:
 
 1. a vendor colour text naming two or more distinct colours is the pack's multicolour value ('Multicolor');
 2. no vendor colour and a variety that allows several: the operator's colour statement for (source, variety) decides;
@@ -199,7 +198,7 @@ def test_the_latest_decision_on_any_spelling_of_the_variety_wins(ref, patagonia)
 
 
 def test_a_colour_decided_on_a_variety_not_yet_in_the_ledger_is_kept_for_the_vendor(tmp_path, monkeypatch):
-    # review L1: the variety is not in the ledger yet, so the decide takes the mint path. The first vendor's word
+    # the variety is not in the ledger yet, so the decide takes the mint path. The first vendor's word
     # defines the spelling for everyone (a GLOBAL statement); a second vendor's restates that meaning (nothing new for
     # the variety). Each vendor's colour must still reach its own listings.
     from stone_pipeline.config import decisions_store

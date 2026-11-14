@@ -1,16 +1,16 @@
-"""P2-10 C2 (PHASE-2-SPEC WP2.3; P2-10-SCRAPER-PLAN sections 3 and 6): learned aliases live in config.db's
-`learned_alias` table, keyed by the variety's identity Key, and only an ACTIVE row is a matcher input.
+"""Learned aliases live in config.db's `learned_alias` table, keyed by the variety's identity Key, and only an ACTIVE
+row is a matcher input.
 
-The table shape is frozen by the scraper manager (11-12): learned_alias(identity_key, value, norm, method, source,
-status, first_seen, decided_by, decided_at), PRIMARY KEY (identity_key, norm), norm = core.text.match_key(value),
-status in proposed | active | rejected; plus a nullable score REAL (the manager 11-12, PHASE-2-SPEC:176), the proposing
-arm's own score on 0..100 where it has one, NULL otherwise and for a migrated row.
+The table shape is frozen: learned_alias(identity_key, value, norm, method, source, status, first_seen, decided_by,
+decided_at), PRIMARY KEY (identity_key, norm), norm = core.text.match_key(value), status in proposed | active |
+rejected; plus a nullable score REAL, the proposing arm's own score on 0..100 where it has one, NULL otherwise and for
+a migrated row.
   * the matcher's guesses (WriteBack.add_alias) and curate's alias arms write `proposed`: a proposal is not a
     matcher input, and a norm once rejected for a variety is never proposed again;
   * config.db goes from phase 1's v12 to v13 in place (an additive table); a store from before phase 1 stays refused,
     and the phase 1 store migration keeps stamping its own version, 12;
   * the old state/alias_writeback.csv moves in ONCE per env, at the produce's start: a row resolving to a live Key
-    that passes the alias boundary (C1) becomes active, decided_by 'migration'; every other row is dropped and listed
+    that passes the alias boundary becomes active, decided_by 'migration'; every other row is dropped and listed
     with its reason; the marker in config.db's `migration` table makes every later produce a no-op that never reads
     the csv again.
 Hermetic: tmp stores, a hand-built index, the committed vocabulary. No em dashes.
@@ -268,8 +268,8 @@ def _ledger(path):
     return path
 
 
-# --- the migration owns its input (manager ruling 11-12): the csv is read from its .v2 key on S3, only while the marker
-# is absent; absence is the only error that reads as "nothing to migrate" ---------------------------------------------
+# --- the migration owns its input: the csv is read from its .v2 key on S3, only while the marker is absent; absence
+# is the only error that reads as "nothing to migrate" ----------------------------------------------------------------
 
 WB_NEW = "development/scraper/state/alias_writeback.v2.csv"     # phase 1's copy, the migration's input
 WB_OLD = "development/scraper/state/alias_writeback.csv"        # the pre-phase-1 key
@@ -340,8 +340,8 @@ def test_the_migration_drops_and_lists_every_other_row_with_its_reason(config_db
     report = _migrate(tmp_path, monkeypatch, [
         ("01NOWHERE", "Some Name", "fuzzy"),            # resolves to no Key
         ("01GONE", "Old Spelling", "fuzzy"),            # a retiring Key is not live
-        ("01PATAGONIA", "Patagonia White", "fuzzy"),    # its own name (C1 boundary)
-        ("01PATAGONIA", "White Linen", "fuzzy"),        # another same-type variety's name (C1 boundary)
+        ("01PATAGONIA", "Patagonia White", "fuzzy"),    # its own name (the alias boundary)
+        ("01PATAGONIA", "White Linen", "fuzzy"),        # another same-type variety's name (the alias boundary)
         ("01PATAGONIA", "G603", "fuzzy"),               # a code, never an alias
         ("01PATAGONIA", "Legacy Pick", "exact"),        # not a learned guess
         ("01PATAGONIA", "PATAGONIA", "phonetic"),
@@ -367,7 +367,7 @@ def test_a_second_produce_s_migration_is_a_no_op(config_db, tmp_path, monkeypatc
 
 
 def test_a_brand_new_environment_records_an_empty_migration(config_db, tmp_path, monkeypatch):
-    # Scraper's L2 on SC #650: no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
+    # no ledger and no csv yet (a new env's first produce) is an EMPTY migration, recorded;
     # the ledger is read only to resolve records, and there are none
     from stone_pipeline.aliases import migrate_learned
     assert _migrate_from(tmp_path, monkeypatch, _S3(), ledger_path=tmp_path / "no-ledger.db") == {"active": 0,
@@ -432,7 +432,7 @@ def test_the_produce_migrates_after_the_inputs_and_before_the_build(monkeypatch)
     assert calls == ["fetch", "migrate", "build"]
 
 
-# --- a proposal never leaves a store that hides sources.yaml (CI's `certify all`, 12 Nov) ------------------------------
+# --- a proposal never leaves a store that hides sources.yaml (CI's `certify all`) -------------------------------------
 
 def test_a_proposal_with_no_config_db_refuses_and_creates_no_file(tmp_path, monkeypatch):
     # the store is created only by the config server's boot (restore from S3, then seed); a write that created it
@@ -461,7 +461,7 @@ def test_a_module_scoped_fixture_sees_an_isolated_config_store(module_config_db)
     assert not Path(module_config_db).exists()
 
 
-# --- config.db v14: norms rekeyed to alias_key (Mas, 13 Nov) ---------------------------------------------------------
+# --- config.db v14: norms rekeyed to alias_key -----------------------------------------------------------------------
 
 _REKEY = getattr(store, "learned_norms_to_rekey", None)
 _INSERT = ("INSERT INTO learned_alias (identity_key, value, norm, method, source, status, first_seen) "

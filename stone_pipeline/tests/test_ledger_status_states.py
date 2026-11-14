@@ -1,6 +1,6 @@
 """GET /sync/v1/status reports every state a table can hold, 0 when it holds none: a count is always a value, never
-an absent key (the admin's sync page rendered an absent state as 'None', owner 2026-11-05). The states are declared
-once beside the schema; this pins them to schema.sql's own CHECK constraints so the two can never drift."""
+an absent key (the admin's sync page rendered an absent state as 'None'). The states are declared once beside the
+schema; this pins them to schema.sql's own CHECK constraints so the two can never drift."""
 
 from __future__ import annotations
 

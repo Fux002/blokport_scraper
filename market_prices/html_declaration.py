@@ -83,7 +83,7 @@ class HtmlFields(BaseModel):
     listing_text: HtmlSource
     url: Optional[HtmlSource] = None
     price: Optional[HtmlSource] = None
-    # contract v4 (Mas's sale rule): the regular price shown beside the current one, typically its struck "was" price
+    # contract v4: the regular price shown beside the current one, typically its struck "was" price
     regular_price: Optional[HtmlSource] = None
     unit: Optional[HtmlSource] = None
     currency: Optional[HtmlSource] = None
@@ -92,7 +92,7 @@ class HtmlFields(BaseModel):
 
     @model_validator(mode="after")
     def _price_is_visible_text(self) -> "HtmlFields":
-        """F1: what a page shows is what is read. A JSON or attribute value (an analytics or data attribute) is never
+        """What a page shows is what is read. A JSON or attribute value (an analytics or data attribute) is never
         the price; they stay for identity and specs."""
         if self.price is not None and not self.price.text:
             raise ValueError("the price is the page's visible text: a price source takes text, never json, attr or "

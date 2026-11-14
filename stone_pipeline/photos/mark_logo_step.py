@@ -1,5 +1,5 @@
-"""One-off, per environment, at the deploy of the release that retired the logo step (2026-11-02): mark every result the
-retired logo step made, so the photo process never adds to it without that step.
+"""One-off, per environment, at the deploy of the release that retired the logo step: mark every result the retired
+logo step made, so the photo process never adds to it without that step.
 
 Why: later steps make views of a stored result again from a re-run of its photo: completing an outdated open book (its
 close view and 3D slab, unjudged: stone_pipeline.photos.source.rework), the close-only run (its close-up again, every

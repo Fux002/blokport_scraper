@@ -261,7 +261,7 @@ def test_a_refused_ledger_reset_does_not_touch_config(tmp_path, monkeypatch):
 
 def test_only_the_factory_reset_wipes_images(tmp_path, monkeypatch):
     """Hosted product images are deleted by ONE routine only: the factory (pristine) reset without
-    keep_images. Hard and soft resets, scoped or global, never touch them (the 2026-09-06 prod incident:
+    keep_images. Hard and soft resets, scoped or global, never touch them (a prod incident:
     a hard reset wiped 32k images and the next republish re-spent GPU on all of them)."""
     from stone_pipeline import lifecycle
     from stone_pipeline.ledger import snapshot

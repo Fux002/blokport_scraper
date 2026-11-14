@@ -18,7 +18,7 @@ from stone_pipeline.ledger.populate import populate_products
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
 
-# the synthetic category pcats (PC1, PC2) on the registry: a category is never the ledger's (table 577)
+# the synthetic category pcats (PC1, PC2) on the registry: a category is never the ledger's
 pytestmark = pytest.mark.usefixtures("ledger_product_pcats")
 
 

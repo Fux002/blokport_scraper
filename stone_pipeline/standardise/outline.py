@@ -315,7 +315,7 @@ def _without_straps(mask, straps):
 def find_slabs(seg, det, rgb):
     """(quads, mask, raw, straps, reason): quads [] (no whole slab in the photo; reason says why), [quad] (one
     slab) or [left, right] (an open book); mask = the slab(s), holes filled, for compositing; raw = what SAM
-    counted as stone (labels are holes; the straps count as shown, never erased: user 2026-10-30); straps = the
+    counted as stone (labels are holes; the straps count as shown, never erased); straps = the
     straps in front of it, kept as shot (they complete the outline and its corners only)."""
     h, w = rgb.shape[:2]
     boxes = detect(det, rgb)

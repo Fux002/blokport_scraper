@@ -9,7 +9,8 @@ from pathlib import Path
 
 from stone_pipeline.reference.loaders.common import env, log, norm
 
-# The columns ports.csv must carry (table 572's T5 `required`; BE's writer emits `id`); every other column is optional.
+# The columns ports.csv must carry (the schema's `required`; the backend's writer emits `id`); every other column is
+# optional.
 REQUIRED_COLUMNS = ("id",)
 
 
@@ -61,7 +62,7 @@ def load_ports(path: Path | None = None) -> Ports:
     with candidate.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         # read by header name: an extra column is ignored (a writer adds one first, this reader adopts it after); a
-        # missing REQUIRED one refuses by name (table 572, the schema's T5 `required`)
+        # missing REQUIRED one refuses by name (the schema's `required`)
         missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
         if missing:
             raise ValueError(f"{candidate}: missing required column(s) {', '.join(missing)}")

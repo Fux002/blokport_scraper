@@ -1,4 +1,4 @@
-"""'Volakas Marble' on the committed production seed (owner, 2026-11-05).
+"""'Volakas Marble' on the committed production seed.
 
 marenostone sells an Iranian white marble as 'Volakas Marble'. The seed gave that spelling to red marble Spider Red,
 whose documented origins include Iran, so the origin rung bound the slabs to Spider Red. With the spelling on Volocas

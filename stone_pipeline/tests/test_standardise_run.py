@@ -271,7 +271,7 @@ def test_the_steps_run_in_order(monkeypatch):
 
 
 def test_without_a_cleaning_cap_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
-    # owner 2026-11-05: the clean-up edits have their own monthly cap; no cap set, no edit is paid
+    # the clean-up edits have their own monthly cap; no cap set, no edit is paid
     done = _steps(monkeypatch)
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
@@ -302,7 +302,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
 
 
 def test_with_the_clean_switch_off_the_clean_step_still_runs_for_the_owner_s_clicks(monkeypatch):
-    # owner 2026-11-05: the switch governs only the automatic edits (select.authorised); a click is cleaned either way
+    # the switch governs only the automatic edits (select.authorised); a click is cleaned either way
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
@@ -325,7 +325,7 @@ def test_the_run_stops_its_steps_at_the_process_budget_and_still_reports_what_is
 
 
 def test_a_reached_cleaning_cap_ends_only_the_clean_step(monkeypatch):
-    # review of #524: the cap's error ended the whole run, so the cleaned copies made before it were never standardised
+    # the cap's error ended the whole run, so the cleaned copies made before it were never standardised
     # or judged, and every later run of the month did the same
     done = _steps(monkeypatch)
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: (
@@ -449,7 +449,7 @@ def test_a_gpu_round_waits_no_longer_than_the_window_it_reserved_for_however_lon
     assert untils == [4000]                                                        # the deadline, as reserved at 400
 
 
-# --- the owner's clicks first (scraper 1a, 2026-11-06) ----------------------------------------------------------------
+# --- the owner's clicks first -----------------------------------------------------------------------------------------
 # The month's budget once ran out in the backlog's GPU round, then the clean step paid for a click whose cleaned copy
 # never got its GPU round or its judge: the owner paid and saw nothing until the next month.
 GPU_P, CL_P = "dev/standardise-test/v9/sentas/", "dev/standardise-test/v9-clean/sentas/"
@@ -616,7 +616,7 @@ def _second_photo_cleaned(s, store):
 
 
 def test_a_click_is_new_work_though_another_photo_of_its_listing_has_a_cleaned_copy():
-    # review 2026-11-06 (A2.1): the other photo's copy made the click count as finished, and nothing paid it
+    # the other photo's copy made the click count as finished, and nothing paid it
     s, store = _clicked_selection()
     _second_photo_cleaned(s, store)
     assert _admit(s, 0.0)[0] == []                                                         # it needs an edit: the budget
@@ -644,7 +644,7 @@ def test_no_new_click_is_paid_when_too_little_window_is_left_for_its_gpu_round()
     assert _admit(s, 100.0, window=C.GPU_MIN_WINDOW_SECONDS)[0] == ["slab-1"]
 
 
-# --- one price, one admission (review 2026-11-06, A2.3, A2.4) --------------------------------------------------------
+# --- one price, one admission ----------------------------------------------------------------------------------------
 def _marked(s, store, *keys):
     """The listings `keys` of _clicked_selection fail the judge for a mark on the stone (cleaned without a click)."""
     mark = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark", "where": "x"}],
@@ -701,7 +701,7 @@ def test_the_clean_step_never_spends_past_what_it_admitted_when_a_check_is_lost(
 
 
 def test_the_clicks_step_judges_only_what_it_admitted_and_the_copies_it_owes(monkeypatch):
-    # review of #540: the clicks' step judged every listing with a click, buying verdicts its admission never priced
+    # the clicks' step judged every listing with a click, buying verdicts its admission never priced
     s, store = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", D)), backlog=())
     s.rounds[0][1]["sentas"].judged.discard(D)                                            # slab-3: not fully judged
     del store.objects[f"{GPU_P}judged/{D}.json"]
@@ -740,7 +740,7 @@ def test_a_new_edit_with_too_little_window_left_waits_for_that_reason():
 
 
 def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch):
-    # review 2026-11-06 (A2.4): the pay step ran listings in parallel up to the cap, so which got the last dollars
+    # the pay step ran listings in parallel up to the cap, so which got the last dollars
     # depended on thread timing
     import random
     import time
@@ -811,7 +811,7 @@ def test_without_a_cleaning_cap_a_ready_click_says_it_waits_for_one(monkeypatch)
 
 
 def test_a_month_with_money_to_judge_but_none_for_a_round_judges_what_is_finished(monkeypatch):
-    # review 2026-11-06: a round that cannot start ends nothing; the judge, the report and publish still run
+    # a round that cannot start ends nothing; the judge, the report and publish still run
     _gpu_env(monkeypatch)
     s, store = _clicked_selection()
     s.clicks = {}
@@ -883,7 +883,7 @@ def test_a_round_is_sized_to_the_budget_left(monkeypatch):
 
 
 def test_a_round_leaves_the_judging_of_its_results_covered(monkeypatch):
-    # review 2026-11-06 (A2.3): a round sized to the GPU alone spent the month on results it could not then judge
+    # a round sized to the GPU alone spent the month on results it could not then judge
     _gpu_env(monkeypatch)
     monkeypatch.setattr(C, "RUN_SLICE", 1)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
@@ -980,8 +980,8 @@ def test_jobs_an_earlier_run_left_are_stopped_and_the_ceiling_set_back(monkeypat
 
 
 def test_a_paid_hosted_step_runs_once_and_its_failures_wait_for_the_next_run():
-    # review of #540: a second pass paid again for what failed after it was sent (a check that was lost), past what the
-    # run had admitted; every hosted step pays, so each runs once and the next run retries from what is stored
+    # a second pass paid again for what failed after it was sent (a check that was lost), past what the run had
+    # admitted; every hosted step pays, so each runs once and the next run retries from what is stored
     calls = []
 
     def flaky(sel, spend, deadline):
@@ -1205,7 +1205,7 @@ def test_an_open_book_made_before_its_halves_had_a_slab_goes_to_the_gpu_again_on
 
 
 def test_a_batch_error_in_a_round_is_a_problem_and_the_run_goes_on(monkeypatch):
-    # review 2026-11-06 (A2.7): a Batch ClientError ended the run before its report, so nothing finished was published
+    # a Batch ClientError ended the run before its report, so nothing finished was published
     from botocore.exceptions import ClientError
     refused = ClientError({"Error": {"Code": "ClientException", "Message": "queue disabled"}}, "SubmitJob")
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: (_ for _ in ()).throw(refused))

@@ -1,10 +1,11 @@
-"""A product is live only with a standardised photo (owner 2026-11-02: whatever has no good image is delisted until it is
-fixed): with the rule on, a product the image stage found without one goes out at stock 0 with reason 'no_photo'
-(Blokport hides it; always stock 0, since Blokport reads an unknown reason above 0 as a plain quantity) and comes back on the first produce after its photo is published. A run that cannot tell (the photo
-pool unreadable, or the stock-only refresh, which skips the image stage) never changes whether a product is hidden, and a
-pool that is empty or unreadable (local mode, nothing published, a failed read) means "cannot tell". Hiding and showing
-again are served to Blokport even when the stock stays 0; the dead-stock purge never deletes a hidden product, and a
-bundle never redirects to a lot whose pieces are all hidden."""
+"""A product is live only with a standardised photo (whatever has no good image is delisted until it is fixed): with
+the rule on, a product the image stage found without one goes out at stock 0 with reason 'no_photo' (Blokport hides
+it; always stock 0, since Blokport reads an unknown reason above 0 as a plain quantity) and comes back on the first
+produce after its photo is published. A run that cannot tell (the photo pool unreadable, or the stock-only refresh,
+which skips the image stage) never changes whether a product is hidden, and a pool that is empty or unreadable (local
+mode, nothing published, a failed read) means "cannot tell". Hiding and showing again are served to Blokport even when
+the stock stays 0; the dead-stock purge never deletes a hidden product, and a bundle never redirects to a lot whose
+pieces are all hidden."""
 from __future__ import annotations
 
 import dataclasses

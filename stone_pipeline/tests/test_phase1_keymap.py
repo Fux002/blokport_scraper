@@ -23,7 +23,7 @@ def _led(env, key, type_name, name):
     return Record(env, "ledger", key, name=name, type_name=type_name)
 
 
-# --- the collapse pins (manager's required tests) -------------------------------------------------------
+# --- the collapse pins ----------------------------------------------------------------------------------
 def test_live_copies_and_a_retired_copy_collapse_to_one_new_key():
     # slab/block/tile live in the ledger; the block copy is also marked retired (same Key string) -> one Key.
     recs = [
@@ -51,7 +51,7 @@ def test_three_retired_only_keys_collapse_to_one_new_key():
 
 # --- aborts ---------------------------------------------------------------------------------------------
 def test_bracket_identity_gets_one_clean_new_key():
-    # The 33 bracket identities (rev 8): every old Key carries the BRACKETED slug, but there is one clean Name
+    # The 33 bracket identities: every old Key carries the BRACKETED slug, but there is one clean Name
     # per copy. The new Key must use the clean Name, so all copies and a retired-only copy collapse to ONE Key.
     recs = [
         _led("development", "slab_granite_absolute_black_nero_assoluto_u1", "Granite", "Absolute Black"),
@@ -83,7 +83,7 @@ LIMESTONE = {"limestone": {"Limestone"}}
 
 
 def _st_amber(prod_name):
-    """One identity's three copies as prod held them at the read: the committed base cleaned by #589 ('St Amber')
+    """One identity's three copies as prod held them at the read: the committed base, cleaned ('St Amber'),
     and prod's ledger written before it (`prod_name`)."""
     return [Record("production", "base_csv", f"{b}_limestone_st_amber_u{i}", name="St Amber", type_name="Limestone")
             for i, b in enumerate(("slab", "block", "tile"))] + [
@@ -178,10 +178,10 @@ def test_prefix_type_longest_match():
     assert {m.new_key for m in res.rows} == {new_key("Dolomite Marble", "Perla"), new_key("Dolomite", "Perla")}
 
 
-# --- C1: backbone spellings never tie or name --------------------------------------------------------
+# --- backbone spellings never tie or name ------------------------------------------------------------
 def test_backbone_spelling_does_not_tie_or_name_the_key():
     # the store Name is authoritative; a backbone `variant` that differs only in case/accent must not tie, and
-    # the new Key takes the STORE Name (C1: 162 identities tied on backbone drift alone).
+    # the new Key takes the STORE Name (162 identities tied on backbone drift alone).
     recs = [_led("development", "slab_andesite_nghe_an_volcanic_u1", "Andesite", "Nghe An Volcanic"),
             Record("development", "backbone", "slab_andesite_nghe_an_volcanic_u1", name="Nghe an Volcanic",
                    type_name="Andesite")]
@@ -197,7 +197,7 @@ def test_backbone_name_used_only_when_no_store_names_it():
     assert res.ghosts == ["slab_onyx_black_gold_u1"]       # backbone-only -> mapped and listed as a ghost
 
 
-# --- M2: ghosts vs store collisions ------------------------------------------------------------------
+# --- ghosts vs store collisions ----------------------------------------------------------------------
 def test_backbone_only_collision_lists_ghosts_not_abort():
     # two keyed backbone posts no store carries, both slab, same identity -> ghosts, not an abort.
     recs = [Record("development", "backbone", "slab_granite_rosa_porrino_u1", name="Rosa Porrino",
@@ -218,7 +218,7 @@ def test_two_store_keys_one_category_abort():
     assert res.aborts["category_collision"] == ["slab_granite_x_u1", "slab_granite_x_u2"]
 
 
-# --- M3: a new Key from two middles is a merge -------------------------------------------------------
+# --- a new Key from two middles is a merge -----------------------------------------------------------
 def test_two_middles_one_new_key_listed_as_merged():
     # a suffixed copy joins its sibling by (type, Name): right, but two Medusa records become one.
     recs = [_led("development", "slab_granite_madam_red_b_u1", "Granite", "Madam Red"),

@@ -1,7 +1,7 @@
 """field-kinds.json: the backend's ONE map of which name field is a NAME and which an IDENTIFIER (PHASE-0 N16).
 
 The scraper is its one reader: there is no default map and no default kind, a failure is never cached, and a map
-that arrives after boot is used without a restart (plan W1)."""
+that arrives after boot is used without a restart."""
 
 from __future__ import annotations
 
@@ -79,8 +79,8 @@ def test_clean_and_display_follow_the_field_kind(map_path):
 
 
 def test_the_committed_map_publishes_owned_aliases_as_the_alias_kind():
-    # Mas, 13 Nov: every committed field-kinds copy says what BE publishes, variation_alias.value = "alias" (names
-    # keep "name"), so the committed seed is judged by the rule its writer uses
+    # Every committed field-kinds copy says what BE publishes, variation_alias.value = "alias" (names keep "name"),
+    # so the committed seed is judged by the rule its writer uses
     assert fk.kind(fk.VARIATION_ALIAS_VALUE) == getattr(fk, "ALIAS", "alias")
     assert fk.kind(fk.VARIATION_NAME) == fk.NAME
 

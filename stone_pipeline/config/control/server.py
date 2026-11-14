@@ -314,7 +314,7 @@ def _post_curation_rebuild(params, body, query):
 
 
 def _post_alias_classification(params, body, query):
-    # P2-10 C5: the alias classification file and its manifest field, from the live ledger, read-only (409 unless
+    # The alias classification file and its manifest field, from the live ledger, read-only (409 unless
     # every variation is synced, naming the Keys). The backend operator calls it right after the draining Publish.
     from stone_pipeline import lifecycle
     result, code = lifecycle.alias_classification()
@@ -387,7 +387,7 @@ def _post_variations_unmint(params, body, query):
 
 
 def _post_variation_verb(params, body, query):
-    #   POST /variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
+    #   POST /variations/<key>/retire     {"force": true?}   remove a variety (re-key old side)
     #   POST /variations/<key>/unmint     {"force": true?}   remove it AND clear its mint decision so the
     #     next produce re-surfaces it in the mint queue UNDECIDED (correct a minting mistake). Contrast
     #     retire (permanent, excluded) and reject (never mint); unmint = remove and reconsider.
@@ -486,7 +486,7 @@ def _put_review_attribute(params, body, query):
         return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
     value = unquote(params["value"])   # same decode-before-key rule as the variety PUT
     kind, medusa_id = _str(body, "kind"), _str(body, "medusa_id")
-    # the value becomes the name the products carry, so it is refused unless it is its kind's clean form (W14)
+    # the value becomes the name the products carry, so it is refused unless it is its kind's clean form
     field = field_kinds.ATTRIBUTE_FIELDS.get(kind.lower())
     if field is None:
         return 400, {"error": f"kind must be one of {sorted(field_kinds.ATTRIBUTE_FIELDS)}"}
@@ -679,7 +679,7 @@ def _put_review_decide(params, body, query):
     if not name or not raw_type:
         return 400, {"error": "name and type are required"}
     from stone_pipeline.reference.loaders import field_kinds
-    if err := _name_refusal(field_kinds.VARIATION_NAME, name):     # the stated name is stored as given (W12)
+    if err := _name_refusal(field_kinds.VARIATION_NAME, name):     # the stated name is stored as given
         return err
     vocab = _type_vocab()
     if proj.norm(raw_type) not in vocab:
@@ -825,7 +825,7 @@ def _put_origin(params, body, query):
     from stone_pipeline.reference.loaders import field_kinds
     for field, value in ((field_kinds.VARIATION_NAME, variety), (field_kinds.PRODUCT_ORIGIN_CITY, city),
                          (field_kinds.PRODUCT_ORIGIN_COUNTY, county)):
-        if value and (err := _name_refusal(field, value)):     # each becomes a name the products carry (W13)
+        if value and (err := _name_refusal(field, value)):     # each becomes a name the products carry
             return err
     isos = []
     for c in _str_list(body.get("countries"), "countries"):
@@ -1199,7 +1199,7 @@ def _validate_source_put(name: str, body: dict, stored: dict | None) -> tuple[in
         return 400, {"error": f"source {name!r} requires at least one shipping port: set 'ports' to a "
                      "non-empty list of the supplier's port names / LOCODEs (Medusa derives a product's "
                      "ports from these)."}
-    # the collection city is a name the products carry (W25): a stored unclean city is refused on every save until
+    # the collection city is a name the products carry: a stored unclean city is refused on every save until
     # it is re-saved clean, which the release runbook does once for zucchi
     from stone_pipeline.reference.loaders import field_kinds
     city = body["collection_city"]          # stripped above (_SOURCE_STR_FIELDS)
@@ -1248,7 +1248,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
             log.info("client hung up before the reply", extra={"extra_fields": {"path": self.path, "code": code}})
 
     def _authorized(self) -> bool:
-        # constant-time compare so the token can't be recovered by response-timing (L1). Compare on BYTES:
+        # constant-time compare so the token can't be recovered by response-timing. Compare on BYTES:
         # hmac.compare_digest raises TypeError on a non-ASCII str, and a client controls the Authorization
         # header value (latin-1 decoded, so a high byte yields a non-ASCII str) -- on str that TypeError
         # escapes _authorized (called before the dispatch try/except) and drops the connection with a
@@ -1315,7 +1315,7 @@ def boot(config_db, ledger_path) -> None:
     -> attribute vocab. A required restore that fails RAISES here, so the task exits non-zero and ECS
     retries: serving on a fresh store would let the periodic save overwrite the real snapshot."""
     from stone_pipeline.ledger import snapshot
-    # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
+    # Restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a
     # no-op when a local config.db already exists; the seed then only fills a genuinely first-ever run.
     snapshot.restore_config(config_db, required=True)   # durable: fail loud if a present snapshot won't fetch
@@ -1331,7 +1331,7 @@ def boot(config_db, ledger_path) -> None:
     if interrupted := store.reconcile_interrupted_runs(config_db):
         log.warning("reconciled interrupted run(s) from a prior restart",
                     extra={"extra_fields": {"sources": interrupted}})
-    # C1: the ledger lives on the LOCAL volume both containers share; the sync server is its ONE restorer
+    # The ledger lives on the LOCAL volume both containers share; the sync server is its ONE restorer
     # (S3 snapshot, else bootstrap; each an atomic rename). Wait for it before a produce/reset could create
     # a fresh empty one, and never download a second copy over a ledger that may already be serving.
     snapshot.await_file(ledger_path)
@@ -1342,14 +1342,13 @@ def boot(config_db, ledger_path) -> None:
     # ...and the learned-alias write-back (state/alias_writeback.csv): matcher consistency accumulated over
     # prior runs, on the same ephemeral disk. No-op when a local one already exists or none was snapshotted.
     snapshot.restore_state()
-    # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
-    # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
-    # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
-    # just-added colour is rejected at mint until the next full produce, and a REPUBLISH does not fetch inputs. A
-    # refused fetch (S3 error, thin or malformed copy, table 569's category_handles missing) is RECORDED, not fatal
-    # (the manager's ruling on SC #663): a crash-looping boot would take /reset, /run and every other route down with
-    # it. The vocabulary routes answer 503 naming the reason, so the server never serves a stale local vocab as
-    # Medusa's (34's rev 2, F vs G10), and a later successful fetch (a photos page, the produce, the next boot) clears it.
+    # Refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint validates
+    # colours/types against Medusa's CURRENT set from container start. Otherwise every deploy reverts the on-disk vocab
+    # to the committed baseline (which lags Medusa's newer colours), so a just-added colour is rejected at mint until
+    # the next full produce, and a REPUBLISH does not fetch inputs. A refused fetch (S3 error, thin or malformed copy,
+    # category_handles missing) is RECORDED, not fatal: a crash-looping boot would take /reset, /run and every other
+    # route down with it. The vocabulary routes answer 503 naming the reason, so the server never serves a stale local
+    # vocab as Medusa's, and a later successful fetch (a photos page, the produce, the next boot) clears it.
     from stone_pipeline.io import medusa_inputs
     try:
         medusa_inputs.fetch_attributes()

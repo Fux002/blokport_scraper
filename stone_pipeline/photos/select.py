@@ -1,4 +1,4 @@
-"""Choose each listing's one good photo (user 2026-11-01: one very good image per listing is enough; it gives every view).
+"""Choose each listing's one good photo (one very good image per listing is enough; it gives every view).
 The steps stone_pipeline.photos.process calls in order; hosted calls only, no model runs here. Two run tags take part: the
 standardiser's run over the scraped photos and its run over the copies a hosted edit model cleaned. Every answer is
 stored next to the image it is about, so a re-run reads it back and never pays twice; one listing's failure is
@@ -458,10 +458,10 @@ def fixable(client, rnd, sha, exclude, judged=None):
 
 
 def authorised(cause, sha, click):
-    """Why this fixable photo may be sent to a paid edit, or None (owner 2026-11-05): "click" when the owner's valid click
-    for the listing names this photo (always, within the cleaning cap, whatever the clean switch says); "auto" for a mark
-    on the stone (CLEAN_AUTO_KINDS, CLEAN_AUTO_HELD; a mark with a reflection besides is cleaned too, the edit removes
-    both) while the clean switch (CLEAN_ENABLED) is on. Any other fixable photo waits for a click."""
+    """Why this fixable photo may be sent to a paid edit, or None: "click" when the owner's valid click for the listing
+    names this photo (always, within the cleaning cap, whatever the clean switch says); "auto" for a mark on the stone
+    (CLEAN_AUTO_KINDS, CLEAN_AUTO_HELD; a mark with a reflection besides is cleaned too, the edit removes both) while
+    the clean switch (CLEAN_ENABLED) is on. Any other fixable photo waits for a click."""
     if click is not None and click["sha"] == sha:
         return "click"
     if C.CLEAN_ENABLED and (set(cause.get("kinds", ())) & set(C.CLEAN_AUTO_KINDS)
@@ -1142,9 +1142,9 @@ TRACKED_FIELDS = ["source", "listing", "format", "photos", "what_happened"]
 
 
 def merged_tracked(sel, tracked):
-    """tracked.csv's rows with this selection's listings' rows replaced by `tracked` (manager ruling C1, 2026-11-07: a
-    clicks-only run never rewrites the list from its few listings): every other row read back as stored, so it is
-    written again byte for byte; this run's rows after them. No list yet: this run's rows."""
+    """tracked.csv's rows with this selection's listings' rows replaced by `tracked` (a clicks-only run never rewrites
+    the list from its few listings): every other row read back as stored, so it is written again byte for byte; this
+    run's rows after them. No list yet: this run's rows."""
     try:
         body = sel.client.get_object(Bucket=S3_BUCKET, Key=f"{sel.root}tracked.csv")["Body"].read().decode()
     except ClientError as exc:

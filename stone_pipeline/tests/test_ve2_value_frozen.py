@@ -1,4 +1,4 @@
-"""VE2 PR4: restricted attribute values on scraped products (design section 3 + the 11-06 ruling).
+"""Restricted attribute values on scraped products.
 
 validate's `value_frozen` rule HOLDS a scraped product whose resolved colour/finish/quality/type is archived
 or internal, unless Medusa already imported THIS product (acked) carrying it. Restricted values come from
@@ -67,7 +67,7 @@ def test_acked_products_carry_the_stored_category_handle(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
         _ledger_product(lg, "ZUCCHI-1", category="tiles", medusa_id="M1")   # stored by handle (D11)
         out = acked_products(lg)
-    assert out == {"ZUCCHI-1": {("category", "tiles")}}                     # the handle itself (table 577)
+    assert out == {"ZUCCHI-1": {("category", "tiles")}}                     # the handle itself
 
 
 # --- validate value_frozen ---------------------------------------------------
@@ -200,7 +200,7 @@ def test_emit_ledger_sku_equals_the_emitted_variant_sku(surrogate, expected):
 
 
 def test_a_restricted_palette_colour_does_not_fail_load(monkeypatch):
-    # the classify palette is PR5's concern (a restricted colour is dropped from a mint), NOT a pack default,
+    # the classify palette is the mint's concern (a restricted colour is dropped from a mint), NOT a pack default,
     # so an archived palette colour must not abort every load_all.
     from stone_pipeline.config.domain import active_pack
     from stone_pipeline.config.settings import SETTINGS
@@ -261,7 +261,7 @@ def test_a_fuzzy_bind_onto_an_archived_variety_is_recognized_but_not_learned():
     assert stage.writeback.aliases == []                                 # but the guess is NOT learned onto it
 
 
-# --- VE2 PR5: the variety Key as a frozen dimension (item 6) ------------------
+# --- the variety Key as a frozen dimension ------------------------------------
 
 _ARCH_KEY = "marble__carrara_1"
 

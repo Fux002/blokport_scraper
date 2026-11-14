@@ -1,6 +1,6 @@
-"""Products link to their one standardised photo when a published one exists (one good image per listing, user
-2026-11-01): its showroom image first (the catalog thumbnail), then its white, side and close-up views; a product with no
-standardised photo keeps the images it had. Only each listing's chosen photo is published."""
+"""Products link to their one standardised photo when a published one exists (one good image per listing): its
+showroom image first (the catalog thumbnail), then its white, side and close-up views; a product with no standardised
+photo keeps the images it had. Only each listing's chosen photo is published."""
 from __future__ import annotations
 
 import boto3

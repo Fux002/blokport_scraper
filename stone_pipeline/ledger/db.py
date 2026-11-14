@@ -27,7 +27,7 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 15  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 15  # v15: phase 1: one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes v15 stores; an older ledger is refused (_apply_schema).

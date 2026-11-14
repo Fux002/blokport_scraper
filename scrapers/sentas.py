@@ -139,8 +139,7 @@ def _gallery(page: str) -> list[str]:
 def _drive_folders(page: str) -> list[str]:
     """Folder ids of the page's Drive photo cards, in page order: every action card that links a Drive folder (the
     packing-list card links a Sheet, never a folder). Read from the link, never the card's words, which the site
-    changes (2026-11-05: 'Google Drive Folder' became 'View slab images and packing list' and every folder was
-    missed)."""
+    changes (once 'Google Drive Folder' became 'View slab images and packing list' and every folder was missed)."""
     ids = []
     for href, _body in _ACTION_CARD.findall(page):
         found = _DRIVE_FOLDER_ID.search(html.unescape(href))

@@ -1,8 +1,8 @@
-"""SC-4 2e (plan SC-3-SC-4-PLAN.md 2e; spec rev 8 section 4, "Texture generation per pair", N3): the produce side of
-the icon layout `{ENV_SEGMENT}/variations/{Key}/{category name}.png`. A texture is ONE (Key, category) pair:
+"""The produce side of the icon layout `{ENV_SEGMENT}/variations/{Key}/{category name}.png` (SC-4 2e, plan
+SC-3-SC-4-PLAN.md 2e; spec section 4, "Texture generation per pair", N3). A texture is ONE (Key, category) pair:
 
 - a queue item carries its pair (`key`, `category`) and its pair id `"{Key}/{category}"` as `output_name` (the icon's
-  path under variations/ without ".png", the `_refreshed.json` id agreed with SC-3);
+  path under variations/ without ".png", the `_refreshed.json` id);
 - "product-backed" is per pair, from (variation id, `Product Category 1`) in the products file; a new mint is queued
   for each category its additions post lists; a held (key-less) addition is never queued;
 - "already has an icon" and "has a texture to upgrade" are per pair, from the S3 listing, never an `Image` cell;

@@ -1,6 +1,6 @@
 """Variety identity: the ONE rule the whole pipeline dedups by.
 
-A variety is (stone-type, name), with no category (PHASE-1-SPEC rev 8, 2a): one record per (type, name). Two Keys
+A variety is (stone-type, name), with no category (PHASE-1-SPEC 2a): one record per (type, name). Two Keys
 with the same identity are the SAME variety twice -- the class that ships duplicate products (a Key whose
 name-slug baked in an alias: `..._verde_ubatuba_ubatuba_...` vs the clean `..._verde_ubatuba_...`). Type comes
 from the Key through the ONE parser (phase1.variety_key: the part before the first `__`), so `sodalite_syenite` is

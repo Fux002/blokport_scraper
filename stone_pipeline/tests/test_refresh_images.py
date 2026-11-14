@@ -15,7 +15,7 @@ from botocore.exceptions import EndpointConnectionError
 from stone_pipeline import refresh_images as ri
 from stone_pipeline.tests._marker_s3 import MarkerS3, client_error
 
-# icon pair ids (`{Key}/{category}`), what the best-model marker holds (spec rev 8 section 4)
+# icon pair ids (`{Key}/{category}`), what the best-model marker holds (spec section 4)
 P0 = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/slab"
 P1 = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/block"
 P2 = "granite__absolute_black_7f3c0b6e-1111-5222-8333-944455556666/tile"

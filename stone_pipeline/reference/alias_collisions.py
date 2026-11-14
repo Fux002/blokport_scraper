@@ -1,9 +1,8 @@
-"""An alias may never equal the name of ANOTHER variety of the SAME stone type (Mas, 11-11): compared
-case-insensitively after the same name cleaning (adapters.tokens.clean_variety under the type). Such an alias binds a
-listing of one stone to a different stone, and nothing merges by name without the owner's word. A variety is one
-identity (type, cleaned name): every spelling under its one Key, and an alias that only repeats its own name, are not
-collisions. The same name under ANOTHER type is a different stone that matching keeps apart (type first): legitimate
-(Mas, 11-11).
+"""An alias may never equal the name of ANOTHER variety of the SAME stone type: compared case-insensitively after
+the same name cleaning (adapters.tokens.clean_variety under the type). Such an alias binds a listing of one stone to a
+different stone, and nothing merges by name without the owner's word. A variety is one identity (type, cleaned name):
+every spelling under its one Key, and an alias that only repeats its own name, are not collisions. The same name under
+ANOTHER type is a different stone that matching keeps apart (type first): legitimate.
 
 `find` lists every collision, each naming the alias, its variety and the variety it collides with. CI holds the
 committed vocabulary at 0 (tests/test_alias_collisions.py); at emit a collision with a live variety is dropped and

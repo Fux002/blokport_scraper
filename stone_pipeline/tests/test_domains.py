@@ -342,7 +342,7 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
     assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700
 
 
-# -- a pack's seed (the manager's rule, 12 Nov, reviewer 2's LOW on SC #663) -------------------------------------------
+# -- a pack's seed -----------------------------------------------------------------------------------------------------
 def test_a_pack_that_names_no_backbone_file_loads_with_no_seed(tmp_path, monkeypatch):
     # the real stone pack less its backbone_file line: a whole, loadable pack (the _valid_pack_dict shape only proves
     # a malformation, its attributes are not a real vocabulary)

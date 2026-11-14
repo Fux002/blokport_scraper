@@ -43,7 +43,7 @@ def _fetch_inputs() -> None:
     failure: in production it aborts the produce (matching against a stale or absent export would hold every
     variety and exit 0); in development (a laptop without S3) it logs and continues. A REFUSED attributes.csv (thin or
     malformed: Medusa mid-reset) is no outage and stops the produce in every environment: a produce never runs on a
-    vocabulary it knows is stale (G10's attributes half)."""
+    vocabulary it knows is stale."""
     from stone_pipeline.io import medusa_inputs
     try:
         medusa_inputs.fetch_all()
@@ -162,10 +162,10 @@ def _mirror_archived() -> None:
 
 
 def _migrate_learned_aliases() -> None:
-    """P2-10 C2: move state/alias_writeback.csv into config.db learned_alias, ONCE per env (the scraper manager's
-    ruling 11-12), before any stage can match. It resolves each record through the ledger, so it runs where the
-    ledger is the live sync source (write-through on); a later produce finds the marker and returns at once. A
-    failure RAISES: a produce must not match with the learned aliases half moved."""
+    """Move state/alias_writeback.csv into config.db learned_alias, ONCE per env, before any stage can match. It
+    resolves each record through the ledger, so it runs where the ledger is the live sync source (write-through on); a
+    later produce finds the marker and returns at once. A failure RAISES: a produce must not match with the learned
+    aliases half moved."""
     from stone_pipeline.ledger import writethrough
     if not writethrough.enabled():
         return
@@ -183,7 +183,7 @@ def _frozen_waiting() -> int:
 def _log_frozen_waiting() -> None:
     """VE2: surface new products held on a frozen (archived) variety. They wait silently as pending (the sync
     lane never serves them), so the produce logs the count on EVERY stage that recorded products (scrape
-    included), not only the catalog stages. The VISIBLE upstream hold (curate refusing the new bind) is PR5's.
+    included), not only the catalog stages. The VISIBLE upstream hold (curate refusing the new bind) is curate's.
     No-op when write-through is off."""
     from stone_pipeline.ledger import writethrough
     if not writethrough.enabled():
