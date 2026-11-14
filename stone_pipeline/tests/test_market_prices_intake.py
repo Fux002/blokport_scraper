@@ -41,9 +41,9 @@ PREFIX = "dev/market_prices/blokport"
 def _competitors() -> list[dict]:
     return [
         {"competitor_id": "stonecorp_gb", "names": ["StoneCorp Ltd", "StoneCorp"], "seller_type": "wholesaler",
-         "seller_country": "GB", "served_market": "GB", "site_domain": "stonecorp.example"},
+         "seller_country": "GB", "served_market": "GB", "site_domain": "stonecorp.example", "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"},
         {"competitor_id": "rocca_it", "names": ["Rocca"], "seller_type": "merchant", "seller_country": "IT",
-         "served_market": "GB", "site_domain": "rocca.example"},
+         "served_market": "GB", "site_domain": "rocca.example", "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"},
     ]
 
 
@@ -92,7 +92,7 @@ def _file(data: bytes = STONECORP, key: str = f"{PREFIX}/intake/stonecorp.csv", 
 
 
 def _absorb(data: bytes = STONECORP, layouts: Layouts | None = None, key: str = f"{PREFIX}/intake/stonecorp.csv"):
-    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport")
+    return intake.absorb_file(_file(data, key), layouts or _layouts(), *_words(), "bucket", "blokport", sources=())
 
 
 def _words():
@@ -107,8 +107,8 @@ def _status(result, site_id="stonecorp_gb") -> SiteStatus:
 
 
 # --- the source column (since v2) ---------------------------------------------------------------------------------------
-def test_the_contract_is_version_3_and_source_is_the_second_column():
-    assert config.CONTRACT_VERSION == "3"
+def test_the_contract_is_version_4_and_source_is_the_second_column():
+    assert config.CONTRACT_VERSION == "4"
     assert columns(Observation)[:2] == ("contract_version", "source")
     assert columns(SiteStatus)[:2] == ("contract_version", "source")
 
@@ -118,7 +118,7 @@ def test_a_crawl_row_says_it_came_from_a_site():
         "brand": "blokport", "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
         "served_market": "NL", "platform": "woocommerce_store", "base_url": "https://shop.example",
         "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02", "summary": "None."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
     from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails this test only
     facts = ListingFacts(listing_key="1", source_url="https://shop.example/p/1", listing_text="Sill")
     assert _observation(facts, site, "blokport", stamp_for(RECEIVED), "woo/1", NO_SPECS).source is Source.site
@@ -132,7 +132,7 @@ def test_a_sheet_row_and_its_status_say_they_came_from_a_file():
 
 def test_the_contract_states_the_version_rule_and_the_source_column():
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
-    assert "Version 3" in text and "| source |" in text
+    assert "Version 4" in text and "| source |" in text
     assert "refuses a contract_version it does not know" in text
 
 
@@ -311,13 +311,14 @@ def test_a_known_layout_gives_the_exact_rows():
     assert result.run_id == RUN_ID and result.brand == "blokport"
     first = result.observations[0].model_dump(mode="json")
     assert first == {
-        "contract_version": "3", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
+        "contract_version": "4", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
-        "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
+        "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
         "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"},
         "thickness_mm": None, "finish": None, "material_type": None, "origin_iso_2": None, "thickness_text": None,
         "finish_text": None, "material_text": None, "origin_text": None, "spec_labels": {}, "grade_text": None,
-        "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
+        "price_text": "1,234.50", "price_amount": "1234.50", "regular_price_text": None,
+        "regular_price_amount": None, "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",
         "min_qty_text": None, "availability_text": None,
         "provenance": {"vat_basis": "site_statement", "unit_text": "listing", "delivery_text": "unknown",
@@ -618,8 +619,9 @@ def test_a_file_is_absorbed_published_and_recorded_once(tmp_path):
     s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
     outcome = _intake(s3, tmp_path)
     assert outcome.absorbed == ((f"{PREFIX}/intake/stonecorp.csv", RUN_ID),) and outcome.refused == ()
-    assert s3.puts == [f"{PREFIX}/{RUN_ID}/observations.csv", f"{PREFIX}/{RUN_ID}/site_status.csv",
-                       f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}", f"{PREFIX}/latest.json", RECORD]
+    assert s3.puts == [f"{PREFIX}/{RUN_ID}/observations.csv", f"{PREFIX}/{RUN_ID}/register.json",
+                       f"{PREFIX}/{RUN_ID}/site_status.csv", f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}",
+                       f"{PREFIX}/latest.json", RECORD]
     assert _record(s3) == [{"sha256": hashlib.sha256(STONECORP).hexdigest(), "key": f"{PREFIX}/intake/stonecorp.csv",
                             "version_id": "v1", "layout_id": "stonecorp_csv", "run_id": RUN_ID}]
     s3.puts.clear()
@@ -666,6 +668,19 @@ def test_a_crash_before_the_record_redoes_the_file_into_the_same_run_and_bytes(t
     assert s3.objects[f"{PREFIX}/{RUN_ID}/observations.csv"][0] == observations
     assert f"{PREFIX}/{RUN_ID}/observations.csv" not in s3.puts and RECORD in s3.puts
 
+
+def test_a_crash_before_latest_records_the_file_and_moves_latest_without_rewriting_its_run_folder(tmp_path):
+    # a run folder is written once (CONTRACT.md): the redo of the file's own published run writes no file in it, and
+    # still finishes what the crash left, its latest pointer and its record
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
+    _intake(s3, tmp_path)
+    del s3.objects[RECORD], s3.objects[f"{PREFIX}/{config.LATEST_FILE}"]     # died after the manifest, before latest
+    s3.puts.clear()
+    assert _intake(s3, tmp_path).absorbed == ((f"{PREFIX}/intake/stonecorp.csv", RUN_ID),)
+    assert not [key for key in s3.puts if key.startswith(f"{PREFIX}/{RUN_ID}/")]
+    assert json.loads(s3.objects[f"{PREFIX}/{config.LATEST_FILE}"][0])["run_id"] == RUN_ID
+    assert RECORD in s3.puts
 
 def test_a_run_folder_held_by_another_run_refuses_the_file(tmp_path):
     s3 = _S3()
@@ -874,18 +889,19 @@ def _owner_rows(tab: str, *rows: dict) -> dict[str, Observation]:
     headers = _OWNER_TABS[tab]
     data = _xlsx({tab: [headers, *([row.get(header) for header in headers] for row in rows)]})
     key = f"{PREFIX}/intake/owner_{tab.split()[0].lower()}.xlsx"
-    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport")
+    result = intake.absorb_file(_file(data, key), load_layouts("blokport"), *_words(), "bucket", "blokport",
+                                sources=())
     return {row.listing_key: row for row in result.observations}
 
 
 def test_the_owner_competitors_are_declared_from_the_owners_answers():
     competitors = load_layouts("blokport").competitors
-    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value, c.supplier_key)
+    assert {c.competitor_id: (c.site_domain, c.seller_country, c.served_market, c.seller_type.value)
             for c in competitors} == {
-        "brachot": ("brachot.com", "BE", "EU", "wholesaler", None),
-        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler", None),
-        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
-        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler", None),
+        "brachot": ("brachot.com", "BE", "EU", "wholesaler"),
+        "tuytelaers": ("tuytelaers.be", "BE", "EU", "wholesaler"),
+        "cereser": ("ceresermarmi.com", "IT", "EU", "wholesaler"),
+        "cereser_carrara": ("ceresermarmi.com", "IT", "EU", "wholesaler"),
     }
 
 
@@ -922,7 +938,7 @@ def test_an_owner_row_with_no_honest_spec_mapping_is_refused_with_its_reason_and
             {**base, "Finish": "Gepolijst", "Origin": "Not defined in catalog legend"},
             {**base, "Finish": "Letano", "Catalog page": 11}))]})
     result = intake.absorb_file(_file(data, f"{PREFIX}/intake/owner_brachot.xlsx"), load_layouts("blokport"),
-                                *_words(), "bucket", "blokport")
+                                *_words(), "bucket", "blokport", sources=())
     (row,) = result.observations
     assert (row.finish, row.origin_iso_2, row.stated_specs["Origin"]) == ("Polished", None,
                                                                          "Not defined in catalog legend")
@@ -962,3 +978,80 @@ def test_each_cereser_list_is_its_own_competitor_priced_from_its_own_column():
     assert (carrara.finish, carrara.finish_text, carrara.thickness_mm) == ("Split Face", "a spacco", "20")
     # an unpriced row is kept as stated, never priced from another column
     assert (unpriced.price_amount, unpriced.price_status) == (None, PriceStatus.none)
+
+
+
+# --- one intake run delivers every pending readable sheet (contract v4, the manager) ---------------------------------
+ROCCA = _csv(["Rocca"], ["Code", "Product", "Finish", "Price", "Unit"],
+             ["R1", "Statuario slab 2cm", "Polished", "990.00", "m2"])
+LATER = datetime(2026, 11, 11, 9, 20, 0, tzinfo=timezone.utc)
+LATER_RUN = "20261111T092000Z"
+
+
+def _one_run_rows(s3: _S3, run_id: str) -> list[dict]:
+    return list(csv.DictReader(io.StringIO(s3.objects[f"{PREFIX}/{run_id}/observations.csv"][0].decode("utf-8"))))
+
+
+def test_two_sheets_received_in_the_same_second_are_one_run_with_both_competitors(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP)
+    outcome = _intake(s3, tmp_path)
+    assert outcome.refused == ()
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", RUN_ID))
+    assert [key for key in s3.puts if key.endswith(MANIFEST_NAME)] == [f"{PREFIX}/{RUN_ID}/{MANIFEST_NAME}"]
+    assert {row["site_id"] for row in _one_run_rows(s3, RUN_ID)} == {"rocca_it", "stonecorp_gb"}
+    assert sorted((row["key"], row["run_id"]) for row in _record(s3)) == [
+        (f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", RUN_ID)]
+
+
+def test_one_run_is_stamped_by_its_newest_sheet_and_each_row_by_its_own(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, LATER)
+    assert {run for _key, run in _intake(s3, tmp_path).absorbed} == {LATER_RUN}
+    seen = {row["site_id"]: row["observed_at"] for row in _one_run_rows(s3, LATER_RUN)}
+    assert seen == {"rocca_it": "2026-11-11T09:15:00Z", "stonecorp_gb": "2026-11-11T09:20:00Z"}
+
+
+def test_a_refused_sheet_is_left_and_named_and_the_run_is_delivered_without_it(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/a_unknown.csv", _csv(["Who"], ["Ref", "Cost"], ["1", "2"]))
+    s3.add(f"{PREFIX}/intake/b_rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/c_stonecorp.csv", STONECORP, LATER)
+    outcome = _intake(s3, tmp_path)
+    assert [key for key, _why in outcome.refused] == [f"{PREFIX}/intake/a_unknown.csv"]
+    assert outcome.absorbed == ((f"{PREFIX}/intake/b_rocca.csv", LATER_RUN),
+                                (f"{PREFIX}/intake/c_stonecorp.csv", LATER_RUN))
+    assert {row["key"] for row in _record(s3)} == {f"{PREFIX}/intake/b_rocca.csv", f"{PREFIX}/intake/c_stonecorp.csv"}
+
+
+def test_one_competitor_in_two_pending_sheets_refuses_both_and_delivers_the_rest(tmp_path):
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, RECEIVED)
+    s3.add(f"{PREFIX}/intake/stonecorp_new.csv", STONECORP.replace(b"1,234.50", b"1,199.00"), LATER)
+    outcome = _intake(s3, tmp_path)
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID),)
+    refused = dict(outcome.refused)
+    assert sorted(refused) == [f"{PREFIX}/intake/stonecorp.csv", f"{PREFIX}/intake/stonecorp_new.csv"]
+    assert all("stonecorp_gb" in why and "more than one pending file" in why for why in refused.values())
+    assert [row["key"] for row in _record(s3)] == [f"{PREFIX}/intake/rocca.csv"]
+
+
+def test_a_crashed_run_is_finished_and_a_new_sheet_makes_its_own_run(tmp_path):
+    # the double fault the manager ruled closed: a run dies after its manifest, before its record, and a new sheet
+    # lands before the redo. The redo finishes the crashed run (nothing in its folder is written again) and the new
+    # sheet is a run of its own: no sheet is ever delivered twice.
+    s3 = _S3()
+    s3.add(f"{PREFIX}/intake/rocca.csv", ROCCA, RECEIVED)
+    _intake(s3, tmp_path / "first")
+    del s3.objects[RECORD]
+    s3.add(f"{PREFIX}/intake/stonecorp.csv", STONECORP, LATER)
+    s3.puts.clear()
+    outcome = _intake(s3, tmp_path / "redo")
+    assert outcome.absorbed == ((f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", LATER_RUN))
+    assert not [key for key in s3.puts if key.startswith(f"{PREFIX}/{RUN_ID}/")]
+    assert {row["site_id"] for row in _one_run_rows(s3, LATER_RUN)} == {"stonecorp_gb"}
+    assert sorted((row["key"], row["run_id"]) for row in _record(s3)) == [
+        (f"{PREFIX}/intake/rocca.csv", RUN_ID), (f"{PREFIX}/intake/stonecorp.csv", LATER_RUN)]

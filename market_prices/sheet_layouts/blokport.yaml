@@ -15,12 +15,18 @@ competitors:
     seller_country: BE
     served_market: EU
     site_domain: brachot.com
+    price_basis: list
+    decided_by: "owner (supplied workbook) via Mas"
+    decided_on: 2026-11-13                # Mas's mapping ruling
   - competitor_id: tuytelaers
     names: ["Tuytelaers", "prijslijst-platen-2026(3).pdf"]
     seller_type: wholesaler
     seller_country: BE
     served_market: EU
     site_domain: tuytelaers.be
+    price_basis: list
+    decided_by: "owner (supplied workbook) via Mas"
+    decided_on: 2026-11-13                # Mas's mapping ruling
   # Cereser's main list and its Listino Carrara are two lists in one tab, each priced in its own column: two ids.
   - competitor_id: cereser
     names: ["Cereser", "Italian supplier list(1).xlsx"]
@@ -28,12 +34,20 @@ competitors:
     seller_country: IT
     served_market: EU
     site_domain: ceresermarmi.com
+    price_basis: list
+    decided_by: "owner (supplied workbook) via Mas"
+    decided_on: 2026-11-13                # Mas's mapping ruling
   - competitor_id: cereser_carrara
     names: ["Cereser Listino Carrara", "LISTINO CARRARA -(2).xlsx"]
     seller_type: wholesaler
     seller_country: IT
     served_market: EU
     site_domain: ceresermarmi.com
+    price_basis: net
+    net_markup: "0.20"                  # the owner: "Gross up the Cereser prices by 20%": EUR 100 net is EUR 120 list
+    net_markup_stated_by: owner
+    decided_by: "owner (supplied workbook) via Mas"
+    decided_on: 2026-11-13                # Mas's mapping ruling
 
 # listing_key: always-filled columns only (an empty key part makes the row malformed), measured unique on the workbook.
 layouts:

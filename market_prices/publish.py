@@ -14,7 +14,11 @@ from market_prices.brand import SLUG, output_key
 _RUN_ID = re.compile(r"\d{8}T\d{6}Z")
 
 
-def _move_latest(client, bucket: str, brand: str, run_id: str, rows: int) -> bool:
+class RunAlreadyPublished(RuntimeError):
+    """The run folder already has its manifest: a run folder is written once, and a correction is a new run."""
+
+
+def move_latest(client, bucket: str, brand: str, run_id: str, rows: int) -> bool:
     """Point latest at this run, unless it holds no rows or a newer run is already there: an all-blocked night or a
     late re-publish must not replace good prices. The run's folder is published either way, as the evidence."""
     key = output_key(brand, config.LATEST_FILE)
@@ -28,13 +32,21 @@ def _move_latest(client, bucket: str, brand: str, run_id: str, rows: int) -> boo
 
 
 def publish_run(client, bucket: str, brand: str, run_dir: Path) -> dict:
-    """Both files, then their manifest (carrying the brand), then latest, so a reader never sees a run that is not
-    complete. The folder must be what write_run made for this brand: its name becomes the run id, and a stray one would
-    freeze latest."""
+    """The run's files (observations, site status, register), then their manifest (carrying the brand), then latest,
+    so a reader never sees a run that is not complete. The folder must be what write_run made for this brand: its name
+    becomes the run id, and a stray one would freeze latest. A run already published is refused before anything is
+    written (CONTRACT.md: a run folder is written once)."""
     run_id = run_dir.name
     if not SLUG.fullmatch(brand) or not _RUN_ID.fullmatch(run_id) or run_dir.parent.name != brand:
         raise ValueError(f"{run_dir} is not a run folder of brand {brand!r}")
+    manifest_key = output_key(brand, run_id, MANIFEST_NAME)
+    # A brand has two producers, the fetching run and the intake, each one run at a time; an id is a second, so an id
+    # both reach is refused here, never overwritten. The check is read-then-write: only two publishes of one id inside
+    # the same moment pass it together, which no S3 conditional write is spent on (the manager, 14 Nov)
+    if published_manifest(client, bucket, manifest_key):
+        raise RunAlreadyPublished(f"s3://{bucket}/{manifest_key} exists: a run folder is written once, so run "
+                                  f"{run_id} is not published again (a correction is a new run)")
     published = publish_deliverables(client, bucket, run_dir, output_key(brand, run_id), run_id, brand=brand,
-                                     only={config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE})
+                                     only={config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE, config.REGISTER_FILE})
     rows = published["manifest"]["files"][config.OBSERVATIONS_FILE]["rows"]
-    return {**published, "latest_moved": _move_latest(client, bucket, brand, run_id, rows)}
+    return {**published, "latest_moved": move_latest(client, bucket, brand, run_id, rows)}

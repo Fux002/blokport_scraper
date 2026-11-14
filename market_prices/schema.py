@@ -85,8 +85,6 @@ class Observation(BaseModel):
     seller_type: SellerType
     seller_country: str = Field(pattern=r"^[A-Z]{2}$")
     served_market: str = Field(pattern=r"^[A-Z]{2}$")
-    seller_is_our_supplier: bool
-    supplier_key: Optional[str]
     listing_key: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     listing_text: str = Field(min_length=1)
@@ -104,6 +102,9 @@ class Observation(BaseModel):
     grade_text: Optional[str]
     price_text: Optional[str]
     price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
+    # contract v4 (Mas's sale rule): the regular price shown beside the current one; on sale exactly when it is set
+    regular_price_text: Optional[str]
+    regular_price_amount: Optional[str] = Field(pattern=r"^\d+(\.\d+)?$")
     currency: Optional[str] = Field(pattern=r"^[A-Z]{3}$")
     price_status: PriceStatus
     vat_basis: VatBasis
@@ -136,9 +137,9 @@ class Observation(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _supplier_flag_has_its_key(self) -> "Observation":
-        if self.seller_is_our_supplier != (self.supplier_key is not None):
-            raise ValueError("supplier_key is set exactly when seller_is_our_supplier is true")
+    def _regular_amount_has_its_text(self) -> "Observation":
+        if self.regular_price_amount is not None and self.regular_price_text is None:
+            raise ValueError("regular_price_amount is set only with the regular_price_text it is read from")
         return self
 
     @model_validator(mode="after")
@@ -182,6 +183,9 @@ class ListingFacts:
     grade_text: Optional[str] = None
     price_text: Optional[str] = None
     price_amount: Optional[str] = None
+    # the regular price shown beside the current one (contract v4)
+    regular_price_text: Optional[str] = None
+    regular_price_amount: Optional[str] = None
     currency: Optional[str] = None
     price_status: PriceStatus = PriceStatus.none
     min_qty_text: Optional[str] = None

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-CONTRACT_VERSION = "3"
+CONTRACT_VERSION = "4"
 
 SITES_DIR = Path(__file__).resolve().parent / "sites"
 LAYOUTS_DIR = Path(__file__).resolve().parent / "sheet_layouts"
@@ -12,6 +12,8 @@ COUNTRIES_FILE = Path(__file__).resolve().parent / "countries.yaml"
 # Each run's folder is written here first (<RUNS_DIR>/<env>/<brand>/<run_id>), then published; gitignored (/outputs/).
 RUNS_DIR = Path(__file__).resolve().parents[1] / "outputs" / "market_prices"
 OBSERVATIONS_FILE = "observations.csv"
+# contract v4: the brand's register as the run started (approved sites and sheet competitors), in every run folder
+REGISTER_FILE = "register.json"
 SITE_STATUS_FILE = "site_status.csv"
 LATEST_FILE = "latest.json"
 S3_BRAND_PREFIX = "{env_segment}/market_prices/{brand}"
@@ -75,22 +77,10 @@ MALFORMED_REASONS_SHOWN = 3
 # The generic declared-HTML collector (collectors/declared_html.py) walks the same entry points under the same caps. A
 # page parsed into more elements than this is not read (the response itself is already capped by MAX_RESPONSE_BYTES).
 DECLARED_HTML_MAX_ELEMENTS = 200_000
-# Mas's sale rule (14 Nov): when a record's price element holds struck text, stated_specs carries this label and value
-SALE_FLAG_LABEL = "On sale"
-SALE_FLAG_VALUE = "yes"
 
-# Supplier prices read from the product scraper's own fetch (collectors/supplier_scrape.py; the produce publishes them,
-# market_prices/supplier.py). Only a declared currency symbol names a currency: another leaves the listing unpriced and
-# is counted, never guessed. A price that states one of these words is on request.
-CURRENCY_SYMBOLS = {"US$": "USD"}
-ON_REQUEST_TEXTS = ("call for price",)
-# A supplier scraper's separate price pass, in its run folder (scrapers/base.py write_price_pass, whose PRICES_CSV and
-# PRICES_MARKER these equal): its rows, its marker with the statement of whether it read prices ("ok" or why not), and
-# the UTC stamp the run folder is named by. The products.csv beside them is never read here.
-SCRAPE_ROWS_FILE = "prices.csv"
-SCRAPE_MARKER_FILE = "prices_complete.json"
-SCRAPE_PRICES_KEY = "prices"
-SCRAPE_STAMP_FORMAT = "%Y%m%d_%H%M%S"
+# WooCommerce core's visually hidden classes: its sale price_html announces "Original price was: X." and "Current
+# price is: Y." for screen readers outside the struck price, never shown to a buyer, so never part of a price text.
+WOOCOMMERCE_HIDDEN_CLASSES = frozenset({"screen-reader-text"})
 
 # The dev pilot (market_prices/pilot.py): the brand register's own pilot_site, run against dev's bucket, then a summary
 # with the first rows. It refuses a pilot site the register has not approved, and any environment but development.
@@ -102,6 +92,8 @@ PILOT_SAMPLE_ROWS = 5
 INTAKE_DIR_NAME = "intake"
 ABSORBED_FILE = "intake_absorbed.csv"
 INTAKE_RUNS_DIR_NAME = "intake"
+# Under the runs root: where the redo rebuilds a lost run from its files, to compare with what was published
+INTAKE_REBUILD_DIR_NAME = "rebuild"
 SHEET_COLLECTOR_VERSION = "sheet-intake/1"
 # A sheet row's site_status decision: the owner supplied the file, so no terms gate applies.
 FILE_DECISION = "supplied"

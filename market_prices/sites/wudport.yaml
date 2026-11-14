@@ -28,6 +28,7 @@ sites:
         listings and product pages for our client. JSON-LD Product and Offer price on a product page (69.52 GBP). The
         owner notes Jewson shows a branch price at a central postcode.
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
   - site_id: selcobw
@@ -52,6 +53,7 @@ sites:
         this site is expected to report 0 listings; its sitemap covers the whole catalogue (about 9,000 URLs), so it
         is no entry point. The owner notes the site needs a browser.
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
   - site_id: totemtimber
@@ -72,6 +74,7 @@ sites:
         The terms have no clause on scraping, automated access or copying prices. robots.txt disallows only
         WooCommerce internals and add-to-cart links. JSON-LD Product and Offer price on a product page (4.00 GBP).
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
   - site_id: mkm
@@ -96,6 +99,7 @@ sites:
         listings and product pages. A product page carries a JSON-LD Product but NO offers price, so this site is
         expected to give no priced rows (the owner noted only 44 of 780 priced).
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
   - site_id: originalmarquetry
@@ -118,6 +122,7 @@ sites:
         facts and the source URL and never reproduce content). robots.txt allows the veneer listings and product
         pages. JSON-LD Product and Offer price on a product page (38.50 GBP).
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
     statements: {vat_basis: excl}
@@ -142,6 +147,7 @@ sites:
         listings and product pages. JSON-LD Product and Offer price on a product page (18.94 GBP). The owner lists
         it as not yet added (about 48 sheet products).
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
   # ---- UK, on the owner's list but not approvable on the 13 Nov read (a reason each; never collected) ------------
@@ -390,6 +396,9 @@ sites:
         and product pages. JSON-LD Product and Offer price on a product page (16.58 EUR). Its sitemaps name only the
         OSB category among sheet materials.
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
+    vat_rate: "0.19"                 # the owner's standard DE rate (prices stated incl., no rate stated)
+    vat_rate_stated_by: owner
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
     statements: {vat_basis: incl}
@@ -434,6 +443,9 @@ sites:
         disallows only search, ProductDisplay and history parameters. A product page carries no JSON-LD Product, so
         this site is expected to give no priced rows. Prices in SEK.
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
+    vat_rate: "0.25"                 # the owner's standard SE rate (prices stated incl., no rate stated)
+    vat_rate_stated_by: owner
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
     statements: {vat_basis: incl}
@@ -460,6 +472,9 @@ sites:
         sheet listings. A product page carries no JSON-LD Product and its listing pages hold no product links in
         plain HTML, so this site is expected to give no priced rows. Prices in SEK.
     decision: approved
+    price_basis: list                 # the owner, 14 Nov: all list prices, no discount
+    vat_rate: "0.25"                 # the owner's standard SE rate (prices stated incl., no rate stated)
+    vat_rate_stated_by: owner
     decided_by: "Mas for the owner (owner's 13 Nov site list)"
     decided_on: 2026-11-13
     statements: {vat_basis: incl}

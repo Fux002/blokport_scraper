@@ -6,13 +6,15 @@ market_prices/sheet_layouts/<brand>.yaml.
 
 Each file in `<env>/market_prices/<brand>/intake/` is read once, by its sha256:
 - a file whose sha is in the brand's `intake_absorbed.csv` is skipped, under any name;
-- a file no layout reads (or over a cap, or naming an unknown competitor) is refused, named, and left there, so it
-  is read once a layout for it is committed;
-- any other file becomes one delivered run, published like a crawl run (publish_run), with `source=file` rows. The
-  run id is when S3 received the file (its LastModified): a fact, so a re-run of the same file gives the same run.
-The record is written after the run is published, so a run that dies in between redoes that file into the same run
-and the same bytes. The entry exits non-zero when any file was refused. Under the S3 dry run the run folders are
-written locally and nothing is published or recorded.
+- a file no layout reads (or over a cap, or naming an unknown competitor), and every file of a competitor two pending
+  files carry, is refused, named, and left there, so it is read once that is resolved;
+- every other pending file goes into ONE delivered run, published like a crawl run (publish_run), with `source=file`
+  rows. The run id is when S3 received the newest of them (its LastModified) and each row's observed_at its own
+  file's: facts, so the same pending files always give the same run.
+The record is written after the run is published. A run that dies in between is finished by the next intake (its
+latest pointer, then its record), never delivered again, even when a new file has arrived since (the newer file is a
+run of its own). The entry exits non-zero when any file was refused. Under the S3 dry run the run folder is written
+locally and nothing is published or recorded.
 """
 
 from __future__ import annotations
@@ -35,8 +37,9 @@ from market_prices import config
 from market_prices.brand import output_key, require_brand_key
 from market_prices.collect import RunResult, Stamp, counted_reasons, invalid_reason, stamp_for, write_run
 from market_prices.layouts import Competitor, Layout, Layouts, cell_position, check_ids_apart, load_layouts, name_key
-from market_prices.publish import publish_run
+from market_prices.publish import move_latest, publish_run
 from market_prices.register import load_register
+from market_prices.register_file import register_sources
 from market_prices.run_input import run_brand
 from market_prices.schema import (
     DeliveryIncluded, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source, VatBasis,
@@ -78,15 +81,29 @@ class _Matched:
     table: Table
 
 
-# --- one file -> one run ---------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _Read:
+    """One pending file read under its layout: its rows and statuses, stamped with its own LastModified."""
+    file: IntakeFile
+    sha: str
+    layout: Layout
+    result: RunResult
+
+    @property
+    def competitors(self) -> frozenset[str]:
+        return frozenset(status.site_id for status in self.result.statuses)
+
+
+# --- one file ---------------------------------------------------------------------------------------------------------
 def absorb_file(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
-                brand: str) -> RunResult:
-    """The file's rows and one status per competitor in it. Raises FileRefused when the whole file cannot be read."""
-    return _absorb(file, layouts, vocabulary, countries, bucket, brand)[1]
+                brand: str, *, sources: tuple[dict, ...]) -> RunResult:
+    """The file's rows and one status per competitor in it, with the brand's register rows (`sources`, written as
+    register.json). Raises FileRefused when the whole file cannot be read."""
+    return _absorb(file, layouts, vocabulary, countries, bucket, brand, sources)[1]
 
 
 def _absorb(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countries: Countries, bucket: str,
-            brand: str) -> tuple[Layout, RunResult]:
+            brand: str, sources: tuple[dict, ...]) -> tuple[Layout, RunResult]:
     matched = _match_layout(file.key, read_tables(PurePosixPath(file.key).name, file.data), layouts)
     layout, rows = matched.layout, matched.table.rows
     stamp = stamp_for(file.last_modified)
@@ -125,7 +142,8 @@ def _absorb(file: IntakeFile, layouts: Layouts, vocabulary: Vocabulary, countrie
     statuses = tuple(_status(site_id, brand, len(kept[site_id]), malformed.get(site_id, 0),
                              duplicates.get(site_id, 0), reasons.get(site_id, collections.Counter()),
                              unstated.get(site_id, 0), stamp) for site_id in sorted(kept))
-    return layout, RunResult(brand=brand, run_id=stamp.run_id, observations=observations, statuses=statuses)
+    return layout, RunResult(brand=brand, run_id=stamp.run_id, observations=observations, statuses=statuses,
+                             sources=sources)
 
 
 def _match_layout(key: str, tables: list[Table], layouts: Layouts) -> _Matched:
@@ -235,11 +253,11 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     row = Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,
         seller_name=competitor.names[0], seller_type=competitor.seller_type, seller_country=competitor.seller_country,
-        served_market=competitor.served_market, seller_is_our_supplier=competitor.supplier_key is not None,
-        supplier_key=competitor.supplier_key, listing_key="|".join(key_parts),
+        served_market=competitor.served_market, listing_key="|".join(key_parts),
         source_url=_source_url(bucket, file, table.name, index), listing_text=text, stated_specs=kept,
         **specs.columns(),
         grade_text=grade, price_text=price.text, price_amount=price.amount,
+        regular_price_text=None, regular_price_amount=None,             # a sheet states no regular price apart
         currency=listed_currency or said.currency, price_status=price.status,
         vat_basis=said.vat_basis or VatBasis.unknown, unit_text=listed_unit or said.unit_text,
         delivery_text=said.delivery_text, delivery_included=said.delivery_included or DeliveryIncluded.unknown,
@@ -294,14 +312,16 @@ def _status(site_id: str, brand: str, rows: int, malformed: int, duplicates: int
 
 # --- the intake folder, the record and the publish --------------------------------------------------------------------
 def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dry_run: bool) -> IntakeOutcome:
-    """Every intake file of the brand, in key order, each isolated: a refused file never stops the others."""
+    """Every pending intake file of the brand into one run; each file isolated, so a refused one never stops the
+    others."""
     vocabulary, countries = load_vocabulary(brand), load_countries()
+    sources = register_sources(load_register(brand), layouts)
     record_key = output_key(brand, config.ABSORBED_FILE)
     record = read_absorbed(client, bucket, record_key)
     seen = set(record)
-    absorbed: list[tuple[str, str]] = []
     skipped: list[str] = []
     refused: list[tuple[str, str]] = []
+    reads: list[_Read] = []
     for key, size in _listed_files(client, bucket, output_key(brand, config.INTAKE_DIR_NAME) + "/"):
         require_brand_key(brand, key)       # brand_scoped_output: a listed key is read only inside the brand's prefix
         if size > config.MAX_INTAKE_FILE_BYTES:
@@ -314,21 +334,107 @@ def run_intake(client, bucket: str, brand: str, layouts: Layouts, root: Path, dr
             continue
         seen.add(sha)
         try:
-            layout, result = _absorb(file, layouts, vocabulary, countries, bucket, brand)
+            layout, result = _absorb(file, layouts, vocabulary, countries, bucket, brand, sources)
         except FileRefused as exc:
             refused.append((key, str(exc)))
             continue
-        run_dir = write_run(result, root)
+        reads.append(_Read(file, sha, layout, result))
+    reads, shared = _one_file_per_competitor(reads)
+    refused.extend(shared)
+    absorbed: list[tuple[str, str]] = []
+    if not dry_run:
+        reads = _finish_crashed_runs(client, bucket, brand, reads, sources, root, record, record_key, absorbed)
+    if reads:
+        run = _one_run(reads, brand, sources)
+        run_dir = write_run(run, root)
         if not dry_run:
-            if (held := _held_by_another_run(client, bucket, brand, result.run_id, run_dir)) is not None:
-                refused.append((key, held))
-                continue
-            publish_run(client, bucket, brand, run_dir)
-            record[sha] = {"sha256": sha, "key": key, "version_id": file.version_id, "layout_id": layout.layout_id,
-                           "run_id": result.run_id}
-            write_absorbed(client, bucket, record_key, record)
-        absorbed.append((key, result.run_id))
-    return IntakeOutcome(tuple(absorbed), tuple(skipped), tuple(refused))
+            if published_manifest(client, bucket, output_key(brand, run.run_id, MANIFEST_NAME)):
+                # the id is the newest file's LastModified, so every rerun meets the same folder: only a new upload of
+                # that file (a new LastModified, so a new id) or the owner's call clears it; refused, so exit non-zero
+                newest = max(reads, key=lambda read: read.file.last_modified).file.key
+                refused.extend((read.file.key, f"run folder {run.run_id} already holds another run; the file is left, "
+                                               f"and every rerun meets the same folder until {newest} is uploaded "
+                                               f"again (a new LastModified gives the run a new id) or the owner "
+                                               f"decides") for read in reads)
+                reads = []
+            else:
+                publish_run(client, bucket, brand, run_dir)
+                _record(client, bucket, record_key, record, reads, run.run_id)
+        absorbed.extend((read.file.key, run.run_id) for read in reads)
+    return IntakeOutcome(tuple(absorbed), tuple(skipped), tuple(sorted(refused)))
+
+
+def _one_file_per_competitor(reads: list[_Read]) -> tuple[list[_Read], list[tuple[str, str]]]:
+    """The reads whose competitors no other pending file carries, and a refusal for each of the others: which of two
+    lists of one competitor is current is never guessed."""
+    holders: dict[str, list[str]] = collections.defaultdict(list)
+    for read in reads:
+        for competitor in read.competitors:
+            holders[competitor].append(read.file.key)
+    kept: list[_Read] = []
+    refused: list[tuple[str, str]] = []
+    for read in reads:
+        shared = sorted(competitor for competitor in read.competitors if len(holders[competitor]) > 1)
+        if not shared:
+            kept.append(read)
+            continue
+        files = sorted({key for competitor in shared for key in holders[competitor]})
+        refused.append((read.file.key, f"competitor {', '.join(shared)} is in more than one pending file {files}; "
+                                       f"which list is current is never guessed, so all are left"))
+    return kept, refused
+
+
+def _one_run(reads: list[_Read], brand: str, sources: tuple[dict, ...]) -> RunResult:
+    """The reads as one run: stamped by the newest file, each row and status keeping its own file's observed_at."""
+    run_id = stamp_for(max(read.file.last_modified for read in reads)).run_id
+    observations = sorted((row.model_copy(update={"run_id": run_id}) for read in reads
+                           for row in read.result.observations), key=lambda row: (row.site_id, row.listing_key))
+    statuses = sorted((status.model_copy(update={"run_id": run_id}) for read in reads
+                       for status in read.result.statuses), key=lambda status: status.site_id)
+    return RunResult(brand=brand, run_id=run_id, observations=tuple(observations), statuses=tuple(statuses),
+                     sources=sources)
+
+
+def _finish_crashed_runs(client, bucket: str, brand: str, reads: list[_Read], sources: tuple[dict, ...], root: Path,
+                         record: dict[str, dict[str, str]], record_key: str,
+                         absorbed: list[tuple[str, str]]) -> list[_Read]:
+    """The redo path. A run published from pending files, then lost before its record, is the run of the files
+    received at or before its id: for each pending file's second, oldest first, a folder there whose observations and
+    site status the files up to that second rebuild exactly is that lost run. It is finished (latest, then the record)
+    and nothing in its folder is written again; its files leave the pending ones, so a file received since is a run of
+    its own. A folder that does not rebuild is another producer's run and is left to the publish's own check.
+    Limit: a lost run one of whose files later meets a second pending file of the same competitor is not finished
+    while both are pending (_one_file_per_competitor refuses the pair first); it is finished once an operator removes
+    the duplicate."""
+    for second in sorted({read.file.last_modified for read in reads}):
+        run_id = stamp_for(second).run_id
+        held = published_manifest(client, bucket, output_key(brand, run_id, MANIFEST_NAME))
+        if not held:
+            continue
+        lost = [read for read in reads if read.file.last_modified <= second]
+        rebuilt = write_run(_one_run(lost, brand, sources), root / config.INTAKE_REBUILD_DIR_NAME)
+        if not _rebuilds(held, rebuilt):
+            continue
+        move_latest(client, bucket, brand, run_id, held["files"][config.OBSERVATIONS_FILE]["rows"])
+        _record(client, bucket, record_key, record, lost, run_id)
+        absorbed.extend((read.file.key, run_id) for read in lost)
+        reads = [read for read in reads if read.file.last_modified > second]
+    return reads
+
+
+def _rebuilds(held: dict, run_dir: Path) -> bool:
+    """Whether the published manifest names exactly the observations and site status written in run_dir."""
+    files = held.get("files", {})
+    return all(files.get(name, {}).get("sha256") == file_entry(run_dir / name)["sha256"]
+               for name in (config.OBSERVATIONS_FILE, config.SITE_STATUS_FILE))
+
+
+def _record(client, bucket: str, record_key: str, record: dict[str, dict[str, str]], reads: list[_Read],
+            run_id: str) -> None:
+    for read in reads:
+        record[read.sha] = {"sha256": read.sha, "key": read.file.key, "version_id": read.file.version_id,
+                            "layout_id": read.layout.layout_id, "run_id": run_id}
+    write_absorbed(client, bucket, record_key, record)
 
 
 def _listed_files(client, bucket: str, intake_prefix: str) -> list[tuple[str, int]]:
@@ -353,18 +459,6 @@ def _fetch(client, bucket: str, key: str) -> IntakeFile:
                           "bucket must have versioning enabled")
     return IntakeFile(key=key, version_id=version, last_modified=answer["LastModified"].astimezone(timezone.utc),
                       data=answer["Body"].read())
-
-
-def _held_by_another_run(client, bucket: str, brand: str, run_id: str, run_dir: Path) -> Optional[str]:
-    """Why this file's run folder cannot be published, or None. A folder already holding exactly these observations
-    is this file's own run, published before its record was written."""
-    held = published_manifest(client, bucket, output_key(brand, run_id, MANIFEST_NAME))
-    if not held:
-        return None
-    theirs = held.get("files", {}).get(config.OBSERVATIONS_FILE, {}).get("sha256")
-    if theirs == file_entry(run_dir / config.OBSERVATIONS_FILE)["sha256"]:
-        return None
-    return f"run folder {run_id} already holds another run; the file is left for the next run"
 
 
 def read_absorbed(client, bucket: str, key: str) -> dict[str, dict[str, str]]:

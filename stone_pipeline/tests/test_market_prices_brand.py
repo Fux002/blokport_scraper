@@ -92,7 +92,7 @@ def _approved(**overrides) -> dict:
     return _row(**{"seller_country": "BE", "served_market": "BE", "decided_by": "owner", "decided_on": "2026-11-08",
                    "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02",
                              "summary": "No clause on copying."},
-                   "decision": "approved", **overrides})
+                   "price_basis": "list", "decision": "approved", **overrides})
 
 
 def _register_file(directory: Path, brand: str, *rows: dict, **top) -> None:
@@ -141,7 +141,7 @@ class _S3:
 
 def _published_run(tmp_path: Path, brand="blokport") -> _S3:
     s3 = _S3()
-    result = RunResult(brand=brand, run_id=RUN_ID, observations=(), statuses=(_status(brand),))
+    result = RunResult(brand=brand, run_id=RUN_ID, observations=(), statuses=(_status(brand),), sources=())
     publish_run(s3, "bucket", brand, write_run(result, tmp_path))
     return s3
 
@@ -177,7 +177,8 @@ def test_a_row_with_an_empty_or_malformed_brand_does_not_validate(brand):
 
 
 def test_write_run_refuses_a_row_of_another_brand(tmp_path):
-    result = RunResult(brand="blokport", run_id=RUN_ID, observations=(), statuses=(_status("wudport"),))
+    result = RunResult(brand="blokport", run_id=RUN_ID, observations=(), statuses=(_status("wudport"),),
+                       sources=())
     with pytest.raises(rules.BrandError, match="wudport"):
         write_run(result, tmp_path)
     assert not (tmp_path / "blokport").exists()
