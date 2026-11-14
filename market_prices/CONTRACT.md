@@ -120,7 +120,7 @@ Every run folder carries the brand's register as it stood when the run started: 
 
 ## site_status.csv
 
-One row per site the run collects. A fetching run lists every site of the register except its `supplier_scrape` rows: each of those is listed in the runs its supplier's product scrape delivers (see "Supplier prices").
+One row per site the run collects: every site of the register.
 
 | status | Meaning |
 |---|---|
@@ -197,14 +197,3 @@ html:
 A record without its `listing_key` or `listing_text` (or where their pattern does not match), a JSON attribute that does not parse, a `url` off the site, or a product page with no declared record is a malformed listing, counted with its reason. A spec or an optional field not held, or not in its declared form, is simply not stated. Material is read as stated and never filtered by a register pattern: v3's vocabulary refuses an unmapped material.
 
 At least one sitemap or listing page. The entry points are the in-scope part of the site (for example its sheet-material categories), never its whole catalogue: nothing is guessed from a link before a page is fetched. Product pages are read in sorted order, each only where robots.txt allows it (a forbidden one is skipped unrequested and counted in `malformed_listings`, `detail` reason `robots.txt disallows the product page`; a query is never dropped to reach an allowed URL); a page that answers with an error is its listing's problem, while a block or no answer ends the site. Caps (`SCHEMA_ORG_*` in `config.py`) bound the sitemaps, listing pages and product pages of one site; reaching one is reported in `detail`.
-
-A `supplier_scrape` row needs `supplier_key` (the source whose price pass it reads), takes no `discovery` or `query`, and, approved, needs `scrape`: the price pass's columns for the listing's `key`, `url` and `price`, its `text` columns (joined as `listing_text`) and its `specs` columns (each in `stated_specs` under the column's name):
-
-```yaml
-scrape:
-  key: product_id
-  url: detail_url
-  price: price1
-  text: [material, stone_type, thickness, finish]
-  specs: [material, stone_type, thickness, finish, price2, area_sqmt]
-```
