@@ -65,7 +65,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | observed_at, run_id | When this run started, UTC |
 | collector_version | Which collector read it |
 
-**Supplier prices** are not in market_prices: they are delivered under `<env>/supplier_prices/<brand>/`, a separate contract. A register site whose host is one of the product scraper's suppliers' domains is refused at load, named.
+**Supplier prices** are not in market_prices: they are delivered under `<env>/supplier_prices/<brand>/`, a separate contract. A register site whose host is one of the product scraper's suppliers' domains is refused at load, named, and so is a sheet competitor whose `site_domain` is one (the same host matching).
 
 No photos are collected. Text cells are the seller's own words: read them as data, and do not open the raw file in a spreadsheet that runs formulas.
 
