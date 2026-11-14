@@ -185,4 +185,6 @@ def test_the_contract_says_supplier_prices_are_a_separate_contract():
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
     assert ("**Supplier prices** are not in market_prices: they are delivered under "
             "`<env>/supplier_prices/<brand>/`") in text
-    assert "seller_is_our_supplier" not in text.split("## Observations", 1)[-1]
+    # the Versions paragraph keeps the history (version 2 added the columns); the field table names them no more
+    fields = text.split("## observations.csv", 1)[1].split("\n## ", 1)[0]
+    assert "seller_is_our_supplier" not in fields and "supplier_key" not in fields
