@@ -44,7 +44,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | thickness_mm | The stated thickness in millimetres: an exact decimal, `^\d+(\.\d+)?$`, no trailing zeros (`20`, `12.5`, never `20.0`). Empty when not stated |
 | finish | The brand vocabulary's canonical finish word for the stated finish (for example `Polished`). Empty when not stated |
 | material_type | The brand vocabulary's canonical material word for the stated material: for blokport the seed's stone type name exactly (for example `Granite`), for wudport its material word (for example `Plywood`). Empty when not stated |
-| origin_iso_2 | The stated origin country, ISO 3166 alpha-2, upper case. Empty when not stated |
+| origin_iso_2 | The stated origin country, ISO 3166 alpha-2, lower case, `^[a-z]{2}$` (the pricing module keys every country in lower case). Empty when not stated |
 | thickness_text, finish_text, material_text, origin_text | Each spec as the seller wrote it. Empty when not stated |
 | spec_labels | JSON object: each stated spec column (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`) to the seller's label or sheet header it was read from, for example `{"finish":"Afwerking","thickness_mm":"Dikte"}`. A column not stated has no key |
 | grade_text | The seller's grade words, as written, when the register names the label that holds them |
@@ -72,7 +72,7 @@ A listing's thickness, finish, material and origin are delivered as normalised c
 - **A site:** its register row's `spec_labels` names the labels (a WooCommerce attribute name, a schema.org `additionalProperty` name) that state each spec, compared case and spacing aside, and the unit a bare thickness number is in. A site whose row has no `spec_labels` yet delivers the four columns empty: the labels come from pilot evidence, never guessed.
 - **A sheet:** its layout's `specs` names the column that states each spec, and the unit of a bare thickness number (a header `Thickness (cm)` declares cm).
 - **Words:** the brand's vocabulary (`market_prices/vocabulary/<brand>.yaml`) maps each stated finish and material to its canonical word (`finishes`, `materials`: canonical to the words that mean it, in any language). A stated value matches a word whole, case, accents and punctuation aside, never a part of it. Its `unstated` words (for example `Not specified`) mean the seller stated nothing: the column is empty and `detail` counts them as `stated as unstated xN`.
-- **Countries:** one brand-neutral table, `market_prices/countries.yaml`: each ISO 3166 alpha-2 code with its alpha-3 code and its names. A stated code matches exactly, a name case and accents aside.
+- **Countries:** one brand-neutral table, `market_prices/countries.yaml`: each ISO 3166 alpha-2 code with its alpha-3 code and its names. A stated code matches as ISO writes it (upper case, `BE`, `BEL`), a name case and accents aside; the column is delivered in lower case (`be`).
 - **Thickness:** one number (a dot or a comma as the decimal mark), with `mm` or `cm` or bare. A stated unit wins over the declared one; cm is multiplied by 10 exactly.
 
 A stated value that has no honest mapping refuses its row, which is counted in `malformed_listings` with its reason and never delivered with a guess:
