@@ -44,7 +44,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | thickness_mm | The stated thickness in millimetres: an exact decimal, `^\d+(\.\d+)?$`, no trailing zeros (`20`, `12.5`, never `20.0`). Empty when not stated |
 | finish | The brand vocabulary's canonical finish word for the stated finish (for example `Polished`). Empty when not stated |
 | material_type | The brand vocabulary's canonical material word for the stated material: for blokport the seed's stone type name exactly (for example `Granite`), for wudport its material word (for example `Plywood`). Empty when not stated |
-| origin_iso_2 | The stated origin country, ISO 3166 alpha-2, lower case, `^[a-z]{2}$` (the pricing module keys every country in lower case). Empty when not stated |
+| origin_iso_2 | The stated origin country, ISO 3166 alpha-2, lower case, `^[a-z]{2}$`. Lower case on purpose: the pricing module keys every country that way, while `seller_country` and `served_market` stay as the register writes them (upper case). Empty when not stated |
 | thickness_text, finish_text, material_text, origin_text | Each spec as the seller wrote it. Empty when not stated |
 | spec_labels | JSON object: each stated spec column (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`) to the seller's label or sheet header it was read from, for example `{"finish":"Afwerking","thickness_mm":"Dikte"}`. A column not stated has no key |
 | grade_text | The seller's grade words, as written, when the register names the label that holds them |
