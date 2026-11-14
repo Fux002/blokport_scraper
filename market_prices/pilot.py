@@ -1,8 +1,9 @@
 """The dev pilot: ONE approved site of ONE brand, run against development's bucket, then a summary printed (each site's
 status, rows and malformed listings, and the first rows): `python -m market_prices.pilot`.
 
-No arguments: the site is the brand register's own `pilot_site` (sites/<brand>.yaml), so no brand or site is written in
-code. It refuses any environment but development, and a register that names no pilot site or whose pilot site is not
+No arguments: the brand is the required run input SCRAPER_MARKET_PRICES_BRAND (market_prices/run_input.py), never the
+deployment's own brand, and the site is that brand register's own `pilot_site` (sites/<brand>.yaml), so no brand or site
+is written in code. It refuses any environment but development, and a register that names no pilot site or whose pilot site is not
 approved, before a single request. It runs the run entry's own path (run.run_live) on a register of that one site, so
 the pilot shows exactly what a full run would do for it.
 """
@@ -13,7 +14,8 @@ from pathlib import Path
 
 from market_prices import config, run
 from market_prices.register import Register, RegisterError, load_register
-from stone_pipeline.config.settings import BRAND, IS_PRODUCTION
+from market_prices.run_input import run_brand
+from stone_pipeline.config.settings import IS_PRODUCTION
 
 
 def pilot_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
@@ -30,7 +32,7 @@ def pilot_register(brand: str, sites_dir: Path = config.SITES_DIR) -> Register:
 def main() -> None:
     if IS_PRODUCTION:
         raise SystemExit("the market-price pilot runs only in development, against dev's bucket")
-    outcome = run.run_live(pilot_register(BRAND))
+    outcome = run.run_live(pilot_register(run_brand()))
     print(run.summary(outcome, sample=config.PILOT_SAMPLE_ROWS))
 
 
