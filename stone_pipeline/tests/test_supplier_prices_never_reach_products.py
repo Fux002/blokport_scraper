@@ -1,7 +1,8 @@
 """The owner's rule (14 Nov): a supplier's list price is never the buy price, and the scraper sends BlokPort no price
 on the product path. Once Polonine's login fills price1/price2/currency in its scrape, nothing between that scrape and a
 served product may read them: the adapter maps no price, the canonical row holds no price field, and no ledger table
-(whose rows the /sync/v1 payloads are built from) has a price column. Prices leave only as market_prices rows."""
+(whose rows the /sync/v1 payloads are built from) has a price column. Prices leave only through the price
+pass's own files (supplier_prices, a separate contract)."""
 
 from __future__ import annotations
 

@@ -181,12 +181,6 @@ def test_neither_the_secret_nor_the_username_is_ever_written(tmp_path, monkeypat
     assert SECRET not in written and "s3cretpw" not in written and USER not in written
 
 
-def test_the_price_files_are_the_names_the_supplier_price_reader_reads():
-    from market_prices import config
-    from scrapers import base
-    assert (base.PRICES_CSV, base.PRICES_MARKER) == (config.SCRAPE_ROWS_FILE, config.SCRAPE_MARKER_FILE)
-
-
 # --- the price pass can never abort the product scrape (f8's must, 14 Nov) -------------------------------------------
 def _identical_products_beside(tmp_path, monkeypatch, site, prepare=None):
     """Run once with the login and the given site, once without any login, and return both scrapers."""

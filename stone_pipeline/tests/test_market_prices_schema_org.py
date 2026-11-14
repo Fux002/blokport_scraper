@@ -32,7 +32,7 @@ def _site(site_id="retail", base_url=BASE, discovery=None, **overrides) -> dict:
         "discovery": discovery if discovery is not None else {"sitemaps": ["/sitemap-products.xml"],
                                                               "product_path": PRODUCT_PATH},
         "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-13", "summary": "No clause on copying."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-13",
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-13",
     }
     return {**site, **overrides}
 

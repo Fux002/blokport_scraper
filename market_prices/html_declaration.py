@@ -10,7 +10,6 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from market_prices import config
 from market_prices.numbers import NumberFormat
 from market_prices.vocabulary import Word
 
@@ -84,6 +83,8 @@ class HtmlFields(BaseModel):
     listing_text: HtmlSource
     url: Optional[HtmlSource] = None
     price: Optional[HtmlSource] = None
+    # contract v4 (Mas's sale rule): the regular price shown beside the current one, typically its struck "was" price
+    regular_price: Optional[HtmlSource] = None
     unit: Optional[HtmlSource] = None
     currency: Optional[HtmlSource] = None
     currency_symbols: dict[Word, Currency] = {}
@@ -96,6 +97,8 @@ class HtmlFields(BaseModel):
         if self.price is not None and not self.price.text:
             raise ValueError("the price is the page's visible text: a price source takes text, never json, attr or "
                              "label")
+        if self.regular_price is not None and not self.regular_price.text:
+            raise ValueError("the regular price is the page's visible text: it takes text, never json, attr or label")
         return self
 
     @model_validator(mode="after")
@@ -103,7 +106,8 @@ class HtmlFields(BaseModel):
         struck = [name for name in ("listing_key", "listing_text", "url", "price", "unit", "currency")
                   if (source := getattr(self, name)) is not None and source.struck]
         if struck:
-            raise ValueError(f"struck text is never the price or any listing fact {struck}: it is read into specs")
+            raise ValueError(f"struck text is never the price or any listing fact {struck}: it is read only as the "
+                             f"regular_price")
         return self
 
 
@@ -122,8 +126,8 @@ class HtmlDeclaration(BaseModel):
 
     @model_validator(mode="after")
     def _whole(self) -> "HtmlDeclaration":
-        if self.fields.price is not None and self.number is None:
+        if (self.fields.price is not None or self.fields.regular_price is not None) and self.number is None:
             raise ValueError("a declared price needs the site's number notation (number: {decimal, thousands})")
-        if config.SALE_FLAG_LABEL in self.specs:
-            raise ValueError(f"the spec {config.SALE_FLAG_LABEL!r} is derived from the price element, never declared")
+        if struck := sorted(label for label, source in self.specs.items() if source.struck):
+            raise ValueError(f"specs {struck} read struck text: it is read only as the regular_price")
         return self

@@ -62,12 +62,13 @@ SALE = {
         "listing_text": {"class": "card-title", "text": True},
         "url": {"class": "card-link", "attr": "href"},
         "price": {"class": "starel-loop-card-price__row--sqm", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
+        # Mas's sale rule (14 Nov; contract v4): the struck "was" price is the regular price, never the price
+        "regular_price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True,
+                          "pattern": r"£\s*([\d,]+\.\d{2})"},
         "currency_symbols": {"£": "GBP"},
     },
     "number": {"decimal": ".", "thousands": ","},
-    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True},
-              # Mas's sale rule (14 Nov): the struck "was" price is kept, read explicitly, never as the price
-              "Regular price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True}},
+    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True}},
 }
 
 
@@ -79,7 +80,7 @@ def _site(declaration: dict, discovery=None, **overrides) -> dict:
                                    "product_path": r"^/product/[a-z0-9-]+/?$"},
         "html": declaration,
         "terms": {"terms_url": f"{BASE}/terms", "checked_on": "2026-11-14", "summary": "No clause on copying."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-14",
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-14",
     }
     return {**site, **overrides}
 
@@ -204,8 +205,8 @@ def test_a_product_page_without_a_declared_record_is_counted_with_its_reason():
 
 
 # --- sale cards: the struck price is never read (the Starel Stones shape) --------------------------------------------
-def test_struck_text_is_never_the_price_but_is_kept_as_the_regular_price_with_the_sale_flag():
-    # Mas's sale rule (14 Nov): the price is the current one as shown; the struck "was" price and "On sale" are kept
+def test_struck_text_is_never_the_price_but_is_the_regular_price():
+    # Mas's sale rule (14 Nov; contract v4): the price is the current one as shown, the struck "was" price the regular
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/arabescato/">x</a>'
             '<h3 class="card-title">Arabescato Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--slab"><del>£2,400.00</del> <ins>£1,999.00</ins> per slab</div>'
@@ -213,30 +214,32 @@ def test_struck_text_is_never_the_price_but_is_kept_as_the_regular_price_with_th
             '</article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/arabescato/"]
     assert (row.price_amount, row.price_text) == ("1375.00", "£1,375.00 per m²")
-    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab", "Regular price": "£1,450.00",
-                                "On sale": "yes"}
+    assert (row.regular_price_text, row.regular_price_amount) == ("£1,450.00", "1450.00")
+    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab"}                # no "On sale" spec any more
 
 
-def test_a_card_not_on_sale_has_no_regular_price_and_no_sale_flag():
+def test_a_card_not_on_sale_has_no_regular_price():
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/bianco/">x</a>'
             '<h3 class="card-title">Bianco Carrara Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--sqm">£295.00 per m²</div></article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/bianco/"]
-    assert (row.price_amount, row.stated_specs) == ("295.00", {})
+    assert (row.price_amount, row.regular_price_text, row.regular_price_amount, row.stated_specs) == (
+        "295.00", None, None, {})
 
 
 def test_a_class_lookup_skips_struck_subtrees_so_the_current_amount_is_read():
     # the manager's ruling 2: a price whose struck and current amounts carry one class reads the current one
-    declaration = {**SALE, "fields": {**SALE["fields"], "price": {"class": "amount", "text": True,
-                                                                  "pattern": r"£\s*([\d,]+\.\d{2})"}},
-                   "specs": {"Regular price": {"class": "amount", "text": True, "struck": True}}}
+    declaration = {**SALE, "fields": {**SALE["fields"],
+                                      "price": {"class": "amount", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
+                                      "regular_price": {"class": "amount", "text": True, "struck": True,
+                                                        "pattern": r"£\s*([\d,]+\.\d{2})"}}}
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/nero/">x</a>'
             '<h3 class="card-title">Nero Marquina Marble Slab</h3><p class="price">'
             '<del><span class="amount">£1,450.00</span></del> <ins><span class="amount">£1,040.00</span></ins></p>'
             '</article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(declaration)))["/p/nero/"]
     assert (row.price_amount, row.price_text) == ("1040.00", "£1,040.00")
-    assert row.stated_specs == {"Regular price": "£1,450.00", "On sale": "yes"}
+    assert (row.regular_price_text, row.regular_price_amount) == ("£1,450.00", "1450.00")
 
 
 def test_a_price_is_read_in_the_declared_notation_and_one_that_does_not_parse_is_unpriced():
@@ -367,6 +370,8 @@ def test_a_declared_html_site_loads_with_its_declaration():
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "listing_key": {"text": True, "pattern": "(a)(b)"}}}},
      "one capture group"),
     ({"html": {**CARDS, "specs": {"Regular price": {"json": ["data-x", "price"], "struck": True}}}}, "struck"),
+    # v4: struck text is read only as the regular price, never into a spec
+    ({"html": {**CARDS, "specs": {"Regular price": {"class": "p", "text": True, "struck": True}}}}, "regular_price"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
      "struck"),                                                          # struck text is never the price
     ({"html": {**CARDS, "specs": {"Material": {"class": "specs", "label": "Material", "text": True}}}}, "one of"),
@@ -387,6 +392,52 @@ def test_another_platform_takes_no_html_declaration():
     woo = {**_site(CARDS), "platform": "woocommerce_store", "discovery": None}
     with pytest.raises(ValidationError, match="takes no html"):
         _register(woo)
+
+
+# --- a declared capture is a whole number (reviewer 2 on SC #785, the manager) ---------------------------------------
+def _sale_card(key: str, shown: str, struck: str = "") -> str:
+    was = f"<del>{struck}</del> " if struck else ""
+    return (f'<article class="starel-loop-card"><a class="card-link" href="/p/{key}/">x</a>'
+            f'<h3 class="card-title">{key.title()} Marble Slab</h3>'
+            f'<div class="starel-loop-card-price__row--sqm">{was}{shown}</div></article>')
+
+
+def _with_price(pattern: str, **extra) -> dict:
+    return {**SALE, "fields": {**SALE["fields"], "price": {"class": "starel-loop-card-price__row--sqm", "text": True,
+                                                           "pattern": pattern}}, **extra}
+
+
+@pytest.mark.parametrize("pattern, shown", [
+    (r"(\d+)\s*/", "£120.50 / m²"),                 # "50": the decimal separator and more digits before it
+    (r"£(\d+)", "£120.50 / m²"),                    # "120": the decimal separator and more digits after it
+    (r"(\d{3}\.\d{2})", "£1,250.00 / m²"),          # "250.00": a thousands group before it
+    (r"(\d{2}\.\d{2})", "£1250.00 / m²"),           # "50.00": a digit right before it
+])
+def test_a_price_capture_that_is_part_of_a_longer_number_is_no_amount_and_its_note_is_counted(pattern, shown):
+    result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", shown))}, _site(_with_price(pattern)))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.price_status, row.currency, row.price_text) == (None, PriceStatus.none, None, shown)
+    assert "price capture is part of a longer number x1" in _status(result).detail
+
+
+def test_a_whole_capture_reads_even_beside_a_separator_that_joins_no_digits():
+    # a space thousands separator before the capture, with no digit beyond it, joins nothing: the capture is whole
+    spaced = _with_price(r"€\s*([\d ]+,\d{2})", number={"decimal": ",", "thousands": " "})
+    spaced["fields"] = {**spaced["fields"], "currency_symbols": {"€": "EUR"}}
+    result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", "€ 1 250,00 / m²"))}, _site(spaced))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.currency) == ("1250.00", "EUR")
+    assert "part of a longer number" not in _status(result).detail
+
+
+def test_a_regular_price_capture_that_is_part_of_a_longer_number_is_no_regular_amount():
+    declaration = {**SALE, "fields": {**SALE["fields"], "regular_price": {
+        "class": "starel-loop-card-price__row--sqm", "text": True, "struck": True, "pattern": r"£(\d+)"}}}
+    page = _page(_sale_card("nero", "£1,040.00 / m²", struck="£1,450.00"))
+    result = _run({f"{BASE}/collections/slabs/": page}, _site(declaration))
+    row = _rows(result)["/p/nero/"]
+    assert (row.price_amount, row.regular_price_text, row.regular_price_amount) == ("1040.00", "£1,450.00", None)
+    assert "regular_price capture is part of a longer number x1" in _status(result).detail
 
 
 # --- the shipped blokport rows read a price whole or not at all (reviewer 2 on SC #785) --------------------------------

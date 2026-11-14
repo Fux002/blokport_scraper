@@ -6,11 +6,11 @@ import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import (
-    AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator,
+    AfterValidator, BaseModel, BeforeValidator, ConfigDict, StringConstraints, field_validator,
     model_validator,
 )
 
@@ -111,20 +111,36 @@ class Discovery(BaseModel):
         return self
 
 
-class ScrapeColumns(BaseModel):
-    """Where a supplier_scrape row's facts are in the rows the product scraper wrote for its supplier: the scraper's
-    own column names. Its listings' text is the text columns joined; the spec columns become its stated_specs."""
+# An exact decimal rate in (0, 1): "0.2", "0.24". A share, never a percentage.
+Rate = Annotated[str, StringConstraints(pattern=r"^0\.\d*[1-9]$")]
+StatedBy = Literal["site", "owner"]
+
+
+class PriceTerms(BaseModel):
+    """A source's price terms for register.json (contract v4), each with who stated it, never defaulted or inferred:
+    whether its prices are list or net prices, a net source's markup up to list (list = net x (1 + net_markup)),
+    and its VAT rate."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    key: Words
-    url: Words
-    price: Words
-    text: tuple[Words, ...] = Field(min_length=1)
-    specs: tuple[Words, ...] = ()
+    price_basis: Optional[Literal["list", "net"]] = None
+    net_markup: Optional[Annotated[str, StringConstraints(pattern=r"^\d+(\.\d+)?$")]] = None   # exact, 0 or more
+    net_markup_stated_by: Optional[StatedBy] = None
+    vat_rate: Optional[Rate] = None
+    vat_rate_stated_by: Optional[StatedBy] = None
+
+    @model_validator(mode="after")
+    def _terms_whole(self) -> "PriceTerms":
+        if (self.price_basis == "net") != (self.net_markup is not None):
+            raise ValueError("a net price_basis needs its net_markup, and only a net one has one")
+        if (self.net_markup is None) != (self.net_markup_stated_by is None):
+            raise ValueError("net_markup_stated_by is set exactly when net_markup is")
+        if (self.vat_rate is None) != (self.vat_rate_stated_by is None):
+            raise ValueError("vat_rate_stated_by is set exactly when vat_rate is")
+        return self
 
 
-class Site(BaseModel):
+class Site(PriceTerms):
     """One storefront. A site selling into several markets is one entry per market."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -141,7 +157,6 @@ class Site(BaseModel):
     discovery: Optional[Discovery] = None
     # declared_html: where its pages hold each listing's facts (market_prices/html_declaration.py)
     html: Optional[HtmlDeclaration] = None
-    scrape: Optional[ScrapeColumns] = None
     terms: Terms
     decision: Decision
     decided_by: Optional[Words] = None
@@ -151,8 +166,6 @@ class Site(BaseModel):
     # contract v3: the labels this site's listings state their specs under, from its listings as fetched (pilot
     # evidence); without them the four spec columns are delivered empty (CONTRACT.md "Specs")
     spec_labels: Optional[SpecLabels] = None
-    # The product scraper's source id when this seller is also one of the owner's suppliers (check_suppliers).
-    supplier_key: Optional[Words] = None
     # one_register_per_site: the other brands this same site is registered for; both rows must name each other
     shared_with: tuple[str, ...] = ()
 
@@ -183,21 +196,19 @@ class Site(BaseModel):
         if self.html is not None and self.html.read == "listing_pages" and (
                 self.discovery is None or not self.discovery.listing_pages):
             raise ValueError("html read: listing_pages needs discovery listing_pages to read")
-        if not collector.needs_scrape and self.scrape is not None:
-            raise ValueError(f"platform {self.platform} takes no scrape columns")
-        if not collector.fetches and self.supplier_key is None:
-            raise ValueError(f"platform {self.platform} reads its supplier's scrape: supplier_key is required")
         if self.query and not collector.takes_query:
             raise ValueError(f"platform {self.platform} takes no query")
         if reserved := sorted(collector.reserved_query & set(self.query)):
             raise ValueError(f"query may not set {reserved}: the collector owns them")
         if self.decision is Decision.approved:
-            self._require_full_record(collector.needs_discovery, collector.needs_scrape)
+            self._require_full_record(collector.needs_discovery)
+            if self.price_basis is None:
+                raise ValueError("an approved site declares its price_basis (list or net); it is never defaulted")
             if collector.needs_html and self.html is None:
                 raise ValueError(f"an approved {self.platform} site needs its html declaration")
         return self
 
-    def _require_full_record(self, needs_discovery: bool, needs_scrape: bool) -> None:
+    def _require_full_record(self, needs_discovery: bool) -> None:
         """What a site needs before any request: only an approved row is ever fetched, so a row never requested (a
         blocked or excluded site) carries none of it, and nothing about it is invented."""
         if not self.terms.complete:
@@ -212,8 +223,6 @@ class Site(BaseModel):
             raise ValueError("approved needs seller_country and served_market")
         if needs_discovery and self.discovery is None:
             raise ValueError(f"approved needs discovery: platform {self.platform} reads the site's entry points")
-        if needs_scrape and self.scrape is None:
-            raise ValueError(f"approved needs scrape: platform {self.platform} reads its supplier's scrape columns")
 
     @property
     def collectable(self) -> bool:
@@ -253,27 +262,20 @@ class Register(BaseModel):
         return self
 
 
-def supplier_problem(label: str, host: str, supplier_key: Optional[str], domains: dict[str, str]) -> Optional[str]:
-    """Why a seller's supplier flag is wrong, or None. The flag is written in the register (or the layout file) and
-    checked both ways against the product scraper's suppliers: the key is a supplier's source id, its domain is the
-    seller's host, and a supplier's domain never goes without the key. `domains` is scrapers.run.supplier_domains()
-    (source id -> site_domain). The one rule for a register site and a price sheet's competitor."""
-    if supplier_key is not None:
-        if supplier_key not in domains:
-            return (f"{label}: supplier_key {supplier_key!r} is not one of the product scraper's suppliers "
-                    f"{sorted(domains)}")
-        if not same_host(host, domains[supplier_key]):
-            return f"{label}: {host} is not supplier {supplier_key}'s domain {domains[supplier_key]}"
-        return None
+def supplier_problem(label: str, host: str, domains: dict[str, str]) -> Optional[str]:
+    """Why a seller may not be in market_prices, or None: its host is one of the product scraper's suppliers'
+    domains, and supplier prices are a separate contract (<env>/supplier_prices/<brand>/, Mas's split). `domains` is
+    scrapers.run.supplier_domains() (source id -> site_domain). The one rule for a register site and a price sheet's
+    competitor."""
     if matched := sorted(key for key, domain in domains.items() if same_host(host, domain)):
-        return f"{label}: {host} is the domain of supplier {matched[0]}; set supplier_key: {matched[0]}"
+        return f"{label}: {host} is the domain of supplier {matched[0]}: supplier prices are not in market_prices"
     return None
 
 
 def check_suppliers(register: Register, domains: dict[str, str]) -> None:
-    """Every site's supplier flag, by supplier_problem."""
+    """No site of the register is one of the product scraper's suppliers (supplier_problem)."""
     for site in register.sites:
-        if problem := supplier_problem(f"site {site.site_id}", site_host(site.base_url), site.supplier_key, domains):
+        if problem := supplier_problem(f"site {site.site_id}", site_host(site.base_url), domains):
             raise RegisterError(problem)
 
 

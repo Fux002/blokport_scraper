@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 from typing import Iterator, Optional
 
 from market_prices import config
+from market_prices.text import one_line
 
 # elements that never hold content, so a start tag closes itself
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
@@ -113,10 +114,12 @@ def locate(element: Element, class_: str, struck: bool) -> Optional[tuple[Elemen
     return None
 
 
-def text(element: Element, struck: bool = False, inside_struck: bool = False) -> Optional[str]:
+def text(element: Element, struck: bool = False, inside_struck: bool = False,
+         hidden: frozenset[str] = frozenset()) -> Optional[str]:
     """The element's text as one clean line, its text nodes joined by a space. Struck text is left out, or, with
     struck=True, is the only text read; `inside_struck` says the element itself sits inside struck text. Script and
-    style content is never text."""
+    style content is never text, nor is anything under an element carrying one of the `hidden` classes (a platform's
+    own visually hidden markup)."""
     parts: list[str] = []
     stack: list[tuple[object, bool]] = [(element, inside_struck or element.tag in _STRUCK)]
     while stack:
@@ -125,7 +128,7 @@ def text(element: Element, struck: bool = False, inside_struck: bool = False) ->
             if inside_struck == struck:
                 parts.append(node)
             continue
-        if node.tag in _NOT_TEXT:
+        if node.tag in _NOT_TEXT or node.classes & hidden:
             continue
         stack.extend((child, inside_struck or (isinstance(child, Element) and child.tag in _STRUCK))
                      for child in reversed(node.children))
@@ -133,15 +136,10 @@ def text(element: Element, struck: bool = False, inside_struck: bool = False) ->
 
 
 def collapse(value: str) -> Optional[str]:
-    """Whitespace collapsed to single spaces; None when nothing is left. The parser has already decoded the
-    page's entities, so nothing is decoded twice."""
-    return _SPACE.sub(" ", value).strip() or None
+    """One clean line (text.one_line); None when nothing is left. The parser has already decoded the page's
+    entities, so nothing is decoded twice."""
+    return one_line(value)
 
-
-def has_struck(element: Element) -> bool:
-    """Whether the element holds struck text (a former price shown beside the current one)."""
-    return element.tag in _STRUCK or any(found.tag in _STRUCK and text(found, struck=True)
-                                         for found in descendants(element))
 
 
 _PAIRED_CELLS = {"th": ("td", "th"), "td": ("td",), "dt": ("dd",)}

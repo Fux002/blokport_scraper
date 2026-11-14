@@ -8,18 +8,19 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable
 
 from pydantic import BaseModel, ValidationError
 
 from market_prices import config
-from market_prices.brand import require_run_brand
+from market_prices.brand import BrandError, require_run_brand
 from market_prices.collectors import COLLECTORS
-from market_prices.collectors.supplier_scrape import ScrapeFolder
 from market_prices.fetching import (
     SiteBlocked, SiteDisallowed, SiteFetcher, Transport, TransportError, UnexpectedResponse,
 )
+from market_prices.layouts import load_layouts
 from market_prices.register import Register, Site
+from market_prices.register_file import register_document, register_sources
 from market_prices.schema import (
     DeliveryIncluded, ListingFacts, MalformedListing, Observation, Provenance, SiteRunStatus, SiteStatus, Source,
     VatBasis, columns, csv_values,
@@ -53,6 +54,8 @@ class RunResult:
     run_id: str
     observations: tuple[Observation, ...]
     statuses: tuple[SiteStatus, ...]
+    # contract v4: the brand's register as the run started (register_file.register_sources), written as register.json
+    sources: tuple[dict, ...]
 
 
 def stamp_for(moment: datetime) -> Stamp:
@@ -82,12 +85,12 @@ def _observation(facts: ListingFacts, site: Site, brand: str, stamp: Stamp, vers
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.site, brand=brand, site_id=site.site_id,
         seller_name=site.seller_name, seller_type=site.seller_type, seller_country=site.seller_country,
-        served_market=site.served_market, seller_is_our_supplier=site.supplier_key is not None,
-        supplier_key=site.supplier_key,
-        listing_key=facts.listing_key, source_url=facts.source_url, listing_text=facts.listing_text,
+        served_market=site.served_market, listing_key=facts.listing_key, source_url=facts.source_url,
+        listing_text=facts.listing_text,
         stated_specs={label: value for label, value in facts.stated_specs.items() if label not in specs.used},
         **specs.columns(), grade_text=facts.grade_text, price_text=facts.price_text,
-        price_amount=facts.price_amount, currency=facts.currency, price_status=facts.price_status,
+        price_amount=facts.price_amount, regular_price_text=facts.regular_price_text,
+        regular_price_amount=facts.regular_price_amount, currency=facts.currency, price_status=facts.price_status,
         min_qty_text=facts.min_qty_text, availability_text=facts.availability_text, provenance=provenance,
         observed_at=stamp.observed_at, run_id=stamp.run_id, collector_version=version, **stated,
     )
@@ -112,8 +115,8 @@ def counted_reasons(reasons: collections.Counter) -> str:
     return "; ".join(shown + ([f"other reasons x{rest}"] if rest else []))
 
 
-def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Countries, transport: Optional[Transport],
-                 stamp: Stamp, pause: Callable[[float], None], scrape: Optional[ScrapeFolder] = None) -> SiteResult:
+def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Countries, transport: Transport,
+                 stamp: Stamp, pause: Callable[[float], None]) -> SiteResult:
     """One site, isolated. A listing is kept only when the run brand's vocabulary has it in scope; one out of scope
     is counted in `detail`, never dropped silently. Scope is decided first, on the collector's listing_text, so a
     listing out of scope is never read further and malformed counts in-scope listings only. An in-scope listing's
@@ -142,10 +145,8 @@ def collect_site(site: Site, brand: str, vocabulary: Vocabulary, countries: Coun
     collector = COLLECTORS[site.platform]
     rows: dict[str, Observation] = {}
     try:
-        # a fetching collector reads the site through the rules every request obeys; a supplier_scrape row reads the
-        # rows its supplier's product scrape already fetched (one fetch, one transport), so it requests nothing
-        source = SiteFetcher(site.robots_url, transport, pause) if collector.fetches else scrape
-        for raw in collector.listings(site, source):
+        fetcher = SiteFetcher(site.robots_url, transport, pause)
+        for raw in collector.listings(site, fetcher):
             try:
                 if not vocabulary.in_scope(collector.listing_text(raw, site), site.served_market):
                     out_of_scope += 1
@@ -201,31 +202,17 @@ def _scoped(register: Register, sites: list[Site]) -> tuple[Vocabulary, Countrie
 def _run_result(register: Register, stamp: Stamp, results: list[SiteResult]) -> RunResult:
     return RunResult(brand=register.brand, run_id=stamp.run_id,
                      observations=tuple(row for result in results for row in result.observations),
-                     statuses=tuple(result.status for result in results))
+                     statuses=tuple(result.status for result in results),
+                     sources=register_sources(register, load_layouts(register.brand)))
 
 
 def collect_run(register: Register, transport: Transport, moment: datetime,
                 pause: Callable[[float], None] = time.sleep) -> RunResult:
-    """The register's fetching sites. A supplier_scrape row is not this run's: its prices come with its supplier's
-    product scrape (collect_supplier_run), so it is neither requested nor listed here."""
     stamp = stamp_for(moment)
-    sites = sorted((site for site in register.sites if COLLECTORS[site.platform].fetches),
-                   key=lambda site: site.site_id)
+    sites = sorted(register.sites, key=lambda site: site.site_id)
     vocabulary, countries = _scoped(register, sites)
     return _run_result(register, stamp, [collect_site(site, register.brand, vocabulary, countries, transport,
                                                       stamp, pause) for site in sites])
-
-
-def collect_supplier_run(register: Register, scrape: ScrapeFolder) -> RunResult:
-    """The register's supplier_scrape rows of `scrape`'s source, read from that scrape and stamped with its own time
-    (when the prices were seen)."""
-    stamp = stamp_for(datetime.strptime(scrape.timestamp, config.SCRAPE_STAMP_FORMAT).replace(tzinfo=timezone.utc))
-    sites = sorted((site for site in register.sites
-                    if not COLLECTORS[site.platform].fetches and site.supplier_key == scrape.source),
-                   key=lambda site: site.site_id)
-    vocabulary, countries = _scoped(register, sites)
-    return _run_result(register, stamp, [collect_site(site, register.brand, vocabulary, countries, None, stamp,
-                                                      time.sleep, scrape) for site in sites])
 
 
 def _write_csv(path: Path, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
@@ -240,8 +227,11 @@ def write_run(result: RunResult, root: Path) -> Path:
     run's brand (brand_required), checked before anything is written."""
     require_run_brand(result.brand, result.observations, "observations")
     require_run_brand(result.brand, result.statuses, "site_status rows")
+    if foreign := sorted({row["brand"] for row in result.sources if row["brand"] != result.brand}):
+        raise BrandError(f"register rows of brand(s) {foreign} in a {result.brand!r} run")
     run_dir = root / result.brand / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(run_dir / config.OBSERVATIONS_FILE, Observation, result.observations)
     _write_csv(run_dir / config.SITE_STATUS_FILE, SiteStatus, result.statuses)
+    (run_dir / config.REGISTER_FILE).write_bytes(register_document(result.brand, result.run_id, result.sources))
     return run_dir

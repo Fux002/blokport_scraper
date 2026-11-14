@@ -35,7 +35,7 @@ def _site(site_id="shop", base_url=BASE, **overrides) -> dict:
         "brand": "blokport", "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant",
         "seller_country": "BE", "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
         "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-02", "summary": "No clause on copying."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
     }
     return {**site, **overrides}
 
@@ -662,8 +662,9 @@ def test_a_run_is_delivered_files_then_manifest_then_latest(tmp_path):
     s3 = _S3()
     outcome = _published(tmp_path, s3)
     prefix = "dev/market_prices/blokport"
-    assert s3.order == [f"{prefix}/20261108T123005Z/observations.csv", f"{prefix}/20261108T123005Z/site_status.csv",
-                        f"{prefix}/20261108T123005Z/manifest.json", f"{prefix}/latest.json"]
+    assert s3.order == [f"{prefix}/20261108T123005Z/observations.csv", f"{prefix}/20261108T123005Z/register.json",
+                        f"{prefix}/20261108T123005Z/site_status.csv", f"{prefix}/20261108T123005Z/manifest.json",
+                        f"{prefix}/latest.json"]
     assert outcome["latest_moved"] is True
     assert outcome["manifest"]["files"]["observations.csv"]["rows"] == 1
     latest = json.loads(s3.objects[f"{prefix}/latest.json"])
@@ -712,7 +713,7 @@ def test_a_folder_that_is_not_this_brands_run_is_refused(tmp_path, brand, parts)
 _PACKAGE = Path(market_prices.__file__).parent
 # the shared delivery and settings; the scraper's one SSRF-checked redirect walk (the transport) and its AWS client
 # factory (the run entry)
-# scrapers.run: the product scraper's suppliers, for the supplier flag (register.supplier_keys)
+# scrapers.run: the product scraper's suppliers, whose domains are refused (register.supplier_keys)
 # stone_pipeline.core.env: the repo's one env reader, for the run input naming the run's brand (run_input.run_brand)
 # stone_pipeline.core.text: the one shared name folding (match_key), which a vocabulary word is compared by; pure, no I/O
 _ALLOWED_OUTSIDE = {"stone_pipeline.io.deliverables", "stone_pipeline.config.settings", "stone_pipeline.io.ssrf",
