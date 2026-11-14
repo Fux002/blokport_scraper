@@ -192,23 +192,31 @@ class WooCommerceStoreCollector:
             raise UnexpectedResponse(f"not a product list from {url}")
         return items
 
-    def facts(self, raw: object, site: "Site") -> ListingFacts:
+    def listing_text(self, raw: object, site: "Site") -> str:
+        """The seller's name for the listing and its short description: the text the run's scope is decided on,
+        before anything else of the listing is read."""
         listing = _mapping(raw, "listing")
-        key, name = _listing_key(listing.get("id")), clean_text(listing.get("name"))
-        url = listing.get("permalink")
+        name = clean_text(listing.get("name"))
         if not name:
             raise MalformedListing("listing has no name")
+        summary = clean_text(listing.get("short_description"))
+        return f"{name} | {summary}" if summary else name
+
+    def facts(self, raw: object, site: "Site") -> ListingFacts:
+        text = self.listing_text(raw, site)
+        listing = _mapping(raw, "listing")
+        key = _listing_key(listing.get("id"))
+        url = listing.get("permalink")
         if not isinstance(url, str) or not on_site(url, site.base_url):
             raise MalformedListing(f"permalink is not on {site.base_url}")
         prices = _mapping(listing.get("prices"), "prices")
         amount = _amount(prices)
         attributes = _attributes(listing)
         stock = listing.get("stock_availability") or {}
-        summary = clean_text(listing.get("short_description"))
         return ListingFacts(
             listing_key=key,
             source_url=url,
-            listing_text=f"{name} | {summary}" if summary else name,
+            listing_text=text,
             stated_specs=_stated_specs(listing, attributes),
             grade_text=_grade(attributes, site.grade_labels),
             price_text=clean_text(listing.get("price_html")),

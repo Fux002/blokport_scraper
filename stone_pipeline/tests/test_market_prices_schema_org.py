@@ -406,6 +406,15 @@ def test_a_variant_with_no_id_of_its_own_is_malformed_not_a_duplicate():
     assert "variant has no id of its own x2" in status.detail
 
 
+def test_out_of_scope_variants_are_never_malformed():
+    """f8's note: variants with no id of their own would be malformed, but out of scope they are counted as such."""
+    group = {"@context": "https://schema.org", "@type": "ProductGroup", "name": "Paint roller",
+             "hasVariant": [_variant("Paint roller 9 inch", "4.00"), _variant("Paint roller 12 inch", "5.00")]}
+    status = _status(_run(_shop({"/p/a": _page(_product("A")), "/p/roller": _page(group)})))
+    assert (status.status.value, status.rows, status.malformed_listings) == ("ok", 1, 0)
+    assert status.detail == "listings out of scope x2"
+
+
 def test_the_pages_own_product_is_chosen_among_related_ones():
     own = _product("OWN"); own["url"] = f"{BASE}/p/a"
     related = _product("REL"); related["url"] = f"{BASE}/p/other"
