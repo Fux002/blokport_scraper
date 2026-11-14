@@ -8,7 +8,7 @@ from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of
 from stone_pipeline.stages.curate.existing import alias_list
-from stone_pipeline.state.writeback import is_learned
+from stone_pipeline.aliases.learned import is_learned
 
 
 def by_name_owner(c: Curation, nm: str, prefer_type: str = "") -> tuple[str, str] | None:
