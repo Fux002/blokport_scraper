@@ -38,7 +38,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | source | `site`: read from a site in the register. `file`: read from a supplied price sheet (see "Price sheets") |
 | brand, site_id | Whose register, which site |
 | seller_name, seller_type | From the register. `merchant`, `wholesaler`, `marketplace` or `unknown` |
-| seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market |
+| seller_country, served_market | From the register, ISO 3166 alpha-2. A site selling into several markets is one register entry per market; a seller whose prices serve the EU as one market states `EU` (ISO 3166-1's exceptionally reserved code for it) |
 | listing_key | The site's own id for the listing, stable between runs |
 | source_url | The listing's page, on the site's own host or a subdomain of it |
 | listing_text | The seller's name for the listing, and short description when there is one |
@@ -57,7 +57,7 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | currency | ISO 4217 code as stated |
 | price_status | `priced`, `on_request` or `none`. A range, or zero (made-to-measure), is `none` with `price_text` kept |
 | vat_basis | `incl`, `excl` or `unknown` |
-| unit_text | The selling unit as written |
+| unit_text | The selling unit as written: the listing's own (provenance `listing`, for example a supplier's `Sq.Mt.`), else the site's statement |
 | delivery_text, delivery_included | As written; `yes`, `no` or `unknown` |
 | min_qty_text | The minimum order as stated |
 | availability_text | The stock wording as written |
@@ -120,7 +120,7 @@ Every run folder carries the brand's register as it stood when the run started: 
 
 ## site_status.csv
 
-One row per site in the register, every run.
+One row per site the run collects. A fetching run lists every site of the register except its `supplier_scrape` rows: each of those is listed in the runs its supplier's product scrape delivers (see "Supplier prices").
 
 | status | Meaning |
 |---|---|
@@ -197,3 +197,14 @@ html:
 A record without its `listing_key` or `listing_text` (or where their pattern does not match), a JSON attribute that does not parse, a `url` off the site, or a product page with no declared record is a malformed listing, counted with its reason. A spec or an optional field not held, or not in its declared form, is simply not stated. Material is read as stated and never filtered by a register pattern: v3's vocabulary refuses an unmapped material.
 
 At least one sitemap or listing page. The entry points are the in-scope part of the site (for example its sheet-material categories), never its whole catalogue: nothing is guessed from a link before a page is fetched. Product pages are read in sorted order, each only where robots.txt allows it (a forbidden one is skipped unrequested and counted in `malformed_listings`, `detail` reason `robots.txt disallows the product page`; a query is never dropped to reach an allowed URL); a page that answers with an error is its listing's problem, while a block or no answer ends the site. Caps (`SCHEMA_ORG_*` in `config.py`) bound the sitemaps, listing pages and product pages of one site; reaching one is reported in `detail`.
+
+A `supplier_scrape` row needs `supplier_key` (the source whose price pass it reads), takes no `discovery` or `query`, and, approved, needs `scrape`: the price pass's columns for the listing's `key`, `url` and `price`, its `text` columns (joined as `listing_text`) and its `specs` columns (each in `stated_specs` under the column's name):
+
+```yaml
+scrape:
+  key: product_id
+  url: detail_url
+  price: price1
+  text: [material, stone_type, thickness, finish]
+  specs: [material, stone_type, thickness, finish, price2, area_sqmt]
+```

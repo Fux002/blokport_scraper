@@ -19,6 +19,7 @@ products.csv that an Adapter then maps into the canonical pipeline.
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from stone_pipeline.core import env
 import random
@@ -34,6 +35,11 @@ from stone_pipeline.io.ssrf import SSRFBlocked, follow_redirects
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
+# A supplier's separate price pass (write_price_pass): its rows and its marker, beside products.csv in the run folder.
+# The supplier price reader reads these names (market_prices.config SCRAPE_ROWS_FILE / SCRAPE_MARKER_FILE; a test pins
+# them equal).
+PRICES_CSV = "prices.csv"
+PRICES_MARKER = "prices_complete.json"
 
 VALID_FORMATS = ("slab", "block", "tile")
 # A pool of current desktop UAs; ONE is picked per scraper INSTANCE (per run), not per request, so a
@@ -308,7 +314,6 @@ class ScraperBase:
     # --- the orchestration ---------------------------------------------------
     def run(self) -> Path:
         self.log.info("scraper start: %s -> %s", self.source, self.run_dir)
-        import json
         rows: list[dict] = []
         for raw in self.list_products():
             try:
@@ -355,6 +360,18 @@ class ScraperBase:
             marker["detail_failure_ratio"] = round(detail_ratio, 4)
         self.complete_marker.write_text(json.dumps(marker), encoding="utf-8")
         return self.products_csv
+
+    def write_price_pass(self, rows: list[dict], columns: list[str], prices: str) -> None:
+        """A supplier's prices read by a SEPARATE pass after the products (e.g. behind a customer login), written beside
+        and never into products.csv, so the product scrape never depends on it: the rows (when there are any), then the
+        pass's marker stating whether it read prices ("ok" or why not) and how many. The supplier price reader
+        (market_prices.collectors.supplier_scrape) reads exactly these two files. Never a secret."""
+        if rows:
+            with (self.run_dir / PRICES_CSV).open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+        (self.run_dir / PRICES_MARKER).write_text(json.dumps({"prices": prices, "rows": len(rows)}), encoding="utf-8")
 
     def mark_incomplete(self, reason: str = "") -> None:
         """A scraper calls this when it knows it stopped short (e.g. pagination broke before the
