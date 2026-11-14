@@ -178,7 +178,7 @@ sites:
       fields:
         listing_key: {attr: id}
         listing_text: {class: fusion-title-heading, text: true}
-        price: {class: woocommerce-Price-amount, text: true, pattern: "(\\d+)\\s*€"}
+        price: {class: woocommerce-Price-amount, text: true, pattern: "(\\d[\\d.,\\s]*?)\\s*€"}
         unit: {class: stx-unit, text: true}
         currency_symbols: {"€": EUR}
       number: {decimal: ".", thousands: ""}
@@ -220,7 +220,7 @@ sites:
       fields:
         listing_key: {class: elementor-heading-title, text: true}
         listing_text: {class: elementor-heading-title, text: true}
-        price: {class: woocommerce-Price-amount, text: true, pattern: "£\\s*([\\d,]+)"}
+        price: {class: woocommerce-Price-amount, text: true, pattern: "£\\s*([\\d.,]*\\d)"}
         currency_symbols: {"£": GBP}
       number: {decimal: ".", thousands: ","}
       specs:
