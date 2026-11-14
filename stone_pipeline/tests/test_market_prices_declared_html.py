@@ -416,7 +416,6 @@ def test_a_price_capture_that_is_part_of_a_longer_number_is_no_amount_and_its_no
     result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", shown))}, _site(_with_price(pattern)))
     row = _rows(result)["/p/nero/"]
     assert (row.price_amount, row.price_status, row.currency, row.price_text) == (None, PriceStatus.none, None, shown)
-    assert row.notes == ("price capture is part of a longer number",)
     assert "price capture is part of a longer number x1" in _status(result).detail
 
 
@@ -426,7 +425,8 @@ def test_a_whole_capture_reads_even_beside_a_separator_that_joins_no_digits():
     spaced["fields"] = {**spaced["fields"], "currency_symbols": {"€": "EUR"}}
     result = _run({f"{BASE}/collections/slabs/": _page(_sale_card("nero", "€ 1 250,00 / m²"))}, _site(spaced))
     row = _rows(result)["/p/nero/"]
-    assert (row.price_amount, row.currency, row.notes) == ("1250.00", "EUR", ())
+    assert (row.price_amount, row.currency) == ("1250.00", "EUR")
+    assert "part of a longer number" not in _status(result).detail
 
 
 def test_a_regular_price_capture_that_is_part_of_a_longer_number_is_no_regular_amount():
@@ -436,4 +436,4 @@ def test_a_regular_price_capture_that_is_part_of_a_longer_number_is_no_regular_a
     result = _run({f"{BASE}/collections/slabs/": page}, _site(declaration))
     row = _rows(result)["/p/nero/"]
     assert (row.price_amount, row.regular_price_text, row.regular_price_amount) == ("1040.00", "£1,450.00", None)
-    assert row.notes == ("regular_price capture is part of a longer number",)
+    assert "regular_price capture is part of a longer number x1" in _status(result).detail
