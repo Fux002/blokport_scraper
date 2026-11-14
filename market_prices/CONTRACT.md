@@ -148,16 +148,16 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 
 ## Price sheets (`source` = `file`)
 
-The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3://<bucket>/<env>/market_prices/<brand>/intake/`. RUN_MODE=market-prices-intake, for the brand named by the same required run input `SCRAPER_MARKET_PRICES_BRAND`, reads each file once, by its sha256, and delivers it as its own run folder, published like a crawl run:
+The owner puts a competitor's price sheet (`.csv` in UTF-8, or `.xlsx`) in `s3://<bucket>/<env>/market_prices/<brand>/intake/`. RUN_MODE=market-prices-intake, for the brand named by the same required run input `SCRAPER_MARKET_PRICES_BRAND`, reads each file once, by its sha256. One intake run delivers every pending file it can read as ONE run folder, published like a crawl run; a file that arrives later is in a later run, and when no pending file can be read no run is delivered:
 
-- `run_id` and `observed_at` are when S3 received the file (its LastModified), not a price date. A date the sheet states is in `stated_specs` as written.
-- `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the file; its `decision` is `supplied` and `terms_checked_on` is empty.
+- `run_id` is when S3 received the newest of the run's files (its LastModified); a row's `observed_at` is when S3 received its own file. Neither is a price date: a date the sheet states is in `stated_specs` as written. The same pending files always give the same run.
+- `site_id` is the competitor's id from the layout file, and the seller fields are that competitor's. `site_status.csv` has one row per competitor in the run's files; its `decision` is `supplied` and `terms_checked_on` is empty.
 - `source_url` is `s3://<bucket>/<intake key>?versionId=<version>#<sheet>!R<row>` (`#R<row>` for a csv): the exact file version and row.
 - `stated_specs` holds every column the layout does not read into an observation field or a spec column, header to cell as written. The identity columns (the column naming the competitor, every `listing_key` part) are kept there too, unless the column is read into a field (a product name that is both a key part and `listing_text` is in `listing_text`; a thickness column the layout's `specs` names is in `thickness_mm` and `thickness_text`), so nothing is ever parsed out of `listing_key`.
 - `provenance` `site_statement` means the sheet's layout states it once for every row (for example its currency or VAT basis).
-- `s3://<bucket>/<env>/market_prices/<brand>/intake_absorbed.csv` records each absorbed file: `sha256`, `key`, `version_id`, `layout_id`, `run_id`, sorted by `sha256`.
+- `s3://<bucket>/<env>/market_prices/<brand>/intake_absorbed.csv` records each absorbed file: `sha256`, `key`, `version_id`, `layout_id`, `run_id` (the run it was delivered in), sorted by `sha256`.
 
-A file is refused, named, and left in the intake (never half-read) when it is not `.csv`/`.xlsx`, is over a size cap, matches no layout's exact header row, or names a competitor the layout file does not declare. A row that cannot be read is counted in `malformed_listings`.
+A file is refused, named in the intake's output, and left in the intake (never half-read) when it is not `.csv`/`.xlsx`, is over a size cap, matches no layout's exact header row, or names a competitor the layout file does not declare. A competitor is in at most one of a run's files: when two pending files carry the same competitor, both are refused and left, since which list is current is never guessed. The run is delivered without the refused files, and the next intake run reads them again. A row that cannot be read is counted in `malformed_listings`.
 
 ## Adding a competitor sheet
 
