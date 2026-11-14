@@ -24,7 +24,7 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | `GET` | `/config/v1/sources` | list every scraper, enriched with `scrape_at`, `scrape_rows`, `ledger_products` | `{ "sources": [ <source>, ... ] }` |
 | `GET` | `/config/v1/sources/<name>` | one source | `<source>` or `404` |
 | `PUT` | `/config/v1/sources/<name>` | create OR update (full object; missing fields fall to defaults). **Also the promote-to-auto action: PUT with `"mode":"auto"`.** | body `<source>` -> saved `<source>`; `400` on a bad/duplicate/adapterless source |
-| `DELETE` | `/config/v1/sources/<name>` | remove permanently (purge qty-0 products + drop config) | `409` if the source still has LIVE products (delist first) |
+| `DELETE` | `/config/v1/sources/<name>` | remove permanently (unpublish its products (reason `delisted`) + drop config; nothing deleted, table 505) | `409` if the source still has LIVE products (delist first) |
 
 A `<source>`'s `lifecycle` is exactly one of `active` | `paused` | `delisted`.
 
