@@ -1,13 +1,13 @@
-# Market price observations: delivery contract (version 3)
+# Market price observations: delivery contract (version 4)
 
 Reference prices seen on competitor sites, and read from the competitor price sheets the owner supplies, for the pricing module. This path never writes to Medusa, the sync ledger or the vendor product path. It records what a site or a sheet says. Matching, conversion, grading and trust rules belong to the consumer.
 
-Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1. Version 3 adds nine columns to observations.csv right after `stated_specs` (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`, `thickness_text`, `finish_text`, `material_text`, `origin_text`, `spec_labels`; see "Specs") and four keys to `provenance`; every other column, and site_status.csv's columns, are as in version 2. Version 3 replaces version 2 outright: no version 2 run was ever delivered, so no consumer reads both.
+Versions: a consumer refuses a contract_version it does not know. Version 2 adds `source` (`site` or `file`) as the second column of both files, and `seller_is_our_supplier` and `supplier_key` after `served_market` in observations.csv; every other column is as in version 1. Version 3 adds nine columns to observations.csv right after `stated_specs` (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`, `thickness_text`, `finish_text`, `material_text`, `origin_text`, `spec_labels`; see "Specs") and four keys to `provenance`; every other column, and site_status.csv's columns, are as in version 2. Version 3 replaces version 2 outright: no version 2 run was ever delivered, so no consumer reads both. Version 4 adds two columns to observations.csv right after `price_amount` (`regular_price_text`, `regular_price_amount`; Mas's sale rule, 14 Nov) and a `register.json` file to every run folder (see "register.json"); site_status.csv is as in version 3. Version 4 replaces version 3 outright, at one cutover after the owner's sheets have loaded under version 3; the consumer reads one version.
 
-The observations.csv header, version 3, in order:
+The observations.csv header, version 4, in order:
 
 ```
-contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,price_text,price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,availability_text,provenance,observed_at,run_id,collector_version
+contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,price_text,price_amount,regular_price_text,regular_price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,availability_text,provenance,observed_at,run_id,collector_version
 ```
 
 ## Where
@@ -15,12 +15,13 @@ contract_version,source,brand,site_id,seller_name,seller_type,seller_country,ser
 ```
 s3://<bucket>/<env>/market_prices/<brand>/<run_id>/observations.csv
 s3://<bucket>/<env>/market_prices/<brand>/<run_id>/site_status.csv
+s3://<bucket>/<env>/market_prices/<brand>/<run_id>/register.json
 s3://<bucket>/<env>/market_prices/<brand>/<run_id>/manifest.json
 s3://<bucket>/<env>/market_prices/<brand>/latest.json
 ```
 
 - `run_id` is the run's UTC start, `YYYYMMDDTHHMMSSZ`. Run folders are kept, so they are the price history.
-- `manifest.json` has the run's `brand` and the sha256, row count and S3 version of each file, and is written after them. A folder without a manifest is not a delivered run.
+- `manifest.json` has the run's `brand` and the sha256, row count and S3 version of each file (`register.json` among them), and is written after them. A folder without a manifest is not a delivered run.
 - `latest.json` names the newest run with at least one observation (`brand`, `run_id`, `manifest_key`, `rows`, `contract_version`). A run with no rows is delivered as evidence but does not move it.
 - Brands never mix: every row, manifest and pointer carries the run's brand, every key is under `<env>/market_prices/<brand>/`, and a site sits in one brand's register unless both registers declare it shared (`shared_with`). The rules are named in `market_prices/brand.py`.
 - The newest run may hold only some sites: `site_status.csv` says which. For a site missing from it, the consumer looks back through the run folders, and decides how old a price may be.
@@ -48,8 +49,10 @@ UTF-8, comma-separated, `\n` line ends, header row. Empty cell means the site di
 | thickness_text, finish_text, material_text, origin_text | Each spec as the seller wrote it. Empty when not stated |
 | spec_labels | JSON object: each stated spec column (`thickness_mm`, `finish`, `material_type`, `origin_iso_2`) to the seller's label or sheet header it was read from, for example `{"finish":"Afwerking","thickness_mm":"Dikte"}`. A column not stated has no key |
 | grade_text | The seller's grade words, as written, when the register names the label that holds them |
-| price_text | The price as the seller shows it |
-| price_amount | Exact decimal, only when the listing has one price |
+| price_text | The price as the seller shows it: the CURRENT price |
+| price_amount | Exact decimal, only when the listing has one price: the CURRENT price |
+| regular_price_text | The regular price the seller shows beside a current one (a struck "was" price, or a regular price the source states separately), as written. Empty when the listing shows one price |
+| regular_price_amount | Its exact decimal, read as the current price is. Empty when `regular_price_text` is empty or is not one price. A listing is on sale exactly when `regular_price_text` is set: there is no separate flag |
 | currency | ISO 4217 code as stated |
 | price_status | `priced`, `on_request` or `none`. A range, or zero (made-to-measure), is `none` with `price_text` kept |
 | vat_basis | `incl`, `excl` or `unknown` |
@@ -85,6 +88,33 @@ A stated value that has no honest mapping refuses its row, which is counted in `
 | `origin '<value>' is not in the country table` | The origin is neither a code nor a name in the table, nor an unstated word |
 | `<column>: two labels state different values '<a>' / '<b>'` | A site states one spec under two of its labels with different values |
 
+## register.json
+
+Every run folder carries the brand's register as it stood when the run started: one row per APPROVED site in `market_prices/sites/<brand>.yaml` and per competitor declared in `market_prices/sheet_layouts/<brand>.yaml`, whatever the run read. The consumer upserts its sources from it by `source_key`; it never needs a writer of its own. UTF-8 JSON:
+
+```json
+{"brand": "blokport", "contract_version": "4", "run_id": "20261114T150000Z", "sources": [
+  {"brand": "blokport", "source_key": "cereser_carrara", "source": "file", "seller_name": "Cereser Listino Carrara",
+   "seller_type": "wholesaler", "seller_country": "IT", "served_market": "EU", "price_basis": "net",
+   "net_discount": "0.2", "vat_rate": null, "vat_rate_stated_by": null, "seller_is_our_supplier": false,
+   "supplier_key": null, "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}]}
+```
+
+`sources` is sorted by `source_key`, and every row has exactly these keys (an empty value is `null`):
+
+| Key | Meaning |
+|---|---|
+| brand | The register's brand |
+| source_key | The site's `site_id` or the competitor's `competitor_id` (the two are kept apart at load); the `site_id` of its observations |
+| source | `site` (a register site) or `file` (a sheet competitor), as in observations.csv |
+| seller_name, seller_type, seller_country, served_market | As its observations carry them |
+| price_basis | `list` or `net`: whether its prices are list prices or net prices. Declared on every approved site and every competitor; never defaulted |
+| net_discount | For a `net` source only (else `null`): the exact decimal in [0, 1) that its net prices are below list, as the owner states it (`0.2`: list = net / (1 - 0.2)) |
+| vat_rate | The VAT rate as an exact decimal (`0.2`), only when the site or the owner states it; else `null`, never inferred |
+| vat_rate_stated_by | `site` (the site's own pages or terms state it) or `owner` (the owner's statement); `null` exactly when `vat_rate` is |
+| seller_is_our_supplier, supplier_key | As its observations carry them |
+| decided_by, decided_on | Who approved the source and when (`YYYY-MM-DD`): a site's register decision, a competitor's declared decision |
+
 ## site_status.csv
 
 One row per site in the register, every run.
@@ -107,7 +137,7 @@ Also: `rows`, `malformed_listings`, `duplicate_listings`, `detail`, `terms_check
 ## Running
 
 - **A run:** `RUN_MODE=market-prices` on the ad-hoc scraper task runs `python -m market_prices.run` for the brand named by the required run input `SCRAPER_MARKET_PRICES_BRAND` (set as a container override; never the deployment's own brand, so one deployment's task runs every brand's register), in that deployment's env and bucket, under `<env>/market_prices/<brand>/`. A run without it stops before any request; an unknown brand (no `sites/<brand>.yaml`) is refused the same way. It loads the brand's register, collects every site in it, writes the run folder, then publishes it as above. A register that does not validate stops the run before any request. Only an approved site is requested at all, so a register with none still runs and publishes `site_status.csv` as evidence, leaving `latest.json` where it is. Under the S3 dry run (`SCRAPER_S3_DRY_RUN`) the folder is written locally and nothing is uploaded.
-- **Collectors:** a site names its platform. `woocommerce_store` reads the shop's public Store API. `schema_org_product` reads each product page's schema.org Product/Offer structured data (JSON-LD), reached through the entry points the register names (see "Adding a site"): one listing per product, or per variant of a ProductGroup. Only what the structured data states is read: a price is `priced` only as one exact decimal in schema.org's form (a dot, no grouping), and a span, a zero or any other form is `none` with `price_text` kept as stated. Offers stating prices in several currencies are not one price either: `none`, every stated price in `price_text` (`10 EUR | 10 GBP`), `currency` empty, and `detail` counts them (`offers state several currencies x<n>`); the listing is still delivered. `listing_key` is the product's `sku`, else its `productID`, else its page's path; a variant shares its page, so without a `sku` or `productID` it is keyed by its own `@id` or `url` on the site, and one with no identity of its own is a malformed listing (`variant has no id of its own`), never merged into another. A site that states no structured price (prices loaded by script, or a browser needed) gives no rows, and `detail` says why; it is never worked around. `declared_html` reads a site whose pages state their facts in their HTML, where its register row DECLARES them (see "Adding a site"): one record (an element) is one listing, so a product page's per-thickness rows are one listing each. What the page shows is what is read: the price is the price element's text as shown, its amount read in the site's declared number notation; a listing that shows no price is `none` with its words kept, whatever a script or an analytics attribute holds. Struck text (`<del>`, `<s>`, `<strike>`) is never the price: the current price is, the struck "was" price is kept when the row declares a struck spec for it (for example `Regular price`), and `stated_specs` carries `On sale: yes` whenever the price element holds struck text or a struck spec was read.
+- **Collectors:** a site names its platform. `woocommerce_store` reads the shop's public Store API. `schema_org_product` reads each product page's schema.org Product/Offer structured data (JSON-LD), reached through the entry points the register names (see "Adding a site"): one listing per product, or per variant of a ProductGroup. Only what the structured data states is read: a price is `priced` only as one exact decimal in schema.org's form (a dot, no grouping), and a span, a zero or any other form is `none` with `price_text` kept as stated. Offers stating prices in several currencies are not one price either: `none`, every stated price in `price_text` (`10 EUR | 10 GBP`), `currency` empty, and `detail` counts them (`offers state several currencies x<n>`); the listing is still delivered. `listing_key` is the product's `sku`, else its `productID`, else its page's path; a variant shares its page, so without a `sku` or `productID` it is keyed by its own `@id` or `url` on the site, and one with no identity of its own is a malformed listing (`variant has no id of its own`), never merged into another. A site that states no structured price (prices loaded by script, or a browser needed) gives no rows, and `detail` says why; it is never worked around. `declared_html` reads a site whose pages state their facts in their HTML, where its register row DECLARES them (see "Adding a site"): one record (an element) is one listing, so a product page's per-thickness rows are one listing each. What the page shows is what is read: the price is the price element's text as shown, its amount read in the site's declared number notation; a listing that shows no price is `none` with its words kept, whatever a script or an analytics attribute holds. Struck text (`<del>`, `<s>`, `<strike>`) is never the price: the current price is, and the struck "was" price is `regular_price_text` (and `regular_price_amount`) when the row declares a `regular_price` source for it. `woocommerce_store` fills the regular price from the Store API's own `regular_price` when it differs from the price; `schema_org_product` and the sheets leave it empty, as their sources state no regular price apart from the price.
 - **How it fetches:** plain HTTP under our own name (`USER_AGENT` in `config.py`): no browser disguise, no proxy, no retry. Every redirect hop must be a public http(s) address, and a body over `MAX_RESPONSE_BYTES` is refused.
 - **The dev pilot:** `python -m market_prices.pilot` runs ONE approved site of ONE brand (the same required run input `SCRAPER_MARKET_PRICES_BRAND`), that brand register's own `pilot_site` (`market_prices/sites/<brand>.yaml`), against development's bucket and prints a summary with the first rows. It refuses any other environment, a register naming no pilot site, and a pilot site the register has not approved, before a single request.
 
@@ -155,10 +185,10 @@ html:
     unit:         {class: sale-unit, text: true, pattern: "per\\s+(\\S+)"}
     currency_symbols: {"$": USD}                            # or currency: a source of the code
     on_request: [Contact us for pricing]                    # price texts meaning on request, as the page states them
+    regular_price: {class: price, text: true, struck: true} # the struck "was" price: regular_price_text / _amount
   number: {decimal: ".", thousands: ","}                    # the sheet layouts' notation model
   specs:
     Material:      {class: specs, label: Material}
-    Regular price: {class: price, text: true, struck: true}
 ```
 
 A record without its `listing_key` or `listing_text` (or where their pattern does not match), a JSON attribute that does not parse, a `url` off the site, or a product page with no declared record is a malformed listing, counted with its reason. A spec or an optional field not held, or not in its declared form, is simply not stated. Material is read as stated and never filtered by a register pattern: v3's vocabulary refuses an unmapped material.
