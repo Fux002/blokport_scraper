@@ -148,8 +148,9 @@ def test_the_committed_registers_hold_no_unflagged_supplier(brand):
 
 # --- the row ---------------------------------------------------------------------------------------------------------
 def _row(site: dict) -> Observation:
+    from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails these tests only
     facts = ListingFacts(listing_key="1", source_url=f"{site['base_url']}/p/1", listing_text="Slab")
-    return _observation(facts, _register(site).sites[0], "blokport", stamp_for(MOMENT), "woo/1")
+    return _observation(facts, _register(site).sites[0], "blokport", stamp_for(MOMENT), "woo/1", NO_SPECS)
 
 
 def test_the_row_copies_the_supplier_flag_from_the_register():
