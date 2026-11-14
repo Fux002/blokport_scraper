@@ -232,6 +232,28 @@ def _global_meaning(conn, spelling: str, stone_type: str, exists_as, alias_targe
     return (existing, stone_type) if existing else None
 
 
+def _stated_variety(name: str, stone_type: str, exists_as, alias_target) -> tuple[str, str | None]:
+    """What a stated (name, type) names: (name, 'existing') when it is an existing variety of that type, (the
+    canonical name, 'alias') when it is a known ALIAS of one (so the statement binds instead of minting a duplicate
+    of a known alias), else (name, None): a mint. The ONE bind-or-mint rule, for decide() and the review card."""
+    if exists_as(name, stone_type):
+        return name, "existing"
+    canonical = alias_target(name, stone_type)
+    return (canonical, "alias") if canonical else (name, None)
+
+
+def resolution(name: str, stone_type: str, exists_as=None, alias_target=None) -> dict | None:
+    """The server's answer to "does stating (name, type) bind or mint?": {action: 'bind' | 'mint', name, stone_type},
+    name being the variety it binds to. None when the name or the type is empty (nothing to resolve). The review card
+    shows it in place of a client-side guess (PHASE-2-SPEC:178)."""
+    name, stone_type = (name or "").strip(), (stone_type or "").strip()
+    if not _norm(name) or not stone_type:
+        return None
+    exists_as, alias_target, _ = _lookups(exists_as, alias_target)
+    resolved, bind = _stated_variety(name, stone_type, exists_as, alias_target)
+    return {"action": "bind" if bind else "mint", "name": resolved, "stone_type": stone_type}
+
+
 def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "", origin: str = "",
            widen: bool = False, exists_as=None, alias_target=None, clean=None) -> dict:
     """One listing's statement (see decide_all, which this is for a single listing)."""
@@ -279,13 +301,7 @@ def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: 
     if not src or not _norm(spelling) or not _norm(name) or not stone_type:
         raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type, "
                               "and the spelling and name must have a usable name (not a non-Latin script only)")
-    # a name the operator states may already be an existing variety's ALIAS (same type); it then resolves to
-    # that variety's canonical name, so the statement binds instead of minting a duplicate of a known alias
-    resolved_alias = False
-    if not exists_as(name, stone_type):
-        canonical = alias_target(name, stone_type)
-        if canonical:
-            name, resolved_alias = canonical, True
+    name, bind = _stated_variety(name, stone_type, exists_as, alias_target)
     outcome: dict = {"source": src, "scraped": spelling, "name": name, "stone_type": stone_type,
                      "color": color or None, "origin": origin or None}
     # a statement REPLACES the vendor's previous one for this spelling, and supersedes a global REJECT on the
@@ -294,11 +310,11 @@ def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: 
     for s in dict.fromkeys((spelling, clean(spelling, stone_type))):
         conn.execute("DELETE FROM statement WHERE source = '' AND verdict = 'reject' AND spelling_norm = ?",
                      (_norm(s),))
-    if exists_as(name, stone_type) or resolved_alias:
+    if bind:
         _write_statement(conn, src, spelling, "is", name=name, stone_type=stone_type, color=color,
                          origin_iso=origin, widen=widen, asked_by=src)
         outcome["result"] = "bound"
-        if resolved_alias:
+        if bind == "alias":
             outcome["resolved_alias"] = True
         return outcome
     meaning = _global_meaning(conn, spelling, stone_type, exists_as, alias_target, clean)
