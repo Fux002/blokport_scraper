@@ -27,7 +27,7 @@ from typing import Any, Iterable, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 19  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
+SCHEMA_VERSION = 20  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per (type, name) under the new Key,
 #                      variation_category_image, and branch/image_url/image_sha256/image_model/volume and the
 #                      combination table gone. No in-place migration below v15: the phase 1 store
 #                      migration (phase1.migrate_stores) writes the stores; an older ledger is refused (_apply_schema).
@@ -40,6 +40,9 @@ SCHEMA_VERSION = 19  # v15: phase 1 (PHASE-1-SPEC rev 8): one variation row per 
 #                      v19: inventory.gone_at -- when a listing was first missing at its supplier (table 505: it stays
 #                           published as sold out); null on every existing row until a run finds it gone, so a
 #                           listing gone before v19 gets the first v19 run's date.
+#                      v20: variation_deleted -- the varieties Medusa acked deleted (table 575 / G5).
+#                      Train order (the manager, 13 Nov; Sat train car 11): SC #677 merges AFTER #596 (v16), #591
+#                      (v17), C4 SC #651 (v18), #634 (v19) and #636, so it takes v20. Never two PRs on one number.
 PHASE1_VERSION = 15  # the first phase 1 ledger: below it only the store migration opens a ledger; from it, in place
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -203,7 +206,8 @@ class Ledger:
         # PRAGMA user_version makes a reopen a no-op. A brand-new file (version 0) gets the schema; a ledger from
         # before phase 1 (1 to 14) is REFUSED: its rows carry old Keys, and only the store migration may turn them
         # into phase 1 rows (PHASE-1-SPEC step 5). Quietly applying the new DDL over it would serve a half-old ledger.
-        # A phase 1 ledger (v15 on) gains the later columns in place (_migrate).
+        # A phase 1 ledger (v15 on) gains the later columns in place (_migrate) and the later tables through
+        # schema.sql's CREATE IF NOT EXISTS.
         from_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if from_version >= SCHEMA_VERSION:
             return
