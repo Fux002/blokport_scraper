@@ -22,6 +22,7 @@ s3://<bucket>/<env>/market_prices/<brand>/latest.json
 
 - `run_id` is the run's UTC start, `YYYYMMDDTHHMMSSZ`. Run folders are kept, so they are the price history.
 - `manifest.json` has the run's `brand` and the sha256, row count and S3 version of each file (`register.json` among them), and is written after them. A folder without a manifest is not a delivered run.
+- A run folder is written once: after its manifest no file in it changes; a correction is a new run.
 - `latest.json` names the newest run with at least one observation (`brand`, `run_id`, `manifest_key`, `rows`, `contract_version`). A run with no rows is delivered as evidence but does not move it.
 - Brands never mix: every row, manifest and pointer carries the run's brand, every key is under `<env>/market_prices/<brand>/`, and a site sits in one brand's register unless both registers declare it shared (`shared_with`). The rules are named in `market_prices/brand.py`.
 - The newest run may hold only some sites: `site_status.csv` says which. For a site missing from it, the consumer looks back through the run folders, and decides how old a price may be.
