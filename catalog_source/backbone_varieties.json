@@ -505068,6 +505068,25 @@
       "merged_from": []
     },
     {
+      "key": "travertine__red_travertine_82ad8ce0-bfbe-566f-8cff-3e7b659bf421",
+      "variant": "Red Travertine",
+      "stone_type": "Travertine",
+      "color": [
+        "Red"
+      ],
+      "finishes": [
+        "Polished"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Persian Red"
+      ],
+      "codes": [],
+      "merged_from": []
+    },
+    {
       "key": "travertine__reddish_7f45803b-aa1b-5814-aa30-c97537989de4",
       "variant": "Reddish",
       "stone_type": "Travertine",

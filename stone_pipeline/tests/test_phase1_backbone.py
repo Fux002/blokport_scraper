@@ -111,6 +111,15 @@ def test_an_identitys_three_posts_merge_into_one(key_map):
                     "aliases": ["Shanxi Black", "Nero Assoluto", "Tile Black"], "merged_from": []}
 
 
+def test_a_copy_with_another_name_lands_as_an_alias_of_the_survivor_post(key_map):
+    # a loser name (a copy whose name is not the survivor's) reaches the seed as an alias of the survivor post by this
+    # merge, never through the ledger (P2-10 C4 drops the ledger's alias union; manager, 11-12)
+    slab = _post(key="slab_granite_absolute_black_a", aliases=["Shanxi Black"])
+    tile = _post(key="tile_granite_absolute_black_c", category="Tiles", variant="Absolute Black Premium")
+    (post,) = rewrite_committed.merge_backbones([slab], [], [tile], key_map)
+    assert (post["variant"], post["aliases"]) == ("Absolute Black", ["Shanxi Black", "Absolute Black Premium"])
+
+
 def test_a_post_the_map_does_not_carry_refuses(key_map):
     with pytest.raises(rewrite_committed.UnmappedKey, match="Kashmir White"):
         rewrite_committed.merge_backbones([], [_post(variant="Kashmir White", category="Blocks")], [], key_map)

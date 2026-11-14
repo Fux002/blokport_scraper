@@ -23,11 +23,14 @@ KEY = "granite__alpine_00000000-0000-0000-0000-000000000001"
 
 
 def _write(path: Path, name: str, with_id: bool) -> None:
-    fields = (["Id"] if with_id else []) + ["Key", "Name", "Type", "Aliases"]
+    # Medusa's export (with an Id) carries the P2-7 columns; the scraper's own base keeps Key,Name,Type,Aliases
+    fields = (["Id", "Key", "Name", "AdminAliases", "AdminCodes", "Type"] if with_id
+              else ["Key", "Name", "Type", "Aliases"])
     with path.open("w", newline="", encoding="utf-8") as h:
         w = csv.DictWriter(h, fieldnames=fields)
         w.writeheader()
-        w.writerow({**({"Id": "var_1"} if with_id else {}), "Key": KEY, "Name": name, "Type": "Granite", "Aliases": "Alpine Granite"})
+        w.writerow({**({"Id": "var_1"} if with_id else {"Aliases": "Alpine Granite"}), "Key": KEY, "Name": name,
+                    "Type": "Granite"})
 
 
 def _paths(tmp_path: Path):
@@ -56,7 +59,11 @@ def test_base_serves_both_matcher_and_curate_when_the_export_is_absent(tmp_path,
     _write(paths.variants_export_base_csv, "Alpine", with_id=False)
     monkeypatch.setattr(loaders, "SETTINGS", _settings(paths))
     assert loaders.existing_varieties_file() == paths.variants_export_base_csv
-    # curate's existing index is populated from the base: the alias surface resolves to its owner
+    # curate's existing index is populated from the base; a variety's aliases come from the alias stores (P2-10
+    # C3/C4), never from the file's Aliases column, so the seed's alias resolves to its owner
+    from stone_pipeline.aliases import stores as alias_stores
+    monkeypatch.setattr(alias_stores, "scraper_stores",
+                        lambda backbone=None: Stores(seed={KEY: (["Alpine Granite"], [])}))
     imp = curate.load_existing()
     assert imp.by_name_type[("alpine", "granite")]["Aliases"] == "Alpine Granite"
     # the matcher's table reads the same file

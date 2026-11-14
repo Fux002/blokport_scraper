@@ -87,6 +87,12 @@ _PHOTO_HELD = ("SELECT {cols} FROM product WHERE photo_unpublished IS NOT NULL A
                "AND abandoned_at IS NULL")
 
 
+# The varieties a change waits on (pending or dirty, rendered, not a dead-letter) held back because their alias_rows or
+# codes are NULL, not computed yet (ledger v18): a produce computes both, then they serve. /status counts them.
+_ALIASES_UNCOMPUTED = ("SELECT COUNT(*) AS n FROM variation WHERE state IN ('pending', 'dirty') AND in_full = 1 "
+                       "AND abandoned_at IS NULL AND (alias_rows IS NULL OR codes IS NULL)")
+
+
 def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     """Per-type state counts. Each state-bearing table reports every state it can hold (db.STATES), 0 for one
     with no rows: a count is always a value, never an absent key;
@@ -115,6 +121,8 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     # products a change waits on that are held back because they link a photo the photos side has not published
     held = ledger.execute(_PHOTO_HELD.replace("{cols}", "COUNT(*) AS n")).fetchone()["n"]
     out["product_photos"] = {"unpublished": held}
+    # varieties a change waits on that are held back because their alias_rows or codes are not computed yet (v18)
+    out["variation_aliases"] = {"uncomputed": ledger.execute(_ALIASES_UNCOMPUTED).fetchone()["n"]}
     return out
 
 
@@ -182,7 +190,7 @@ def _sub_limit(limit: int | None) -> str:
 # Nor a product linking a standardised file the photos side has not published (photo_unpublished, recomputed by every
 # produce: populate.mark_unpublished_photos): a content fact, so a requeue or a reset never revives it.
 _ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archived = 0 "
-                       "AND type IS NOT NULL AND type != '' "
+                       "AND type IS NOT NULL AND type != '' AND alias_rows IS NOT NULL AND codes IS NOT NULL "
                        "AND (retry_after IS NULL OR retry_after <= ?)")
 _ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND p.photo_unpublished IS NULL "
                      f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
@@ -237,7 +245,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "UPDATE variation SET state = 'syncing', reserved_at = NULL, updated_at = ? WHERE key IN ("
         "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
-        "RETURNING key, type, name, aliases, payload_hash",
+        "RETURNING key, type, name, alias_rows, codes, payload_hash",
         (now, now)).fetchall()
     icons = variation_icons(ledger, [v["key"] for v in rows])
     return _isolate(ledger, "variation", "key", rows, lambda v: {
@@ -664,10 +672,12 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
 
 # Why the scraper does not serve an existing variation, the first that applies (NULL = it serves). The reserve answers
 # it as `frozen` and never marks the row. The operator's terminal verdict (an abandoned dead-letter) outranks the rest;
-# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays.
+# then the gates of _ELIGIBLE_VARIATION, save the retry wait, which only delays. 'uncomputed' comes LAST (Mas, 11-12):
+# its alias_rows or codes are NULL, not computed yet (ledger v18), and the remedy is to run a produce.
 _FROZEN_REASON_SQL = ("CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned' "
                       "WHEN archived = 1 THEN 'archived' WHEN state = 'retiring' THEN 'retiring' "
-                      "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' END")
+                      "WHEN in_full = 0 THEN 'not_in_full' WHEN type IS NULL OR type = '' THEN 'no_type' "
+                      "WHEN alias_rows IS NULL OR codes IS NULL THEN 'uncomputed' END")
 
 
 def reserve_variations(ledger: Ledger, external_ids: Iterable[str]) -> dict[str, list]:
