@@ -199,16 +199,20 @@ def _observation(file: IntakeFile, bucket: str, brand: str, layout: Layout, head
     if not all(key_parts):
         raise MalformedListing(f"row {index + 1} has no listing key")
     text = " ".join(part for column in layout.listing_text if (part := _cell(cells, header, column)))
-    price = read_price(_raw(cells, header, layout.price), layout)
+    price_column = layout.price_column(competitor.competitor_id)
+    if price_column is None:                            # the whole file is refused, never half-read
+        raise FileRefused(f"{file.key}: layout {layout.layout_id} gives competitor {competitor.competitor_id} "
+                          f"no price column")
+    price = read_price(_raw(cells, header, price_column), layout)
     column_currency = read_currency(_raw(cells, header, layout.currency), layout)
     if column_currency and price.currency and column_currency != price.currency:
         raise MalformedListing(f"row {index + 1}: currency {column_currency} but the price says {price.currency}")
     listed_currency = column_currency or price.currency
     listed_unit = _cell(cells, header, layout.unit)
     said = layout.statements
-    mapped = {name_key(column) for column in layout.mapped_columns()}
+    fields = {name_key(column) for column in layout.field_columns(competitor.competitor_id)}
     specs = {layout.headers[position]: value for position, cell in enumerate(cells)
-             if header[position] not in mapped and (value := cell_text(cell))}
+             if header[position] not in fields and (value := cell_text(cell))}
     grade, min_qty = _cell(cells, header, layout.grade), _cell(cells, header, layout.min_qty)
     return Observation(
         contract_version=config.CONTRACT_VERSION, source=Source.file, brand=brand, site_id=competitor.competitor_id,
