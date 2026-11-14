@@ -92,7 +92,7 @@ def _approved(**overrides) -> dict:
     return _row(**{"seller_country": "BE", "served_market": "BE", "decided_by": "owner", "decided_on": "2026-11-08",
                    "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02",
                              "summary": "No clause on copying."},
-                   "decision": "approved", **overrides})
+                   "price_basis": "list", "decision": "approved", **overrides})
 
 
 def _register_file(directory: Path, brand: str, *rows: dict, **top) -> None:

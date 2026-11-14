@@ -44,7 +44,7 @@ def _site(site_id="shop", base_url="https://shop.example", **overrides) -> dict:
         "brand": "blokport", "site_id": site_id, "seller_name": "Shop", "seller_type": "merchant",
         "seller_country": "BE", "served_market": "NL", "platform": "woocommerce_store", "base_url": base_url,
         "terms": {"terms_url": f"{base_url}/terms", "checked_on": "2026-11-02", "summary": "No clause on copying."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08",
     }
     return {**site, **overrides}
 
@@ -181,7 +181,7 @@ def test_a_row_cannot_say_supplier_without_its_key_or_the_reverse():
 # --- a price sheet's competitor ---------------------------------------------------------------------------------------
 def _layouts(supplier_key=None, site_domain="ferraz-rival.example") -> dict:
     competitor = {"competitor_id": "ferraz_br", "names": ["Ferraz"], "seller_type": "wholesaler",
-                  "seller_country": "BR", "served_market": "GB", "site_domain": site_domain}
+                  "seller_country": "BR", "served_market": "GB", "site_domain": site_domain, "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"}
     if supplier_key:
         competitor["supplier_key"] = supplier_key
     return {"brand": "blokport", "competitors": [competitor], "layouts": [{

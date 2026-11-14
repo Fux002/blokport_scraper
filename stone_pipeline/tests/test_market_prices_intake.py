@@ -41,9 +41,9 @@ PREFIX = "dev/market_prices/blokport"
 def _competitors() -> list[dict]:
     return [
         {"competitor_id": "stonecorp_gb", "names": ["StoneCorp Ltd", "StoneCorp"], "seller_type": "wholesaler",
-         "seller_country": "GB", "served_market": "GB", "site_domain": "stonecorp.example"},
+         "seller_country": "GB", "served_market": "GB", "site_domain": "stonecorp.example", "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"},
         {"competitor_id": "rocca_it", "names": ["Rocca"], "seller_type": "merchant", "seller_country": "IT",
-         "served_market": "GB", "site_domain": "rocca.example"},
+         "served_market": "GB", "site_domain": "rocca.example", "price_basis": "list", "decided_by": "owner (supplied workbook) via Mas", "decided_on": "2026-11-13"},
     ]
 
 
@@ -107,8 +107,8 @@ def _status(result, site_id="stonecorp_gb") -> SiteStatus:
 
 
 # --- the source column (since v2) ---------------------------------------------------------------------------------------
-def test_the_contract_is_version_3_and_source_is_the_second_column():
-    assert config.CONTRACT_VERSION == "3"
+def test_the_contract_is_version_4_and_source_is_the_second_column():
+    assert config.CONTRACT_VERSION == "4"
     assert columns(Observation)[:2] == ("contract_version", "source")
     assert columns(SiteStatus)[:2] == ("contract_version", "source")
 
@@ -118,7 +118,7 @@ def test_a_crawl_row_says_it_came_from_a_site():
         "brand": "blokport", "site_id": "shop", "seller_name": "Shop", "seller_type": "merchant", "seller_country": "BE",
         "served_market": "NL", "platform": "woocommerce_store", "base_url": "https://shop.example",
         "terms": {"terms_url": "https://shop.example/terms", "checked_on": "2026-11-02", "summary": "None."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-08"}]}).sites[0]
     from market_prices.specs import NO_SPECS     # v3; imported here so a red run fails this test only
     facts = ListingFacts(listing_key="1", source_url="https://shop.example/p/1", listing_text="Sill")
     assert _observation(facts, site, "blokport", stamp_for(RECEIVED), "woo/1", NO_SPECS).source is Source.site
@@ -132,7 +132,7 @@ def test_a_sheet_row_and_its_status_say_they_came_from_a_file():
 
 def test_the_contract_states_the_version_rule_and_the_source_column():
     text = (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
-    assert "Version 3" in text and "| source |" in text
+    assert "Version 4" in text and "| source |" in text
     assert "refuses a contract_version it does not know" in text
 
 
@@ -311,13 +311,14 @@ def test_a_known_layout_gives_the_exact_rows():
     assert result.run_id == RUN_ID and result.brand == "blokport"
     first = result.observations[0].model_dump(mode="json")
     assert first == {
-        "contract_version": "3", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
+        "contract_version": "4", "source": "file", "brand": "blokport", "site_id": "stonecorp_gb",
         "seller_name": "StoneCorp Ltd", "seller_type": "wholesaler", "seller_country": "GB", "served_market": "GB",
         "seller_is_our_supplier": False, "supplier_key": None, "listing_key": "SC-1", "source_url": f"s3://bucket/{PREFIX}/intake/stonecorp.csv?versionId=v1#R3",
         "listing_text": "Nero Assoluto slab 2cm", "stated_specs": {"Code": "SC-1", "Finish": "Polished"},
         "thickness_mm": None, "finish": None, "material_type": None, "origin_iso_2": None, "thickness_text": None,
         "finish_text": None, "material_text": None, "origin_text": None, "spec_labels": {}, "grade_text": None,
-        "price_text": "1,234.50", "price_amount": "1234.50", "currency": "GBP", "price_status": "priced",
+        "price_text": "1,234.50", "price_amount": "1234.50", "regular_price_text": None,
+        "regular_price_amount": None, "currency": "GBP", "price_status": "priced",
         "vat_basis": "excl", "unit_text": "m2", "delivery_text": None, "delivery_included": "unknown",
         "min_qty_text": None, "availability_text": None,
         "provenance": {"vat_basis": "site_statement", "unit_text": "listing", "delivery_text": "unknown",

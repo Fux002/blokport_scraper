@@ -61,12 +61,13 @@ SALE = {
         "listing_text": {"class": "card-title", "text": True},
         "url": {"class": "card-link", "attr": "href"},
         "price": {"class": "starel-loop-card-price__row--sqm", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
+        # Mas's sale rule (14 Nov; contract v4): the struck "was" price is the regular price, never the price
+        "regular_price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True,
+                          "pattern": r"£\s*([\d,]+\.\d{2})"},
         "currency_symbols": {"£": "GBP"},
     },
     "number": {"decimal": ".", "thousands": ","},
-    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True},
-              # Mas's sale rule (14 Nov): the struck "was" price is kept, read explicitly, never as the price
-              "Regular price": {"class": "starel-loop-card-price__row--sqm", "text": True, "struck": True}},
+    "specs": {"Price per slab": {"class": "starel-loop-card-price__row--slab", "text": True}},
 }
 
 
@@ -78,7 +79,7 @@ def _site(declaration: dict, discovery=None, **overrides) -> dict:
                                    "product_path": r"^/product/[a-z0-9-]+/?$"},
         "html": declaration,
         "terms": {"terms_url": f"{BASE}/terms", "checked_on": "2026-11-14", "summary": "No clause on copying."},
-        "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-14",
+        "price_basis": "list", "decision": "approved", "decided_by": "owner", "decided_on": "2026-11-14",
     }
     return {**site, **overrides}
 
@@ -203,8 +204,8 @@ def test_a_product_page_without_a_declared_record_is_counted_with_its_reason():
 
 
 # --- sale cards: the struck price is never read (the Starel Stones shape) --------------------------------------------
-def test_struck_text_is_never_the_price_but_is_kept_as_the_regular_price_with_the_sale_flag():
-    # Mas's sale rule (14 Nov): the price is the current one as shown; the struck "was" price and "On sale" are kept
+def test_struck_text_is_never_the_price_but_is_the_regular_price():
+    # Mas's sale rule (14 Nov; contract v4): the price is the current one as shown, the struck "was" price the regular
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/arabescato/">x</a>'
             '<h3 class="card-title">Arabescato Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--slab"><del>£2,400.00</del> <ins>£1,999.00</ins> per slab</div>'
@@ -212,30 +213,32 @@ def test_struck_text_is_never_the_price_but_is_kept_as_the_regular_price_with_th
             '</article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/arabescato/"]
     assert (row.price_amount, row.price_text) == ("1375.00", "£1,375.00 per m²")
-    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab", "Regular price": "£1,450.00",
-                                "On sale": "yes"}
+    assert (row.regular_price_text, row.regular_price_amount) == ("£1,450.00", "1450.00")
+    assert row.stated_specs == {"Price per slab": "£1,999.00 per slab"}                # no "On sale" spec any more
 
 
-def test_a_card_not_on_sale_has_no_regular_price_and_no_sale_flag():
+def test_a_card_not_on_sale_has_no_regular_price():
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/bianco/">x</a>'
             '<h3 class="card-title">Bianco Carrara Marble Slab</h3>'
             '<div class="starel-loop-card-price__row--sqm">£295.00 per m²</div></article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(SALE)))["/p/bianco/"]
-    assert (row.price_amount, row.stated_specs) == ("295.00", {})
+    assert (row.price_amount, row.regular_price_text, row.regular_price_amount, row.stated_specs) == (
+        "295.00", None, None, {})
 
 
 def test_a_class_lookup_skips_struck_subtrees_so_the_current_amount_is_read():
     # the manager's ruling 2: a price whose struck and current amounts carry one class reads the current one
-    declaration = {**SALE, "fields": {**SALE["fields"], "price": {"class": "amount", "text": True,
-                                                                  "pattern": r"£\s*([\d,]+\.\d{2})"}},
-                   "specs": {"Regular price": {"class": "amount", "text": True, "struck": True}}}
+    declaration = {**SALE, "fields": {**SALE["fields"],
+                                      "price": {"class": "amount", "text": True, "pattern": r"£\s*([\d,]+\.\d{2})"},
+                                      "regular_price": {"class": "amount", "text": True, "struck": True,
+                                                        "pattern": r"£\s*([\d,]+\.\d{2})"}}}
     card = ('<article class="starel-loop-card"><a class="card-link" href="/p/nero/">x</a>'
             '<h3 class="card-title">Nero Marquina Marble Slab</h3><p class="price">'
             '<del><span class="amount">£1,450.00</span></del> <ins><span class="amount">£1,040.00</span></ins></p>'
             '</article>')
     row = _rows(_run({f"{BASE}/collections/slabs/": _page(card)}, _site(declaration)))["/p/nero/"]
     assert (row.price_amount, row.price_text) == ("1040.00", "£1,040.00")
-    assert row.stated_specs == {"Regular price": "£1,450.00", "On sale": "yes"}
+    assert (row.regular_price_text, row.regular_price_amount) == ("£1,450.00", "1450.00")
 
 
 def test_a_price_is_read_in_the_declared_notation_and_one_that_does_not_parse_is_unpriced():
@@ -366,6 +369,8 @@ def test_a_declared_html_site_loads_with_its_declaration():
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "listing_key": {"text": True, "pattern": "(a)(b)"}}}},
      "one capture group"),
     ({"html": {**CARDS, "specs": {"Regular price": {"json": ["data-x", "price"], "struck": True}}}}, "struck"),
+    # v4: struck text is read only as the regular price, never into a spec
+    ({"html": {**CARDS, "specs": {"Regular price": {"class": "p", "text": True, "struck": True}}}}, "regular_price"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "price": {"class": "p", "text": True, "struck": True}}}},
      "struck"),                                                          # struck text is never the price
     ({"html": {**CARDS, "specs": {"Material": {"class": "specs", "label": "Material", "text": True}}}}, "one of"),

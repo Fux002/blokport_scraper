@@ -23,11 +23,12 @@ def _specs():
     collection (so a red run shows every test failing on its own)."""
     return importlib.import_module("market_prices.specs")
 
-V3_HEADER = (
+V4_HEADER = (
     "contract_version,source,brand,site_id,seller_name,seller_type,seller_country,served_market,"
     "seller_is_our_supplier,supplier_key,listing_key,source_url,listing_text,stated_specs,thickness_mm,finish,"
     "material_type,origin_iso_2,thickness_text,finish_text,material_text,origin_text,spec_labels,grade_text,"
-    "price_text,price_amount,currency,price_status,vat_basis,unit_text,delivery_text,delivery_included,min_qty_text,"
+    "price_text,price_amount,regular_price_text,regular_price_amount,currency,price_status,vat_basis,unit_text,"
+    "delivery_text,delivery_included,min_qty_text,"
     "availability_text,provenance,observed_at,run_id,collector_version")
 
 
@@ -58,10 +59,10 @@ def _read(stated: dict, labels=None, vocabulary: Vocabulary | None = None):
 
 
 # --- the delivered shape ---------------------------------------------------------------------------------------------
-def test_the_contract_is_version_3_with_the_pinned_header():
-    assert config.CONTRACT_VERSION == "3"
-    assert ",".join(columns(Observation)) == V3_HEADER
-    assert V3_HEADER in (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
+def test_the_contract_is_version_4_with_the_pinned_header():
+    assert config.CONTRACT_VERSION == "4"
+    assert ",".join(columns(Observation)) == V4_HEADER
+    assert V4_HEADER in (REPO / "market_prices" / "CONTRACT.md").read_text(encoding="utf-8")
 
 
 # --- one stated listing, read through its labels ---------------------------------------------------------------------
