@@ -33,19 +33,19 @@ def _write(directory: Path, name: str, document: object) -> None:
 # --- brand_vocabulary_isolated: a run reads its own brand's vocabulary and no other ------------------------------------
 
 def test_a_run_loads_its_own_brands_vocabulary(tmp_path):
-    _write(tmp_path, "wudport", {"brand": "wudport"})
-    assert load_vocabulary("wudport", tmp_path) == Vocabulary(brand="wudport")
+    _write(tmp_path, "wudport", {"brand": "wudport", "scope": "all"})
+    assert load_vocabulary("wudport", tmp_path) == Vocabulary(brand="wudport", scope="all")
 
 
 def test_a_vocabulary_declaring_another_brand_is_refused(tmp_path):
-    _write(tmp_path, "wudport", {"brand": "blokport"})
+    _write(tmp_path, "wudport", {"brand": "blokport", "scope": "all"})
     with pytest.raises(VocabularyError, match="declares brand 'blokport'"):
         load_vocabulary("wudport", tmp_path)
 
 
 def test_a_run_opens_only_its_own_brands_file(tmp_path, monkeypatch):
-    _write(tmp_path, "wudport", {"brand": "wudport"})
-    _write(tmp_path, "blokport", {"brand": "blokport"})
+    _write(tmp_path, "wudport", {"brand": "wudport", "scope": "all"})
+    _write(tmp_path, "blokport", {"brand": "blokport", "scope": "all"})
     opened: list[Path] = []
     real_read = Path.read_text
 
@@ -62,7 +62,7 @@ def test_a_run_opens_only_its_own_brands_file(tmp_path, monkeypatch):
     ("../blokport", None, "must match"),
     ("nobody", None, "no scope vocabulary for brand 'nobody'"),
     ("broken", "brand: [", "is not valid YAML"),
-    ("shape", "brand: shape\nunknown_field: 1\n", "does not validate"),
+    ("shape", "brand: shape\nscope: all\nunknown_field: 1\n", "does not validate"),
 ])
 def test_a_vocabulary_problem_raises(tmp_path, brand, content, message):
     if content is not None:
