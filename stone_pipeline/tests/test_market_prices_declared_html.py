@@ -356,9 +356,10 @@ def test_a_declared_html_site_loads_with_its_declaration():
 
 
 @pytest.mark.parametrize("change, message", [
-    ({"html": None}, "html"),                                                           # approved needs it
-    ({"html": {**CARDS, "record": {}}}, "record"),                                       # no selector
-    ({"html": {**CARDS, "record": {"class": "a", "attribute": "data-x"}}}, "record"),    # two selectors
+    ({"html": None}, "needs its html declaration"),                                     # approved needs it
+    ({"html": {**CARDS, "record": {}}}, "names exactly one of class, attribute"),        # no selector
+    ({"html": {**CARDS, "record": {"class": "a", "attribute": "data-x"}}},              # two selectors
+     "names exactly one of class, attribute"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "listing_key": {"attr": "href", "text": True}}}}, "one of"),
     ({"html": {**CARDS, "fields": {**CARDS["fields"], "listing_key": {"text": True, "pattern": "no group"}}}},
      "one capture group"),
