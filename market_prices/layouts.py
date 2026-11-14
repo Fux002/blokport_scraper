@@ -7,11 +7,11 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from market_prices import config
-from market_prices.register import SLUG, Country, Register, Words, supplier_keys, supplier_problem
+from market_prices.brand import SLUG, load_brand_document
+from market_prices.register import Country, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
@@ -127,7 +127,10 @@ class Layout(BaseModel):
     competitor: NameSource
     listing_key: tuple[Words, ...] = Field(min_length=1)
     listing_text: tuple[Words, ...] = Field(min_length=1)
-    price: Words
+    # The price column: `price` for the sheet, or `price_by_competitor` when a sheet names several competitors and
+    # each states its price in its own column (competitor_id -> column). Exactly one of the two.
+    price: Optional[Words] = None
+    price_by_competitor: dict[str, Words] = {}
     unit: Optional[Words] = None
     currency: Optional[Words] = None
     min_qty: Optional[Words] = None
@@ -150,16 +153,29 @@ class Layout(BaseModel):
         keys = [name_key(header) for header in self.headers]
         if len(set(keys)) != len(keys):
             raise ValueError(f"layout {self.layout_id}: a header appears twice in {list(self.headers)}")
-        for column in self.mapped_columns():
+        if self.price is not None and self.price_by_competitor:
+            raise ValueError(f"layout {self.layout_id}: price or price_by_competitor, not both")
+        if self.price is None and not self.price_by_competitor:
+            raise ValueError(f"layout {self.layout_id} names no price column (price or price_by_competitor)")
+        named = (self.price, self.unit, self.currency, self.min_qty, self.availability, self.grade,
+                 self.competitor.column)
+        for column in (*self.listing_key, *self.listing_text, *self.price_by_competitor.values(),
+                       *(column for column in named if column is not None)):
             if name_key(column) not in keys:
                 raise ValueError(f"layout {self.layout_id}: column {column!r} is not a header")
         return self
 
-    def mapped_columns(self) -> tuple[str, ...]:
-        """Every header the layout reads into a named field; the others become stated_specs."""
-        single = (self.price, self.unit, self.currency, self.min_qty, self.availability, self.grade,
-                  self.competitor.column)
-        return (*self.listing_key, *self.listing_text, *(column for column in single if column is not None))
+    def price_column(self, competitor_id: str) -> Optional[str]:
+        """The column a row of this competitor states its price in; None when the layout gives it none."""
+        return self.price if self.price is not None else self.price_by_competitor.get(competitor_id)
+
+    def field_columns(self, competitor_id: str) -> tuple[str, ...]:
+        """Every header read into an observation field for a row of `competitor_id` (its own price column); the
+        others become stated_specs. The identity columns (the competitor's name column, the listing_key parts) are
+        not fields: a consumer reads thickness or finish from stated_specs and never parses listing_key."""
+        single = (self.price_column(competitor_id), self.unit, self.currency, self.min_qty, self.availability,
+                  self.grade)
+        return (*self.listing_text, *(column for column in single if column is not None))
 
     @property
     def signature(self) -> tuple[str, ...]:
@@ -179,6 +195,11 @@ class Layouts(BaseModel):
         _refuse_repeats("competitor name", [name_key(name) for c in self.competitors for name in c.names])
         _refuse_repeats("layout_id", [layout.layout_id for layout in self.layouts])
         _refuse_repeats("header signature", [layout.signature for layout in self.layouts])
+        declared = {competitor.competitor_id for competitor in self.competitors}
+        for layout in self.layouts:
+            if unknown := sorted(set(layout.price_by_competitor) - declared):
+                raise ValueError(f"layout {layout.layout_id}: price_by_competitor names {unknown}, "
+                                 f"not a declared competitor")
         return self
 
     def competitor_named(self, name: str) -> Optional[Competitor]:
@@ -199,21 +220,8 @@ def check_ids_apart(layouts: Layouts, register: Register) -> None:
 
 def load_layouts(brand: str, layouts_dir: Path = config.LAYOUTS_DIR) -> Layouts:
     """The validated layouts of one brand. Any problem raises, so no file is read on a half-read layout file."""
-    if not SLUG.fullmatch(brand):
-        raise LayoutError(f"brand {brand!r} must match {SLUG.pattern}")
+    layouts = load_brand_document(layouts_dir, brand, Layouts, LayoutError, "sheet layouts")
     path = layouts_dir / f"{brand}.yaml"
-    try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise LayoutError(f"no sheet layouts for brand {brand!r} at {path}") from exc
-    except yaml.YAMLError as exc:
-        raise LayoutError(f"{path} is not valid YAML: {exc}") from exc
-    try:
-        layouts = Layouts.model_validate(document)
-    except ValidationError as exc:
-        raise LayoutError(f"{path} does not validate: {exc}") from exc
-    if layouts.brand != brand:
-        raise LayoutError(f"{path} declares brand {layouts.brand!r}")
     suppliers = supplier_keys()
     for competitor in layouts.competitors:
         if problem := supplier_problem(f"{path}: competitor {competitor.competitor_id}", competitor.site_domain,
