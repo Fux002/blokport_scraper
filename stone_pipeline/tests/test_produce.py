@@ -22,6 +22,8 @@ def _stub(monkeypatch):
     # deleting it from main fails them instead of silently passing.
     monkeypatch.setattr(produce, "_log_frozen_waiting", lambda: calls.append(("frozen_log", None)))
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
+    # the supplier prices this scrape read are published right after it, before the build (supplier_prices.run)
+    monkeypatch.setattr(produce, "_emit_supplier_prices", lambda s, since: calls.append(("supplier_prices", s)))
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append(("build", sources, stage)) or 0)
     # persist + publish belong to produce now (wave 4g); off for these step-order tests
     from stone_pipeline.ledger import snapshot
@@ -35,14 +37,14 @@ def _stub(monkeypatch):
 def test_full_produce_fetches_then_scrapes_then_builds(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.run(["zucchi"], "all") == 0
-    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]),
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]), ("supplier_prices", ["zucchi"]),
                      ("build", ["zucchi"], "all"), ("frozen_log", None)]
 
 
 def test_default_scope_scrapes_all(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.run(None, "all") == 0
-    assert calls == [("fetch", None), ("mirror", None), ("scrape", None),
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", None), ("supplier_prices", None),
                      ("build", None, "all"), ("frozen_log", None)]
 
 
@@ -77,7 +79,7 @@ def test_republish_stage_never_scrapes_but_still_mirrors(monkeypatch):
 def test_inventory_stage_still_scrapes_first(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.run(None, "inventory") == 0
-    assert calls == [("fetch", None), ("mirror", None), ("scrape", None),
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", None), ("supplier_prices", None),
                      ("build", None, "inventory"), ("frozen_log", None)]
 
 
@@ -119,7 +121,7 @@ def test_frozen_log_skipped_when_the_build_fails(monkeypatch):
     monkeypatch.setattr(produce.build, "run", lambda sources, stage: calls.append(("build", sources, stage)) or 7)
     assert produce.run(["zucchi"], "all") == 7
     assert ("frozen_log", None) not in calls
-    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]),
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]), ("supplier_prices", ["zucchi"]),
                      ("build", ["zucchi"], "all")]
 
 
@@ -256,3 +258,13 @@ def test_consistency_gate_failure_exits_with_its_own_code(monkeypatch):
     assert exc.value.code == catalog_mod.CONSISTENCY_GATE_RC
     monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: ([], ["a warning"]))
     catalog_mod._consistency_gate()                                          # warnings never abort
+
+
+# --- supplier prices: published from this produce's own scrape, isolated from the product produce ---------------------
+def test_supplier_prices_read_only_scrapes_written_by_this_produce(monkeypatch):
+    calls = _stub(monkeypatch)
+    stamps = []
+    monkeypatch.setattr(produce, "_emit_supplier_prices", lambda s, since: stamps.append(since))
+    produce.run(["polonine"], "all")
+    assert len(stamps) == 1 and len(stamps[0]) == len("20261114_120000")   # the scrape folders' own stamp form
+    assert ("scrape", ["polonine"]) in calls
