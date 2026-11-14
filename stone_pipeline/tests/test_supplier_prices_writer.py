@@ -236,3 +236,56 @@ def test_a_supplier_price_failure_never_fails_the_product_produce(monkeypatch, c
     with caplog.at_level("ERROR"):
         produce._emit_supplier_prices(["polonine"], "20261114_160000")
     assert "supplier prices not delivered" in caplog.text and "AccessDenied" in caplog.text
+
+
+# -- one bad listing never costs the vendor's run, and the key is the product path's own --------------------------
+
+def _adapting(monkeypatch, change):
+    from stone_pipeline import adapters
+    adapter = adapters.REGISTRY["polonine"]
+    original = adapter.adapt_record
+    monkeypatch.setattr(adapter, "adapt_record", lambda record: change(record, original))
+
+
+def _raise_for(bad_id, exc):
+    def change(record, original):
+        if record.get("product_id") == bad_id:
+            raise exc
+        return original(record)
+    return change
+
+
+def test_a_row_the_adapter_cannot_map_is_counted_malformed_and_the_run_is_still_written(tmp_path, monkeypatch):
+    _adapting(monkeypatch, _raise_for("bad", TypeError("unexpected cell")))
+    written = _write(tmp_path, [_row(product_id="bad"), _row(product_id="152")])
+    _, rows = _read(written)
+    assert [r["vendor_sku"] for r in rows] == ["POL-152"]
+    assert (written.rows, written.malformed, written.left_out, written.duplicates) == (1, 1, 0, 0)
+
+
+def test_deliver_publishes_the_run_and_reports_a_malformed_row_whatever_the_adapter_raised(tmp_path, monkeypatch):
+    from supplier_prices import run
+    _adapting(monkeypatch, _raise_for("bad", KeyError("no such column")))
+    _folder(tmp_path, [_row(product_id="bad"), _row(product_id="152")])
+    s3 = _S3()
+    delivered = run.deliver(["polonine"], "20261114_160000", data_dir=tmp_path / "data", out_root=tmp_path / "out",
+                            client=s3, bucket="bucket", brand="blokport")
+    assert [(d["run_id"], d["rows"], d["malformed"], d["published"]) for d in delivered] == [(RUN, 1, 1, True)]
+
+
+def test_the_vendor_sku_takes_the_key_exactly_as_the_product_path_assigns_it(tmp_path, monkeypatch):
+    from stone_pipeline import adapters
+    from stone_pipeline.config.sources import load_source
+    from stone_pipeline.stages import keys_dedupe
+    from stone_pipeline.stages.product_state import sku_from
+
+    def padded(record, original):
+        row = original(record)
+        return row.model_copy(update={"src_natural_key": f" {row.src_natural_key} "})
+
+    _adapting(monkeypatch, padded)
+    raw = _row(product_id="151")
+    _, rows = _read(_write(tmp_path, [raw]))
+    served = adapters.REGISTRY["polonine"].adapt_record(raw)
+    keys_dedupe.assign_surrogates([served])
+    assert rows[0]["vendor_sku"] == sku_from(load_source("polonine").source_code, served.surrogate_key) == "POL-151"
