@@ -7,11 +7,12 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Optional
 
 from market_prices import config
 from market_prices.layouts import Layout, name_key
+from market_prices.numbers import parse_number
 from market_prices.schema import MalformedListing, PriceStatus
 from market_prices.text import clean_text
 
@@ -75,19 +76,8 @@ def _without_symbol(text: str, layout: Layout) -> tuple[str, Optional[str]]:
 
 
 def _parse(text: str, layout: Layout) -> Optional[Decimal]:
-    """The text as a number in the layout's own notation: digits, at most one decimal separator, and thousands
-    separators only in groups of three. Anything else (a range, a word, another notation) is no number."""
-    decimal, thousands = re.escape(layout.number.decimal), re.escape(layout.number.thousands)
-    fraction = rf"(?:{decimal}\d+)?"
-    plain = rf"\d+{fraction}"
-    grouped = rf"\d{{1,3}}(?:{thousands}\d{{3}})+{fraction}" if layout.number.thousands else plain
-    if not re.fullmatch(rf"{plain}|{grouped}", text):
-        return None
-    canonical = text.replace(layout.number.thousands, "") if layout.number.thousands else text
-    try:
-        return Decimal(canonical.replace(layout.number.decimal, "."))
-    except InvalidOperation:
-        return None
+    """The text as a number in the layout's own notation (numbers.parse_number, the one reading)."""
+    return parse_number(text, layout.number)
 
 
 def _amount(number: Optional[Decimal]) -> Optional[str]:

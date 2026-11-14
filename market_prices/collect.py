@@ -30,7 +30,7 @@ _SITE_STATEMENT_FIELDS = {"vat_basis": VatBasis.unknown, "unit_text": None, "del
                           "delivery_included": DeliveryIncluded.unknown}
 _LISTING_FIELDS = ("grade_text", "price_amount", "currency", "min_qty_text")
 # A statement a listing may make for itself; it wins over the site's, being the more specific (manager's ruling 13 Nov)
-_LISTING_STATEMENT_FIELDS = ("vat_basis",)
+_LISTING_STATEMENT_FIELDS = ("vat_basis", "unit_text")
 _VAT_CONFLICT = "listing VAT differs from the site statement"
 
 

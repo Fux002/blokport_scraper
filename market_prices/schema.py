@@ -188,6 +188,8 @@ class ListingFacts:
     availability_text: Optional[str] = None
     # the listing's own VAT statement; it wins over the site's (collect._observation)
     vat_basis: Optional[VatBasis] = None
+    # the listing's own selling unit as written (a declared_html unit source); it wins over the site's statement too
+    unit_text: Optional[str] = None
     # what about this listing the site_status detail counts, though the listing itself is delivered (not malformed)
     notes: tuple[str, ...] = ()
 

@@ -1,6 +1,6 @@
 """A retail site's product pages, read from their schema.org Product/Offer structured data (JSON-LD), reached through
-the entry points the site's register row names (its sitemaps or listing pages). Any shop that states its products this
-way is config only: no per-site code.
+the entry points the site's register row names (its sitemaps or listing pages; market_prices/discovery.py). Any shop that
+states its products this way is config only: no per-site code.
 
 What a page does not state in its structured data is not read from its HTML. A site whose prices are loaded by script,
 or need a browser, gives no rows and says why in site_status, never worked around. Every scan is linear: an opening tag,
@@ -9,17 +9,16 @@ then the next closing tag after it, resuming where the last stopped, so a hostil
 
 from __future__ import annotations
 
-import html
 import json
 import re
-import zlib
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Iterator, Mapping, Optional
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit
 
 from market_prices import config
-from market_prices.fetching import Response, SiteFetcher, UnexpectedResponse, UnexpectedStatus
+from market_prices.discovery import between, normal, product_urls
+from market_prices.fetching import SiteFetcher, UnexpectedResponse, UnexpectedStatus
 from market_prices.schema import ListingFacts, MalformedListing, PriceStatus, VatBasis
 from market_prices.text import clean_text, on_site, site_host
 
@@ -33,14 +32,7 @@ _AGGREGATE_TYPE = "AggregateOffer"
 _SCRIPT_OPEN = re.compile(r"<script\b[^<>]*>", re.IGNORECASE)
 _SCRIPT_CLOSE = re.compile(r"</script\s*>", re.IGNORECASE)
 _JSON_LD = re.compile(r"""\btype\s*=\s*["']?\s*application/ld\+json\b""", re.IGNORECASE)
-_LOC_OPEN = re.compile(r"<loc\s*>", re.IGNORECASE)
-_LOC_CLOSE = re.compile(r"</loc\s*>", re.IGNORECASE)
-_SITEMAP_INDEX = re.compile(r"<sitemapindex\b", re.IGNORECASE)
-_LINK_TAG = re.compile(r"<(?:a|link)\b[^<>]*>", re.IGNORECASE)
-_HREF = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", re.IGNORECASE)
-_REL_NEXT = re.compile(r"""\brel\s*=\s*(?:"[^"]*\bnext\b[^"]*"|'[^']*\bnext\b[^']*'|next\b)""", re.IGNORECASE)
 _DECIMAL = re.compile(r"\d+(\.\d+)?")
-_GZIP_MAGIC = b"\x1f\x8b"
 _SEVERAL_CURRENCIES = "offers state several currencies"
 _VARIANT_ID_FIELDS = ("@id", "url")
 _SPEC_FIELDS = ("brand", "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "mpn", "sku", "productID", "color", "material",
@@ -62,23 +54,6 @@ class _Skipped:
     reason: str
 
 
-def _between(text: str, opening: re.Pattern, closing: re.Pattern) -> Iterator[tuple[str, str]]:
-    """Each (opening tag, text up to the next closing tag), in page order. Once no closing tag follows an opening, no
-    later item can close either, so the scan stops."""
-    at = 0
-    while (opened := opening.search(text, at)) is not None:
-        closed = closing.search(text, opened.end())
-        if closed is None:
-            return
-        yield opened.group(0), text[opened.end():closed.start()]
-        at = closed.end()
-
-
-def _normal(url: str) -> str:
-    """The URL without its fragment: the same page however it was linked."""
-    return urlunsplit(urlsplit(url)._replace(fragment=""))
-
-
 def _types(node: Mapping) -> set[str]:
     """The node's schema.org types, a full IRI or a bare name alike."""
     declared = node.get("@type")
@@ -95,85 +70,6 @@ def _text(value: object) -> Optional[str]:
     return clean_text(value) if isinstance(value, str) else None
 
 
-# --- discovery -------------------------------------------------------------------------------------------------------
-def _sitemap_text(response: Response, url: str) -> str:
-    """The sitemap's text; a gzipped file (served as a .gz, not as a transfer encoding) is unzipped under a cap."""
-    if response.body[:2] != _GZIP_MAGIC:
-        return response.text
-    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    try:
-        data = inflater.decompress(response.body, config.SCHEMA_ORG_MAX_UNZIPPED_BYTES + 1)
-    except zlib.error as exc:
-        raise UnexpectedResponse(f"{url} is not a readable gzip file") from exc
-    if len(data) > config.SCHEMA_ORG_MAX_UNZIPPED_BYTES:
-        raise UnexpectedResponse(f"{url} unzipped is over the cap of {config.SCHEMA_ORG_MAX_UNZIPPED_BYTES} bytes")
-    if inflater.unused_data:    # zlib reads one member; a second would otherwise be left unread, silently
-        raise UnexpectedResponse(f"{url} holds more than one gzip member")
-    return data.decode("utf-8", errors="replace")
-
-
-def _sitemap_pages(site: "Site", fetcher: SiteFetcher) -> set[str]:
-    """Every page the entry sitemaps list. An index's sitemaps on the site are followed, breadth first, under a count
-    and a depth cap; one off the site is never requested."""
-    pages: set[str] = set()
-    queue = [(f"{site.base_url}{path}", 0) for path in site.discovery.sitemaps]
-    seen: set[str] = set()
-    while queue:
-        url, depth = queue.pop(0)
-        if url in seen:
-            continue
-        seen.add(url)
-        if len(seen) > config.SCHEMA_ORG_MAX_SITEMAPS:
-            raise UnexpectedResponse(f"the entry points list over {config.SCHEMA_ORG_MAX_SITEMAPS} sitemaps")
-        text = _sitemap_text(fetcher.get(url), url)
-        locs = [_normal(urljoin(url, html.unescape(loc.strip()))) for _, loc in _between(text, _LOC_OPEN, _LOC_CLOSE)]
-        if not _SITEMAP_INDEX.search(text):
-            pages.update(locs)
-            continue
-        if depth >= config.SCHEMA_ORG_MAX_SITEMAP_DEPTH:
-            raise UnexpectedResponse(f"sitemap index nested deeper than {config.SCHEMA_ORG_MAX_SITEMAP_DEPTH} at {url}")
-        queue.extend((loc, depth + 1) for loc in locs if on_site(loc, site.base_url))
-    return pages
-
-
-def _href(tag: str) -> Optional[str]:
-    found = _HREF.search(tag)
-    return next((group for group in found.groups() if group is not None), None) if found else None
-
-
-def _listing_links(site: "Site", fetcher: SiteFetcher) -> set[str]:
-    """Every link on the entry listing pages and the pages their rel="next" links lead to, under a page cap. A next
-    link off the site, or back to a page already read, ends that entry's pages."""
-    links: set[str] = set()
-    seen: set[str] = set()
-    for path in site.discovery.listing_pages:
-        url: Optional[str] = f"{site.base_url}{path}"
-        while url is not None and url not in seen:
-            seen.add(url)
-            if len(seen) > config.SCHEMA_ORG_MAX_LISTING_PAGES:
-                raise UnexpectedResponse(f"the entry points lead to over {config.SCHEMA_ORG_MAX_LISTING_PAGES} "
-                                         f"listing pages")
-            following = None
-            for tag in _LINK_TAG.findall(fetcher.get(url).text):
-                href = _href(tag)
-                if href is None:
-                    continue
-                target = _normal(urljoin(url, html.unescape(href)))
-                if _REL_NEXT.search(tag):
-                    following = following or target
-                else:
-                    links.add(target)
-            url = following if following is not None and on_site(following, site.base_url) else None
-    return links
-
-
-def _product_urls(site: "Site", fetcher: SiteFetcher) -> list[str]:
-    """The product pages the entry points lead to: on the site, the path matching product_path, sorted."""
-    pattern = re.compile(site.discovery.product_path)
-    found = _sitemap_pages(site, fetcher) | _listing_links(site, fetcher)
-    return sorted(url for url in found if on_site(url, site.base_url) and pattern.search(urlsplit(url).path))
-
-
 # --- the structured data ---------------------------------------------------------------------------------------------
 def _no_constant(name: str) -> None:
     """NaN and Infinity are not prices or ids: read as null."""
@@ -183,7 +79,7 @@ def _no_constant(name: str) -> None:
 def _blocks(page: str) -> list:
     """Every JSON-LD block that parses. A broken block (or hostile nesting) is that block's problem alone."""
     blocks = []
-    for tag, body in _between(page, _SCRIPT_OPEN, _SCRIPT_CLOSE):
+    for tag, body in between(page, _SCRIPT_OPEN, _SCRIPT_CLOSE):
         if not _JSON_LD.search(tag):
             continue
         try:
@@ -382,7 +278,7 @@ def _key(node: Mapping, page_url: str, variant: bool) -> str:
 def _source_url(node: Mapping, page_url: str, base_url: str) -> str:
     stated = node.get("url")
     if isinstance(stated, str):
-        absolute = _normal(urljoin(page_url, stated))
+        absolute = normal(urljoin(page_url, stated))
         if on_site(absolute, base_url):
             return absolute
     return page_url
@@ -393,11 +289,12 @@ class SchemaOrgProductCollector:
     version = "schema_org_product-1"
     takes_query = False
     needs_discovery = True
+    needs_html = False
     reserved_query: frozenset = frozenset()
 
     def listings(self, site: "Site", fetcher: SiteFetcher) -> Iterator[object]:
         """Each product page's listings, in sorted page order, up to the cap; reaching it ends the read as partial."""
-        urls = _product_urls(site, fetcher)
+        urls = product_urls(site, fetcher)
         if not urls:
             raise UnexpectedResponse("the entry points list no product page matching product_path")
         cap = config.SCHEMA_ORG_MAX_PRODUCT_PAGES

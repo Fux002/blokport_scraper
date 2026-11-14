@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from market_prices import config
 from market_prices.brand import SLUG, load_brand_document
+from market_prices.numbers import NumberFormat
 from market_prices.register import Country, Register, Words, supplier_keys, supplier_problem
 from market_prices.schema import DeliveryIncluded, SellerType, VatBasis
 from market_prices.specs import SpecLabels
@@ -88,19 +89,6 @@ class NameSource(BaseModel):
                 raise ValueError(f"filename pattern {self.filename!r} does not compile: {exc}") from exc
             if "name" not in pattern.groupindex:
                 raise ValueError(f"filename pattern {self.filename!r} has no group named 'name'")
-        return self
-
-
-class NumberFormat(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    decimal: Literal[".", ","]
-    thousands: Literal["", ",", ".", " ", "'"]
-
-    @model_validator(mode="after")
-    def _separators_differ(self) -> "NumberFormat":
-        if self.decimal == self.thousands:
-            raise ValueError(f"the decimal and thousands separators are both {self.decimal!r}")
         return self
 
 
