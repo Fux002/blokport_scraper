@@ -34,6 +34,7 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
 from stone_pipeline.core import env
+from stone_pipeline.io.ssrf import SSRFBlocked
 
 # The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://polonine.slabware.com"
@@ -52,6 +53,10 @@ LOGIN_USER_ENV = "SCRAPER_POLONINE_USERNAME"
 LOGIN_PASSWORD_ENV = "SCRAPER_POLONINE_PASSWORD"
 LOGIN_OK = "ok"
 # The price pass's rows (prices.csv): the bundle's own list fields, the same values the product row takes from the list.
+# What a price-pass request can end in besides an answer: no answer after the retries (RuntimeError), an answer that is
+# not JSON (ValueError, JSONDecodeError among them), a refused redirect (SSRFBlocked), JSON that is not an object
+# (AttributeError on .get). Each reads no prices; none may reach the product scrape (f8's must, 14 Nov).
+PRICE_PASS_FAILURES = (RuntimeError, ValueError, SSRFBlocked, AttributeError)
 PRICE_COLUMNS = ["product_id", "material", "stone_type", "finish", "quality", "thickness", "block", "bundle_no",
                  "average_size", "price1", "price2", "detail_url"]
 
@@ -152,16 +157,16 @@ class PolonineScraper(ScraperBase):
         body = json.dumps({"login": _as_the_login_form_sends(user), "senha": _as_the_login_form_sends(password)})
         try:
             answer = (self.post(LOGIN_API, headers=API_HEADERS, content=body).json() or {}).get("d")
-        except (RuntimeError, ValueError) as exc:    # no answer after the retries; an answer that is not JSON
+        except PRICE_PASS_FAILURES as exc:
             return f"login request failed: {type(exc).__name__}"
         # a refusal is stated by its length, never the site's words: they could echo the username back
         return LOGIN_OK if answer == LOGIN_OK else f"login refused ({len(str(answer))} characters)"
 
     def _logout(self) -> None:
-        """End the customer session. A logout that gets no answer is logged, not fatal: the session expires."""
+        """End the customer session. A logout that fails is logged, not fatal: the session expires."""
         try:
             self.post(LOGOUT_API, headers=API_HEADERS, content="{}")
-        except RuntimeError as exc:
+        except PRICE_PASS_FAILURES as exc:
             self.log.warning("logout got no answer: %s", type(exc).__name__)
 
     def list_products(self) -> Iterable[Any]:
@@ -173,9 +178,13 @@ class PolonineScraper(ScraperBase):
     def run(self) -> Path:
         """The anonymous product and stock scrape exactly as before, then the separate logged-in price pass. The product
         set never depends on the login, by design (the Scraper manager's ruling, 14 Nov): the pass writes only its own
-        files, after the products and their completion marker are written."""
+        files, after the products and their completion marker are written, and no failure of it reaches the products:
+        price files that cannot be written are logged, and the products are returned all the same."""
         products = super().run()
-        self._price_pass()
+        try:
+            self._price_pass()
+        except OSError as exc:
+            self.log.error("price pass files not written: %s: %s", type(exc).__name__, exc)
         return products
 
     def _price_pass(self) -> None:
@@ -187,7 +196,7 @@ class PolonineScraper(ScraperBase):
         if prices == LOGIN_OK:
             try:
                 rows = [_list_fields(item) for item in self.paginate_offset(self._fetch_page, PAGE_SIZE)]
-            except RuntimeError as exc:      # the list got no answer after the retries
+            except PRICE_PASS_FAILURES as exc:
                 prices, rows = f"price list failed: {type(exc).__name__}", []
             finally:
                 self._logout()
