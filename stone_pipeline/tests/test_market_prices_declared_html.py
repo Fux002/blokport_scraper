@@ -484,3 +484,49 @@ def test_the_shipped_terra_row_reads_a_grouped_price_with_its_pence_whole():
             f'class="woocommerce-Price-currencySymbol">&pound;</span>{amount}</span></p></div>')
     assert _amounts(register, answers) == {"Carrara Marble": Decimal("185"),
                                            "Calacatta Viola Marble": Decimal("1234.50")}
+
+
+class _Pages:
+    """A scripted site: an unscripted URL answers 404, so a row reading other pages is unpriced, not an error."""
+
+    def __init__(self, answers: dict):
+        self.answers = answers
+        self.requested: list[str] = []
+
+    def get(self, url: str) -> Response:
+        self.requested.append(url)
+        return self.answers.get(url, Response(404, ""))
+
+
+def _starel_card(product_id: str, name: str, slab: str, sqm: str) -> str:
+    amount = '<span class="woocommerce-Price-amount amount"><bdi><span class="woocommerce-Price-currencySymbol">' \
+             '&pound;</span>{}</bdi></span>'
+
+    def row(kind: str, shown: tuple, unit: str) -> str:
+        current = amount.format(shown[-1])
+        struck = f"<del>{amount.format(shown[0])}</del> <ins>{current}</ins>" if len(shown) == 2 else current
+        return f'<span class="starel-loop-card-price__row starel-loop-card-price__row--{kind}">{struck} / {unit}</span>'
+
+    return (f'<article class="product type-product" data-starel-product-card data-product-id="{product_id}">'
+            f'<div class="starel-loop-card"><a class="starel-loop-card__image-link" href="/product/{product_id}/"></a>'
+            f'<div class="starel-loop-card__info"><h3 class="starel-loop-card__title-heading">'
+            f'<a href="/product/{product_id}/">{name}</a></h3><div class="starel-loop-card__price">'
+            f'{row("slab", slab, "slab")}{row("sqm", sqm, "m²")}</div></div></div></article>')
+
+
+def test_the_shipped_starel_row_reads_its_natural_category_cards_with_the_regular_price_in_the_prices_unit():
+    register = _shipped("starelstones")
+    base = register.sites[0].base_url
+    cards = (_starel_card("111315", "Aegean White Honed Marble Slab 111315", ("1,199.00", "599.50"), ("268.84", "134.41"))
+             + _starel_card("112751", "Arabescato Gold Honed Marble Slab 112751", ("1,736.59",), ("358.80",)))
+    natural = [f"{base}/product-category/slabs/{kind}-slabs/" for kind in ("marble", "travertine", "onyx")]
+    transport = _Pages({f"{base}/robots.txt": ROBOTS_OPEN, natural[0]: _page(cards), natural[1]: _page(""),
+                        natural[2]: _page("")})
+    result = collect_run(register, transport, MOMENT, lambda _seconds: None)
+    rows = {row.listing_text: (row.price_amount, row.unit_text, row.regular_price_amount,
+                               row.stated_specs.get("Price per slab")) for row in result.observations}
+    # the struck per-m2 price is the regular price (the price's own unit); the per-slab row is a stated spec
+    assert rows == {"Aegean White Honed Marble Slab 111315": ("134.41", "m²", "268.84", "£ 599.50 / slab"),
+                    "Arabescato Gold Honed Marble Slab 112751": ("358.80", "m²", None, "£ 1,736.59 / slab")}
+    # only the natural stone category pages are read: no product page, no quartz or porcelain category
+    assert sorted(transport.requested) == sorted([f"{base}/robots.txt", *natural])
