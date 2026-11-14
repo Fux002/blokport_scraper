@@ -12,7 +12,7 @@ from stone_pipeline.config import decisions_store, store
 from stone_pipeline.config.control import server
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
-from stone_pipeline.reference.loaders import reference_data
+from stone_pipeline.reference.loaders import reference_data, resolve_iso
 from stone_pipeline.reference.loaders.origins import OriginMap, OriginOverrides, OriginRule
 from stone_pipeline.stages import derive
 
@@ -75,7 +75,8 @@ def _cfg(**over):
     return SimpleNamespace(**{**vars(base), **over})
 
 
-_REF = SimpleNamespace(valid_iso_codes=VALID)
+_REF = SimpleNamespace(valid_iso_codes=VALID,
+                       to_iso=lambda v: resolve_iso(v, {"italy": "IT"}, VALID))
 
 
 @pytest.mark.parametrize("field", ["origin_default", "primary_origin"])
