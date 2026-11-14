@@ -17,7 +17,8 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
-from stone_pipeline.state import writeback as wb
+from stone_pipeline.aliases.learned import is_learned
+from stone_pipeline.stages.match_variation import WriteBack
 from stone_pipeline.tests.test_origin_aware_matching import _stage
 
 
@@ -33,7 +34,7 @@ from stone_pipeline.tests.test_origin_aware_matching import _stage
     ("override", False), ("", False),
 ])
 def test_only_phonetic_and_fuzzy_are_learned(method, learned):
-    assert wb.is_learned(method) is learned
+    assert is_learned(method) is learned
 
 
 def test_a_bind_narrowed_by_origin_is_not_saved():
@@ -51,7 +52,7 @@ def test_a_fuzzy_bind_is_still_saved():
     stage = match_variation.VariationStage(
         ref=SimpleNamespace(**{**vars(_stage().ref), "variants": {"slab": SimpleNamespace(
             by_id={"a": SimpleNamespace(key="granite__kashmir_golda_1", archived=False)})}}),
-        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=wb.WriteBack(),
+        engines={"slab": VariationEngine(idx, auto_accept=90, review_floor=80)}, writeback=WriteBack(),
         source_cfg=SimpleNamespace(primary_origin=""))
     row = CanonicalRow(src_site="zucchi", surrogate_key="1", variety_match_key="Kashmir Goldx",
                        raw_type="Granite", raw_format="Slab")
