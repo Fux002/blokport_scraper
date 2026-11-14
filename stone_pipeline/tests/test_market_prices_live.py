@@ -230,7 +230,7 @@ def test_main_runs_the_run_inputs_brand_not_the_deployments_and_publishes_under_
 
     def load(brand: str) -> Register:
         loaded.append(brand)
-        return Register.model_validate({"brand": brand, "sites": [_site()]})
+        return Register.model_validate({"brand": brand, "sites": [_site(brand=brand)]})
     monkeypatch.setenv(variable, "wudport")
     monkeypatch.setattr(run, "_dry_run", lambda: False)
     monkeypatch.setattr(run, "_s3_client", lambda: s3)
@@ -296,7 +296,7 @@ def test_the_pilot_runs_the_run_inputs_brand_not_the_deployments(monkeypatch, tm
 
     def cut(brand: str) -> Register:
         piloted.append(brand)
-        return Register.model_validate({"brand": brand, "sites": [_site()]})
+        return Register.model_validate({"brand": brand, "sites": [_site(brand=brand)]})
     monkeypatch.setenv("SCRAPER_MARKET_PRICES_BRAND", "wudport")
     monkeypatch.setattr(pilot, "pilot_register", cut)
     monkeypatch.setattr(pilot.run, "_dry_run", lambda: True)
